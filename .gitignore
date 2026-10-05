@@ -1,0 +1,7 @@
+/build/
+/third_party/
+/.research/
+/reports/
+/.vs/
+*.user
+__pycache__/

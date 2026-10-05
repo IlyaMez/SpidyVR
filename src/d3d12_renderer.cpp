@@ -1,0 +1,372 @@
+#include "spidy/d3d12_renderer.hpp"
+#include <cstring>
+#include <d3dcompiler.h>
+#include <stdexcept>
+#include <string>
+namespace spidy {
+namespace {
+void hr(HRESULT result, const char* context) {
+    if (FAILED(result))
+        throw std::runtime_error(std::string(context) +
+                                 " HRESULT=" + std::to_string(static_cast<unsigned long>(result)));
+}
+D3D12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE type) {
+    D3D12_HEAP_PROPERTIES h{};
+    h.Type = type;
+    h.CreationNodeMask = h.VisibleNodeMask = 1;
+    return h;
+}
+void triangle(std::vector<Vertex>& v, Vec3 a, Vec3 b, Vec3 c, Vec3 color) {
+    v.push_back({a, color});
+    v.push_back({b, color});
+    v.push_back({c, color});
+}
+} // namespace
+D3D12Renderer::~D3D12Renderer() {
+    try {
+        waitIdle();
+    } catch (...) {
+    }
+    if (fenceEvent_)
+        CloseHandle(fenceEvent_);
+}
+void D3D12Renderer::initialize(LUID adapter, D3D_FEATURE_LEVEL minimum) {
+    ComPtr<IDXGIFactory4> factory;
+    hr(CreateDXGIFactory1(IID_PPV_ARGS(&factory)), "Create DXGI factory");
+    ComPtr<IDXGIAdapter1> gpu;
+    hr(factory->EnumAdapterByLuid(adapter, IID_PPV_ARGS(&gpu)), "Find OpenXR GPU");
+    hr(D3D12CreateDevice(gpu.Get(), minimum, IID_PPV_ARGS(&device_)), "Create D3D12 device");
+    D3D12_COMMAND_QUEUE_DESC q{};
+    q.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    hr(device_->CreateCommandQueue(&q, IID_PPV_ARGS(&queue_)), "Create direct queue");
+    resources();
+}
+void D3D12Renderer::initialize(ID3D12Device* device, ID3D12CommandQueue* queue) {
+    if (!device || !queue || device_ || queue_ || queue->GetDesc().Type != D3D12_COMMAND_LIST_TYPE_DIRECT)
+        throw std::runtime_error("Invalid overlay device or direct queue");
+    ComPtr<ID3D12Device> owner;
+    hr(queue->GetDevice(IID_PPV_ARGS(&owner)), "Check overlay queue device");
+    if (owner.Get() != device)
+        throw std::runtime_error("Overlay queue belongs to another device");
+    device_ = device;
+    queue_ = queue;
+    resources();
+}
+void D3D12Renderer::resources() {
+    hr(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator_)),
+       "Create allocator");
+    hr(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator_.Get(), nullptr,
+                                  IID_PPV_ARGS(&list_)),
+       "Create command list");
+    hr(list_->Close(), "Close initial list");
+    D3D12_DESCRIPTOR_HEAP_DESC desc{};
+    desc.NumDescriptors = 2;
+    desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    hr(device_->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&rtv_)), "Create RTV heap");
+    desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+    desc.NumDescriptors = 1;
+    hr(device_->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&dsv_)), "Create DSV heap");
+    hr(device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)), "Create GPU fence");
+    fenceEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!fenceEvent_)
+        throw std::runtime_error("CreateEvent failed");
+}
+void D3D12Renderer::waitIdle() {
+    if (!queue_ || !fence_ || !fenceEvent_)
+        return;
+    hr(queue_->Signal(fence_.Get(), ++fenceValue_), "Signal GPU fence");
+    waitForSubmission();
+}
+void D3D12Renderer::waitForSubmission() {
+    if (!fence_ || !fenceEvent_ || !fenceValue_)
+        return;
+    if (fence_->GetCompletedValue() == UINT64_MAX)
+        throw std::runtime_error("Overlay graphics device removed");
+    if (fence_->GetCompletedValue() < fenceValue_) {
+        hr(fence_->SetEventOnCompletion(fenceValue_, fenceEvent_), "Arm GPU fence");
+        if (WaitForSingleObject(fenceEvent_, 10000) != WAIT_OBJECT_0)
+            throw std::runtime_error("GPU fence timed out");
+    }
+}
+std::vector<unsigned char> D3D12Renderer::readback(ID3D12Resource* target) {
+    waitIdle();
+    const auto desc = target->GetDesc();
+    if (desc.Format != DXGI_FORMAT_R8G8B8A8_UNORM && desc.Format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB &&
+        desc.Format != DXGI_FORMAT_R8G8B8A8_TYPELESS)
+        throw std::runtime_error("Readback requires RGBA8");
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+    UINT rows{};
+    UINT64 rowBytes{}, total{};
+    device_->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, &rows, &rowBytes, &total);
+    D3D12_RESOURCE_DESC buffer{};
+    buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    buffer.Width = total;
+    buffer.Height = 1;
+    buffer.DepthOrArraySize = 1;
+    buffer.MipLevels = 1;
+    buffer.SampleDesc.Count = 1;
+    buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    auto h = heap(D3D12_HEAP_TYPE_READBACK);
+    ComPtr<ID3D12Resource> readback;
+    hr(device_->CreateCommittedResource(&h, D3D12_HEAP_FLAG_NONE, &buffer, D3D12_RESOURCE_STATE_COPY_DEST,
+                                        nullptr, IID_PPV_ARGS(&readback)),
+       "Create diagnostic readback");
+    hr(allocator_->Reset(), "Reset readback allocator");
+    hr(list_->Reset(allocator_.Get(), nullptr), "Reset readback list");
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = target;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    list_->ResourceBarrier(1, &barrier);
+    D3D12_TEXTURE_COPY_LOCATION src{}, dst{};
+    src.pResource = target;
+    src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dst.pResource = readback.Get();
+    dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dst.PlacedFootprint = footprint;
+    list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+    std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
+    list_->ResourceBarrier(1, &barrier);
+    hr(list_->Close(), "Close readback list");
+    ID3D12CommandList* lists[] = {list_.Get()};
+    queue_->ExecuteCommandLists(1, lists);
+    waitIdle();
+    void* mapped{};
+    D3D12_RANGE range{0, static_cast<SIZE_T>(total)};
+    hr(readback->Map(0, &range, &mapped), "Map readback");
+    std::vector<unsigned char> pixels(static_cast<size_t>(desc.Width) * desc.Height * 4);
+    for (unsigned y = 0; y < desc.Height; ++y)
+        std::memcpy(pixels.data() + y * desc.Width * 4,
+                    static_cast<unsigned char*>(mapped) + footprint.Offset + y * footprint.Footprint.RowPitch,
+                    static_cast<size_t>(desc.Width) * 4);
+    D3D12_RANGE written{0, 0};
+    readback->Unmap(0, &written);
+    return pixels;
+}
+void D3D12Renderer::pipeline(DXGI_FORMAT format) {
+    if (pipeline_ && format == format_)
+        return;
+    const char* shader = R"(
+cbuffer Eye : register(b0) { row_major float4x4 vp; };
+struct In { float3 position:POSITION; float3 color:COLOR; };
+struct Out { float4 position:SV_POSITION; float3 color:COLOR; };
+Out vs(In i) { Out o; o.position=mul(vp,float4(i.position,1)); o.color=i.color; return o; }
+float4 ps(Out i):SV_TARGET { return float4(i.color,1); }
+)";
+    ComPtr<ID3DBlob> vs, ps, error;
+    hr(D3DCompile(shader, std::strlen(shader), "spidy_lab", nullptr, nullptr, "vs", "vs_5_0",
+                  D3DCOMPILE_ENABLE_STRICTNESS, 0, &vs, &error),
+       "Compile vertex shader");
+    hr(D3DCompile(shader, std::strlen(shader), "spidy_lab", nullptr, nullptr, "ps", "ps_5_0",
+                  D3DCOMPILE_ENABLE_STRICTNESS, 0, &ps, &error),
+       "Compile pixel shader");
+    D3D12_ROOT_PARAMETER parameter{};
+    parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    parameter.Constants.Num32BitValues = 16;
+    parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+    D3D12_ROOT_SIGNATURE_DESC rs{};
+    rs.NumParameters = 1;
+    rs.pParameters = &parameter;
+    rs.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+    ComPtr<ID3DBlob> signature;
+    hr(D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error),
+       "Serialize root signature");
+    root_.Reset();
+    hr(device_->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(),
+                                    IID_PPV_ARGS(&root_)),
+       "Create root signature");
+    D3D12_INPUT_ELEMENT_DESC layout[] = {
+        {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+        {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};
+    p.pRootSignature = root_.Get();
+    p.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
+    p.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
+    p.InputLayout = {layout, 2};
+    p.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    p.NumRenderTargets = 1;
+    p.RTVFormats[0] = format;
+    p.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    p.SampleDesc.Count = 1;
+    p.SampleMask = UINT_MAX;
+    p.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    p.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    p.RasterizerState.DepthClipEnable = TRUE;
+    auto& blend = p.BlendState.RenderTarget[0];
+    blend.SrcBlend = D3D12_BLEND_ONE;
+    blend.DestBlend = D3D12_BLEND_ZERO;
+    blend.BlendOp = D3D12_BLEND_OP_ADD;
+    blend.SrcBlendAlpha = D3D12_BLEND_ONE;
+    blend.DestBlendAlpha = D3D12_BLEND_ZERO;
+    blend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    blend.LogicOp = D3D12_LOGIC_OP_NOOP;
+    blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    p.DepthStencilState.DepthEnable = TRUE;
+    p.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    p.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    p.DepthStencilState.FrontFace.StencilFailOp = p.DepthStencilState.FrontFace.StencilDepthFailOp =
+        p.DepthStencilState.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
+    p.DepthStencilState.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+    p.DepthStencilState.BackFace = p.DepthStencilState.FrontFace;
+    pipeline_.Reset();
+    hr(device_->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&pipeline_)), "Create graphics pipeline");
+    format_ = format;
+}
+void D3D12Renderer::render(ID3D12Resource* target, DXGI_FORMAT format, unsigned width, unsigned height,
+                           const Mat4& vp, std::span<const Vertex> vertices, bool preserveColor) {
+    const ViewTarget view{target, format, width, height, vp};
+    renderViews(std::span(&view, 1), vertices, preserveColor);
+}
+void D3D12Renderer::renderViews(std::span<const ViewTarget> views, std::span<const Vertex> vertices,
+                                bool preserveColor, bool waitForCompletion) {
+    if (views.empty() || views.size() > 2)
+        throw std::runtime_error("Overlay requires one or two views");
+    const auto format = views[0].format;
+    const auto width = views[0].width, height = views[0].height;
+    for (const auto& view : views)
+        if (!view.texture || !width || !height || view.width != width || view.height != height ||
+            view.format != format)
+            throw std::runtime_error("Overlay view dimensions or formats differ");
+    waitForSubmission();
+    pipeline(format);
+    if (!depth_ || width != width_ || height != height_) {
+        depth_.Reset();
+        width_ = width;
+        height_ = height;
+        D3D12_RESOURCE_DESC d{};
+        d.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        d.Width = width;
+        d.Height = height;
+        d.DepthOrArraySize = 1;
+        d.MipLevels = 1;
+        d.Format = DXGI_FORMAT_D32_FLOAT;
+        d.SampleDesc.Count = 1;
+        d.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+        D3D12_CLEAR_VALUE clear{};
+        clear.Format = d.Format;
+        clear.DepthStencil.Depth = 1;
+        auto h = heap(D3D12_HEAP_TYPE_DEFAULT);
+        hr(device_->CreateCommittedResource(&h, D3D12_HEAP_FLAG_NONE, &d, D3D12_RESOURCE_STATE_DEPTH_WRITE,
+                                            &clear, IID_PPV_ARGS(&depth_)),
+           "Create depth target");
+        device_->CreateDepthStencilView(depth_.Get(), nullptr, dsv_->GetCPUDescriptorHandleForHeapStart());
+    }
+    const auto bytes = vertices.size_bytes();
+    if (bytes > capacity_) {
+        vertices_.Reset();
+        capacity_ = std::max<std::size_t>(bytes, 1024 * 1024);
+        D3D12_RESOURCE_DESC d{};
+        d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        d.Width = capacity_;
+        d.Height = 1;
+        d.DepthOrArraySize = 1;
+        d.MipLevels = 1;
+        d.SampleDesc.Count = 1;
+        d.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        auto h = heap(D3D12_HEAP_TYPE_UPLOAD);
+        hr(device_->CreateCommittedResource(&h, D3D12_HEAP_FLAG_NONE, &d, D3D12_RESOURCE_STATE_GENERIC_READ,
+                                            nullptr, IID_PPV_ARGS(&vertices_)),
+           "Create vertex upload buffer");
+    }
+    if (bytes) {
+        void* data{};
+        D3D12_RANGE read{0, 0};
+        hr(vertices_->Map(0, &read, &data), "Map vertices");
+        std::memcpy(data, vertices.data(), bytes);
+        vertices_->Unmap(0, nullptr);
+    }
+    hr(allocator_->Reset(), "Reset allocator");
+    hr(list_->Reset(allocator_.Get(), pipeline_.Get()), "Reset list");
+    D3D12_RENDER_TARGET_VIEW_DESC rv{};
+    rv.Format = format;
+    rv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+    const auto dsv = dsv_->GetCPUDescriptorHandleForHeapStart();
+    const auto rtvStride = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    list_->SetGraphicsRootSignature(root_.Get());
+    list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    if (bytes) {
+        D3D12_VERTEX_BUFFER_VIEW buffer{vertices_->GetGPUVirtualAddress(), static_cast<UINT>(bytes),
+                                        sizeof(Vertex)};
+        list_->IASetVertexBuffers(0, 1, &buffer);
+    }
+    for (size_t eye = 0; eye < views.size(); ++eye) {
+        auto rtv = rtv_->GetCPUDescriptorHandleForHeapStart();
+        rtv.ptr += eye * rtvStride;
+        device_->CreateRenderTargetView(views[eye].texture, &rv, rtv);
+        // XR_KHR_D3D12_enable requires color images in RENDER_TARGET state on
+        // acquire/release. We render directly and leave them in that state.
+        const float clear[] = {.025f, .045f, .08f, 1};
+        if (!preserveColor)
+            list_->ClearRenderTargetView(rtv, clear, 0, nullptr);
+        list_->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+        list_->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
+        D3D12_VIEWPORT viewport{0, 0, static_cast<float>(width), static_cast<float>(height), 0, 1};
+        D3D12_RECT rect{0, 0, static_cast<LONG>(width), static_cast<LONG>(height)};
+        list_->RSSetViewports(1, &viewport);
+        list_->RSSetScissorRects(1, &rect);
+        list_->SetGraphicsRoot32BitConstants(0, 16, views[eye].viewProjection.data(), 0);
+        if (bytes) {
+            list_->DrawInstanced(static_cast<UINT>(vertices.size()), 1, 0, 0);
+        }
+    }
+    hr(list_->Close(), "Close render list");
+    ID3D12CommandList* lists[] = {list_.Get()};
+    queue_->ExecuteCommandLists(1, lists);
+    hr(queue_->Signal(fence_.Get(), ++fenceValue_), "Signal overlay completion");
+    if (waitForCompletion)
+        waitForSubmission();
+}
+void addBox(std::vector<Vertex>& out, Vec3 lo, Vec3 hi, Vec3 color) {
+    Vec3 p[] = {{lo.x, lo.y, lo.z}, {hi.x, lo.y, lo.z}, {hi.x, hi.y, lo.z}, {lo.x, hi.y, lo.z},
+                {lo.x, lo.y, hi.z}, {hi.x, lo.y, hi.z}, {hi.x, hi.y, hi.z}, {lo.x, hi.y, hi.z}};
+    const int faces[][4] = {{0, 1, 2, 3}, {5, 4, 7, 6}, {4, 0, 3, 7},
+                            {1, 5, 6, 2}, {3, 2, 6, 7}, {4, 5, 1, 0}};
+    for (int f = 0; f < 6; ++f) {
+        const auto& v = faces[f];
+        const auto c = color * (.65f + .07f * f);
+        triangle(out, p[v[0]], p[v[1]], p[v[2]], c);
+        triangle(out, p[v[0]], p[v[2]], p[v[3]], c);
+    }
+}
+void addBeam(std::vector<Vertex>& out, Vec3 a, Vec3 b, float r, Vec3 color) {
+    const Vec3 d = normalized(b - a);
+    if (length(d) < .1f)
+        return;
+    const Vec3 u = normalized(cross(d, std::abs(d.y) > .95f ? Vec3{1, 0, 0} : Vec3{0, 1, 0})) * r,
+               v = normalized(cross(d, u)) * r;
+    Vec3 ring[] = {u + v, -u + v, -u - v, u - v};
+    for (int i = 0; i < 4; ++i) {
+        const auto j = (i + 1) % 4;
+        triangle(out, a + ring[i], b + ring[i], b + ring[j], color);
+        triangle(out, a + ring[i], b + ring[j], a + ring[j], color);
+    }
+}
+void addTrackedHand(std::vector<Vertex>& out, Pose grip, unsigned hand, float squeeze, bool webGesture) {
+    const size_t begin = out.size();
+    const Vec3 red{.65f, .025f, .035f}, seam{.025f, .015f, .02f}, cuff{.035f, .06f, .24f};
+    addBox(out, {-.041f, -.02f, -.05f}, {.041f, .02f, .042f}, red);
+    addBox(out, {-.035f, -.024f, .035f}, {.035f, .024f, .09f}, cuff);
+    for (int finger = 0; finger < 4; ++finger) {
+        const float x = -.031f + finger * .021f;
+        const float bend = webGesture && (finger == 0 || finger == 3) ? 0.f : std::clamp(squeeze, 0.f, 1.f);
+        const float size = (finger == 3 ? .017f : .022f);
+        Vec3 from{x, 0, -.049f};
+        for (int joint = 0; joint < 3; ++joint) {
+            const float angle = bend * (.45f + joint * .8f);
+            const Vec3 to = from + Vec3{0, -std::sin(angle) * size, -std::cos(angle) * size};
+            addBeam(out, from, to, .0085f, red);
+            addBox(out, to - Vec3{.0087f, .0015f, .0015f}, to + Vec3{.0087f, .0015f, .0015f}, seam);
+            from = to;
+        }
+    }
+    const float side = hand ? -1.f : 1.f;
+    addBeam(out, {side * .035f, -.005f, .025f}, {side * .065f, -.012f, -.007f}, .011f, red);
+    addBeam(out, {side * .065f, -.012f, -.007f}, {side * .061f, -.018f, -.036f}, .009f, red);
+    for (int line = -1; line <= 1; ++line)
+        addBeam(out, {line * .022f, .0205f, .035f}, {line * .022f, .0205f, -.045f}, .0009f, seam);
+    for (size_t i = begin; i < out.size(); ++i)
+        out[i].position = grip.position + grip.orientation.rotate(out[i].position);
+}
+} // namespace spidy

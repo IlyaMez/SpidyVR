@@ -1,0 +1,366 @@
+15:15:49:019 [50940] | INFO  | Initializing R.E.A.L. VR by LukeRoss, version '25.0.0.24529' (64-bit) built on '2025-11-07 18:55:08'
+15:15:49:019 [MAIN ] | INFO  | Loading from "C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\dxgi.dll" into "C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\Spider-Man.exe" ...
+15:15:49:019 [MAIN ] | INFO  | Commandline = "C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\Spider-Man.exe" -nolauncher
+15:15:49:020 [MAIN ] | INFO  | (Kudos to crosire for creating his awesome ReShade injector.)
+15:15:49:072 [MAIN ] | INFO  | Registering hooks for "user32.dll" ...
+15:15:49:072 [MAIN ] | INFO  | > Libraries loaded.
+15:15:49:073 [MAIN ] | INFO  | > Found 29 match(es). Installing ...
+15:15:49:123 [MAIN ] | INFO  | Registering hooks for "ws2_32.dll" ...
+15:15:49:123 [MAIN ] | INFO  | > Libraries loaded.
+15:15:49:123 [MAIN ] | INFO  | > Found 8 match(es). Installing ...
+15:15:49:173 [MAIN ] | INFO  | Registering hooks for "C:\Windows\system32\d2d1.dll" ...
+15:15:49:173 [MAIN ] | INFO  | > Delayed.
+15:15:49:173 [MAIN ] | INFO  | Registering hooks for "C:\Windows\system32\d3d9.dll" ...
+15:15:49:173 [MAIN ] | INFO  | > Delayed.
+15:15:49:174 [MAIN ] | INFO  | Registering hooks for "C:\Windows\system32\d3d10.dll" ...
+15:15:49:174 [MAIN ] | INFO  | > Delayed.
+15:15:49:174 [MAIN ] | INFO  | Registering hooks for "C:\Windows\system32\d3d10_1.dll" ...
+15:15:49:174 [MAIN ] | INFO  | > Delayed.
+15:15:49:174 [MAIN ] | INFO  | Registering hooks for "C:\Windows\system32\d3d11.dll" ...
+15:15:49:174 [MAIN ] | INFO  | > Delayed.
+15:15:49:175 [MAIN ] | INFO  | Registering hooks for "C:\Windows\system32\d3d12.dll" ...
+15:15:49:175 [MAIN ] | INFO  | > Delayed.
+15:15:49:175 [MAIN ] | INFO  | Registering hooks for "C:\Windows\system32\dxgi.dll" ...
+15:15:49:175 [MAIN ] | INFO  | > Delayed until first call to an exported function.
+15:15:49:175 [MAIN ] | INFO  | Registering hooks for "C:\Windows\system32\opengl32.dll" ...
+15:15:49:175 [MAIN ] | INFO  | > Delayed.
+15:15:49:175 [MAIN ] | INFO  | Registering hooks for "bink2w64.dll" ...
+15:15:49:175 [MAIN ] | INFO  | > Delayed.
+15:15:49:175 [MAIN ] | INFO  | Registering hooks for "XInput9_1_0.dll" ...
+15:15:49:175 [MAIN ] | INFO  | > Delayed.
+15:15:49:175 [MAIN ] | INFO  | Registering hooks for "kernel32.dll" ...
+15:15:49:175 [MAIN ] | INFO  | > Libraries loaded.
+15:15:49:176 [MAIN ] | INFO  | > Found 6 match(es). Installing ...
+15:15:49:226 [MAIN ] | INFO  | Registering hooks for "steam_api64.dll" ...
+15:15:49:226 [MAIN ] | INFO  | > Libraries loaded.
+15:15:49:226 [MAIN ] | INFO  | > Found 4 match(es). Installing ...
+15:15:49:278 [MAIN ] | INFO  | Registering hooks for "Hid.dll" ...
+15:15:49:279 [MAIN ] | INFO  | > Libraries loaded.
+15:15:49:279 [MAIN ] | INFO  | > Found 9 match(es). Installing ...
+15:15:49:330 [MAIN ] | INFO  | Registering hooks for "_nvngx.dll" ...
+15:15:49:330 [MAIN ] | INFO  | > Delayed.
+15:15:49:431 [MAIN ] | INFO  | 11 RVR patch(es) applied successfully in 109 ms.
+15:15:49:431 [MAIN ] | INFO  | Initialized.
+15:15:49:566 [MAIN ] | INFO  | Redirecting RegisterClassExW(lpWndClassEx = 000000A1F014F090 { SteamWinsockInitFakeClass_1 }) ...
+15:15:49:567 [MAIN ] | INFO  | > Adding 'CS_OWNDC' window class style flag to 'SteamWinsockInitFakeClass_1'.
+15:15:49:723 [MAIN ] | INFO  | Redirecting CreateDXGIFactory(riid = {7B7166EC-21C7-44AE-B21A-C9AE321AE369}, ppFactory = 000000A1F014C4C0) ...
+15:15:49:724 [MAIN ] | INFO  | > Passing on to CreateDXGIFactory1:
+15:15:49:726 [MAIN ] | INFO  | Installing export hooks for "C:\Windows\system32\dxgi.dll" ...
+15:15:49:726 [MAIN ] | INFO  | > Found 11 match(es). Installing ...
+15:15:49:726 [MAIN ] | INFO  | Redirecting CreateDXGIFactory1(riid = IDXGIFactory, ppFactory = 000000A1F014C4C0) ...
+15:15:49:832 [MAIN ] | INFO  | Installing delayed hooks for "C:\Windows\system32\d3d12.dll" (Just loaded via LoadLibrary("C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\/sl.common.dll")) ...
+15:15:49:832 [MAIN ] | INFO  | > Found 7 match(es). Installing ...
+15:15:49:889 [MAIN ] | INFO  | Redirecting CreateDXGIFactory(riid = {7B7166EC-21C7-44AE-B21A-C9AE321AE369}, ppFactory = 000000A1F014BF50) ...
+15:15:49:889 [MAIN ] | INFO  | > Passing on to CreateDXGIFactory1:
+15:15:49:889 [MAIN ] | INFO  | Redirecting CreateDXGIFactory1(riid = IDXGIFactory, ppFactory = 000000A1F014BF50) ...
+15:15:49:922 [MAIN ] | INFO  | Installing delayed hooks for "_nvngx.dll" (Just loaded via LoadLibrary("api-ms-win-core-synch-l1-2-0")) ...
+15:15:49:922 [MAIN ] | INFO  | > Found 6 match(es). Installing ...
+15:15:50:694 [MAIN ] | INFO  | Redirecting CreateDXGIFactory2(Flags = 0, riid = IDXGIFactory, ppFactory = 0000023024BA79F0) ...
+15:15:51:244 [MAIN ] | INFO  | Redirecting D3D12CreateDevice(pAdapter = 0000023170444010, MinimumFeatureLevel = 0xb000, riid = {189819F1-1DB6-4B57-BE54-1821339B85F7}, ppDevice = 000000A1F014D000) ...
+15:15:51:334 [MAIN ] | DEBUG | Modules:
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\Spider-Man.exe (4.630.0.0)
+C:\Windows\SYSTEM32\ntdll.dll (10.0.26100.9444)
+C:\Windows\System32\KERNEL32.DLL (10.0.26100.9444)
+C:\Windows\System32\KERNELBASE.dll (10.0.26100.9444)
+C:\Windows\System32\SETUPAPI.dll (10.0.26100.9444)
+C:\Windows\System32\msvcrt.dll (7.0.26100.9444)
+C:\Windows\System32\WS2_32.dll (10.0.26100.9444)
+C:\Windows\SYSTEM32\WINHTTP.dll (10.0.26100.9278)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\steam_api64.dll (8.2.21.95)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\amd_ags_x64.dll (6.1.0.0)
+C:\Windows\System32\ucrtbase.dll (10.0.26100.9444)
+C:\Windows\System32\sechost.dll (10.0.26100.9444)
+C:\Windows\System32\ADVAPI32.dll (10.0.26100.9278)
+C:\Windows\System32\RPCRT4.dll (10.0.26100.9444)
+C:\Windows\System32\SHELL32.dll (10.0.26100.9278)
+C:\Windows\System32\USER32.dll (10.0.26100.9444)
+C:\Windows\System32\win32u.dll (10.0.26100.9444)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\crs-client.dll
+C:\Windows\System32\msvcp_win.dll (10.0.26100.9444)
+C:\Windows\System32\GDI32.dll (10.0.26100.8328)
+C:\Windows\System32\OLEAUT32.dll (10.0.26100.9278)
+C:\Windows\System32\combase.dll (10.0.26100.9444)
+C:\Windows\System32\gdi32full.dll (10.0.26100.9444)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\GFSDK_SSAO_D3D11.win64.dll (3.1.0.0)
+C:\Windows\System32\ole32.dll (10.0.26100.9444)
+C:\Windows\SYSTEM32\faultrep.dll (10.0.26100.9444)
+C:\Windows\SYSTEM32\dbghelp.dll (10.0.26100.9444)
+C:\Windows\SYSTEM32\IPHLPAPI.DLL (10.0.26100.9278)
+C:\Windows\SYSTEM32\WINMM.dll (10.0.26100.9278)
+C:\Windows\SYSTEM32\pdh.dll (10.0.26100.9278)
+C:\Windows\SYSTEM32\HID.DLL (10.0.26100.1150)
+C:\Windows\SYSTEM32\MFReadWrite.dll (10.0.26100.9278)
+C:\Windows\SYSTEM32\bcrypt.dll (10.0.26100.9444)
+C:\Windows\System32\shcore.dll (10.0.26100.9444)
+C:\Windows\SYSTEM32\MFPlat.DLL (10.0.26100.9278)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\dxgi.dll (25.0.0.24529)
+C:\Windows\SYSTEM32\UxTheme.dll (10.0.26100.9444)
+C:\Windows\SYSTEM32\cfgmgr32.dll (10.0.26100.9278)
+C:\Windows\SYSTEM32\WININET.dll (11.0.26100.9444)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\cudart64_12.dll (6.14.11.12080)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\openvr_api.dll (1.16.8.0)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\D3DCOMPILER_47.dll (6.3.9600.16384)
+C:\Windows\SYSTEM32\VERSION.dll (10.0.26100.1150)
+C:\Windows\SYSTEM32\CRYPTBASE.DLL (10.0.26100.9444)
+C:\Windows\SYSTEM32\dbgcore.DLL (10.0.26100.9444)
+C:\Windows\SYSTEM32\RTWorkQ.DLL (10.0.26100.8972)
+C:\Windows\System32\IMM32.DLL (10.0.26100.9278)
+C:\Windows\System32\bcryptPrimitives.dll (10.0.26100.9444)
+C:\Program Files (x86)\Steam\gameoverlayrenderer64.dll (10.96.30.42)
+C:\Windows\System32\PSAPI.DLL (10.0.26100.8521)
+C:\Windows\System32\MSCTF.dll (10.0.26100.9278)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\gattaca.dll
+C:\Windows\SYSTEM32\VCRUNTIME140.dll (14.51.36247.0)
+C:\Windows\SYSTEM32\windows.storage.dll (10.0.26100.9444)
+C:\Windows\System32\shlwapi.dll (10.0.26100.9444)
+C:\Windows\SYSTEM32\SspiCli.dll (10.0.26100.9278)
+C:\Program Files (x86)\Steam\steamclient64.dll (10.96.30.42)
+C:\Windows\System32\imagehlp.dll (10.0.26100.4202)
+C:\Windows\SYSTEM32\MSWSOCK.dll (10.0.26100.9278)
+C:\Windows\SYSTEM32\Secur32.dll (10.0.26100.7705)
+C:\Program Files (x86)\Steam\tier0_s64.dll (10.96.30.42)
+C:\Program Files (x86)\Steam\vstdlib_s64.dll (10.96.30.42)
+C:\Windows\System32\CRYPT32.dll (10.0.26100.9278)
+C:\Windows\SYSTEM32\kernel.appcore.dll (10.0.26100.9278)
+C:\Windows\system32\ntmarta.dll (10.0.26100.7019)
+C:\Windows\system32\dxgi.dll (10.0.26100.9444)
+C:\Windows\SYSTEM32\powrprof.dll (10.0.26100.3912)
+C:\Windows\SYSTEM32\UMPDC.dll (10.0.26100.8972)
+C:\Windows\SYSTEM32\dxcore.dll (10.0.26100.9278)
+C:\Windows\SYSTEM32\directxdatabasehelper.dll (10.0.26100.9444)
+C:\Windows\System32\wintrust.dll (10.0.26100.9444)
+C:\Windows\SYSTEM32\MSASN1.dll (10.0.26100.9444)
+C:\Windows\SYSTEM32\CRYPTSP.dll (10.0.26100.9444)
+C:\Windows\system32\rsaenh.dll (10.0.26100.7705)
+C:\Windows\SYSTEM32\gpapi.dll (10.0.26100.9444)
+C:\Windows\System32\cryptnet.dll (10.0.26100.9278)
+C:\Windows\SYSTEM32\profapi.dll (10.0.26100.9444)
+C:\Windows\SYSTEM32\WINNSI.DLL (10.0.26100.9444)
+C:\Windows\System32\NSI.dll (10.0.26100.9444)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\sl.interposer.dll (2.4.0.0)
+C:\Windows\SYSTEM32\MSVCP140.dll (14.51.36247.0)
+C:\Windows\SYSTEM32\VCRUNTIME140_1.dll (14.51.36247.0)
+C:\Windows\SYSTEM32\drvstore.dll (10.0.26100.9444)
+C:\Windows\SYSTEM32\devobj.dll (10.0.26100.9278)
+C:\Windows\SYSTEM32\wldp.dll (10.0.26100.9444)
+C:\Windows\SYSTEM32\nvapi64.dll (32.0.16.1714)
+C:\Windows\system32\DriverStore\FileRepository\nv_dispi.inf_amd64_da865124972e1f80\nvapi64_impl.dll (32.0.16.1714)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\sl.common.dll (2.4.0.0)
+C:\Windows\SYSTEM32\d3d12.dll (10.0.26100.9278)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\sl.dlss.dll (2.4.0.0)
+C:\Windows\System32\DriverStore\FileRepository\nv_dispi.inf_amd64_da865124972e1f80\_nvngx.dll (32.0.16.1714)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\nvngx_dlss.dll (3.7.10.0)
+C:\Windows\SYSTEM32\vulkan-1.dll (1.4.341.0)
+C:\Windows\SYSTEM32\nvcuda.dll (32.0.16.1714)
+C:\Windows\System32\DriverStore\FileRepository\nv_dispi.inf_amd64_da865124972e1f80\nvngx_dlssg.dll (310.2.1.0)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\sl.dlss_g.dll (2.4.0.0)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\sl.pcl.dll (2.4.0.0)
+C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\sl.reflex.dll (2.4.0.0)
+C:\Windows\SYSTEM32\atiadlxx.dll (32.0.21030.2001)
+C:\Windows\SYSTEM32\WTSAPI32.dll (10.0.26100.9278)
+C:\Windows\SYSTEM32\PROPSYS.dll (7.0.26100.9278)
+Callstack:
+dxgi.dll+a7b20!D3D12CreateDevice()+220
+sl.interposer.dll+1fab5!D3D12CreateDevice()+35
+Spider-Man.exe+1cab982!Scaleform::Render::Matrix4x4<float>::SetIdentity()+19edc52
+Spider-Man.exe+1ca9d60!Scaleform::Render::Matrix4x4<float>::SetIdentity()+19ec030
+Spider-Man.exe+1ca1dfe!Scaleform::Render::Matrix4x4<float>::SetIdentity()+19e40ce
+Spider-Man.exe+2bbf0e!Scaleform::System::Init()+86e
+Spider-Man.exe+1d2ee83!Scaleform::Render::Matrix2x4<float>::Prepend()+af73
+Spider-Man.exe+2b8211!00007ff70fff8211()
+Spider-Man.exe+3637b5e!AK::MusicEngine::Term()+5bed6e
+KERNEL32.DLL+2cd87!BaseThreadInitThunk()+17
+ntdll.dll+acaec!RtlUserThreadStart()+2c
+15:15:51:340 [MAIN ] | INFO  | Redirecting CreateDXGIFactory2(Flags = 0x80000000, riid = IDXGIFactory4, ppFactory = 000000A1F014C0E8) ...
+15:15:51:442 [MAIN ] | INFO  | Ignoring LoadLibrary("msasn1.dll") call to avoid possible deadlock.
+15:15:51:457 [49508] | INFO  | Ignoring LoadLibrary("api-ms-win-appmodel-runtime-l1-1-2") call to avoid possible deadlock.
+15:15:51:550 [MAIN ] | INFO  | Created D3D12 device 00000231700385F0
+15:15:51:550 [MAIN ] | INFO  | Skipping device because it is not the main one created by the game.
+15:15:51:583 [MAIN ] | INFO  | Redirecting D3D12CreateDevice(pAdapter = 0000023170444010, MinimumFeatureLevel = 0xb000, riid = {189819F1-1DB6-4B57-BE54-1821339B85F7}, ppDevice = 0000023022BB79B8) ...
+15:15:51:661 [MAIN ] | DEBUG | Callstack:
+dxgi.dll+a7b20!D3D12CreateDevice()+220
+sl.interposer.dll+1fab5!D3D12CreateDevice()+35
+Spider-Man.exe+1cb96ad!Scaleform::Render::Matrix4x4<float>::SetIdentity()+19fb97d
+Spider-Man.exe+1cb9cdf!Scaleform::Render::Matrix4x4<float>::SetIdentity()+19fbfaf
+Spider-Man.exe+1ca9f47!Scaleform::Render::Matrix4x4<float>::SetIdentity()+19ec217
+Spider-Man.exe+1ca1dfe!Scaleform::Render::Matrix4x4<float>::SetIdentity()+19e40ce
+Spider-Man.exe+2bbf0e!Scaleform::System::Init()+86e
+Spider-Man.exe+1d2ee83!Scaleform::Render::Matrix2x4<float>::Prepend()+af73
+Spider-Man.exe+2b8211!00007ff70fff8211()
+Spider-Man.exe+3637b5e!AK::MusicEngine::Term()+5bed6e
+KERNEL32.DLL+2cd87!BaseThreadInitThunk()+17
+ntdll.dll+acaec!RtlUserThreadStart()+2c
+15:15:51:666 [MAIN ] | INFO  | Redirecting CreateDXGIFactory2(Flags = 0x80000000, riid = IDXGIFactory4, ppFactory = 000000A1F014BFE8) ...
+15:15:51:782 [56948] | INFO  | Ignoring LoadLibrary("api-ms-win-appmodel-runtime-l1-1-2") call to avoid possible deadlock.
+15:15:51:782 [06640] | INFO  | Ignoring LoadLibrary("api-ms-win-appmodel-runtime-l1-1-2") call to avoid possible deadlock.
+15:15:51:866 [MAIN ] | INFO  | Created D3D12 device 000002316D4F4FE0
+15:15:51:871 [MAIN ] | INFO  | Recreated runtime environment on runtime 00000231C3974040.
+15:15:52:379 [MAIN ] | DEBUG | Active OpenXR runtime is SteamVR
+15:15:52:382 [MAIN ] | INFO  | Returning ID3D12Device0 object 000002317307F030 wrapping device 000002316D4F4FE0.
+15:15:52:927 [MAIN ] | INFO  | Redirecting CreateDXGIFactory(riid = {7B7166EC-21C7-44AE-B21A-C9AE321AE369}, ppFactory = 000000A1F014BD60) ...
+15:15:52:927 [MAIN ] | INFO  | > Passing on to CreateDXGIFactory1:
+15:15:52:927 [MAIN ] | INFO  | Redirecting CreateDXGIFactory1(riid = IDXGIFactory, ppFactory = 000000A1F014BD60) ...
+15:15:52:949 [56316] | INFO  | Ignoring LoadLibrary("api-ms-win-appmodel-runtime-l1-1-2") call to avoid possible deadlock.
+15:15:52:950 [MAIN ] | INFO  | Ignoring LoadLibrary("cryptbase.dll") call to avoid possible deadlock.
+15:15:52:950 [MAIN ] | INFO  | Ignoring LoadLibrary("wldp.dll") call to avoid possible deadlock.
+15:15:52:952 [MAIN ] | INFO  | Ignoring LoadLibrary("drvstore.dll") call to avoid possible deadlock.
+15:15:52:952 [MAIN ] | INFO  | Ignoring LoadLibrary("devobj.dll") call to avoid possible deadlock.
+15:15:52:953 [56316] | INFO  | Ignoring LoadLibrary("drvstore.dll") call to avoid possible deadlock.
+15:15:52:953 [MAIN ] | INFO  | Ignoring LoadLibrary("kernel32.dll") call to avoid possible deadlock.
+15:15:53:314 [MAIN ] | INFO  | Redirecting ID3D12Device::CreateCommandQueue(this = 000002317307F030, pDesc = 000000A1F014CF10, riid = {0EC870A6-5D7E-4C22-8CFC-5BAAE07616ED}, ppCommandQueue = 00000231C73B0030) ...
+15:15:53:315 [MAIN ] | INFO  | > Dumping command queue description:
+15:15:53:315 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:315 [MAIN ] | INFO  |   | Parameter                               | Value                                   |
+15:15:53:315 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:315 [MAIN ] | INFO  |   | Type                                    | 0                                       |
+15:15:53:315 [MAIN ] | INFO  |   | Priority                                | 0                                       |
+15:15:53:315 [MAIN ] | INFO  |   | Flags                                   | 0                                       |
+15:15:53:315 [MAIN ] | INFO  |   | NodeMask                                | 0x1                                     |
+15:15:53:315 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:350 [MAIN ] | INFO  | Created command queue 000002316D4769E0
+15:15:53:361 [MAIN ] | INFO  | Redirecting CreateDXGIFactory1(riid = {1BC6EA02-EF36-464F-BF0C-21CA39E5168A}, ppFactory = 000000A1F014D458) ...
+15:15:53:364 [MAIN ] | INFO  | Redirecting CreateDXGIFactory1(riid = {1BC6EA02-EF36-464F-BF0C-21CA39E5168A}, ppFactory = 000000A1F014D218) ...
+15:15:53:366 [MAIN ] | INFO  | Redirecting ID3D12Device::CreateCommandQueue(this = 000002317307F030, pDesc = 000000A1F014D748, riid = {0EC870A6-5D7E-4C22-8CFC-5BAAE07616ED}, ppCommandQueue = 000002317025C510) ...
+15:15:53:366 [MAIN ] | INFO  | > Dumping command queue description:
+15:15:53:366 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:366 [MAIN ] | INFO  |   | Parameter                               | Value                                   |
+15:15:53:366 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:366 [MAIN ] | INFO  |   | Type                                    | 0                                       |
+15:15:53:366 [MAIN ] | INFO  |   | Priority                                | 0                                       |
+15:15:53:366 [MAIN ] | INFO  |   | Flags                                   | 0                                       |
+15:15:53:366 [MAIN ] | INFO  |   | NodeMask                                | 0                                       |
+15:15:53:367 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:393 [MAIN ] | INFO  | Created command queue 000002316D4712D0
+15:15:53:393 [MAIN ] | INFO  | Redirecting CreateDXGIFactory1(riid = {1BC6EA02-EF36-464F-BF0C-21CA39E5168A}, ppFactory = 000000A1F014D218) ...
+15:15:53:396 [MAIN ] | INFO  | Redirecting ID3D12Device::CreateCommandQueue(this = 000002317307F030, pDesc = 000000A1F014D748, riid = {0EC870A6-5D7E-4C22-8CFC-5BAAE07616ED}, ppCommandQueue = 000002317025C1B0) ...
+15:15:53:396 [MAIN ] | INFO  | > Dumping command queue description:
+15:15:53:396 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:397 [MAIN ] | INFO  |   | Parameter                               | Value                                   |
+15:15:53:397 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:397 [MAIN ] | INFO  |   | Type                                    | 0                                       |
+15:15:53:397 [MAIN ] | INFO  |   | Priority                                | 0                                       |
+15:15:53:397 [MAIN ] | INFO  |   | Flags                                   | 0                                       |
+15:15:53:397 [MAIN ] | INFO  |   | NodeMask                                | 0                                       |
+15:15:53:397 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:422 [MAIN ] | INFO  | Created command queue 000002316D59B490
+15:15:53:549 [16380] | INFO  | Redirecting RegisterClassExW(lpWndClassEx = 000000A1F34FF7B0 { GameNxApp }) ...
+15:15:53:549 [16380] | INFO  | > Adding 'CS_OWNDC' window class style flag to 'GameNxApp'.
+15:15:53:591 [16380] | INFO  | Installing delayed hooks for "XInput9_1_0.dll" (Just loaded via LoadLibrary("xinput9_1_0.dll")) ...
+15:15:53:592 [16380] | INFO  | > Found 1 match(es). Installing ...
+15:15:53:658 [50216] | INFO  | Ignoring LoadLibrary("api-ms-win-appmodel-runtime-l1-1-2") call to avoid possible deadlock.
+15:15:53:659 [56380] | INFO  | Ignoring LoadLibrary("api-ms-win-appmodel-runtime-l1-1-2") call to avoid possible deadlock.
+15:15:53:667 [53804] | INFO  | Redirecting IDXGIFactory2::CreateSwapChainForHwnd(this = 000002316D5A0830, pDevice = 00000231C8A34D10 (ID3D12CommandQueue = 00000231C8A34D10 , ID3D12Device = 0000023172352480), hWnd = 0000000000A40BEC, pDesc = 000000A1F33FF840, pFullscreenDesc = 0000000000000000, pRestrictToOutput = 0000000000000000, ppSwapChain = 000000A1F33FF870) ...
+15:15:53:668 [53804] | INFO  | > Dumping swap chain description:
+15:15:53:668 [53804] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:668 [53804] | INFO  |   | Parameter                               | Value                                   |
+15:15:53:668 [53804] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:668 [53804] | INFO  |   | Width                                   | 2560                                    |
+15:15:53:668 [53804] | INFO  |   | Height                                  | 1440                                    |
+15:15:53:668 [53804] | INFO  |   | RefreshRate                             | 0                   0                   |
+15:15:53:668 [53804] | INFO  |   | Format                                  | DXGI_FORMAT_R8G8B8A8_UNORM              |
+15:15:53:668 [53804] | INFO  |   | Stereo                                  | FALSE                                   |
+15:15:53:668 [53804] | INFO  |   | ScanlineOrdering                        | 0                                       |
+15:15:53:669 [53804] | INFO  |   | Scaling                                 | 0                                       |
+15:15:53:669 [53804] | INFO  |   | SampleCount                             | 1                                       |
+15:15:53:669 [53804] | INFO  |   | SampleQuality                           | 0                                       |
+15:15:53:669 [53804] | INFO  |   | BufferUsage                             | 0x20                                    |
+15:15:53:670 [53804] | INFO  |   | BufferCount                             | 2                                       |
+15:15:53:670 [53804] | INFO  |   | Windowed                                | TRUE                                    |
+15:15:53:670 [53804] | INFO  |   | SwapEffect                              | 4                                       |
+15:15:53:670 [53804] | INFO  |   | AlphaMode                               | 0                                       |
+15:15:53:670 [53804] | INFO  |   | Flags                                   | 0x802                                   |
+15:15:53:670 [53804] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:671 [53804] | INFO  | Resetting runtime environment on runtime 00000231C3974040.
+15:15:53:680 [53804] | INFO  | Runtime environment was never initialized on runtime 00000231C3974040.
+15:15:53:681 [53804] | INFO  | Running on NVIDIA GeForce RTX 5090
+15:15:53:710 [53804] | INFO  | Estimated performance index = 1.52187
+15:15:53:710 [53804] | INFO  | Suggested initial PPD = 34.5419
+15:15:53:714 [53804] | INFO  | Recreated runtime environment on runtime 00000231C3974040.
+15:15:53:714 [53804] | DEBUG | Active OpenXR runtime is SteamVR
+15:15:53:758 [MAIN ] | INFO  | Redirecting ID3D12Device::CreateCommandQueue(this = 000002317307F030, pDesc = 000000A1F014DF90, riid = {0EC870A6-5D7E-4C22-8CFC-5BAAE07616ED}, ppCommandQueue = 000000A1F014DFC0) ...
+15:15:53:758 [MAIN ] | INFO  | > Dumping command queue description:
+15:15:53:758 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:758 [MAIN ] | INFO  |   | Parameter                               | Value                                   |
+15:15:53:758 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:758 [MAIN ] | INFO  |   | Type                                    | 3                                       |
+15:15:53:758 [MAIN ] | INFO  |   | Priority                                | 0                                       |
+15:15:53:759 [MAIN ] | INFO  |   | Flags                                   | 0                                       |
+15:15:53:759 [MAIN ] | INFO  |   | NodeMask                                | 0                                       |
+15:15:53:759 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:768 [MAIN ] | INFO  | Created command queue 0000023172E79DA0
+15:15:53:768 [MAIN ] | INFO  | Redirecting ID3D12Device::CreateCommandQueue(this = 000002317307F030, pDesc = 000000A1F014DF90, riid = {0EC870A6-5D7E-4C22-8CFC-5BAAE07616ED}, ppCommandQueue = 000000A1F014DFC0) ...
+15:15:53:768 [MAIN ] | INFO  | > Dumping command queue description:
+15:15:53:768 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:768 [MAIN ] | INFO  |   | Parameter                               | Value                                   |
+15:15:53:768 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:768 [MAIN ] | INFO  |   | Type                                    | 2                                       |
+15:15:53:768 [MAIN ] | INFO  |   | Priority                                | 0                                       |
+15:15:53:769 [MAIN ] | INFO  |   | Flags                                   | 0                                       |
+15:15:53:769 [MAIN ] | INFO  |   | NodeMask                                | 0                                       |
+15:15:53:769 [MAIN ] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:15:53:781 [MAIN ] | INFO  | Created command queue 00000231C8F662C0
+15:15:54:841 [MAIN ] | INFO  | Installing delayed hooks for "bink2w64.dll" (Just loaded via LoadLibrary("bink2w64.dll")) ...
+15:15:54:841 [MAIN ] | INFO  | > Found 4 match(es). Installing ...
+15:15:54:846 [37516] | INFO  | Ignoring LoadLibrary("ext-ms-win-mininput-inputhost-l1-1-1.dll") call to avoid possible deadlock.
+15:15:54:846 [41876] | INFO  | Ignoring LoadLibrary("HID.DLL") call to avoid possible deadlock.
+15:15:54:847 [37516] | INFO  | Ignoring LoadLibrary("ext-ms-win-mininput-inputhost-l1-1-0.dll") call to avoid possible deadlock.
+15:15:54:847 [41876] | INFO  | Ignoring LoadLibrary("SETUPAPI.DLL") call to avoid possible deadlock.
+15:15:54:847 [41876] | INFO  | Ignoring LoadLibrary("WINMM.DLL") call to avoid possible deadlock.
+15:15:54:848 [41876] | INFO  | Ignoring LoadLibrary("USER32.DLL") call to avoid possible deadlock.
+15:15:54:871 [16240] | INFO  | Ignoring LoadLibrary("api-ms-win-core-synch-l1-2-0") call to avoid possible deadlock.
+15:15:54:872 [16240] | INFO  | Ignoring LoadLibrary("api-ms-win-core-fibers-l1-1-1") call to avoid possible deadlock.
+15:15:54:873 [16240] | INFO  | Ignoring LoadLibrary("api-ms-win-core-fibers-l1-1-2") call to avoid possible deadlock.
+15:15:54:874 [16240] | INFO  | Ignoring LoadLibrary("api-ms-win-core-localization-l1-2-1") call to avoid possible deadlock.
+15:15:54:874 [16240] | INFO  | Ignoring LoadLibrary("kernel32") call to avoid possible deadlock.
+15:15:54:875 [16240] | INFO  | Ignoring LoadLibrary("C:\Windows\system32\version.dll") call to avoid possible deadlock.
+15:15:54:961 [50764] | INFO  | Ignoring LoadLibrary("avrt.dll") call to avoid possible deadlock.
+15:15:55:227 [53804] | INFO  | Installing delayed hooks for "C:\Windows\system32\d3d11.dll" (Just loaded via LoadLibrary("d3d11.dll")) ...
+15:15:55:228 [53804] | INFO  | > Found 2 match(es). Installing ...
+15:15:55:330 [53804] | INFO  | Loading image files for textures ...
+15:15:56:677 [53804] | INFO  | RVRMgr created.
+15:15:56:677 [53804] | INFO  | Calling AttachD3D with initial size 0x0
+15:16:37:124 [16600] | INFO  | Redirecting CreateDXGIFactory1(riid = {1BC6EA02-EF36-464F-BF0C-21CA39E5168A}, ppFactory = 000000A1F18FFB88) ...
+15:16:37:128 [16600] | INFO  | Redirecting D3D12CreateDevice(pAdapter = 0000000000000000, MinimumFeatureLevel = 0xb000, riid = {189819F1-1DB6-4B57-BE54-1821339B85F7}, ppDevice = 000000A1F18FFB80) ...
+15:16:37:395 [16600] | DEBUG | Callstack:
+dxgi.dll+a7b20!D3D12CreateDevice()+220
+spidy_render_probe.dll+1094!00007ffb20ef1094()
+spidy_render_probe.dll+1766!SpidyStart()+66
+KERNEL32.DLL+2cd87!BaseThreadInitThunk()+17
+ntdll.dll+acaec!RtlUserThreadStart()+2c
+15:16:37:403 [16600] | INFO  | Redirecting CreateDXGIFactory2(Flags = 0x80000000, riid = IDXGIFactory4, ppFactory = 000000A1F18FECA8) ...
+15:16:37:409 [16600] | INFO  | Created D3D12 device 000002316D4F4FE0
+15:16:37:409 [16600] | INFO  | Skipping device because it is not the main one created by the game.
+15:16:37:444 [16600] | INFO  | Redirecting IDXGIFactory2::CreateSwapChainForComposition(this = 000002301FF9C070, pDevice = 00000231F23FC120, pDesc = 000000A1F18FFB90, pRestrictToOutput = 0000000000000000, ppSwapChain = 000000A1F18FFB78) ...
+15:16:37:445 [16600] | INFO  | > Dumping swap chain description:
+15:16:37:445 [16600] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:16:37:446 [16600] | INFO  |   | Parameter                               | Value                                   |
+15:16:37:446 [16600] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:16:37:446 [16600] | INFO  |   | Width                                   | 16                                      |
+15:16:37:446 [16600] | INFO  |   | Height                                  | 16                                      |
+15:16:37:446 [16600] | INFO  |   | RefreshRate                             | 3342401             4522041             |
+15:16:37:446 [16600] | INFO  |   | Format                                  | DXGI_FORMAT_R8G8B8A8_UNORM              |
+15:16:37:447 [16600] | INFO  |   | Stereo                                  | FALSE                                   |
+15:16:37:447 [16600] | INFO  |   | ScanlineOrdering                        | 3211317                                 |
+15:16:37:447 [16600] | INFO  |   | Scaling                                 | 3670070                                 |
+15:16:37:447 [16600] | INFO  |   | SampleCount                             | 1                                       |
+15:16:37:447 [16600] | INFO  |   | SampleQuality                           | 0                                       |
+15:16:37:447 [16600] | INFO  |   | BufferUsage                             | 0x20                                    |
+15:16:37:447 [16600] | INFO  |   | BufferCount                             | 2                                       |
+15:16:37:447 [16600] | INFO  |   | Windowed                                | TRUE                                    |
+15:16:37:448 [16600] | INFO  |   | SwapEffect                              | 4                                       |
+15:16:37:448 [16600] | INFO  |   | AlphaMode                               | 3                                       |
+15:16:37:448 [16600] | INFO  |   | Flags                                   | 0                                       |
+15:16:37:448 [16600] | INFO  |   +-----------------------------------------+-----------------------------------------+
+15:16:37:456 [16600] | WARN  | Skipping swap chain because it was created without a (hooked) Direct3D device.
+15:16:39:244 [51408] | INFO  | Installing delayed hooks for "C:\Windows\system32\opengl32.dll" (Just loaded via LoadLibrary("api-ms-win-core-synch-l1-2-0")) ...
+15:16:39:244 [51408] | INFO  | > Found 360 match(es). Installing ...
+15:16:39:564 [51408] | INFO  | Redirecting CreateDXGIFactory1(riid = {C1B6694F-FF09-44A9-B03C-77900A0A1D17}, ppFactory = 000000A1F72D6A40) ...
+15:16:39:568 [51408] | INFO  | Redirecting CreateDXGIFactory1(riid = IDXGIFactory1, ppFactory = 000000A1F72D6C90) ...
+15:16:39:586 [51408] | INFO  | Redirecting CreateDXGIFactory1(riid = IDXGIFactory1, ppFactory = 000000A1F72D6E68) ...
+15:16:39:589 [51408] | INFO  | Redirecting CreateDXGIFactory1(riid = IDXGIFactory1, ppFactory = 000000A1F72D6C50) ...
+15:16:39:590 [51408] | INFO  | Passing D3D11CreateDevice on to D3D11CreateDeviceAndSwapChain:
+15:16:39:591 [51408] | INFO  | Redirecting D3D11CreateDeviceAndSwapChain(pAdapter = 0000023172A38EC0, DriverType = 0, Software = 0000000000000000, Flags = 0x20, pFeatureLevels = 000000A1F72D6C58, FeatureLevels = 1, SDKVersion = 7, pSwapChainDesc = 0000000000000000, ppSwapChain = 0000000000000000, ppDevice = 000000A1F72D6C48, pFeatureLevel = 0000000000000000, ppImmediateContext = 000000A1F72D6C40) ...
+15:16:39:592 [51408] | INFO  | Skipping device because the graphics API is not supported.
+15:16:39:619 [51408] | INFO  | Created D3D11 device 00000236030BDAC0
+15:26:00:177 [16380] | INFO  | Quit message received
+15:26:00:360 [MAIN ] | INFO  | Redirecting IDXGISwapChain::SetFullscreenState(this = 0000023172FAB690, Fullscreen = FALSE, pTarget = 0000000000000000) ...

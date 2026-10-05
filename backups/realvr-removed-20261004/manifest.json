@@ -1,0 +1,112 @@
+{
+  "source": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Marvel's Spider-Man Remastered",
+  "backup": "C:\\Users\\lianm\\OneDrive\\Documents\\GitHub\\Spidy\\backups\\realvr-removed-20261004",
+  "gameExeSha256": "E297D4D94F1FFE4FEBF289745E79E7B6FA233A788E7A00F480FC77C55DB81AD1",
+  "files": [
+    {
+      "relativePath": "RealRepo\\dbghelp.dll",
+      "bytes": 1866240,
+      "sha256": "72FCD4053C92CF8369997C2D1AFAE74E2FF53050A51F47813D849EAE41F8D38A"
+    },
+    {
+      "relativePath": "RealRepo\\elevate.exe",
+      "bytes": 6144,
+      "sha256": "43F1E45AE07715619EAAD705765B58E6DE969CCBD5E94F23D0D616070F188142"
+    },
+    {
+      "relativePath": "RealRepo\\NVIDIA_Profiles_ori.bin",
+      "bytes": 2557628,
+      "sha256": "7D14191E0D6C7A3A9C630CD4D4C6F15211301897A802057BE5AB82A1AA42DA99"
+    },
+    {
+      "relativePath": "RealRepo\\RealFluid.exe",
+      "bytes": 18432,
+      "sha256": "86A1810326093A62D707BDE2C48739399FFA2C7262C847E8922D95FE8504A2EC"
+    },
+    {
+      "relativePath": "RealRepo\\RealVR.ini",
+      "bytes": 7,
+      "sha256": "9F6B43A1D1186D45B6266B658294910BEC6452CF1945435FB80BE994B536883E"
+    },
+    {
+      "relativePath": "RealRepo\\RealVR64.dll",
+      "bytes": 11048448,
+      "sha256": "6FE6295EEB32419076967169F60F64630C9EDA4C52F29FFE6D7457A55C8D5C45"
+    },
+    {
+      "relativePath": "RealRepo\\ReplaceJSON.exe",
+      "bytes": 13312,
+      "sha256": "253D87F2052B6DF4EEEAE230E27D4F0671A1D518CE16242D1844C31E5DF31F96"
+    },
+    {
+      "relativePath": "RealRepo\\rxrepl.exe",
+      "bytes": 655360,
+      "sha256": "7FCAE139F68E3873F1516D075183DB693DE6FB1A19D40CA91E6DBDF15E42E89D"
+    },
+    {
+      "relativePath": "RealRepo\\Vdesync.exe",
+      "bytes": 198656,
+      "sha256": "128A9B5741161447A6D07BFF35240D73AFC4A922536158C70A9FCE257D52C730"
+    },
+    {
+      "relativePath": "RealRepo\\xrsetruntime.exe",
+      "bytes": 16896,
+      "sha256": "079162033E31405FEE2C7AD376CC806048AC54FF6C6CE9F93FC2ED3A13AEF333"
+    },
+    {
+      "relativePath": "RealRepo\\SPIDEY\\Settings\\SPIDEY.txt",
+      "bytes": 2290,
+      "sha256": "9B0443F7A788FD9F3E1130BFE8BCF93DD64D20CD20A0D6D3D48173E232EBAF3F"
+    },
+    {
+      "relativePath": "RealRepo\\SPIDEY\\Settings\\SPIDEYMM.txt",
+      "bytes": 2352,
+      "sha256": "DF5F2B85B25ECA31A8698081571CDC44CE972B0EA247DBE7E98FAEEA25D0E6D2"
+    },
+    {
+      "relativePath": "ShaderFixesGeo3D\\FC522842-vs.skip",
+      "bytes": 85840,
+      "sha256": "020AB963E577BD21DB65F1EC88702D678266A98F07D04B01878621B20C67E036"
+    },
+    {
+      "relativePath": "dxgi.dll",
+      "bytes": 11048448,
+      "sha256": "6FE6295EEB32419076967169F60F64630C9EDA4C52F29FFE6D7457A55C8D5C45"
+    },
+    {
+      "relativePath": "openvr_api.dll",
+      "bytes": 818904,
+      "sha256": "C3314D8822729FB7550D070F75C3EFDD2D099965E53416B2901996FC6CEE744F"
+    },
+    {
+      "relativePath": "cudart64_110.dll",
+      "bytes": 526848,
+      "sha256": "BA5C2FB526C4EE4BB218CEB3FA5E8BFDE89CE474F38711FDCCE802549BF9FC6F"
+    },
+    {
+      "relativePath": "cudart64_12.dll",
+      "bytes": 573952,
+      "sha256": "C2C9A9C22A9BCBA90E261825968836787B331038047A26770CFFB7A583C28344"
+    },
+    {
+      "relativePath": "RealConfig.bat",
+      "bytes": 53600,
+      "sha256": "5A034E13A1B04F1ADB9527830191C26941121572F0C7507FABDF7DBE91E4E050"
+    },
+    {
+      "relativePath": "RealVR.ini",
+      "bytes": 2399,
+      "sha256": "CEAAC1FA706928A17CF02D50D8D8A2B1E1B934312D3F6752E1123CBCE4868453"
+    },
+    {
+      "relativePath": "RealVR64.log",
+      "bytes": 33513,
+      "sha256": "9A715FAA46B36085BD11EFE69C154415994A5AFDB36A417D543B4E73830ABBEB"
+    },
+    {
+      "relativePath": "Begun.txt",
+      "bytes": 0,
+      "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+    }
+  ]
+}
