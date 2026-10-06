@@ -1,6 +1,97 @@
 # Validation — 2026-10-06
 
-## Eye occlusion culling — current build, awaiting headset check
+## Webs as ropes: weight, swinging, the web let go of follows its prop — current build, tried in the headset
+
+The user, after trying it (`Spidy-0.1.0\reports\game-vr-20261006-133652.json`,
+from the release folder): "i tested in vr and it worked good,only issue is on
+release the bins fell into the floor (still visible but partially in it)". In
+that session 11 yanks, 5 catches (0.5-0.6 s after the yank), 4 throws at
+10.2-16.7 m/s, no web lost. Eye snapshot 0025 shows a thrown blue bin as a thin
+sliver in the road; 0023 shows the let-go web lying on the road to it.
+
+The bins, measured in the game without a headset (`reports/grab-probe-rope.json`,
+`grab-probe-rope-yank.json`, new `--bodies` option): the thrown bins' bodies
+rested on the road (the player stood on it at y 0.85; their centres at
+1.20-1.22), so the bodies did not sink: the drawing did. A breakable trash can
+is two bodies; the game draws it from the top piece, which is the only body
+Spidy's freeing lets move: the can itself (the primary) keeps zero velocity
+whatever it is given, held as an unbroken breakable. Within 0.1 s of being
+freed the top piece fell 0.74 m through the can and the can was drawn with it,
+0.74 m into the pavement; thrown, it landed with the can drawn 0.8 m into the
+road. Drawn from the primary instead, the can stood upright and never moved;
+that change was reverted. Breaking the prop off as the game's own yank does
+(`BustBreakablesWhileWebYanked`) is the open fix; details in
+[WEB-GRAB.md](WEB-GRAB.md#breakable-props-only-the-top-piece-flies-open). The
+same probe measured the let-go web: its drawn end followed the prop 15.5 m, a
+median 0.45 m from it, until it dissolved after 2 s.
+
+The first report of the session, as written before the headset check:
+
+The user: "right now it feels like objects have no weight while webbed and dont
+feel like they are being pulled by a web, they feel like the web is a stick
+that holds the object (i can hold a bin in the air with a web). when releasing
+the web the objects also seem like they barely have any weight. also when
+releasing the object the web stays in place attached to last point of contact
+with the object as if its still there instead of falling".
+
+The grab samples of the 10:16 session (`reports/game-vr-20261006-101603.json`,
+14 grabs, 10 yanks, 5 catches, 5 throws, physics at 0.9-2.2 times real time):
+
+- Two of the four throws reached the 40 m/s cap, (3.2, -25.2, 30.9) and
+  (-30.1, 16.2, 20.8) m/s: the held prop moved at 18 m/s or more and the throw
+  multiplied that by 2.2. A held prop followed a point 1.35 m ahead of the
+  wrist, held up, so a turn of the wrist alone swung it fast. The other two
+  left at 5.4 and 1.5 m/s.
+- Yanks launched props at 17-45 m/s, mostly upward: (2.3, 26.8, -12.0),
+  (9.3, 32.8, 8.6), (-29.5, 32.1, 11.1). The arc aimed where the hold point
+  would be after the whole flight, carried on at the hand's velocity, which
+  during the pull gesture is the gesture itself. Let go of 0.14-0.41 s into
+  the flight (5 times), props flew on at 12-33 m/s, four of them rising at
+  12-13 m/s.
+- The web line: the game draws the webs. A released rope dissolves with its
+  far end at its target position, which Spidy stopped updating when the grab
+  ended.
+
+Changes (design and numbers in [WEB-GRAB.md](WEB-GRAB.md)):
+
+- Every web is a tension-only rope with weight on its end: one web pulls with
+  at most 2400 N (80 m/s² on the game's 30 kg props), its stiffness and
+  damping are rates, gravity always acts. A held prop hangs from the wrist on a
+  web 0.25 m longer than its radius and swings; turning the wrist does not move
+  it. A target the web brings in is braked to the edge of reach as a hand
+  catches it, then caught.
+- Throws: the prop's own velocity from the swing, times 1.6 for targets up to
+  60 kg (less above), capped at 25 m/s, keeping its own spin.
+- Yanks: 7-15 m/s from the pull (5 times its speed), slower for heavier
+  targets, aimed where the hand is carried with the player, the jerk no faster
+  than 1.5 times that; in flight the web reels in at 0.8 times it and pulls
+  only what falls behind, along the web.
+- The web let go of: for 1.5 s the grab telemetry (version 2, 336 bytes)
+  reports the target as trailing; the XR worker asks for that web with
+  `attached` 2; `native_webs` releases the rope keeping its handle (ReleaseRope
+  67b610's fourth argument) and aims its far end at the prop each update until
+  it has dissolved. A released rope's update still reads that position (679dc0
+  → 6786c0 → +67c into the anchor +720), from the disassembly.
+- The controller hums by the web's tension (0.6 times it) between event pulses,
+  in the game and the lab. The grab telemetry carries each hand's tension.
+
+Offline: a simulation with ground and friction (90 Hz hands, 30 Hz physics):
+a can reeled from 12 m is caught after 1.2 s and hangs 0.7 m below the hand;
+yanked from 8, 20 and 40 m it launches at 15-20 m/s and is caught at under
+1.5 m/s after 0.7-2.7 s, never more than 0.5 m behind the wrist; from a perch
+32 m up it is reeled up along the web and caught; an underhand swing throws
+a 30 kg can at 13 m/s, 80 kg at 5 m/s; a wrist flick at 0.3 m/s. 125 core
+checks (30 for the grab, 10 of them new or rewritten), the GPU test and
+66 Python checks pass. Not run in the game: the rope's behaviour on Havok
+bodies at VR frame rates, and the released web following its prop.
+
+Headset check: web a trash can and reel it in; it should hang below the hand,
+swing, and not stay up when the hand points ahead. Swing it underhand and let
+go; it should fly with the swing, not with a flick. Yank one and let go
+mid-flight. Watch the web after a throw: it should go with the prop and fall
+away. In the report, the grab samples' `tension` and `trailing` per hand.
+
+## Eye occlusion culling — preceding build, awaiting headset check
 
 The user, after the 10:16 session (`reports/game-vr-20261006-101603.json`):
 "performance feels not to too good in vr considering that i alt tabbed and saw

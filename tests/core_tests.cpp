@@ -103,10 +103,19 @@ struct GrabTargets : TargetQueries {
         for(const auto& [s,t]:owners)if(s==surface)return t;
         return {};
     }
+    // With ground: every target falls and rests on a floor at y = 0, sliding with friction.
+    bool ground{};
     void apply(float dt,const std::vector<TargetCommand>& commands) {
         for(auto& t:items) {
-            for(const auto& c:commands)if(c.id==t.id)t.velocity=advance(c,t.position,t.velocity,dt,{0,-9.81f,0});
+            bool commanded=false;
+            for(const auto& c:commands)if(c.id==t.id){t.velocity=advance(c,t.position,t.velocity,dt,{0,-9.81f,0});commanded=true;}
+            if(ground&&!commanded)t.velocity.y-=9.81f*dt;
             t.position+=t.velocity*dt;
+            if(ground&&t.position.y<t.radius) {
+                t.position.y=t.radius;t.velocity.y=std::max(t.velocity.y,0.f);
+                const Vec3 flat{t.velocity.x,0,t.velocity.z};const float s=length(flat),slow=.6f*9.81f*dt;
+                const Vec3 left=s>slow?flat*((s-slow)/s):Vec3{};t.velocity.x=left.x;t.velocity.z=left.z;
+            }
         }
     }
 };
@@ -1788,9 +1797,35 @@ int main() {
             for(int s=0;s<4;++s){out.clear();grab.step(1.f/360,world,targets,out);targets.apply(1.f/360,out);caught|=events(grab,GrabEventKind::Catch)>0;}
         }
         check(caught&&grab.grabs()[0].phase==GrabPhase::Held,"reeling never caught the target");
-        for(int i=0;i<90;++i)settle(grab,targets,world,player,in,1.f/90);
-        const Vec3 hold={0,1,-(grab.config().holdDistance+.4f)};
-        check(length(targets.find(7)->position-hold)<.05f,"a held target did not hang at the hold point");
+        for(int i=0;i<450;++i)settle(grab,targets,world,player,in,1.f/90);
+        // Held, it hangs from the wrist on its short web, below the hand.
+        const Vec3 below={0,1-(grab.config().holdDistance+.4f),0};
+        check(length(targets.find(7)->position-below)<.1f,"a held target did not hang below the hand");
+    });
+    test("a reeled target on the ground is caught at the hand instead of sliding past it", [] {
+        // October 6: with the web wound on to the end, a can dragged in at
+        // 12 m/s slid under the hand and swung up behind it.
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.ground=true;targets.add(7,{0,.45f,-12},30,.45f);
+        WebGrab grab;Body player{{0,1,0},{},true};
+        Input in;in.hands[0]={{{0,1.3f,0},Quat{std::sin(-.035f),0,0,std::cos(-.035f)}},{0,0,0},true,0,1};
+        grab.claim(1.f/90,in,world,targets,player);
+        check(grab.grabs()[0].phase==GrabPhase::Tethered,"the can was not webbed");
+        in.hands[0].trigger=1;
+        // Hand samples at 90 Hz, physics at 30 Hz, as in the game in VR.
+        float behind=-1e9f,fastest=0,caughtAt=-1;
+        std::vector<TargetCommand> out;
+        for(int frame=1;frame<=360;++frame) {
+            grab.claim(1.f/90,in,world,targets,player);
+            if(frame%3)continue;
+            out.clear();grab.step(1.f/30,world,targets,out);targets.apply(1.f/30,out);
+            const auto t=*targets.find(7);
+            behind=std::max(behind,t.position.z);fastest=std::max(fastest,length(t.velocity));
+            if(caughtAt<0&&grab.grabs()[0].phase==GrabPhase::Held)caughtAt=length(t.velocity);
+        }
+        check(caughtAt>=0&&caughtAt<=grab.config().catchSpeed+.5f,"the can was not caught, or caught fast");
+        check(fastest>8,"the reel did not drag the can in");
+        check(behind<.6f,"the can slid past the hand toward the player");
     });
     test("the zip gesture yanks a target to the hand without overshooting it", [] {
         TestWorld world;world.enabled=false;
@@ -1801,17 +1836,19 @@ int main() {
         // Pull the hand 0.3 m back toward the body in 0.1 s (head-relative).
         for(int i=1;i<=9;++i){in.hands[0].gripRelativeToHead={0,0,.033f*i};grab.claim(1.f/90,in,world,targets,player);if(events(grab,GrabEventKind::Yank))break;}
         check(grab.grabs()[0].phase==GrabPhase::Yanked,"the pull did not yank");
-        float nearest=-1e9f;bool caught{};
-        const Vec3 hold={0,1,-(grab.config().holdDistance+.4f)};
-        for(int frame=0;frame<120;++frame) {
+        float behind=-1e9f;bool caught{};
+        for(int frame=0;frame<300&&!caught;++frame) {
             grab.claim(1.f/90,in,world,targets,player);
             std::vector<TargetCommand> out;
             for(int s=0;s<4;++s){out.clear();grab.step(1.f/360,world,targets,out);targets.apply(1.f/360,out);caught|=events(grab,GrabEventKind::Catch)>0;}
-            nearest=std::max(nearest,targets.find(7)->position.z);
+            behind=std::max(behind,targets.find(7)->position.z);
         }
         check(caught&&grab.grabs()[0].phase==GrabPhase::Held,"the yanked target was not caught");
-        near(targets.find(7)->position.z,hold.z,.05f);
-        check(nearest<hold.z+.25f,"the target flew past the hand");
+        check(behind<.1f,"the target flew past the hand");
+        // Caught, it swings on its web and settles below the hand.
+        for(int i=0;i<540;++i)settle(grab,targets,world,player,in,1.f/90);
+        const auto t=*targets.find(7);
+        check(t.position.y<1-.8f*(grab.config().holdDistance+.4f)&&std::abs(t.position.z)<.35f,"the caught target did not hang below the hand");
     });
     test("a long yank flies all the way to the hand; a snagged one stays on its web", [] {
         // On October 5 a fixed 1.5 s timeout ended a 43 m yank 8.5 m short of the hand.
@@ -1822,7 +1859,7 @@ int main() {
         grab.claim(1.f/90,in,world,targets,player);
         for(int i=1;i<=9;++i){in.hands[0].gripRelativeToHead={0,0,.033f*i};grab.claim(1.f/90,in,world,targets,player);if(events(grab,GrabEventKind::Yank))break;}
         bool caught{};
-        for(int frame=0;frame<360&&!caught;++frame) {
+        for(int frame=0;frame<540&&!caught;++frame) {
             grab.claim(1.f/90,in,world,targets,player);
             std::vector<TargetCommand> out;
             for(int s=0;s<4;++s){out.clear();grab.step(1.f/360,world,targets,out);targets.apply(1.f/360,out);caught|=events(grab,GrabEventKind::Catch)>0;}
@@ -1837,6 +1874,50 @@ int main() {
         std::vector<TargetCommand> out;
         for(int s=0;s<360;++s){out.clear();other.step(1.f/360,world,pinned,out);} // commands ignored: it cannot move
         check(other.grabs()[0].phase==GrabPhase::Tethered,"a snagged yank never gave up");
+    });
+    test("a yank launches no faster than its pull allows, a heavy target slower", [] {
+        // October 6, 10:16 session: yanks launched props at 26-45 m/s, aimed
+        // where the pulling hand would have been after the whole flight.
+        auto launch=[](float mass) {
+            TestWorld world;world.enabled=false;
+            GrabTargets targets;targets.add(7,{0,1,-20},mass);
+            WebGrab grab;Body player{{0,1,0},{},true};
+            auto in=forward();in.hands[0].trigger=0;
+            grab.claim(1.f/90,in,world,targets,player);
+            for(int i=1;i<=9;++i){in.hands[0].gripRelativeToHead={0,0,.033f*i};grab.claim(1.f/90,in,world,targets,player);if(events(grab,GrabEventKind::Yank))break;}
+            std::vector<TargetCommand> out;grab.step(1.f/120,world,targets,out);
+            check(out.size()==1&&out[0].mode==TargetCommand::Mode::Launch&&!out[0].thrown,"the yank did not launch");
+            return out[0].velocity;
+        };
+        const Vec3 light=launch(25),heavy=launch(150);
+        const auto& c=WebGrab{}.config();
+        check(length(light)<=c.maxYankFlight*c.yankLaunch+.01f&&length(light)>c.minYankFlight,"the yank's launch is out of bounds");
+        check(light.z>8,"the yank did not head for the hand");
+        check(length(heavy)<length(light)*.6f,"a heavy target was yanked as fast as a light one");
+    });
+    test("a yank from a perch whose arc falls short is reeled in along the web and caught", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.ground=true;targets.add(7,{0,.45f,-30},30,.45f);
+        WebGrab grab;Body player{{0,33,0},{},true};
+        const Vec3 d=normalized(Vec3{0,.45f-33.3f,-30});const float n=std::sqrt(d.y*d.y+d.x*d.x+(1-d.z)*(1-d.z));
+        Input in;in.hands[0]={{{0,33.3f,0},Quat{d.y/n,-d.x/n,0,(1-d.z)/n}},{0,0,0},true,0,1};
+        grab.claim(1.f/90,in,world,targets,player);
+        check(grab.grabs()[0].phase==GrabPhase::Tethered,"the can was not webbed");
+        // The hand comes back and up along the web, 0.3 m in 0.1 s.
+        for(int i=1;i<=9;++i){in.hands[0].gripRelativeToHead=d*(-.033f*i);grab.claim(1.f/90,in,world,targets,player);if(events(grab,GrabEventKind::Yank))break;}
+        check(grab.grabs()[0].phase==GrabPhase::Yanked,"no yank");
+        std::vector<TargetCommand> out;bool caught{};float highest=-1e9f,fastest=0;int frame=0;
+        for(;frame<90*8&&!caught;++frame) {
+            grab.claim(1.f/90,in,world,targets,player);caught|=events(grab,GrabEventKind::Catch)>0;
+            if((frame+1)%3)continue;
+            out.clear();grab.step(1.f/30,world,targets,out);targets.apply(1.f/30,out);caught|=events(grab,GrabEventKind::Catch)>0;
+            highest=std::max(highest,targets.find(7)->position.y);
+            for(const auto& c:out)if(c.mode==TargetCommand::Mode::Launch)fastest=std::max(fastest,length(c.velocity));
+        }
+        check(caught,"the can never reached the hand on the perch");
+        check(highest<33.3f+1.5f,"the can swung up past the hand");
+        // Its arc alone could not reach (26-28 m/s needed): the web pulled it up.
+        check(fastest<26,"the yank launched the can at the speed the arc needed");
     });
     test("a yank flies an arc, lobbed higher over a railing the lower arc would strike", [] {
         // October 6: a trash can behind a subway railing, flown straight at
@@ -1903,10 +1984,10 @@ int main() {
         std::vector<TargetCommand> out;grab.step(1.f/120,world,targets,out);
         check(out.empty(),"the web kept acting after it was let go");
     });
-    test("a web's law pulls only when taut, never pushes, and holds a target up", [] {
+    test("a web's law pulls only when taut, never pushes, and holds up only what it can", [] {
         const Vec3 g{0,-9.81f,0};
         TargetCommand rope{7,TargetKind::Object,TargetCommand::Mode::Rope};
-        rope.ropes[0]={{0,1,0},{},5};rope.ropeCount=1;rope.stiffness=.6f;rope.maxAcceleration=240;
+        rope.ropes[0]={{0,1,0},{},5};rope.ropeCount=1;rope.response=30;rope.maxAcceleration=240;
         // Slack, it only falls; coming toward the hand, the web does not push it back.
         auto v=advance(rope,{0,1,-3},{},.01f,g);near(v.y,-.0981f);near(v.z,0);
         v=advance(rope,{0,1,-4},{0,0,8},.01f,g);near(v.z,8);
@@ -1914,36 +1995,84 @@ int main() {
         v=advance(rope,{0,1,-6},{},.01f,g);near(v.z,2.4f,1e-3f);
         auto two=rope;two.ropes[1]={{2,1,0},{},5};two.ropeCount=2;
         check(advance(two,{1,1,-6},{},.01f,g).z>advance(rope,{1,1,-6},{},.01f,g).z+1,"the second web did not pull");
-        // Held: at its hold point it stays, held up; a flying target falls.
-        TargetCommand held{7,TargetKind::Object,TargetCommand::Mode::Follow};
-        held.point={0,1,-1.3f};held.response=20;held.maxAcceleration=420;held.supported=true;
-        near(length(advance(held,{0,1,-1.3f},{},.01f,g)),0);
-        held.supported=false;near(advance(held,{0,1,-1.3f},{},.01f,g).y,-.0981f);
-        // Turning: a hold takes up the hand's turning gradually, a launch at once, a web never.
-        held.spins=true;held.spin={0,10,0};held.spinAcceleration=60;
-        near(advanceSpin(held,{},.01f).y,.6f);
+        // Hanging from a web strong enough, a target stays up, sagging under a
+        // centimetre; from one too weak for its weight it sinks; two such webs hold it.
+        auto hang=[&](TargetCommand c,float seconds) {
+            Vec3 p{0,0,0},w{};
+            for(int i=0;i<static_cast<int>(seconds*100);++i){w=advance(c,p,w,.01f,g);p+=w*.01f;}
+            return p;
+        };
+        TargetCommand hanging{7,TargetKind::Object,TargetCommand::Mode::Rope};
+        hanging.ropes[0]={{0,1,0},{},1};hanging.ropeCount=1;hanging.response=30;hanging.maxAcceleration=80;
+        check(hang(hanging,2).y>-.01f,"a web strong enough did not hold its target up");
+        hanging.maxAcceleration=8; // 300 kg on 2400 N
+        check(hang(hanging,2).y<-1,"a web too weak for its target held it up");
+        hanging.ropes[1]=hanging.ropes[0];hanging.ropeCount=2;
+        check(hang(hanging,2).y>-.05f,"two webs did not hold up what one could not");
+        // Damping slows a swing across the web, not the web's own pull.
+        TargetCommand swinging=hanging;swinging.ropeCount=1;swinging.maxAcceleration=80;
+        const float free=advance(swinging,{0,0,0},{2,0,0},.01f,g).x;
+        swinging.damping=4;
+        check(advance(swinging,{0,0,0},{2,0,0},.01f,g).x<free-.05f,"damping did not slow the swing");
+        // A brake slows the target toward its velocity at most maxAcceleration; it still falls.
+        TargetCommand brake{7,TargetKind::Object,TargetCommand::Mode::Follow};
+        brake.velocity={0,0,2};brake.maxAcceleration=80;
+        v=advance(brake,{},{0,0,10},.01f,g);near(v.z,9.2f);near(v.y,-.0981f);
+        // Turning: a taut web steadies a spin gradually, a launch sets it at once, a web
+        // that does not spin never turns it.
+        hanging.spins=true;hanging.spin={};hanging.spinAcceleration=20;
+        near(advanceSpin(hanging,{0,10,0},.01f).y,9.8f);
         TargetCommand launch{7,TargetKind::Object,TargetCommand::Mode::Launch,true};
         launch.velocity={1,2,3};launch.spins=true;launch.spin={0,5,0};
         near(advance(launch,{},{9,9,9},.01f,g).y,2);near(advanceSpin(launch,{1,1,1},.01f).y,5);
         check(length(advanceSpin(rope,{0,3,0},.01f)-Vec3{0,3,0})<1e-6f,"a web turned a target it only pulls");
     });
-    test("a held target turns with the hand and leaves spinning as it turned", [] {
+    test("a held target hangs below the hand wherever it points, and a wrist flick throws nothing", [] {
+        // October 6: "i can hold a bin in the air with a web". The held target
+        // followed a point 1.3 m ahead of the hand, held up like on a stick,
+        // and a flick of the wrist swung it at 15-18 m/s.
         TestWorld world;world.enabled=false;
-        GrabTargets targets;targets.add(7,{0,1,-1.3f});
+        GrabTargets targets;targets.ground=true;targets.add(7,{0,.45f,-6},30,.45f);
         WebGrab grab;Body player{{0,1,0},{},true};
-        auto in=forward();in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
+        Input in;in.hands[0]={{{0,1.6f,0},Quat{std::sin(-.096f),0,0,std::cos(-.096f)}},{0,0,0},true,0,1};
+        grab.claim(1.f/90,in,world,targets,player);
         in.hands[0].trigger=1;
-        for(int i=0;i<30;++i)settle(grab,targets,world,player,in,1.f/90);
+        for(int i=0;i<270;++i)settle(grab,targets,world,player,in,1.f/90,60);
         check(grab.grabs()[0].phase==GrabPhase::Held,"not held");
-        // The wrist turns about the vertical at 3 rad/s, and lets go still turning.
-        for(int i=1;i<=10;++i){in.hands[0].aim.orientation=Quat::yaw(3.f*i/90);grab.claim(1.f/90,in,world,targets,player);}
-        std::vector<TargetCommand> out;grab.step(1.f/120,world,targets,out);
-        check(out.size()==1&&out[0].spins,"the hold did not turn the target");
-        near(out[0].spin.y,3,.15f);
-        in.hands[0].aim.orientation=Quat::yaw(3.f*11/90);in.hands[0].grip=0;grab.claim(1.f/90,in,world,targets,player);
-        out.clear();grab.step(1.f/120,world,targets,out);
-        check(out.size()==1&&out[0].thrown&&out[0].spins,"the throw did not spin");
-        near(out[0].spin.y,3,.15f);
+        // The hand points straight ahead, level: the target hangs below the wrist, not ahead of it.
+        in.hands[0].aim.orientation={};in.hands[0].trigger=0;
+        for(int i=0;i<360;++i)settle(grab,targets,world,player,in,1.f/90,60);
+        const auto t=*targets.find(7);const float lever=grab.config().holdDistance+.45f;
+        check(t.position.y<1.6f-.9f*lever&&std::abs(t.position.z)<.25f,"the held target was not hanging below the hand");
+        near(grab.grabs()[0].tension,9.81f*30/grab.config().webForce,.04f);
+        // A flick of the wrist, the hand staying put, then letting go: it hardly moves.
+        for(int i=1;i<=14;++i){const float a=.8f*i/14;in.hands[0].aim.orientation=Quat{std::sin(a),0,0,std::cos(a)};settle(grab,targets,world,player,in,1.f/90,60);}
+        in.hands[0].grip=0;grab.claim(1.f/90,in,world,targets,player);
+        check(events(grab,GrabEventKind::Throw)==1,"no throw");
+        check(length(grab.events()[0].velocity)<2,"a wrist flick threw what hangs from the web");
+    });
+    test("an arm swinging a held target throws it, a heavy one slower", [] {
+        auto thrown=[](float mass) {
+            TestWorld world;world.enabled=false;
+            GrabTargets targets;targets.ground=true;targets.add(7,{0,.45f,-6},mass,.45f);
+            WebGrab grab;Body player{{0,1,0},{},true};
+            Input in;in.hands[0]={{{0,1.6f,0},Quat{std::sin(-.096f),0,0,std::cos(-.096f)}},{0,0,0},true,0,1};
+            grab.claim(1.f/90,in,world,targets,player);
+            in.hands[0].trigger=1;
+            for(int i=0;i<360;++i)settle(grab,targets,world,player,in,1.f/90,60);
+            check(grab.grabs()[0].phase==GrabPhase::Held,"not held");
+            // An underhand swing: the hand 1.2 m forward and up in a quarter second, then let go.
+            const Vec3 from={0,1,.4f},to={0,1.8f,-.6f};
+            for(int i=1;i<=27;++i){in.hands[0].aim.position=Vec3{0,1.6f,0}+(from-Vec3{0,1.6f,0})*(i/27.f);settle(grab,targets,world,player,in,1.f/90,60);}
+            for(int i=0;i<45;++i)settle(grab,targets,world,player,in,1.f/90,60);
+            for(int i=1;i<=22;++i){const float k=i/22.f,s=k*k*(3-2*k);in.hands[0].aim.position=from+(to-from)*s;settle(grab,targets,world,player,in,1.f/90,60);}
+            in.hands[0].grip=0;grab.claim(1.f/90,in,world,targets,player);
+            check(events(grab,GrabEventKind::Throw)==1,"no throw");
+            return length(grab.events()[0].velocity);
+        };
+        const float light=thrown(30),heavy=thrown(100);
+        check(light>6&&light<=WebGrab{}.config().maxThrowSpeed,"the swing threw the can too slow or too fast");
+        check(heavy<light*.75f,"a heavy target was thrown as fast as a light one");
     });
     test("one hand letting go of a target both hold leaves it in the other", [] {
         TestWorld world;world.enabled=false;
@@ -1952,37 +2081,41 @@ int main() {
         auto in=forward();in.hands[1]=in.hands[0];in.hands[1].aim.position.x=.2f;
         in.hands[0].trigger=in.hands[1].trigger=0;grab.claim(1.f/90,in,world,targets,player);
         in.hands[0].trigger=in.hands[1].trigger=1;
-        for(int i=0;i<60;++i)settle(grab,targets,world,player,in,1.f/90);
+        for(int i=0;i<180;++i)settle(grab,targets,world,player,in,1.f/90);
         check(grab.grabs()[0].phase==GrabPhase::Held&&grab.grabs()[1].phase==GrabPhase::Held,"not held by both");
         in.hands[0].grip=0;grab.claim(1.f/90,in,world,targets,player);
         check(events(grab,GrabEventKind::Throw)==0&&events(grab,GrabEventKind::Release)==1,"one hand threw it");
         check(grab.grabs()[1].phase==GrabPhase::Held,"the other hand lost it");
         std::vector<TargetCommand> out;grab.step(1.f/120,world,targets,out);
-        check(out.size()==1&&!out[0].thrown&&out[0].mode==TargetCommand::Mode::Follow,"the other hand stopped holding it");
+        check(out.size()==1&&!out[0].thrown&&out[0].mode==TargetCommand::Mode::Rope,"the other hand stopped holding it");
     });
-    test("a carried target follows the hand alike at any physics rate, without overshoot", [] {
-        auto run=[](int hz) {
+    test("a held target swings alike at any physics rate and settles below the hand", [] {
+        auto run=[](int every) {
             TestWorld world;world.enabled=false;
             GrabTargets targets;targets.add(7,{0,1,-1.3f});
             WebGrab grab;Body player{{0,1,0},{},true};
-            auto in=forward();in.hands[0].trigger=1;
-            grab.claim(1.f/90,in,world,targets,player);
-            in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
+            auto in=forward();in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
             in.hands[0].trigger=1;
-            for(int i=0;i<30;++i)settle(grab,targets,world,player,in,1.f/90,hz);
+            // Hand samples at 90 Hz, physics every `every` of them.
+            std::vector<TargetCommand> out;int frame=0;
+            auto tick=[&]{grab.claim(1.f/90,in,world,targets,player);if(++frame%every==0){out.clear();grab.step(every/90.f,world,targets,out);targets.apply(every/90.f,out);}};
+            for(int i=0;i<450;++i)tick();
             check(grab.grabs()[0].phase==GrabPhase::Held,"not held");
-            // A metre to the side in a fifth of a second, then still.
+            // Half a metre to the side in a third of a second, then still.
             float most=0;
-            for(int i=0;i<108;++i) {
-                const float t=std::min(1.f,i/18.f);in.hands[0].aim.position.x=t*t*(3-2*t);
-                settle(grab,targets,world,player,in,1.f/90,hz);most=std::max(most,targets.find(7)->position.x);
+            for(int i=1;i<=720;++i) {
+                const float t=std::min(1.f,i/30.f);in.hands[0].aim.position.x=.5f*t*t*(3-2*t);
+                tick();most=std::max(most,targets.find(7)->position.x);
             }
-            check(most<1.08f,"the held target swung past the hand");
-            return targets.find(7)->position;
+            return std::pair{most,targets.find(7)->position};
         };
-        const auto baseline=run(240);
-        near(baseline.x,1,.01f);
-        for(int hz:{60,120,360})check(length(run(hz)-baseline)<.02f,"carrying depends on the physics rate");
+        const auto [most,settled]=run(1);
+        check(most>.55f,"the held target did not swing past the hand that moved it");
+        check(std::abs(settled.x-.5f)<.03f&&settled.y<1-.95f*(WebGrab{}.config().holdDistance+.4f),"the target did not settle below the hand");
+        for(int every:{2,3}) {
+            const auto [m,s]=run(every);
+            check(std::abs(m-most)<.1f&&length(s-settled)<.04f,"the swing depends on the physics rate");
+        }
     });
     test("a heavy target lags the hand that a light one follows", [] {
         auto lag=[](float mass) {
@@ -1991,13 +2124,28 @@ int main() {
             WebGrab grab;Body player{{0,1,0},{},true};
             auto in=forward();in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
             in.hands[0].trigger=1;
-            for(int i=0;i<30;++i)settle(grab,targets,world,player,in,1.f/90);
+            for(int i=0;i<180;++i)settle(grab,targets,world,player,in,1.f/90);
+            check(grab.grabs()[0].phase==GrabPhase::Held,"not held");
             in.hands[0].aim.position.x=2;
-            for(int i=0;i<9;++i)settle(grab,targets,world,player,in,1.f/90);
+            for(int i=0;i<18;++i)settle(grab,targets,world,player,in,1.f/90);
             return 2-targets.find(7)->position.x;
         };
-        check(lag(300)>lag(25)+.1f,"mass made no difference to carrying");
-        check(lag(300)<1.9f,"a heavy target was not carried at all");
+        check(lag(150)>lag(25)+.1f,"mass made no difference to carrying");
+        check(lag(150)<1.9f,"a heavy target was not carried at all");
+    });
+    test("tension tells how hard the web pulls", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-1.3f},60);
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
+        near(grab.grabs()[0].tension,0); // slack
+        in.hands[0].trigger=1;
+        for(int i=0;i<450;++i)settle(grab,targets,world,player,in,1.f/90);
+        // Hanging: its weight against the web's strength.
+        near(grab.grabs()[0].tension,9.81f*60/grab.config().webForce,.03f);
+        // The hand snatched away: the web pulls as hard as it can.
+        in.hands[0].aim.position={0,4,0};settle(grab,targets,world,player,in,1.f/90);
+        near(grab.grabs()[0].tension,1,.01f);
     });
     test("letting go throws with the arm's speed, never multiplying the player's own", [] {
         TestWorld world;world.enabled=false;
@@ -2005,7 +2153,7 @@ int main() {
         WebGrab grab;Body player{{0,1,0},{20,0,0},false};
         auto in=forward();in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
         in.hands[0].trigger=1;
-        for(int i=0;i<30;++i)settle(grab,targets,world,player,in,1.f/90);
+        for(int i=0;i<180;++i)settle(grab,targets,world,player,in,1.f/90);
         check(grab.grabs()[0].phase==GrabPhase::Held,"not held");
         targets.items[0].velocity={20,3,0}; // carried along, plus 3 m/s up from the arm
         in.hands[0].grip=0;grab.claim(1.f/90,in,world,targets,player);
@@ -2023,8 +2171,8 @@ int main() {
         WebGrab grab;Body player{{0,1,0},{},true};
         auto in=forward();in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
         in.hands[0].trigger=1;
-        for(int i=0;i<30;++i)settle(grab,targets,world,player,in,1.f/90);
-        targets.items[0].velocity={0,1,-9}; // a throw a few degrees off
+        for(int i=0;i<180;++i)settle(grab,targets,world,player,in,1.f/90);
+        targets.items[0].velocity={0,1,-12}; // a throw a few degrees off
         in.hands[0].grip=0;grab.claim(1.f/90,in,world,targets,player);
         std::vector<TargetCommand> out;grab.step(1.f/120,world,targets,out);
         check(out.size()==1,"no throw");
@@ -2032,7 +2180,7 @@ int main() {
         Vec3 p=targets.items[0].position,v=out[0].velocity;float closest=1e9f;
         for(int i=0;i<2000;++i){v.y-=9.81f/1000;p+=v/1000;closest=std::min(closest,length(p-targets.items[1].position));}
         check(closest<.15f,"the aimed throw missed");
-        near(length(out[0].velocity),length(Vec3{0,1,-9})*grab.config().throwMultiplier,.01f);
+        near(length(out[0].velocity),length(Vec3{0,1,-12})*grab.config().throwMultiplier,.01f);
     });
     test("aimed throws reach a target only within their cone, flatter arc first", [] {
         check(!aimThrow({},{0,0,-10},{10,0,-10},.2f,9.81f),"a target 45 degrees off was aimed at");
@@ -2131,7 +2279,7 @@ int main() {
         auto in=forward();in.hands[1]=in.hands[0];in.hands[1].aim.position.x=.2f;
         in.hands[0].trigger=in.hands[1].trigger=0;grab.claim(1.f/90,in,world,targets,player);
         in.hands[0].trigger=in.hands[1].trigger=1;
-        for(int i=0;i<60;++i)settle(grab,targets,world,player,in,1.f/90);
+        for(int i=0;i<180;++i)settle(grab,targets,world,player,in,1.f/90);
         check(grab.grabs()[0].phase==GrabPhase::Held&&grab.grabs()[1].phase==GrabPhase::Held,"not held by both");
         near(targets.find(7)->position.x,.1f,.03f);
         targets.items[0].velocity={0,0,-6};
@@ -2181,17 +2329,20 @@ int main() {
         grab.claim(1.f/90,in,world,props,player);
         check(grab.grabs()[0].phase==GrabPhase::Tethered,"the aimed crate was not grabbed");
         in.hands[0].trigger=1;
-        for(int i=0;i<180;++i){grab.claim(1.f/90,in,world,props,player);props.advance(1.f/90,grab,world);}
+        for(int i=0;i<360;++i){grab.claim(1.f/90,in,world,props,player);props.advance(1.f/90,grab,world);}
         check(grab.grabs()[0].phase==GrabPhase::Held,"reeling never brought the crate in");
-        check(length(props.props()[0].position-Vec3{0,1.4f,-1.22f})<.4f,"the crate is not at the hand");
+        // It hangs from the hand on its short web.
+        const auto crate=props.props()[0].position;
+        check(length(crate-Vec3{0,1.4f,0})<grab.config().holdDistance+.32f+.1f&&crate.y<1.4f-.3f,"the crate is not hanging at the hand");
         in.hands[0].grip=0;grab.claim(1.f/90,in,world,props,player);props.advance(1.f/90,grab,world);
         for(int i=0;i<300;++i){grab.claim(1.f/90,in,world,props,player);props.advance(1.f/90,grab,world);}
         near(props.props()[0].position.y,.32f,.02f);
     });
     test("grab configuration rejects invalid tuning", [] {
         auto bad=[](auto change){GrabConfig c;change(c);try{WebGrab g(c);return false;}catch(const std::invalid_argument&){return true;}};
-        check(bad([](GrabConfig& c){c.holdResponse=0;}),"zero hold response accepted");
-        check(bad([](GrabConfig& c){c.tetherStiffness=1.5f;}),"overstiff tether accepted");
+        check(bad([](GrabConfig& c){c.webForce=0;}),"a web with no strength accepted");
+        check(bad([](GrabConfig& c){c.tetherResponse=-1;}),"a negative web response accepted");
+        check(bad([](GrabConfig& c){c.swingDamping=std::numeric_limits<float>::infinity();}),"infinite damping accepted");
         check(bad([](GrabConfig& c){c.minYankFlight=30;}),"inverted yank speeds accepted");
         check(bad([](GrabConfig& c){c.gravity=std::numeric_limits<float>::quiet_NaN();}),"NaN gravity accepted");
         check(!bad([](GrabConfig&){}),"defaults rejected");

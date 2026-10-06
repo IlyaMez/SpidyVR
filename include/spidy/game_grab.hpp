@@ -26,10 +26,18 @@ struct Hand {
     uint64_t target{};        // the target's actor record
     Vec3 end{};               // the target's centre, where the web ends
     float length{};
-    uint32_t taut{}, reserved{};
+    uint32_t taut{};
+    // How hard the web pulls, as a share of its strength (Grab::tension).
+    float tension{};
+    // The web this hand just let go of (thrown, released or lost) still
+    // hangs from `target`, at `end`, for trailSeconds: it is drawn falling
+    // away with it rather than left where the target was. phase is 0.
+    uint32_t trailing{}, reserved{};
 };
+// How long a web let go of is reported trailing its target.
+constexpr float trailSeconds = 1.5f;
 struct Data {
-    uint32_t magic = 0x53475244, version = 1, bytes = sizeof(Data), status{};
+    uint32_t magic = 0x53475244, version = 2, bytes = sizeof(Data), status{};
     int64_t sequence{};
     uint64_t steps{}, commands{}, grabs{}, yanks{}, catches{}, throws{}, releases{}, lost{}, flights{},
         landed{};
@@ -47,7 +55,7 @@ struct Data {
     Vec3 commanded{}, observed{};
     float tickDt{}, stepDt{};
 };
-static_assert(sizeof(Hand) == 40 && sizeof(Data) == 320);
+static_assert(sizeof(Hand) == 48 && sizeof(Data) == 336);
 using Call = unsigned long(__stdcall*)(void*);
 // drive and driven: the movement module's SpidyMotionDrive and
 // SpidyMotionDrivenSample. kinds: bits 1 << game_targets::Kind to offer.

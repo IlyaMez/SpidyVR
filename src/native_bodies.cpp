@@ -212,17 +212,23 @@ bool keyframed(const Body& b) {
 // an index into the physics system's bodies; records at [M + 0x23468], 0xa0
 // each). A prop's bodies are not joined: they knock into each other and drift
 // apart, and the primary one was drawn 1.4 m from where the web held it.
-Body rootBody(uintptr_t world, uintptr_t actor, const Body& primary) {
+// The actor's keyframe record (pool entry), or 0 for none.
+uintptr_t keyframeRecord(const Body& primary) {
     const auto index = static_cast<int16_t>(primary.user >> 32);
     const auto entries = pointer(records() + 0x28);
     const auto kf = index >= 0 && entries ? value<int16_t>(entries + index * 0x130ull + 0x5e) : int16_t{-1};
     const auto pool = pointer(pointer(base + physicsGlobal) + 0x23468);
+    return kf >= 0 && pool ? pool + kf * 0xa0ull : 0;
+}
+Body rootBody(uintptr_t world, uintptr_t actor, const Body& primary) {
+    const auto record = keyframeRecord(primary);
     const auto system = pointer(actor + 0xe0);
     const auto count = value<uint32_t>(system + 0x30);
-    if (kf < 0 || !pool || !system)
+    if (!record || !system)
         return primary;
-    const auto root = value<uint32_t>(pool + kf * 0xa0ull + 0x9c);
-    if (root >= count || count > maxSystemBodies)
+    // The game reads the root as an s16 (182bd60).
+    const auto root = value<int16_t>(record + 0x9c);
+    if (root < 0 || static_cast<uint32_t>(root) >= count || count > maxSystemBodies)
         return primary;
     const auto b = body(world, value<uint32_t>(pointer(system + 0x28) + root * 4ull));
     return b.valid ? b : primary;

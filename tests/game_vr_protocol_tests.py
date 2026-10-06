@@ -155,19 +155,24 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(struct.unpack_from('<I2f',packet,72),(1,1,1))
 
     def test_grab_feedback_decodes_each_hand_the_body_driver_and_rejects_torn_reads(self):
-        raw = bytearray(320)
-        struct.pack_into('<4Iq10Q4I', raw, 0, 0x53475244, 1, 320, 2, 6, *range(1, 11), 5, 0, 6, 0)
-        struct.pack_into('<2IQ4f2I', raw, 120, 3, 1, 0x2156b32d740, -293.5, 2.25, -179.5, 1.35, 1, 0)
-        struct.pack_into('<2IQ4f2I', raw, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-        struct.pack_into('<4f9Q', raw, 200, 6.5, 2.5, -13.25, 8.0, *range(20, 29))
-        struct.pack_into('<6f2f', raw, 288, 1, 2, 3, 4, 5, 6, .00415, .0332)
+        raw = bytearray(336)
+        struct.pack_into('<4Iq10Q4I', raw, 0, 0x53475244, 2, 336, 2, 6, *range(1, 11), 5, 0, 6, 0)
+        # Hands (48 bytes): phase, kind, target, end, length, taut, tension, trailing, reserved.
+        struct.pack_into('<2IQ4fIf2I', raw, 120, 3, 1, 0x2156b32d740, -293.5, 2.25, -179.5, .7, 1, .125, 0, 0)
+        struct.pack_into('<2IQ4fIf2I', raw, 168, 0, 1, 0x2156b32d800, 1.5, 2.5, 3.5, 0, 0, 0, 1, 0)
+        struct.pack_into('<4f9Q', raw, 216, 6.5, 2.5, -13.25, 8.0, *range(20, 29))
+        struct.pack_into('<6f2f', raw, 304, 1, 2, 3, 4, 5, 6, .00415, .0332)
         result = grab_snapshot(Reader(raw, struct.pack('<q', 6)), 0)
         self.assertEqual((result['grabs'], result['throws'], result['lost'], result['landed']), (3, 6, 8, 10))
         self.assertEqual((result['candidates'], result['kinds']), (5, 6))
         self.assertEqual((result['hands'][0]['phase'], result['hands'][0]['kind']), ('held', 1))
         self.assertEqual(result['hands'][0]['target'], '0x2156b32d740')
         self.assertEqual(result['hands'][0]['end'], (-293.5, 2.25, -179.5))
-        self.assertEqual(result['hands'][1]['phase'], 'none')
+        self.assertEqual((result['hands'][0]['taut'], result['hands'][0]['tension'], result['hands'][0]['trailing']),
+                         (1, .125, 0))
+        # A web let go of, trailing the prop it threw.
+        self.assertEqual((result['hands'][1]['phase'], result['hands'][1]['trailing']), ('none', 1))
+        self.assertEqual(result['hands'][1]['end'], (1.5, 2.5, 3.5))
         self.assertEqual((result['last_throw'], result['time_scale']), ((6.5, 2.5, -13.25), 8.0))
         self.assertEqual((result['body_steps'], result['frees'], result['expired']), (20, 21, 28))
         self.assertEqual((result['commanded'], result['observed']), ((1, 2, 3), (4, 5, 6)))
@@ -366,7 +371,7 @@ class ProtocolTests(unittest.TestCase):
                                      (motion_snapshot, 0x534d5644, 176), (ray_snapshot, 0x53525944, 784),
                                      (swing_snapshot,0x53574441,240),(timing_snapshot,0x5358544d,344),
                                      (appearance_snapshot,0x53415044,328),(eye_snapshot,0x53455353,112),
-                                     (grab_snapshot,0x53475244,320)):
+                                     (grab_snapshot,0x53475244,336)):
             raw = bytearray(size)
             struct.pack_into('<4IQ', raw, 0, magic, 99, size, 2, 4)
             with self.assertRaisesRegex(RuntimeError, 'protocol mismatch'):

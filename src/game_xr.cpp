@@ -231,6 +231,9 @@ DWORD WINAPI run(void*) {
         // What each hand's web holds, when it caught a thug instead of a wall.
         game_grab::Data grabState;
         uint32_t grabPhases[2]{};
+        // A grab's event pulse plays this long before the web's tension
+        // takes the hand's haptics again (predicted display time, ns).
+        int64_t pulseUntil[2]{};
         WebTimeline webTimes;
         bool attachedBefore[2]{};
         uint64_t zipBefore{};
@@ -429,23 +432,36 @@ DWORD WINAPI run(void*) {
                         check(swingState.error, "Native swinging");
                         if (!sampleGrab || sampleGrab(&grabState))
                             grabState = {};
+                        bool trails[2]{};
+                        Vec3 trailEnds[2]{};
                         for (unsigned i = 0; i < 2; ++i) {
                             // A web that caught a thug ends on him, wherever he goes.
                             const auto& held = grabState.hands[i];
                             const bool grabbing = input.focused && held.phase != 0;
                             const bool wasGrabbing = grabPhases[i] != 0;
+                            const int64_t displayAt = frame.predictedDisplayTime;
                             if (grabbing) {
                                 swingState.webs[i] = {1, 0, held.end, held.length, held.taut ? 1.f : 0.f};
                                 // Caught, yanked, at the hand: each its own pulse.
                                 const auto phase = static_cast<GrabPhase>(held.phase);
-                                if (held.phase != grabPhases[i])
+                                if (held.phase != grabPhases[i]) {
                                     runtime.haptic(i, phase == GrabPhase::Yanked ? 1.f
                                                       : phase == GrabPhase::Held ? .4f
                                                                                  : .55f);
+                                    pulseUntil[i] = displayAt + 30'000'000;
+                                } else if (held.tension > .05f && displayAt >= pulseUntil[i]) {
+                                    // Between pulses the hand feels the web pull: a
+                                    // hanging trash can faintly, one swung hard or too
+                                    // heavy to lift strongly.
+                                    runtime.haptic(i, std::min(.6f, .6f * held.tension));
+                                }
                             } else if (wasGrabbing) {
                                 runtime.haptic(i, .6f); // thrown or let go
                             }
                             grabPhases[i] = grabbing ? held.phase : 0;
+                            // The web let go of trails what it held as it dissolves.
+                            trails[i] = input.focused && !grabbing && held.trailing;
+                            trailEnds[i] = held.end;
                             const bool attached =
                                 input.focused && swingState.status && swingState.webs[i].attached;
                             if (attached != attachedBefore[i] && !grabbing && !wasGrabbing)
@@ -463,10 +479,12 @@ DWORD WINAPI run(void*) {
                             webs.feet = motion.anchor;
                             for (unsigned i = 0; i < 2; ++i) {
                                 auto& hand = webs.hands[i];
-                                hand.attached = attachedBefore[i];
+                                // A web let go of a thrown prop goes with it as it dissolves.
+                                const bool trail = !attachedBefore[i] && trails[i];
+                                hand.attached = attachedBefore[i] ? 1 : trail ? 2 : 0;
                                 hand.tracked = motion.swing.hands[i].tracked;
                                 hand.attachedAt = webTimes[i].attachedAt;
-                                hand.anchor = swingState.webs[i].anchor;
+                                hand.anchor = trail ? trailEnds[i] : swingState.webs[i].anchor;
                                 hand.wrist = webWrist(motion.hands[i]);
                             }
                             native_webs::submit(webs, 200);

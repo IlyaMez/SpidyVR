@@ -18,6 +18,12 @@
 // actor's model override), which builds it again in debris mode with one.
 // Its bodies are new then. Until the rebuilt prop has its keyframe record,
 // Spidy sets the instance from the body itself (Instance::SetMatrix 191c0e0).
+// The game draws a rebuilt prop from its keyframe record's root body (+0x9c,
+// an s16 index into the physics system's bodies) by the offset its first
+// sync takes (+0x40). Some throwables are breakables of two bodies: a base
+// that stays held on its unbroken stage, whatever velocity it is given, and
+// a free top piece the whole prop is drawn from (measured October 6: see
+// docs/WEB-GRAB.md). Only the top piece flies.
 //
 // The web. Its command (web_grab's TargetCommand) is a law, evaluated here
 // each step against the prop's actual motion, after the contacts of the step

@@ -46,6 +46,8 @@ struct Owned {
     uint32_t handle{};
     int64_t attachedAt{};
     bool failed{};
+    // Released and dissolving; its end follows the request's anchor.
+    bool trailing{};
 };
 Owned owned[2]; // hero rope manager update only
 // The rope manager the handles above belong to. A new player brings a new
@@ -142,27 +144,41 @@ void update(void* manager, float dt) {
     for (unsigned hand = 0; hand < 2; ++hand) {
         auto& rope = owned[hand];
         const auto& want = wanted.hands[hand];
-        const bool attached = live && want.attached && want.tracked && finite(want.anchor);
-        // Engine events can clear every slot; a stale handle is simply gone.
+        const bool attached = live && want.attached == 1 && want.tracked && finite(want.anchor);
+        // This hand's web let go of a target it still trails.
+        const bool trail = live && want.attached == 2 && want.attachedAt == rope.attachedAt && finite(want.anchor);
+        // Engine events can clear every slot; a stale handle is simply gone,
+        // and so is a released rope once it has dissolved.
         if (rope.handle && !get(manager, rope.handle))
             rope.handle = 0;
-        if (rope.handle && (!attached || want.attachedAt != rope.attachedAt)) {
-            release(manager, &rope.handle, false, false); // dissolve, clear handle
+        if (rope.handle && rope.trailing) {
+            if (trail)
+                target(manager, rope.handle, &want.anchor.x);
+            else
+                rope.handle = 0; // it dissolves where it is
+        } else if (rope.handle && (!attached || want.attachedAt != rope.attachedAt)) {
+            // Dissolve; a trailing web keeps its handle so its end can follow.
+            release(manager, &rope.handle, false, trail);
+            rope.trailing = trail && rope.handle;
+            if (rope.trailing)
+                target(manager, rope.handle, &want.anchor.x);
             ++released;
         }
+        if (!rope.handle)
+            rope.trailing = false;
         if (attached && !rope.handle && !(rope.failed && rope.attachedAt == want.attachedAt)) {
             uint32_t handle{};
             if (ensure(manager, &handle, swingRope, hand, nullptr, 0, 0) && get(manager, handle)) {
-                rope = {handle, want.attachedAt, false};
+                rope = {handle, want.attachedAt, false, false};
                 ++created;
             } else {
-                rope = {0, want.attachedAt, true};
+                rope = {0, want.attachedAt, true, false};
                 ++failures;
             }
         }
         if (!attached)
             rope.failed = false;
-        if (rope.handle) {
+        if (rope.handle && !rope.trailing) {
             target(manager, rope.handle, &want.anchor.x);
             if (const auto slot = get(manager, rope.handle))
                 std::memcpy(reinterpret_cast<void*>(slot + 0x6c0), &leaseSeconds, sizeof(leaseSeconds));
@@ -206,7 +222,9 @@ void update(void* manager, float dt) {
         // released one (+70c bit 2) drifts from it, and the tail above moved
         // point 0 away, so a gap here means the rope does not leave the wrist.
         for (unsigned hand = 0; hand < 2; ++hand)
-            if (const auto slot = wrote[hand] && owned[hand].handle ? get(manager, owned[hand].handle) : 0;
+            if (const auto slot = wrote[hand] && owned[hand].handle && !owned[hand].trailing
+                                      ? get(manager, owned[hand].handle)
+                                      : 0;
                 slot && read(slot + 0x1c, &built[hand], sizeof(Vec3)) && finite(built[hand])) {
                 startError = std::max(startError, length(built[hand] - starts[hand]));
                 builtMask |= 1u << hand;
@@ -360,7 +378,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyWebsSubmit(void* input) {
         c.bytes != sizeof(c) || c.leaseMs > 500 || !finite(c.request.feet))
         return 6502;
     for (const auto& hand : c.request.hands)
-        if (hand.attached > 1 || hand.tracked > 1 || !finite(hand.anchor) || !finite(hand.wrist))
+        if (hand.attached > 2 || hand.tracked > 1 || !finite(hand.anchor) || !finite(hand.wrist))
             return 6502;
     native_webs::submit(c.request, c.leaseMs);
     return 0;

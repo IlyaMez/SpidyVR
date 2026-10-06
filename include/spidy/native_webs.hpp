@@ -9,6 +9,12 @@
 // wrists there while immersive VR owns the webs.
 namespace spidy::native_webs {
 struct Hand {
+    // 1: a web from the wrist to `anchor`. 2: the web of attachment
+    // `attachedAt` was let go of and dissolves, its far end staying on
+    // `anchor`, a target it threw or let go of: ReleaseRope (67b610) keeps the
+    // handle when asked, and a released rope's update still reads its target
+    // position (6786c0 returns +67c, which SetRopeTargetPosition writes).
+    // Until October 6 a let-go web's end stayed where the target had been.
     uint32_t attached{}, tracked{};
     int64_t attachedAt{}; // one attachment; a new value shoots a new web
     Vec3 anchor{}, wrist{};

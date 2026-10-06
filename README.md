@@ -9,7 +9,38 @@ An in-development VR mod project for **Marvel's Spider-Man Remastered**, targeti
 **Quest 3 + Virtual Desktop**. First milestone: 6DoF head/controller tracking,
 native stereo, and physically controlled web swinging.
 
-**Latest build (October 6, fourth build): the VR frame rate about doubles.**
+**Latest build (October 6, fifth build): a web is a rope, and what it holds
+has weight.** You said webbed objects felt weightless, as if the web were a
+stick (you could hold a bin up in the air with it), that they felt weightless
+once let go too, and that the web you let go of stayed in the air where the
+object had been. In the 10:16 session a held prop followed a point 1.35 m ahead
+of your hand, held up, so a turn of the wrist swung it fast, and a throw
+multiplied its speed by 2.2: two of four throws left at the 40 m/s cap. Yanks
+launched props at 17-45 m/s, mostly upward, and four you let go of in flight
+kept rising at 12-13 m/s. Now every web is a rope that only pulls, with at most
+2400 N: 80 m/s² on a 30 kg trash can, less on anything heavier, and one web can
+drag but not lift anything over 245 kg (two can). A caught prop hangs below
+your hand on a short web, swings when you move and settles when you stop;
+pointing the hand ahead or turning the wrist neither lifts nor swings it. A
+throw keeps the speed your swing gave the prop, times 1.6 for a light prop and
+less for a heavy one, up to 25 m/s: in a simulation a hard underhand swing
+throws a can at 13 m/s and a flick of the wrist at 0.3 m/s. Yanks fly at 7-15
+m/s by how hard you pull; where the arc falls short (up to a rooftop) the web
+reels the prop in along itself, and a prop coming in is caught near your hand
+instead of flying past it. The controller hums with the web's pull: faintly
+for a hanging can, strongly when you swing it hard or it is too heavy to lift.
+The web you let go of now stays on the prop as it dissolves, going with it.
+You tried it and found it good, except that thrown bins sank into the floor.
+They are breakable props of two bodies: the game draws the whole bin from its
+top piece, and that is the only part Spidy's freeing lets move; the bin's own
+body stays held where it stood, invisible. Measured in the game: the top piece
+falls through the bin when freed and lies on the road after a throw, with the
+bin drawn 0.8 m below it. Freeing a bin the way the game's own yank breaks it
+off is the open fix. 125 core checks, the GPU test and 66 Python checks pass.
+Details: [docs/WEB-GRAB.md](docs/WEB-GRAB.md) and
+[docs/VALIDATION.md](docs/VALIDATION.md).
+
+**Preceding build (October 6, fourth build): the VR frame rate about doubles.**
 You reported that VR felt slow although the CPU and GPU showed about 20% load
 and the disk 44%. In the 10:16 session the headset ran at 90 Hz, and the game
 made 38 new eye images a second (41-64 frames a second in its own log); a third
@@ -458,9 +489,11 @@ eyes, start with `Launch Spidy VR.cmd -OverlayWebs` for Spidy's overlay strands.
 
 Aim the web at a throwable prop (one the game's combat lets you web and
 throw) or a thug, and it catches it instead. Pull the trigger to reel it in, or
-pull the hand back sharply to yank it to you; it then hangs just beyond your
-hand and follows your arm. Let go of the grip to throw it: the harder you
-swing, the faster it flies, and a throw close to a thug is aimed to hit them.
+pull the hand back sharply to yank it to you; it then hangs below your hand on
+a short web and swings as you move. Swing your arm and let go of the grip to
+throw it: it flies with what the swing gave it, a heavy one slower, and a
+throw close to a thug is aimed to hit them. The controller hums with the web's
+pull.
 `Launch Spidy VR.cmd -NoWebGrab` keeps webs for swinging only. See
 [docs/WEB-GRAB.md](docs/WEB-GRAB.md).
 
@@ -627,9 +660,9 @@ OpenXR runtime instead. Neither option changes the system registration.
 | Hold trigger while attached | Reel the web in (release it first if it was held when the web attached) |
 | Pull hand sharply away from the anchor | Zip once per attachment |
 | Aim at a crate, barrel or thug (a yellow marker shows it), squeeze grip | Web it |
-| Trigger on a webbed prop or thug | Reel it in to your hand |
+| Trigger on a webbed prop or thug | Reel it in until it hangs from your hand |
 | Pull hand sharply back from it | Yank it to your hand |
-| Release grip while it is at your hand | Throw it |
+| Swing your arm and release grip while it hangs from your hand | Throw it |
 | Left stick | Move / steer |
 | Right stick left/right | 30-degree snap turn |
 | Right A | Jump; shortly after a zip landing, point launch |

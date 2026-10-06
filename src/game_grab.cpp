@@ -62,6 +62,13 @@ std::vector<TargetCommand> commands;
 WebGrab core{GrabConfig{}};
 uint64_t driveSerial{}, stepped{}, botsLanded{};
 size_t counted{};
+// The target each hand's web last let go of, until when its web is drawn
+// trailing it (GetTickCount64). Left where the target was when let go, the
+// web hung in the air there as if still attached.
+struct Trail {
+    uint64_t record{}, until{};
+};
+Trail trails[2];
 SRWLOCK output = SRWLOCK_INIT;
 
 bool read(uintptr_t p, void* out, size_t n) {
@@ -262,6 +269,21 @@ void count(size_t from) {
     }
     InterlockedIncrement64(&SpidyGrabData.sequence);
     ReleaseSRWLockExclusive(&output);
+    // A web let go of trails what it held; a new grab takes the hand's web.
+    for (auto i = from; i < events.size(); ++i) {
+        const auto& e = events[i];
+        if (e.hand < 0 || e.hand > 1)
+            continue;
+        if (e.kind == GrabEventKind::Throw || e.kind == GrabEventKind::Release || e.kind == GrabEventKind::Lost)
+            trails[e.hand] = {e.target, GetTickCount64() + static_cast<uint64_t>(trailSeconds * 1000)};
+        else if (e.kind == GrabEventKind::Grab)
+            trails[e.hand] = {};
+    }
+}
+bool trailing(uint64_t record) {
+    const auto now = GetTickCount64();
+    return std::any_of(std::begin(trails), std::end(trails),
+                       [&](const Trail& t) { return t.record == record && now < t.until; });
 }
 // Where each target is now, and how fast it goes: a freed prop's body or a
 // steered bot's mover says; anything else, its last two positions.
@@ -331,6 +353,7 @@ uint32_t game_grab::stop() {
 }
 void game_grab::cancel() {
     core.releaseAll();
+    trails[0] = trails[1] = {};
     for (auto& t : tracked) {
         if (t.who.kind == Kind::throwable)
             native_bodies::release(t.actor);
@@ -456,14 +479,15 @@ void game_grab::step(float dt, const WorldQueries& world) {
         if (!native_bodies::flung(t.who.machine))
             t.flingAsked = false;
     }
-    // Forget targets nothing acts on any longer.
+    // Forget targets nothing acts on any longer, nor a web trails.
     tracked.erase(std::remove_if(tracked.begin(), tracked.end(),
                                  [](const Tracked& t) {
                                      const bool held = std::any_of(
                                          core.grabs().begin(), core.grabs().end(), [&](const Grab& g) {
                                              return g.phase != GrabPhase::None && g.target == t.who.record;
                                          });
-                                     return t.gone || (!held && !t.steering && !t.falling);
+                                     return t.gone ||
+                                            (!held && !t.steering && !t.falling && !trailing(t.who.record));
                                  }),
                   tracked.end());
     const auto bodies = native_bodies::counters();
@@ -489,16 +513,23 @@ void game_grab::step(float dt, const WorldQueries& world) {
     SpidyGrabData.steers = bodies.steers;
     SpidyGrabData.refused = bodies.rejected;
     SpidyGrabData.expired = bodies.expired;
+    const auto now = GetTickCount64();
     for (unsigned i = 0; i < 2; ++i) {
         const auto& g = core.grabs()[i];
-        const auto* t = g.phase != GrabPhase::None ? track(g.target) : nullptr;
-        SpidyGrabData.hands[i] = {static_cast<uint32_t>(g.phase),
-                                  t ? static_cast<uint32_t>(t->who.kind) : 0u,
-                                  g.target,
-                                  t ? t->position : g.end,
-                                  g.length,
-                                  g.taut,
-                                  0};
+        auto& hand = SpidyGrabData.hands[i];
+        if (g.phase != GrabPhase::None) {
+            const auto* t = track(g.target);
+            hand = {static_cast<uint32_t>(g.phase), t ? static_cast<uint32_t>(t->who.kind) : 0u,
+                    g.target, t ? t->position : g.end, g.length, g.taut, g.tension};
+            continue;
+        }
+        // Let go of: the web trails its target while it is there to trail.
+        const auto* t = trails[i].record && now < trails[i].until ? track(trails[i].record) : nullptr;
+        if (!t || t->gone)
+            trails[i] = {};
+        hand = t && !t->gone ? game_grab::Hand{0, static_cast<uint32_t>(t->who.kind), t->who.record, t->position,
+                                               0, 0, 0, 1}
+                             : game_grab::Hand{};
     }
     InterlockedIncrement64(&SpidyGrabData.sequence);
     ReleaseSRWLockExclusive(&output);

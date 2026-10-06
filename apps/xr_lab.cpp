@@ -59,6 +59,9 @@ int main(int argc, char** argv) {
         bool snapHeld = false, resetHeld = false, haveHead = false;
         Pose lastHead{};
         unsigned knockdowns = 0;
+        // A grab event's pulse plays this long before the web's tension takes
+        // the hand's haptics again (predicted display time, ns).
+        int64_t pulseUntil[2]{};
         auto reset = [&]() {
             swing.reset({{0, 18.3501f, 19}, {}, true});
             grab.releaseAll();
@@ -107,10 +110,18 @@ int main(int argc, char** argv) {
                     }
                     for (const auto& event : grab.events()) {
                         xr.haptic(event.hand, event.strength);
+                        if (event.hand == 0 || event.hand == 1)
+                            pulseUntil[event.hand] = f.predictedDisplayTime + 30'000'000;
                         if (event.kind == GrabEventKind::Throw)
                             std::cout << "Throw at " << static_cast<int>(length(event.velocity) + .5f)
                                       << " m/s\n";
                     }
+                    // Between pulses the hand feels its web pull, by how hard.
+                    for (int i = 0; i < 2; ++i)
+                        if (const auto& held = grab.grabs()[i]; held.phase != GrabPhase::None &&
+                                                                held.tension > .05f &&
+                                                                f.predictedDisplayTime >= pulseUntil[i])
+                            xr.haptic(i, std::min(.6f, .6f * held.tension));
                     if (props.knockdowns() != knockdowns) {
                         knockdowns = props.knockdowns();
                         std::cout << "Thugs knocked down: " << knockdowns << '\n';

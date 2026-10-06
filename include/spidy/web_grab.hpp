@@ -33,8 +33,12 @@ class TargetQueries {
 };
 struct GrabConfig {
     float maxRange = 60, aimCone = .07f, maxMass = 400;
-    // A held target hangs this far beyond the hand along its aim, plus its radius.
-    float holdDistance = .9f;
+    // Every web is a rope: it only pulls, and the target keeps its weight. A
+    // held target hangs from the wrist on a web this much longer than its
+    // radius, below the hand, and swings as the hand moves. Until October 6
+    // it was held at a point ahead of the hand, like on a stick: a trash can
+    // stayed up in the air wherever the hand pointed.
+    float holdDistance = .25f;
     // A new web leaves this much slack: taking hold of a target does not yet
     // pull it, so a webbed thug stays on its feet until the hand pulls.
     float slack = .3f;
@@ -42,34 +46,51 @@ struct GrabConfig {
     // (the zip gesture) yanks it over to the hand at its pull speed times this.
     float reelSpeed = 12;
     float yankSpeed = 1.3f, yankDistance = .14f, yankWindow = .25f;
-    float yankMultiplier = 6, minYankFlight = 10, maxYankFlight = 24;
-    // A yanked target flies a ballistic arc to the hand, taking as long as a
+    float yankMultiplier = 5, minYankFlight = 7, maxYankFlight = 15;
+    // A yank jerks the target onto an arc to the hand, taking as long as a
     // straight flight at the yank's speed would, or longer (a higher arc, up
-    // to maxYankTime) where the lower arc meets a wall. In flight the web
-    // steers it at no more than yankGuidance, so what it strikes on the way
-    // stops it as it would stop anything thrown; near the hand it brakes at
-    // arrivalDeceleration. One that comes no closer for yankTimeout has
-    // stopped short and stays on its web. A fixed timeout ran out 8.5 m short
-    // of the hand on a 43 m yank in the game. It flies tumbling end over end
-    // at yankTumble radians per second, its near side first.
-    float maxYankTime = 2.5f, yankGuidance = 40, yankTumble = 2.5f;
-    float arrivalDeceleration = 90, catchDistance = .5f, yankTimeout = .5f;
-    // The hardest a web speeds up a target it tows or yanks, at liftMass or
-    // below. A web taking up slack picks a target up over a few steps.
-    float webAcceleration = 240;
-    // A held target moves with its hold point and closes the gap to it at
-    // holdResponse per second. Mass above liftMass scales its strongest
-    // acceleration down, to a floor. It turns with the hand, taking up the
-    // hand's turning at holdSpin radians per second squared.
-    float holdResponse = 20, maxHoldAcceleration = 420, liftMass = 120, holdSpin = 60;
-    // Letting go multiplies the target's speed relative to the player, so a
-    // flick of the arm throws hard; a throw near a character is aimed into it.
-    // It leaves spinning as the hand turned, up to maxThrowSpin.
-    float throwMultiplier = 2.2f, maxThrowSpeed = 40, maxThrowSpin = 25;
+    // to maxYankTime) where the lower arc meets a wall, and launched no faster
+    // than yankLaunch times the yank's speed: an arc that needs more falls
+    // short. In flight the web reels in at yankReel times the yank's speed and
+    // pulls only a target that falls behind that, so what it strikes on the
+    // way stops it as it would stop anything thrown. It flies tumbling end
+    // over end at yankTumble radians per second, its near side first. One
+    // that comes no closer for yankTimeout has stopped short and stays on its
+    // web. In the 10:16 session of October 6 yanks launched props at 26-45
+    // m/s, mostly upward, aimed where the pulling hand would have been after
+    // the whole flight; let go of in flight, they kept soaring.
+    float maxYankTime = 2.5f, yankLaunch = 1.5f, yankReel = .8f, yankTumble = 2.5f;
+    // While a web brings its target in (a reel, a yank's flight) and pulls,
+    // the target's swing across it slows at reelSteer per second, so it comes
+    // in along the web: reeled from a perch without it, a can swung under the
+    // hand and up past it like a pendulum whose rope shortens. A held
+    // target's swing slows at swingDamping.
+    float reelSteer = 4, swingDamping = .8f;
+    // A target the web brings in (a yank or a reel) is braked at no more than
+    // arrivalDeceleration, as a hand catches it, so it comes within
+    // catchDistance of its hold length at half catchSpeed instead of flying
+    // past the hand, and is caught there once no faster than catchSpeed.
+    float arrivalDeceleration = 90, catchDistance = .5f, catchSpeed = 1.5f, yankTimeout = .5f;
+    // The hardest one web pulls, in newtons: it changes its target's velocity
+    // by at most this over the target's mass per second. A heavy target lags
+    // the hand and swings wide, and one heavier than webForce over gravity
+    // cannot be lifted by one web, only dragged. Two webs pull twice as hard.
+    float webForce = 2400;
+    // A taut web takes up its stretch at tetherResponse per second, giving a
+    // little like elastic. A reel winds it in no more than reelLead ahead of
+    // a target too heavy to follow. A taut web steadies a target's spin by
+    // webSpin radians per second squared.
+    float tetherResponse = 30, reelLead = .5f, webSpin = 20;
+    // Targets heavier than liftMass fly slower when yanked and are thrown
+    // with less of the multiplier.
+    float liftMass = 60;
+    // Letting go of a held target throws it with its own velocity relative to
+    // the player, as the arm swung it on its web, times throwMultiplier for a
+    // light target and less for a heavier one, up to maxThrowSpeed. A throw
+    // near a character is aimed into it. In the 10:16 session every throw
+    // reached the former 40 m/s cap (a flick, times 2.2).
+    float throwMultiplier = 1.6f, maxThrowSpeed = 25;
     float aimAssistCone = .21f, aimAssistRange = 45, minAssistSpeed = 6;
-    // Fraction of a taut web's stretch taken out in one step: below 1 the web
-    // gives a little, like elastic.
-    float tetherStiffness = .6f;
     // A wall between hand and target this long, or a web stretched this far
     // past its length, lets go.
     float obstructionTime = .3f, breakStretch = 6;
@@ -85,6 +106,10 @@ struct Grab {
     Vec3 end{};     // the target's centre, at the latest step
     float radius{};
     bool taut{}; // the web pulled on the target in the latest step
+    // How hard the web pulled in the latest step, as a share of its strength
+    // (webForce): a hanging trash can about 0.12, one swung hard or a target
+    // too heavy to lift 1. A yank's jerk is 1.
+    float tension{};
 };
 enum class GrabEventKind { Grab, Yank, Catch, Throw, Release, Lost };
 struct GrabEvent {
@@ -104,30 +129,31 @@ struct WebRope {
 // the target's actual state, so what the step before did to it (the ground,
 // a wall, another prop) stays in its motion. The game evaluates it on its
 // physics thread, the lab in its own step. Targets without a command move
-// freely.
+// freely. Gravity always acts: no law holds a target up but a web pulling
+// from above it.
 struct TargetCommand {
     enum class Mode : std::uint8_t {
         Rope,   // one or two tension-only webs from the hands
-        Follow, // the web steers it toward a velocity, and to a point
+        Follow, // the web brakes it toward a velocity, as a hand catches it
         Launch  // it leaves with `velocity` (and `spin`), once
     };
     std::uint64_t id{};
     TargetKind kind{};
     Mode mode{};
     bool thrown{}; // the web let go: the last command for this target
-    // Rope: a taut web takes `stiffness` of its stretch out per step.
+    // Rope: a taut web takes up its stretch at `response` per second, and
+    // the target's swing across it, relative to the hand, slows at `damping`
+    // per second.
     std::array<WebRope, 2> ropes{};
     std::uint8_t ropeCount{};
-    float stiffness{};
-    // Rope and Follow: the most the webs change its velocity, per second.
+    float response{}, damping{};
+    // Rope: the most each web changes its velocity, per second (the web's
+    // strength over its mass). Follow: the most the brake does.
     float maxAcceleration{};
-    // Follow: approach `velocity`, plus `response` per second of the gap to
-    // `point`. A supported target is held up; otherwise it falls as it flies.
-    Vec3 velocity{}, point{};
-    float response{};
-    bool supported{};
+    // Follow: the velocity to approach. Launch: the velocity it leaves with.
+    Vec3 velocity{};
     // When `spins`: the angular velocity (world axes, radians per second) to
-    // take up at spinAcceleration (Follow) or to leave with (Launch).
+    // take up at spinAcceleration (Rope, Follow) or to leave with (Launch).
     bool spins{};
     Vec3 spin{};
     float spinAcceleration{};
@@ -173,18 +199,15 @@ class WebGrab {
         // belongs to a grab until it is let go, even after the grab ended.
         bool held{}, owned{}, sample{}, triggerReleased{}, reeling{}, yankUsed{};
         Vec3 previous{}; // grip relative to head, tracking metres
-        Vec3 wrist{}, wristVelocity{}, forward{}, forwardRate{};
+        Vec3 wrist{}, wristVelocity{}, forward{};
         float pullDistance{}, pullTime{}, obstructed{}, flight{};
-        float closest{}, stalled{}; // a yanked target's nearest approach to the hand, and time since
-        // A yank's arc: launched yet, its planned flight time, time flown.
-        bool launched{};
-        float flightTime{}, flown{};
+        // A yanked target's nearest approach to its hold length, and time since.
+        float closest{}, stalled{};
+        bool launched{}; // the yank's jerk is sent
     };
     void end(int hand, GrabEventKind reason, Vec3 velocity = {});
     void letGo(int hand, const TargetQueries&, const Body& player, bool otherReleasing);
     float holdLength(int hand) const;
-    // The hand's turning rate: radians per second about world axes.
-    Vec3 turning(int hand) const;
     // How long a yanked target's arc to `hold` takes: as long as a straight
     // flight at `speed`, or longer and higher where the world is in the way.
     float planYank(Vec3 from, Vec3 hold, Vec3 holdVelocity, float speed, float radius, std::uint64_t target,
@@ -194,6 +217,9 @@ class WebGrab {
     std::array<HandState, 2> hands_{};
     std::vector<GrabEvent> events_;
     std::vector<TargetCommand> pending_; // throws, sent with the next step
+    // The player's velocity at the latest sample: a yank's arc is aimed where
+    // the hand is carried, not where the pulling gesture itself would take it.
+    Vec3 playerVelocity_{};
 };
 // How far a sphere lies off a ray, in radians: 0 when the ray passes through
 // it; infinity behind the origin or starting beyond `distance`.
