@@ -9,7 +9,38 @@ An in-development VR mod project for **Marvel's Spider-Man Remastered**, targeti
 **Quest 3 + Virtual Desktop**. First milestone: 6DoF head/controller tracking,
 native stereo, and physically controlled web swinging.
 
-**Latest build (October 6, fifth build): a web is a rope, and what it holds
+**Latest build (October 6, sixth build): Spider-Man's body is yours, and
+your fists hit.** You asked for Spider-Man's actual avatar as a full-body
+presence you control, and for physical punching. In VR you are now the game's
+own hero model: look down and you see his torso, legs and arms; his hands are
+where your controllers are and turn as you turn them; his head is gone,
+because you are inside it. The body stands upright under your head, faces
+where you look once you turn more than 34 degrees (a snap turn turns it at
+once), bends its knees when you crouch with its feet on the ground, and keeps
+the game's leg pose in the air. A squeezed grip or a fast-moving hand closes
+into a fist. Spidy turns the hero's joints right after the game's animation
+writes them (the pose writer 1601290 and the rig's own joint names), so the
+game skins and lights the body itself. A fist moving 2.2 m/s or faster into a
+thug is a punch: Spidy hands it to the game's own damage system as a melee
+blow from the hero, 10-40 damage by the fist's speed, with the game's
+reaction for that strength (a flinch, a stagger, a knockdown, a flight; an
+uppercut pops him up), and the controller kicks. Measured in the game without
+a headset, on your rooftop save: both wrists landed 0.0 mm from scripted
+controller targets and the head joint 0.0 mm from its place behind the eyes,
+in 0.03 ms a frame; from the eyes, looking down, you see his arm reaching to
+the controller with a closed fist, the web shooter at the wrist, and his feet
+on the vent below. A scripted fist driven through a thug's chest at 6 m/s,
+through the same input path as your controllers, landed one punch (5.6 m/s, a
+knockdown, 29 damage) and took the thug's health from 100 to 68. The thugs in
+reach were in a scripted scene and lost health without reacting; a thug in a
+fight reacting to a punch still needs a crime or the headset. With the body
+off, or whenever it is not on the hero, the hero stays hidden and the overlay
+draws gloves, as before: `Launch Spidy VR.cmd -NoBody`; `-NoPunch` turns
+punching off; Spidy Launcher has a switch for each. 143 core checks, the GPU
+test and 68 Python checks pass; the headset session is pending. Details:
+[docs/BODY.md](docs/BODY.md).
+
+**Preceding build (October 6, fifth build): a web is a rope, and what it holds
 has weight.** You said webbed objects felt weightless, as if the web were a
 stick (you could hold a bin up in the air with it), that they felt weightless
 once let go too, and that the web you let go of stayed in the air where the
@@ -437,6 +468,13 @@ than Quest Touch (Index bindings are also suggested) are untested.
   it, in a freshly started game; `--watch SECONDS` watches it land and come to
   rest after the throw (3 s by default), `--bots` does the same with a bot, and
   `--fling-test` checks the game's flung reaction on the nearest bot.
+- `tools/probe_game_body.py`: the player's body and fists in a freshly started
+  game, no headset: lists the hero's rig (joint names, parents, rest pose),
+  turns the body toward a scripted headset and controllers and measures how
+  far the wrists and head land from them, saves the eyes' image looking down
+  at the body (`eyes`), drives a scripted fist through the nearest thug as a
+  controller would (`fist`), and sends one blow straight to the game's damage
+  system (`punch`; `--punch-hero` also staggers the hero).
 - `tools/probe_vr_load.py`: renders the VR views at the headset's resolution
   where the player stands and reports, per phase, the game's frame rate, its
   render commands per frame, GPU use, and the CPU time of each game thread;
@@ -496,6 +534,14 @@ throw close to a thug is aimed to hit them. The controller hums with the web's
 pull.
 `Launch Spidy VR.cmd -NoWebGrab` keeps webs for swinging only. See
 [docs/WEB-GRAB.md](docs/WEB-GRAB.md).
+
+You are Spider-Man's body: look down to see it, your arms and hands follow the
+controllers, and the body turns with you once you look far enough to the side.
+A squeezed grip, or a hand moving fast, closes into a fist. Punch a thug with a
+fist moving 2.2 m/s or more and he takes the game's melee damage and reacts as
+hard as you hit him; the controller kicks. `-NoBody` hides the hero and draws
+gloves instead; `-NoPunch` lets fists pass through. See
+[docs/BODY.md](docs/BODY.md).
 
 The intro, menus, loading, the map, hint cards, cutscenes, finishers and death
 appear on a screen in front of you, as the game shows them on the monitor; VR
@@ -746,6 +792,8 @@ still requires a running game or headset.
 | `src/d3d12_renderer.cpp` | Lab renderer, tracked hand overlay, diagnostic readback |
 | `src/native_webs.cpp` | The game's own web lines, started at the tracked wrists |
 | `src/web_grab.cpp`, `src/lab_props.cpp` | Web grab: catching, yanking, carrying and throwing props and characters; the lab's props |
+| `src/body_ik.cpp`, `src/native_body.cpp` | The player's body: the solver, and the hero's joints turned after the game's pose writer |
+| `src/punch.cpp`, `src/game_punch.cpp` | Punching: fists against characters, and the game's own melee damage for each punch |
 | `src/game_grab.cpp`, `src/native_bodies.cpp`, `src/game_targets.cpp` | Web grab in the game: candidates, freed Havok props, flung bots |
 | `src/native_render_memory.cpp`, `tools/vr_launcher.py` | A larger per-frame render memory ring, installed while the game starts |
 | `src/web_visual.cpp` | Fallback game-style web strands for the headset overlay and lab |

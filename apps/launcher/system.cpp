@@ -510,6 +510,8 @@ Settings loadSettings() {
         else if (key == "overlay_webs") o.overlayWebs = number() != 0;
         else if (key == "small_window") o.smallWindow = number() != 0;
         else if (key == "stock_monitor_view") o.stockMonitorView = number() != 0;
+        else if (key == "body") o.body = number() != 0;
+        else if (key == "punch") o.punch = number() != 0;
         else if (key == "eye_size") o.eyeSize = number();
         else if (key == "swing_speed") o.swingSpeed = std::clamp(number(), 10, 65);
         else if (key == "hash_path") settings.hashPath = widen(value);
@@ -531,7 +533,8 @@ void saveSettings(const Settings& settings) {
     const auto& o = settings.options;
     file << "game=" << narrow(settings.gameExe) << "\nruntime=" << narrow(settings.runtime)
          << "\nweb_grab=" << o.webGrab << "\noverlay_webs=" << o.overlayWebs << "\nsmall_window=" << o.smallWindow
-         << "\nstock_monitor_view=" << o.stockMonitorView << "\neye_size=" << o.eyeSize
+         << "\nstock_monitor_view=" << o.stockMonitorView << "\nbody=" << o.body << "\npunch=" << o.punch
+         << "\neye_size=" << o.eyeSize
          << "\nswing_speed=" << o.swingSpeed << "\nhash_path=" << narrow(settings.hashPath)
          << "\nhash_size=" << settings.hashSize << "\nhash_time=" << settings.hashTime
          << "\nhash=" << settings.hashValue << "\nshortcuts_asked=" << settings.shortcutsAsked << "\n";

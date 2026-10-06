@@ -145,6 +145,8 @@ struct SessionOptions {
     bool stockMonitorView = false;
     int eyeSize = 0; // 0: the runtime's recommendation
     int swingSpeed = 32;
+    bool body = true;  // your own body (Spider-Man's) instead of gloves
+    bool punch = true; // fists punch thugs
 };
 
 // Arguments after the script for tools/run_game_vr.py, for an untimed session
@@ -162,6 +164,10 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
         args.emplace_back(L"--full-desktop-view");
     if (options.stockMonitorView)
         args.emplace_back(L"--stock-monitor-view");
+    if (!options.body)
+        args.emplace_back(L"--no-body");
+    if (!options.punch)
+        args.emplace_back(L"--no-punch");
     if (!runtime.empty()) {
         args.emplace_back(L"--xr-runtime");
         args.emplace_back(runtime);

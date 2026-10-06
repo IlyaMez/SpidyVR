@@ -1,5 +1,6 @@
 // Bounded first-person OpenXR integration using the game's two native views.
 #include "spidy/native_appearance.hpp"
+#include "spidy/native_body.hpp"
 // The input bridge remains a separately verified, separately stoppable module.
 #include "spidy/eye_resolution.hpp"
 #include "spidy/eye_snapshot.hpp"
@@ -7,6 +8,7 @@
 #include "spidy/game_grab.hpp"
 #include "spidy/game_pad.hpp"
 #include "spidy/game_player.hpp"
+#include "spidy/game_punch.hpp"
 #include "spidy/game_swing.hpp"
 #include "spidy/game_tracking.hpp"
 #include "spidy/native_eye_frame.hpp"
@@ -34,7 +36,9 @@ struct XrConfig {
     // bit 0: CPU eye capture; bit 1: Spidy's overlay webs instead of the game's;
     // bit 2: keep the stock camera as the game's active (monitor) view in VR;
     // bit 3: no web grab (webs never catch props or thugs);
-    // bit 4: no eye occlusion (each eye draws everything in its view, hidden or not)
+    // bit 4: no eye occlusion (each eye draws everything in its view, hidden or not);
+    // bit 5: no body (the hero stays hidden in VR, the overlay draws gloves);
+    // bit 6: no punching (fists pass through thugs)
     uint32_t options{};
     // OpenXR runtime manifest the launcher chose; empty: Virtual Desktop's if
     // installed, else Windows' active runtime.
@@ -93,6 +97,7 @@ XrConfig config;
 BridgeCall submitInput{}, sampleBridge{}, stopBridge{}, retargetBridge{};
 BridgeCall startRays{}, submitRays{}, stopRays{};
 BridgeCall startSwing{}, submitSwing{}, sampleSwing{}, stopSwing{}, retargetSwing{}, sampleGrab{};
+BridgeCall startPunch{}, samplePunch{};
 std::mutex lifecycle, telemetry;
 HANDLE worker{};
 std::atomic<bool> stopRequested{};
@@ -165,7 +170,8 @@ struct RuntimeSelection {
     }
 };
 DWORD WINAPI run(void*) {
-    bool nativeStarted = false, gpuStarted = false, raysStarted = false, swingStarted = false, websStarted = false;
+    bool nativeStarted = false, gpuStarted = false, raysStarted = false, swingStarted = false, websStarted = false,
+         bodyStarted = false;
     uint64_t serial = 1, nativeDeadline{};
     // lastPresentedMs: an image was on show. lastNewImageMs: the game delivered a newer one.
     uint64_t firstImageDeadline{}, lastPresentedMs{}, lastNewImageMs{};
@@ -237,8 +243,21 @@ DWORD WINAPI run(void*) {
         WebTimeline webTimes;
         bool attachedBefore[2]{};
         uint64_t zipBefore{};
+        // Punches each hand had landed by the previous frame.
+        bool punchStarted{};
+        uint64_t punchesBefore[2]{};
         uint64_t submittedFrames{};
         uint64_t previousPresentedGeneration{};
+        // The player's standing eye height above the floor: it rises at once
+        // to a higher head and sinks a centimetre a second, so crouching
+        // does not shrink the body.
+        float standingEye{};
+        // Each hand's fist (0 open, 1 closed): closed by the grip, or by a
+        // hand moving fast relative to the head (a punch), opening again in
+        // a third of a second; and where each grip was relative to the head.
+        float fists[2]{};
+        Vec3 gripsBefore[2]{};
+        bool gripsSeen[2]{};
         LARGE_INTEGER frequency{};
         QueryPerformanceFrequency(&frequency);
         auto controls = [&](uint32_t keys) {
@@ -274,6 +293,7 @@ DWORD WINAPI run(void*) {
             if (!player.hero)
                 follow({});
             native_appearance::setPlayerRecord(player.record);
+            native_body::retarget(player.record);
             if (websStarted)
                 native_webs::retarget(player.record);
             playersFound += player.hero != 0;
@@ -409,6 +429,13 @@ DWORD WINAPI run(void*) {
                         swing.grabKinds = (config.options & 8) || !sampleGrab ? 0 : game_grab::movableKinds;
                         check(startSwing(&swing), "Start native swinging");
                         swingStarted = true;
+                        // Fists take the swing's input samples; punching is optional.
+                        if (startPunch && samplePunch && !(config.options & 64)) {
+                            game_punch::Config punch;
+                            punch.pid = config.pid;
+                            punch.base = config.base;
+                            punchStarted = !startPunch(&punch);
+                        }
                     }
                     if (swingStarted) {
                         game_swing::Command input;
@@ -473,6 +500,17 @@ DWORD WINAPI run(void*) {
                                             frame.predictedDisplayTime);
                         }
                         zipBefore = swingState.zips;
+                        game_punch::Data punch{};
+                        if (punchStarted && !samplePunch(&punch))
+                            for (unsigned i = 0; i < 2; ++i) {
+                                // A landed punch knocks back into the hand, as hard as it was;
+                                // the web's rumble waits for it.
+                                if (punch.hands[i].punches > punchesBefore[i] && input.focused) {
+                                    runtime.haptic(i, .5f + .5f * punch.hands[i].lastStrength);
+                                    pulseUntil[i] = frame.predictedDisplayTime + 40'000'000;
+                                }
+                                punchesBefore[i] = punch.hands[i].punches;
+                            }
                         if (websStarted && motion.active && !flatScreen) {
                             // The game draws these webs from the tracked wrists.
                             native_webs::Request webs;
@@ -583,9 +621,49 @@ DWORD WINAPI run(void*) {
                         nativeStarted = true;
                         // Game-drawn webs are optional: without them the overlay draws webs.
                         websStarted = !(config.options & 2) && !native_webs::start(config.base, player.record);
+                        // The player's body is optional too: without it the hero stays
+                        // hidden and the overlay draws gloves, as before.
+                        bodyStarted = !(config.options & 32) && !native_body::start(config.base);
                         firstImageDeadline = GetTickCount64() + 3000;
                         message(3, 0, "Gameplay found; waiting for the first eye images");
                         return false; // initialization can exceed one predicted display interval
+                    }
+                    if (const float h = frame.head.position.y; std::isfinite(h) && h > .8f && h < 2.4f)
+                        standingEye = standingEye <= 0 ? h
+                                      : h > standingEye
+                                          ? standingEye + (h - standingEye) * std::min(1.f, frame.seconds * 4)
+                                          : standingEye - std::min(standingEye - h, frame.seconds * .01f);
+                    if (bodyStarted) {
+                        // The hero's body follows the headset and the controllers,
+                        // placed from the same feet as the eyes.
+                        native_body::Command pose;
+                        pose.serial = serial;
+                        pose.flags = (flatScreen ? 0u : native_body::bodyOn) | native_body::hideHead |
+                                     native_body::handTurn | (swingState.owned ? native_body::airborne : 0u);
+                        pose.eyes = Vec3{(motion.eyes[0][12] + motion.eyes[1][12]) / 2,
+                                         (motion.eyes[0][13] + motion.eyes[1][13]) / 2,
+                                         (motion.eyes[0][14] + motion.eyes[1][14]) / 2} -
+                                    motion.anchor;
+                        pose.facing = motion.headPose.orientation;
+                        for (unsigned i = 0; i < 2; ++i) {
+                            const auto& hand = frame.hands[i];
+                            const bool tracked = hand.valid && validTrackedPose(hand.grip);
+                            const Vec3 relative = hand.grip.position - frame.head.position;
+                            const float seconds =
+                                std::isfinite(frame.seconds) && frame.seconds > 0 ? frame.seconds : 1.f / 90;
+                            const float speed =
+                                tracked && gripsSeen[i] ? length(relative - gripsBefore[i]) / seconds : 0.f;
+                            gripsBefore[i] = relative;
+                            gripsSeen[i] = tracked;
+                            const float wanted = std::max(std::clamp(hand.squeeze, 0.f, 1.f),
+                                                          std::clamp((speed - 1.2f) / 1.3f, 0.f, 1.f));
+                            fists[i] = tracked ? std::max(wanted, fists[i] - seconds * 3) : 0.f;
+                            pose.hands[i] = {motion.grips[i].position - motion.anchor, motion.grips[i].orientation,
+                                             tracked ? 1u : 0u, fists[i]};
+                        }
+                        pose.height = standingEye;
+                        pose.trackingYaw = motion.swing.trackingYaw;
+                        native_body::submit(pose);
                     }
                     // Keep publishing tracking while the engine renders earlier
                     // commands. The presentation loop no longer waits for this pose.
@@ -710,8 +788,10 @@ DWORD WINAPI run(void*) {
                             }
                             auto pose = rendered.hands[hand];
                             pose.position += travel;
-                            addTrackedHand(vertices, pose, hand, rendered.swing.hands[hand].grip,
-                                           web.attached != 0);
+                            // With the player's body on the hero, the game draws its own hands.
+                            if (!native_body::drawn())
+                                addTrackedHand(vertices, pose, hand, rendered.swing.hands[hand].grip,
+                                               web.attached != 0);
                             shooters[hand] = webWrist(pose);
                             shooterHands |= 1u << hand;
                             if (gameWeb) {
@@ -873,6 +953,13 @@ DWORD WINAPI run(void*) {
             failure = "Game web lines did not stop cleanly";
         }
     }
+    if (bodyStarted) {
+        const auto code = native_body::stop();
+        if (code) {
+            error = code;
+            failure = "The player's body did not stop cleanly";
+        }
+    }
     if (nativeStarted) {
         const auto code = SpidyStop(nullptr);
         if (code) {
@@ -914,7 +1001,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
-        !config.motionModule || config.options > 31 ||
+        !config.motionModule || config.options > 127 ||
         !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 || config.swingSpeed > 65 ||
         (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||
         (config.eyeSize && !validEyeSize(config.eyeSize)))
@@ -933,8 +1020,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     sampleSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingSample"));
     stopSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingStop"));
     retargetSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingRetarget"));
-    // Optional: an older ray module has no web grab.
+    // Optional: an older ray module has no web grab, nor punching.
     sampleGrab = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyGrabSample"));
+    startPunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchStart"));
+    samplePunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchSample"));
     if (!submitInput || !sampleBridge || !stopBridge || !retargetBridge || !startRays || !submitRays ||
         !stopRays || !startSwing || !submitSwing || !sampleSwing || !stopSwing || !retargetSwing)
         return 1002;

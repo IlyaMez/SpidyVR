@@ -6,6 +6,8 @@ param(
     [switch]$CaptureImages,
     [switch]$OverlayWebs,
     [switch]$NoWebGrab,
+    [switch]$NoBody,
+    [switch]$NoPunch,
     [switch]$NoEyeOcclusion,
     [switch]$StockMonitorView,
     [switch]$FullDesktopView,
@@ -52,6 +54,13 @@ else {
     Write-Host 'A web aimed at a throwable prop or a thug catches it: trigger reels it in, a sharp pull yanks'
     Write-Host 'it to your hand, release the grip to throw (add -NoWebGrab to only swing).'
 }
+if($NoBody) {
+    $captureArgs+=@('--no-body')
+    Write-Host 'Body off: the hero stays hidden in VR and gloves are drawn over the image.'
+}
+else { Write-Host "Your body: Spider-Man's, following your head and hands (add -NoBody for gloves)." }
+if($NoPunch) { $captureArgs+=@('--no-punch'); Write-Host 'Punching off: fists pass through thugs.' }
+else { Write-Host 'Punch a thug: a fist that hits him fast enough knocks him back (add -NoPunch to turn it off).' }
 if($NoEyeOcclusion) {
     $captureArgs+=@('--no-eye-occlusion')
     Write-Host 'Eye occlusion off: each eye draws everything in view, hidden or not (about half the frame rate).'

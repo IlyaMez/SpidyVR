@@ -298,6 +298,60 @@ def lens_degrees(left, right, top, bottom):
     return [math.degrees(math.atan(right) - math.atan(left)), math.degrees(math.atan(bottom) - math.atan(top))]
 
 
+BODY_STATES = {0: 'off', 1: 'waiting', 2: 'active', 3: 'failed'}
+BODY_PROBLEMS = {0: None, 1: 'no_hero', 2: 'no_rig', 3: 'unknown_rig', 4: 'bad_rest_pose', 5: 'bad_instance'}
+
+
+def body_snapshot(game, address):
+    """The player's body on the hero (native_body::Status): whether it turns the hero's joints, how far each
+    wrist and the head joint land from the controllers and the headset (metres), and how far the hero turned
+    between its pose job and the render (radians), which the body is off by while the hero turns."""
+    for _ in range(8):
+        raw = game.read(address, 136)
+        if len(raw) != 136:
+            return None
+        if struct.unpack_from('<3I', raw) != (0x53424453, 1, 136):
+            raise RuntimeError('Body protocol mismatch')
+        if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
+            continue
+        v = struct.unpack('<4Iq3Q2I2Q3fI2ff2fIQ2Id', raw)
+        return dict(state=BODY_STATES.get(v[3], v[3]), jobs=v[5], hero_jobs=v[6], solved=v[7],
+                    problem=BODY_PROBLEMS.get(v[8], v[8]), joints=v[9], weight=round(v[12], 3),
+                    scale=round(v[13], 4), yaw=round(v[14], 4), grounded=bool(v[15]),
+                    hand_error_m=[round(v[16], 4), round(v[17], 4)], head_error_m=round(v[18], 4),
+                    turn_last=round(v[19], 5), turn_max=round(v[20], 5), renders=v[22],
+                    hero_jobs_last_frame=v[23], solve_ms=round(v[25], 3))
+    return None
+
+
+def punch_snapshot(game, address):
+    """Punches (game_punch::Data): landed per hand, the game's damage requests issued and dropped, the bots
+    within reach of a fist, and the latest punch."""
+    for _ in range(8):
+        raw = game.read(address, 160)
+        if len(raw) != 160:
+            return None
+        if struct.unpack_from('<3I', raw) != (0x53505544, 1, 160):
+            raise RuntimeError('Punch protocol mismatch')
+        if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
+            continue
+        status = struct.unpack_from('<I', raw, 12)[0]
+        samples, punches, issued, dropped = struct.unpack_from('<4Q', raw, 24)
+        bots, error = struct.unpack_from('<2I', raw, 56)
+        hands = []
+        for i in range(2):
+            count, target, strength, speed, knockback, busy = struct.unpack_from('<2Q2f2I', raw, 64+i*32)
+            hands.append(dict(punches=count, last_target=hex(target), last_strength=round(strength, 3),
+                              speed=round(speed, 2), last_knockback=knockback, busy=bool(busy)))
+        point, direction = struct.unpack_from('<3f', raw, 128), struct.unpack_from('<3f', raw, 140)
+        damage, speed = struct.unpack_from('<2f', raw, 152)
+        return dict(status=status, samples=samples, punches=punches, issued=issued, dropped=dropped, bots=bots,
+                    error=error, hands=hands, last_point=[round(x, 3) for x in point],
+                    last_direction=[round(x, 3) for x in direction], last_damage=round(damage, 1),
+                    last_speed=round(speed, 2))
+    return None
+
+
 def appearance_snapshot(game, address):
     for _ in range(8):
         raw = game.read(address, 328)
@@ -511,6 +565,9 @@ def main():
     p.add_argument('--capture-images', action='store_true',help='Enable diagnostic CPU eye readback (adds overhead)')
     p.add_argument('--overlay-webs', action='store_true',help="Draw Spidy's overlay webs instead of the game's web lines")
     p.add_argument('--no-web-grab', action='store_true', help='Webs never catch props or thugs; they only swing')
+    p.add_argument('--no-body', action='store_true',
+                   help="Keep the hero hidden in VR (gloves drawn over the image) instead of your own body")
+    p.add_argument('--no-punch', action='store_true', help='Fists pass through thugs instead of punching them')
     p.add_argument('--no-eye-occlusion', action='store_true',
                    help='Each eye draws everything in its view, hidden behind buildings or not (builds before '
                         'October 6 did; about half the frame rate)')
@@ -589,7 +646,8 @@ def main():
         bridge_module = next(m['base'] for m in modules(game.pid) if m['name'].lower() == 'spidy_bridge.dll')
         rays, ray_hash = prepare(game.pid, process, ROOT/'build/windows-ninja/spidy_ray_bridge.dll',
             ROOT/'reports/ray-modules', ('SpidyRayStart', 'SpidyRaySubmit', 'SpidyRayStop',
-                                       'SpidyRaySample', 'SpidyRayData', 'SpidySwingData', 'SpidyGrabData'))
+                                       'SpidyRaySample', 'SpidyRayData', 'SpidySwingData', 'SpidyGrabData',
+                                       'SpidyPunchData'))
         # Imported here: probe_game_grab imports from this module.
         from probe_game_grab import grab_snapshot
         ray_module = next(m['base'] for m in modules(game.pid) if m['name'].lower() == 'spidy_ray_bridge.dll')
@@ -600,13 +658,15 @@ def main():
         xr, xr_hash = prepare(game.pid, process, ROOT/'build/windows-ninja/spidy_stereo_probe.dll',
             ROOT/'reports/stereo-modules', ('SpidyXrStart', 'SpidyXrStop', 'SpidyXrKeepAlive', 'SpidyXrData',
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
-                                           'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData'))
+                                           'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
+                                           'SpidyBodyData'))
         config = struct.pack('<4I7Q2IfI', 0x53585243, 7, 608, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
                              (4 if a.stock_monitor_view else 0) | (8 if a.no_web_grab else 0) |
-                             (16 if a.no_eye_occlusion else 0)) + runtime_path(manifest)
+                             (16 if a.no_eye_occlusion else 0) | (32 if a.no_body else 0) |
+                             (64 if a.no_punch else 0)) + runtime_path(manifest)
         code = call_with_payload(process, xr['SpidyXrStart'], config)
         if code:
             raise RuntimeError(f'Game XR start: {code}')
@@ -622,6 +682,9 @@ def main():
         eye_folder = a.output.with_name(a.output.stem+'-eyes')
         shot_count = 0
         appearance = None
+        # The player's body and fists: the latest of each, and a sample when punches land.
+        body = punch = None
+        punch_samples = deque(maxlen=2000)
         eye_jobs = None
         render_memory = None
         lowest_commit = start_commit = free_commit_mb()
@@ -636,7 +699,8 @@ def main():
             return dict(pid=game.pid, eye_size=a.size, swing_speed=a.swing_speed, motion_hash=motion_hash,
                         xr_hash=xr_hash, ray_hash=ray_hash, samples=list(samples),
                         swing_samples=list(swing_samples), motion_samples=list(motion_samples),
-                        grab_samples=list(grab_samples),
+                        grab_samples=list(grab_samples), body=body, punch=punch,
+                        punch_samples=list(punch_samples),
                         ray_samples=list(ray_samples), appearance=appearance, eye_jobs=eye_jobs,
                         render_memory=render_memory,
                         free_commit_mb=dict(start=start_commit, lowest=lowest_commit),
@@ -681,6 +745,16 @@ def main():
                     sample['seconds'] = time.monotonic()-started
                     appearance = appearance_snapshot(game, xr['SpidyAppearanceData']) or appearance
                     sample['appearance'] = appearance
+                    body = body_snapshot(game, xr['SpidyBodyData']) or body
+                    if body:
+                        sample['body'] = {k: body[k] for k in ('state', 'problem', 'weight', 'hand_error_m',
+                                                               'head_error_m', 'turn_last', 'grounded', 'scale')}
+                    landed = punch_snapshot(game, rays['SpidyPunchData'])
+                    if landed:
+                        if landed['punches'] != (punch or {}).get('punches') or \
+                                landed['dropped'] != (punch or {}).get('dropped'):
+                            punch_samples.append(dict(landed, seconds=round(time.monotonic()-started, 3)))
+                        punch = landed
                     # Eye job copies the game dropped unrendered (reclaimed by age).
                     eye_jobs = frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs
                     sample['eye_jobs_reclaimed'] = eye_jobs['reclaimed'] if eye_jobs else None
@@ -780,6 +854,8 @@ def main():
             ray_hash=ray_hash, ray_samples=list(ray_samples), rays=ray_snapshot(game, rays['SpidyRayData']),
             motion_hash=motion_hash, swing_speed=a.swing_speed, swing_samples=list(swing_samples),
             grab_samples=list(grab_samples), grab=grab_snapshot(game, rays['SpidyGrabData']),
+            body=body_snapshot(game, xr['SpidyBodyData']) or body,
+            punch=punch_snapshot(game, rays['SpidyPunchData']) or punch, punch_samples=list(punch_samples),
             motion_samples=list(motion_samples), appearance=appearance_snapshot(game,xr['SpidyAppearanceData']),
             eye_jobs=frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs,
             render_memory=final_render_memory or render_memory, render_stop=render_stop,

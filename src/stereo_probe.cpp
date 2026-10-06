@@ -3,6 +3,7 @@
 #include "spidy/eye_job_table.hpp"
 #include "spidy/eye_resolution.hpp"
 #include "spidy/native_appearance.hpp"
+#include "spidy/native_body.hpp"
 #include "spidy/native_eye_frame.hpp"
 #include "spidy/native_eye_gpu.hpp"
 #include "spidy/native_view.hpp"
@@ -67,7 +68,9 @@ SetupDisplay originalSetupDisplay{};
 void* renderActorHook{};
 void* setupDisplayHook{};
 std::atomic<uint64_t> playerRecord{}, localActor{};
-std::atomic<bool> latchedImmersive{};
+// latchedHide: immersive, and the eyes must not draw the hero, because the
+// body (native_body) is not turning its joints with its head shrunk.
+std::atomic<bool> latchedImmersive{}, latchedHide{};
 // The hero's render instance and world transform for the frame the main
 // thread just prepared. Render jobs read the newest of several slots.
 struct HeroFrame {
@@ -256,8 +259,9 @@ void renderActor(void* context, void* actor, uint8_t visibility) {
     // 1796d20 copies the scene view into context +8. The primary hide uses the
     // game's actor visibility switch in maintain(); this per-eye check removes
     // anything still drawn as the hero or on the hero's root transform. It
-    // changes no actor flags, animation state, or gameplay visibility.
-    if (enabled && actor && latchedImmersive.load(std::memory_order_relaxed)) {
+    // changes no actor flags, animation state, or gameplay visibility. With
+    // the player's body on the hero (native_body), the eyes draw it.
+    if (enabled && actor && latchedHide.load(std::memory_order_relaxed)) {
         const int eye = eyeView(pointer(reinterpret_cast<uintptr_t>(context) + 8));
         const auto& hero = heroFrames[heroSlot.load(std::memory_order_acquire) % heroFrames.size()];
         const auto instance = reinterpret_cast<uintptr_t>(actor);
@@ -279,8 +283,9 @@ void renderActor(void* context, void* actor, uint8_t visibility) {
 }
 // Runs on the main thread in maintain(), after gameplay updated the hero and
 // before render jobs read it. Uses DrawOff 191afb0 / DrawOn 191b880, the
-// handlers of the game's ActorDrawAction script node (15a3460).
-void updateHero(bool immersive) {
+// handlers of the game's ActorDrawAction script node (15a3460). `hide`:
+// immersive without the player's body on the hero.
+void updateHero(bool immersive, bool hide) {
     HeroFrame frame;
     uint32_t state = native_appearance::heroNoInstance, handle{}, flags{};
     const auto record = playerRecord.load();
@@ -297,7 +302,7 @@ void updateHero(bool immersive) {
         }
     }
     bool hid{}, restored{};
-    if (const auto previous = hiddenHero.load(); previous && (previous != frame.instance || !immersive)) {
+    if (const auto previous = hiddenHero.load(); previous && (previous != frame.instance || !hide)) {
         uint32_t current{}, previousFlags{};
         // Restore only the same live instance this module switched off.
         if (registered(previous, current) && current == hiddenHandle && read(previous + 0x5c, &previousFlags, 4) &&
@@ -310,7 +315,7 @@ void updateHero(bool immersive) {
         if (previous == frame.instance)
             read(previous + 0x5c, &flags, 4);
     }
-    if (immersive && drawable && !(flags & 0x20)) {
+    if (hide && drawable && !(flags & 0x20)) {
         // A hero already hidden by the game stays owned by the game.
         reinterpret_cast<Visibility>(base + 0x191afb0)(reinterpret_cast<void*>(frame.instance));
         hiddenHero = frame.instance;
@@ -330,7 +335,7 @@ void updateHero(bool immersive) {
     data.playerActor = instance;
     data.nativeHides += hid;
     data.nativeRestores += restored;
-    data.nativeHiddenFrames += immersive && drawable && (flags & 0x20);
+    data.nativeHiddenFrames += hide && drawable && (flags & 0x20);
     const auto webs = native_webs::status();
     data.webState = webs.state;
     data.webLive = webs.live;
@@ -690,8 +695,9 @@ void placeEyes() {
         ReleaseSRWLockShared(&commandLock);
     }
     latchedImmersive = render && enabled && controlled && desired.enabled == 1;
+    latchedHide = latchedImmersive && !native_body::drawn();
     if ((config.createViews & 4) && (latchedImmersive || hiddenHero.load()))
-        updateHero(latchedImmersive);
+        updateHero(latchedImmersive, latchedHide);
     if (!render)
         return;
     latchedSerial = controlled ? desired.serial : 0;
@@ -758,6 +764,7 @@ void placeEyes() {
 }
 // 1920240 sets up this frame's render jobs for the offscreen views.
 uint8_t renderOffscreen() {
+    native_body::renderFrame();
     if (!lateEyes && (enabled || live.load() || hiddenHero.load()))
         placeEyes();
     return originalRenderOffscreen();

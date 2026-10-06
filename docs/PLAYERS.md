@@ -62,6 +62,13 @@ Grabbing
   Trigger / sharp pull ........... reel it in / yank it to your hand
   Release the grip ............... throw it (swing harder to throw faster)
 
+Your body and fists
+  Look down ............ you are Spider-Man: his body under you, his arms
+                         and hands where your controllers are
+  Punch a thug ......... a fist moving fast into him hits: the faster, the
+                         harder he is knocked back (an uppercut lifts him)
+  Squeeze a grip ....... closes that hand into a fist (it shoots a web too)
+
 Moving
   Left stick ........... walk and run
   A .................... jump
@@ -86,6 +93,8 @@ IF SOMETHING IS WRONG
   the larger render memory VR needs.
 - Low frame rate: lower "Eye resolution" in the launcher's options, or your
   streaming quality in Virtual Desktop.
+- Your body looks wrong or gets in the way: switch "Your own body" off in the
+  launcher's options; you get gloves instead, as in earlier versions.
 
 
 SHARING

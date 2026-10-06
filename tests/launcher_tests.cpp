@@ -83,11 +83,12 @@ int main() {
                                                  L"32", L"--output", L"r.json", L"--xr-runtime", L"vd.json",
                                                  L"--stop-event", L"Local\\Stop"};
         check(args == defaults, "defaults");
-        options = {false, true, false, true, 2048, 90};
+        options = {false, true, false, true, 2048, 90, false, false};
         args = sessionArguments(options, L"r.json", L"", L"");
         const std::vector<std::wstring> changed{L"--auto-launch", L"--seconds", L"0", L"--size", L"2048",
                                                 L"--swing-speed", L"65", L"--output", L"r.json", L"--overlay-webs",
-                                                L"--no-web-grab", L"--full-desktop-view", L"--stock-monitor-view"};
+                                                L"--no-web-grab", L"--full-desktop-view", L"--stock-monitor-view",
+                                                L"--no-body", L"--no-punch"};
         check(args == changed, "every flag, speed capped at 65");
     });
     test("log lines are coloured by what they say", [] {

@@ -10,7 +10,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]/'tools'))
 from probe_stereo_gpu import snapshot as gpu_snapshot, save_eye_images
 from run_game_vr import (snapshot as xr_snapshot, accepted as accepted_xr, timing_snapshot, frame_rates,
                          appearance_snapshot, eye_snapshot, save_eye_snapshot, rgb_rows, crop_origin,
-                         game_memory, keep_game_log, commit_warning, VR_COMMIT_MB)
+                         game_memory, keep_game_log, commit_warning, VR_COMMIT_MB, body_snapshot,
+                         punch_snapshot)
 from probe_collision import snapshot as collision_snapshot
 from probe_movement import snapshot as movement_snapshot
 from probe_native_motion import snapshot as motion_snapshot
@@ -185,6 +186,40 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(struct.unpack_from('<3I', packet), (0x5357434d, 2, 168))
         self.assertEqual(struct.unpack_from('<3f', packet, 60), (0, 0, struct.unpack('<f', struct.pack('<f', .1))[0]))
         self.assertEqual(struct.unpack_from('<I2f', packet, 72), (1, .25, 1))
+
+    def test_body_status_decodes_errors_and_turn_and_rejects_torn_reads(self):
+        raw = bytearray(136)
+        struct.pack_into('<4Iq3Q2I2Q3fI2ff2fIQ2Id', raw, 0, 0x53424453, 1, 136, 2, 6, 900, 300, 290, 0, 237,
+                         0x1a0, 0x2b0, 1., 1.03125, -.5, 1, .002, .003, .0005, .0125, .0375, 0, 480, 1, 0, 7.5)
+        result = body_snapshot(Reader(raw, struct.pack('<q', 6)), 0)
+        self.assertEqual((result['state'], result['problem'], result['joints']), ('active', None, 237))
+        self.assertEqual((result['hero_jobs'], result['solved'], result['renders']), (300, 290, 480))
+        self.assertEqual((result['weight'], result['scale'], result['grounded']), (1., 1.0312, True))
+        self.assertEqual((result['hand_error_m'], result['head_error_m']), ([.002, .003], .0005))
+        self.assertEqual((result['turn_last'], result['turn_max'], result['solve_ms']), (.0125, .0375, 7.5))
+        struct.pack_into('<2I', raw, 48, 3, 237)
+        self.assertEqual(body_snapshot(Reader(raw, struct.pack('<q', 6)), 0)['problem'], 'unknown_rig')
+        torn = bytearray(raw)
+        struct.pack_into('<q', torn, 16, 7)
+        self.assertIsNone(body_snapshot(Reader(*([torn, struct.pack('<q', 7)]*8)), 0))
+
+    def test_punch_feedback_decodes_each_hand_and_the_latest_blow(self):
+        raw = bytearray(160)
+        struct.pack_into('<4Iq4Q2I', raw, 0, 0x53505544, 1, 160, 2, 4, 5000, 3, 3, 1, 2, 0)
+        # Hands (32 bytes): punches, last target, last strength, speed, last knockback, busy.
+        struct.pack_into('<2Q2f2I', raw, 64, 1, 0x1c517822940, .25, .5, 2, 0)
+        struct.pack_into('<2Q2f2I', raw, 96, 2, 0x1c517822a00, 1., 9.5, 5, 1)
+        struct.pack_into('<3f3f2f', raw, 128, 1.5, 95.25, 2393.75, 0, 0, -1, 40, 8.25)
+        result = punch_snapshot(Reader(raw, struct.pack('<q', 4)), 0)
+        self.assertEqual((result['punches'], result['issued'], result['dropped'], result['bots']), (3, 3, 1, 2))
+        self.assertEqual((result['hands'][0]['punches'], result['hands'][0]['last_knockback']), (1, 2))
+        self.assertEqual(result['hands'][1]['last_target'], '0x1c517822a00')
+        self.assertEqual((result['hands'][1]['speed'], result['hands'][1]['busy']), (9.5, True))
+        self.assertEqual((result['last_point'], result['last_direction']), ([1.5, 95.25, 2393.75], [0, 0, -1]))
+        self.assertEqual((result['last_damage'], result['last_speed']), (40, 8.25))
+        torn = bytearray(raw)
+        struct.pack_into('<q', torn, 16, 5)
+        self.assertIsNone(punch_snapshot(Reader(*([torn, struct.pack('<q', 5)]*8)), 0))
 
     def test_ray_geometry_serial_and_body_generation_boundaries(self):
         raw = bytearray(784)
@@ -371,7 +406,8 @@ class ProtocolTests(unittest.TestCase):
                                      (motion_snapshot, 0x534d5644, 176), (ray_snapshot, 0x53525944, 784),
                                      (swing_snapshot,0x53574441,240),(timing_snapshot,0x5358544d,344),
                                      (appearance_snapshot,0x53415044,328),(eye_snapshot,0x53455353,112),
-                                     (grab_snapshot,0x53475244,336)):
+                                     (grab_snapshot,0x53475244,336),(body_snapshot,0x53424453,136),
+                                     (punch_snapshot,0x53505544,160)):
             raw = bytearray(size)
             struct.pack_into('<4IQ', raw, 0, magic, 99, size, 2, 4)
             with self.assertRaisesRegex(RuntimeError, 'protocol mismatch'):

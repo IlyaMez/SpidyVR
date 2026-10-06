@@ -257,6 +257,25 @@ input bridge and samples the gameplay gate. What they need:
   game promptly afterwards, and run `python tools\vr_display.py --restore` if
   the launcher's small-window settings are still pending.
 
+### The player's body and fists
+
+`python tools/probe_game_body.py` in a freshly started game in free roam (the
+VR launcher's way: `probe_menu_pad.py start`, then `pad a --until-player`):
+
+- `--phases rig,ik,eyes,fist` (default): the hero's rig with every joint's
+  name, parent and rest position; the body toward a scripted headset and
+  controllers, with the wrists' and head's distance from their targets and a
+  screenshot; the left eye's image looking down at the body, and with the body
+  off; a scripted fist through the nearest bot's chest through the swing
+  module's input, with the punch, the request and the bot's health.
+- `walk`: the hero walks about under the body with the virtual pad's stick (a
+  perched hero ignores a light stick), for the turn between pose job and
+  render. `punch`: one blow straight to the DamageSystem; `--punch-hero` also
+  staggers the hero.
+- The GPU capture starts once per game process: the eyes phase needs a fresh
+  game each time (a second start returns 1000).
+- Reports: `reports/body-probe*.json`, images in `reports/body-probe/`.
+
 ## Performance comparison
 
 The initial successful headset test was `game-vr-20261004-131244.json`: 509 pairs

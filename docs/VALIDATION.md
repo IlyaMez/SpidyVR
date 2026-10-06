@@ -1,6 +1,44 @@
 # Validation — 2026-10-06
 
-## Webs as ropes: weight, swinging, the web let go of follows its prop — current build, tried in the headset
+## Your own body and punching — current build, measured without a headset
+
+The user: "lets add spiderman actual avatar as a full body presense we control
+and allow physical punching". Design, numbers and open items:
+[BODY.md](BODY.md).
+
+Measured with `tools/probe_game_body.py` in five fresh game processes on the
+user's rooftop save (the hero perched on a vent cap), October 6:
+
+- The hero's rig as its pose job names it (1601290, rig at job +0x28): 237
+  joints, every name resolved through its hash (`reports/body-probe.json`).
+  `a_body` is the body's root with `pelvis` and the spine under it; the
+  identification by name is built in, and found the same rig in every run.
+  One hero pose job per render frame.
+- Body on, a scripted headset at 1.75 m eye height looking ahead, the left
+  controller raised above the head, the right one at the chin 0.5 m ahead:
+  both wrists 0.0 mm from their targets in the world, the head joint 0.0 mm
+  from its place, the head shrunk to 0.001, body scale 1.031, 0.03 ms of
+  solving a frame (`reports/body-probe/ik-third-person.png`: the hero standing
+  on the vent with his left hand raised and no head).
+- The left eye's image, looking 50 degrees down
+  (`reports/body-probe/eye-body.png`): his right arm reaching ahead, the hand a
+  closed fist with the thumb across the fingers, the web shooter at the wrist,
+  his feet on the vent below, nothing of the head. With the body off the eyes
+  hide the hero, as before (`eye-hidden.png`).
+- The game's damage system: a blow of 30 (kMelee, kFlyBack) straight to a bot
+  126 m away took its health from 100 to 67; 5 (kStagger) to the hero, 110 to
+  105, and he was shoved 7.9 m. A scripted fist driven through that bot's chest
+  at 6 m/s, as controller samples through the swing module's input, landed one
+  punch (5.6 m/s, strength 0.64, kKnockdown, 29.1 damage), issued one request,
+  and took the bot's health from 100 to 68 (`reports/body-probe-fist.json`).
+  The bot was in `BotStatePlayCinematicGame` and played no reaction.
+- Not measured: a free-roaming thug's reaction (none came within reach), and
+  the hero's turn between pose job and render (he did not walk off the perch;
+  `body.turn_max` in the session report measures it in VR).
+
+143 core checks (18 new), the GPU test and 68 Python checks (2 new) pass.
+
+## Webs as ropes: weight, swinging, the web let go of follows its prop — preceding build, tried in the headset
 
 The user, after trying it (`Spidy-0.1.0\reports\game-vr-20261006-133652.json`,
 from the release folder): "i tested in vr and it worked good,only issue is on

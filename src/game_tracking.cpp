@@ -112,6 +112,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
             hand.tracked = false;
     const auto head = rig_.toWorld(f.head);
     out.head = worldPose(head);
+    out.headPose = head;
     for (unsigned i = 0; i < 2; ++i) {
         out.eyes[i] = worldPose(rig_.toWorld(f.eyes[i].pose));
         out.fovs[i] = f.eyes[i].fov;
@@ -120,6 +121,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
             // angled along its handle; its aim pose supplies the pointing axis.
             Pose hand{f.hands[i].grip.position, f.hands[i].aim.orientation};
             out.hands[i] = rig_.toWorld(hand);
+            out.grips[i] = rig_.toWorld(f.hands[i].grip);
         }
     }
     // Existing native input bridge uses these bits for W/A/S/D/Space, the

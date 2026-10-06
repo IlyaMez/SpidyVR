@@ -14,6 +14,11 @@ struct GameMotionFrame {
     Mat4 head{};
     std::array<Mat4, 2> eyes{};
     std::array<Pose, 2> hands{};
+    // The headset and the controllers' OpenXR grip poses, in the world: the
+    // player's body follows them (native_body). A hand's grip keeps the
+    // identity orientation while it is not tracked.
+    Pose headPose{};
+    std::array<Pose, 2> grips{};
     std::array<EyeFov, 2> fovs{};
     uint32_t nativeKeys{};
     // The left stick in the stock camera's horizontal axes, -1..1: native

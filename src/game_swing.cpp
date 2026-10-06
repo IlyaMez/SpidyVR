@@ -2,6 +2,7 @@
 // responsible for body collision and committing the resulting position.
 #include "spidy/game_swing.hpp"
 #include "spidy/game_grab.hpp"
+#include "spidy/game_punch.hpp"
 #include "spidy/native_bodies.hpp"
 #include "spidy/native_movement.hpp"
 #include "spidy/native_query_context.hpp"
@@ -137,10 +138,21 @@ void visit(const native_rays::QueryContext& world) {
             finite({feet[12], feet[13], feet[14]}))
             at = {feet[12], feet[13], feet[14]};
         const Body player{at + Vec3{0, 1, 0}, fresh ? motion.achievedVelocity : Vec3{}, motion.grounded != 0};
-        game_grab::claim(grabInputClock.consume(c), in, world, player);
+        const float sampleSeconds = grabInputClock.consume(c);
+        game_grab::claim(sampleSeconds, in, world, player);
         float grabDt{};
         if (game_grab::due(grabDt))
             game_grab::step(grabDt, world);
+        // Fists take the same samples. A hand whose web holds a target or
+        // swings the player does not punch.
+        if (game_punch::running()) {
+            const auto grab = game_grab::data();
+            uint32_t busy{};
+            for (unsigned i = 0; i < 2; ++i)
+                if (grab.hands[i].phase || solver.webs()[i].attached)
+                    busy |= 1u << i;
+            game_punch::update(sampleSeconds, in, config.record, busy, world);
+        }
         if (world.error()) {
             fault(world.error());
             return;
@@ -450,6 +462,9 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStop(void*) {
     enabled = false;
     cancel();
     game_grab::stop();
+    // Punches started the main-thread damage hook when the grab did not.
+    game_punch::stop();
+    native_bodies::stop();
     ReleaseSRWLockExclusive(&simulation);
     const DWORD result = started ? stopMotion(nullptr) : 0;
     AcquireSRWLockExclusive(&output);

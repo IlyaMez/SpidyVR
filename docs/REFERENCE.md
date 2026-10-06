@@ -50,6 +50,25 @@ The local PE inspection confirmed these byte/address facts:
 | Native requested-target setter | `0x1fb88d0` | Decoded finite checks and request-ready bookkeeping |
 | Component timestep | `0x16769f0` | Global game delta multiplied by component time scale |
 
+For the player's body and punching (October 6; [BODY.md](BODY.md)), checked
+in this executable and measured in the running game:
+
+| Fact | RVA | Verification |
+|---|---:|---|
+| Pose writer (out joints, pose job) | `0x1601290` | 20 entry bytes match; returns a float its callers read; one hero call per render frame |
+| Local-to-model joint conversion (out, local, joints, count) | `0x1600770` | Builds the hero's rest pose; parents before children; roots read the matrix before the first joint |
+| Rig: count +2, joints +8 (16 B: parent, hash +8, name +0xc), rest pose +0x18 | job `+0x28` | 237 joints, every name's hash matches |
+| Name hash: CRC-32 table steps seeded with `0xedb88320`, no final inversion | `0x1bb88d0` | Table at `0x4f232f0` is the standard reflected one |
+| DamageSystem (static object; vtable `0x4f5db58`) | `0x62a4ec0` | Its vtable is stored in the image |
+| Direct damage request (system, target, direction, point, normal) | `0x1eb6d60` | A bot's and the hero's health fell by the requested amount |
+| Request processing; drops an unresolved Damager | `0x1eb8cf0` | Disassembly |
+| Health::OnDamage; hit points at Health `+0x88` | `0x1f15a10` | Hit points read before and after each blow |
+| DamageRequest fields and Knockback / DamageType names | reflection at `0x6a13090`, enum names at `0x5e08560`, `0x5e07b50` | Field offsets, docs and value names read from the image |
+
+ArkWeb's `mirror.h` was the lead for the pose writer and the hero's joint
+array at the instance's `+0xd8`; Spidy reads the joint tree and names from the
+rig itself and shares no code with it.
+
 The camera-related entry was temporarily hooked by the independently written
 Spidy observer. Local disassembly showed RCX as the object, XMM1 as the float
 delta, and the low bytes of R8/R9 as flags. A live 30-second test produced 3,362

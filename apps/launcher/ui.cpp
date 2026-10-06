@@ -888,6 +888,10 @@ void App::optionsCard(ImVec2 size) {
     bool changed = false;
     option("Webs catch props and thugs", "Grab, yank and throw props and thugs with your webs.", S(40),
            [&] { changed |= toggle("##grab", &o.webGrab); });
+    option("Your own body", "See Spider-Man's body and hands as yours; off draws gloves.", S(40),
+           [&] { changed |= toggle("##body", &o.body); });
+    option("Punch thugs", "A fist that hits a thug hard enough knocks him back.", S(40),
+           [&] { changed |= toggle("##punch", &o.punch); });
     option("Webs drawn by", "Spidy's own strands, if the game's look off.", S(150), [&] {
         static constexpr const char* labels[] = {"Game", "Spidy"};
         int value = o.overlayWebs ? 1 : 0;

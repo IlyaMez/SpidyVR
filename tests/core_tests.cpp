@@ -17,6 +17,8 @@
 #include "spidy/web_visual.hpp"
 #include "spidy/web_grab.hpp"
 #include "spidy/lab_props.hpp"
+#include "spidy/body_ik.hpp"
+#include "spidy/punch.hpp"
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -143,6 +145,82 @@ SwingConfig inert() {
     c.gravity = 0;
     c.airAcceleration = 0;
     return c;
+}
+// A small humanoid in the game's joint layout (four rows: x, y, z axes, then
+// the position), facing +z with its left on +x, its rest pose a T-pose. With
+// oddFrames every joint frame is turned and the left side mirrored, as game
+// rigs do, so the solver cannot lean on joint axes.
+struct TestBody {
+    std::vector<float> rest;
+    body::Rig rig;
+    Vec3 at(const std::vector<float>& pose,int joint) const {return {pose[joint*16+12],pose[joint*16+13],pose[joint*16+14]};}
+};
+TestBody testBody(bool oddFrames=false) {
+    struct J {int parent;Vec3 p;};
+    const J joints[]={
+        {-1,{0,0,0}},{0,{0,1.f,0}},{1,{0,1.12f,0}},{2,{0,1.25f,0}},{3,{0,1.38f,0}},{4,{0,1.52f,0}},{5,{0,1.62f,0}},
+        {6,{.032f,1.7f,.08f}},{6,{-.032f,1.7f,.08f}},
+        {4,{.03f,1.47f,.02f}},{9,{.18f,1.46f,0}},{10,{.44f,1.46f,0}},{11,{.74f,1.46f,0}},{12,{.83f,1.46f,0}},
+        {12,{.77f,1.45f,.04f}},
+        {4,{-.03f,1.47f,.02f}},{15,{-.18f,1.46f,0}},{16,{-.44f,1.46f,0}},{17,{-.74f,1.46f,0}},{18,{-.83f,1.46f,0}},
+        {18,{-.77f,1.45f,.04f}},
+        {1,{.1f,.95f,0}},{21,{.1f,.5f,.02f}},{22,{.1f,.08f,0}},{23,{.1f,0,.13f}},
+        {1,{-.1f,.95f,0}},{25,{-.1f,.5f,.02f}},{26,{-.1f,.08f,0}},{27,{-.1f,0,.13f}},
+        // A left middle finger, palm down: base in the palm, knuckle, middle joint, tip, end.
+        {12,{.77f,1.46f,0}},{29,{.83f,1.46f,0}},{30,{.875f,1.46f,0}},{31,{.905f,1.46f,0}},{32,{.93f,1.46f,0}},
+        // Its thumb, ahead of the palm: base, two joints, end.
+        {12,{.76f,1.45f,.03f}},{34,{.78f,1.45f,.06f}},{35,{.8f,1.45f,.085f}},{36,{.82f,1.45f,.1f}},
+    };
+    TestBody b;
+    const int n=static_cast<int>(std::size(joints));
+    b.rest.assign(n*16,0.f);
+    for(int j=0;j<n;++j){
+        Quat q{};
+        if(oddFrames)q=body::unit({std::sin(j*1.3f),std::cos(j*.7f),std::sin(j*.31f+1),1.5f});
+        Vec3 axes[3]={q.rotate({1,0,0}),q.rotate({0,1,0}),q.rotate({0,0,1})};
+        if(oddFrames&&joints[j].p.x>.01f)axes[0]=axes[0]*-1.f;
+        float* m=&b.rest[j*16];
+        for(int r=0;r<3;++r){m[r*4]=axes[r].x;m[r*4+1]=axes[r].y;m[r*4+2]=axes[r].z;}
+        m[12]=joints[j].p.x;m[13]=joints[j].p.y;m[14]=joints[j].p.z;m[15]=1;
+        b.rig.parent.push_back(static_cast<int16_t>(joints[j].parent));
+    }
+    auto& r=b.rig;
+    r.pelvis=1;r.spine={2,3,4};r.neck={5};r.head=6;r.eyes[0]=7;r.eyes[1]=8;
+    r.arms[0]={9,10,11,12,13,14};r.arms[1]={15,16,17,18,19,20};
+    r.arms[0].fingers={{29,30,31,32,33}};
+    r.arms[0].thumbChain={34,35,36,37};
+    r.legs[0]={21,22,23};r.legs[1]={25,26,27};
+    check(body::prepare(r,b.rest),"the test rig was rejected");
+    return b;
+}
+// A headset looking along model +z (OpenXR looks along -z), eyes at `eyes`.
+body::Targets lookingAhead(Vec3 eyes){
+    body::Targets t;t.head=true;t.eyes=eyes;t.facing=Quat::yaw(3.14159265f);
+    return t;
+}
+// A controller held thumb up with the knuckles along model `knuckles`, by a
+// player facing +z (whose right is model -x): its grip pose.
+Quat gripFacing(Vec3 knuckles){
+    const Vec3 y=normalized(knuckles)*-1.f,x{-1,0,0};
+    return body::fromAxes(x,y,cross(x,y));
+}
+// The wrist the solver aims for from a grip pose (Config::wristFromGrip).
+Vec3 wristOf(const body::Targets::Hand& h,int side,const body::Config& c={}){
+    return h.grip+h.orientation.rotate({side==0?-c.wristFromGrip.x:c.wristFromGrip.x,c.wristFromGrip.y,c.wristFromGrip.z});
+}
+// Solves a fresh copy of the game's pose each frame, as the game hands one
+// over, until the body has fully taken over.
+std::vector<float> solved(const TestBody& b,const body::Targets& t,body::State& s,const body::Config& c={},
+                          float scale=1,body::Result* result=nullptr,const std::vector<float>* from=nullptr){
+    std::vector<float> pose;
+    body::Result r;
+    for(int i=0;i<4;++i){
+        pose=from?*from:b.rest;
+        body::Pose view(pose.data(),static_cast<int>(b.rig.parent.size()));
+        r=body::solve(view,b.rig,t,c,s,true,.1f,scale);
+    }
+    if(result)*result=r;
+    return pose;
 }
 XrFrame trackedFrame() {
     XrFrame f;f.focused=f.valid=true;f.predictedDisplayTime=1;
@@ -2346,6 +2424,287 @@ int main() {
         check(bad([](GrabConfig& c){c.minYankFlight=30;}),"inverted yank speeds accepted");
         check(bad([](GrabConfig& c){c.gravity=std::numeric_limits<float>::quiet_NaN();}),"NaN gravity accepted");
         check(!bad([](GrabConfig&){}),"defaults rejected");
+    });
+    test("body: the rest pose gives the references and broken rigs are refused", [] {
+        auto b=testBody();
+        near(b.rig.eyeHeight,1.7f);
+        near(b.rig.eyesFromHead.x,.08f);near(b.rig.eyesFromHead.y,.08f);near(b.rig.eyesFromHead.z,0);
+        near(b.rig.upperArm[0],.26f);near(b.rig.forearm[1],.3f);near(b.rig.thigh[0],.4504f,.001f);
+        check(b.rig.below[b.rig.arms[0].upper].size()==14,"the left arm's subtree is wrong");
+        auto broken=b;broken.rig.arms[0].fingers={{29,30,99}};
+        check(!body::prepare(broken.rig,broken.rest),"a finger beyond the rig was accepted");
+        auto cycle=b;cycle.rig.parent[2]=4;
+        check(!body::prepare(cycle.rig,cycle.rest),"a cycle in the parents was accepted");
+        auto missing=b;missing.rig.arms[1].hand=-1;
+        check(!body::prepare(missing.rig,missing.rest),"a rig without a hand was accepted");
+        auto lying=b;
+        body::Pose view(lying.rest.data(),static_cast<int>(lying.rig.parent.size()));
+        view.turn(lying.rig.all,body::axisAngle({1,0,0},1.5f),{});
+        check(!body::prepare(lying.rig,lying.rest),"a rest pose lying down was accepted");
+    });
+    test("body: hands reach the controllers and every bone keeps its length", [] {
+        for(const bool odd:{false,true}){
+            auto b=testBody(odd);
+            auto t=lookingAhead({0,1.7f,.08f});
+            t.hands[0]={true,{.3f,1.2f,.45f},gripFacing({0,0,1})};
+            t.hands[1]={true,{-.25f,1.55f,.4f},gripFacing({0,.5f,.866f})};
+            body::Config c;c.hideHead=false;
+            body::State s;body::Result r;
+            const auto pose=solved(b,t,s,c,1,&r);
+            check(r.solved&&r.weight==1,"the body did not take over");
+            for(int i=0;i<2;++i){
+                const auto& arm=b.rig.arms[i];
+                check(length(b.at(pose,arm.hand)-wristOf(t.hands[i],i))<1e-3f,"a wrist missed its controller");
+                // The hand's fingers point past the knuckles: the grip's -y.
+                const Vec3 fingers=normalized(b.at(pose,arm.finger)-b.at(pose,arm.hand));
+                check(dot(fingers,t.hands[i].orientation.rotate({0,-1,0}))>.999f,"a hand does not follow its controller");
+            }
+            // Every bone of the body; the rig's root (0) is not the body's and stays.
+            for(size_t j=0;j<b.rig.parent.size();++j){
+                const int p=b.rig.parent[j];
+                if(p<=0)continue;
+                near(length(b.at(pose,static_cast<int>(j))-b.at(pose,p)),length(b.at(b.rest,static_cast<int>(j))-b.at(b.rest,p)),1e-4f);
+            }
+            // Elbows hang below the shoulders.
+            check(b.at(pose,b.rig.arms[0].lower).y<b.at(pose,b.rig.arms[0].upper).y,"the left elbow went up");
+            // The rig's own root (an effects or camera target in the game's) is not the body's.
+            check(std::equal(pose.begin(),pose.begin()+16,b.rest.begin()),"the rig's root moved with the body");
+        }
+    });
+    test("body: the head joint sits behind the eyes and shrinks out of view", [] {
+        for(const bool odd:{false,true}){
+            auto b=testBody(odd);
+            // Looking 30 degrees to the left and 20 down.
+            auto t=lookingAhead({.2f,1.62f,.3f});
+            t.facing=Quat::yaw(3.14159265f+.52f)*body::axisAngle({1,0,0},-.35f);
+            body::Config c;c.hideHead=false;
+            body::State s;body::Result r;
+            auto pose=solved(b,t,s,c,1,&r);
+            check(r.headError<1e-3f,"the head missed its place");
+            const Vec3 eyes=(b.at(pose,7)+b.at(pose,8))/2,head=b.at(pose,6);
+            check(length(eyes-t.eyes)<1e-3f,"the model's eyes are not at the headset's");
+            s={};c.hideHead=true;
+            pose=solved(b,t,s,c);
+            check(length(b.at(pose,7)-b.at(pose,6))<1e-3f&&length(b.at(pose,8)-b.at(pose,6))<1e-3f,"the head was not shrunk");
+            check(length(b.at(pose,6)-head)<1e-4f,"the head joint moved as it shrank");
+        }
+    });
+    test("body: hips stand upright facing the body's way, whatever the game's pose", [] {
+        auto b=testBody(true);
+        // The game's pose swings face down (a web swing) and turned around.
+        auto swinging=b.rest;
+        body::Pose view(swinging.data(),static_cast<int>(b.rig.parent.size()));
+        view.turn(b.rig.all,body::axisAngle({0,1,0},2.f)*body::axisAngle({1,0,0},1.3f),{0,1,0});
+        auto t=lookingAhead({0,1.7f,.08f});
+        t.airborne=true;
+        body::State s;
+        const auto pose=solved(b,t,s,{},1,nullptr,&swinging);
+        const Vec3 spine=normalized(b.at(pose,4)-b.at(pose,1));
+        check(spine.y>.98f,"the torso is not upright");
+        const Vec3 left=normalized(b.at(pose,21)-b.at(pose,25));
+        check(left.x>.98f,"the hips do not face the headset's way");
+    });
+    test("body: standing feet stay on the ground while the player crouches", [] {
+        auto b=testBody(true);
+        auto t=lookingAhead({0,1.35f,.1f});
+        body::State s;body::Result r;
+        auto pose=solved(b,t,s,{},1,&r);
+        check(r.grounded,"feet on the ground were not seen as standing");
+        for(const int foot:{23,27}){
+            check(length(b.at(pose,foot)-b.at(b.rest,foot))<1e-3f,"a standing foot moved");
+        }
+        // Knees bend forward, ahead of the line from hip to ankle.
+        for(const auto& leg:b.rig.legs){
+            const Vec3 hip=b.at(pose,leg.upper),knee=b.at(pose,leg.lower),ankle=b.at(pose,leg.foot);
+            check(knee.z>(hip.z+ankle.z)/2+.05f,"a knee does not bend forward");
+        }
+        // In the air the legs keep the game's pose and go with the hips.
+        t.airborne=true;s={};
+        pose=solved(b,t,s,{},1,&r);
+        check(!r.grounded&&b.at(pose,23).y<b.at(b.rest,23).y-.2f,"airborne legs stayed on the ground");
+    });
+    test("body: the body turns with the head only past the dead zone", [] {
+        auto b=testBody();
+        auto t=lookingAhead({0,1.7f,.08f});
+        body::State s;
+        solved(b,t,s);
+        near(s.yaw,0,.01f);
+        // 25 degrees to the left: within the dead zone, the hips stay.
+        t.facing=Quat::yaw(3.14159265f+.44f);
+        std::vector<float> pose=b.rest;
+        body::Pose view(pose.data(),static_cast<int>(b.rig.parent.size()));
+        body::solve(view,b.rig,t,{},s,true,.05f);
+        check(std::abs(s.yaw)<.05f,"the hips turned within the dead zone");
+        // 100 degrees: the hips follow to the dead zone's edge.
+        t.facing=Quat::yaw(3.14159265f+1.75f);
+        for(int i=0;i<20;++i){pose=b.rest;body::solve(view,b.rig,t,{},s,true,.02f);}
+        check(s.yaw>1.75f-.65f&&s.yaw<1.75f,"the hips did not follow the head");
+    });
+    test("body: the game's pose stays untouched until the body blends in, and comes back", [] {
+        auto b=testBody(true);
+        auto t=lookingAhead({.1f,1.5f,.3f});
+        t.hands[0]={true,{.3f,1.f,.4f},gripFacing({0,0,1})};
+        body::State s;
+        std::vector<float> pose=b.rest;
+        body::Pose view(pose.data(),static_cast<int>(b.rig.parent.size()));
+        auto r=body::solve(view,b.rig,t,{},s,false,.1f);
+        check(!r.solved&&pose==b.rest,"a body that was not wanted moved the pose");
+        r=body::solve(view,b.rig,t,{},s,true,.1f);
+        check(r.solved&&r.weight>.3f&&r.weight<.5f,"the body did not blend in gradually");
+        check(length(b.at(pose,12)-wristOf(t.hands[0],0))>.05f,"half blended, the hand is already there");
+        for(int i=0;i<10;++i){pose=b.rest;body::solve(view,b.rig,t,{},s,true,.1f);}
+        for(int i=0;i<10;++i){pose=b.rest;r=body::solve(view,b.rig,t,{},s,false,.1f);}
+        check(r.weight==0&&pose==b.rest,"the body never gave the pose back");
+    });
+    test("body: a controller out of reach stretches the arm toward it", [] {
+        auto b=testBody(true);
+        auto t=lookingAhead({0,1.7f,.08f});
+        t.hands[1]={true,{-1.5f,1.5f,1.5f},gripFacing({0,0,1})};
+        body::Config c;c.hideHead=false;
+        body::State s;body::Result r;
+        const auto pose=solved(b,t,s,c,1,&r);
+        const Vec3 shoulder=b.at(pose,16),elbow=b.at(pose,17),wrist=b.at(pose,18);
+        check(finite(wrist)&&r.handError[1]>1,"an unreachable hand reported reaching");
+        check(dot(normalized(elbow-shoulder),normalized(wrist-elbow))>.99f,"the arm is not stretched");
+        check(dot(normalized(wrist-shoulder),normalized(wristOf(t.hands[1],1)-shoulder))>.99f,"the arm does not point at the controller");
+    });
+    test("body: on a wall the body stands up in the world and plants no feet", [] {
+        auto b=testBody(true);
+        // The hero crawls up a wall: the world's up is the model's -z.
+        body::Targets t;t.head=true;t.up={0,0,-1};
+        t.eyes=Vec3{0,.3f,0}+t.up*1.7f;
+        // Looking level in the world, along the model's +y.
+        t.facing=body::fromAxes({-1,0,0},{0,0,-1},{0,-1,0});
+        body::State s;body::Result r;
+        const auto pose=solved(b,t,s,{},1,&r);
+        check(r.solved&&!r.grounded,"feet were planted on a wall");
+        check(dot(normalized(b.at(pose,4)-b.at(pose,1)),t.up)>.98f,"the torso does not stand up in the world");
+        check(r.headError<1e-3f,"the head missed its place on a wall");
+    });
+    test("body: a turn of the whole player turns the body at once", [] {
+        auto b=testBody();
+        auto t=lookingAhead({0,1.7f,.08f});
+        body::State s;
+        solved(b,t,s);
+        // A 30 degree snap turn: within the dead zone, but the whole player
+        // turned, and the adapter turns the body by as much.
+        body::turnState(s,.5236f);
+        t.facing=Quat::yaw(3.14159265f+.5236f);
+        std::vector<float> pose=b.rest;
+        body::Pose view(pose.data(),static_cast<int>(b.rig.parent.size()));
+        const auto r=body::solve(view,b.rig,t,{},s,true,1.f/90);
+        near(s.yaw,.5236f,.01f);
+        // The hips face the new way at once.
+        const Vec3 left=normalized(b.at(pose,21)-b.at(pose,25));
+        check(r.solved&&std::abs(std::atan2(-left.z,left.x)-.5236f)<.02f,"the hips did not turn with the player");
+    });
+    test("body: a fist curls the fingers into the palm, whatever the game had curled", [] {
+        for(const bool odd:{false,true}){
+            auto b=testBody(odd);
+            auto t=lookingAhead({0,1.7f,.08f});
+            t.hands[0]={true,{.3f,1.2f,.45f},gripFacing({0,0,1})};
+            body::Config c;c.hideHead=false;
+            body::State s;
+            const auto open=solved(b,t,s,c);
+            const Vec3 wrist=b.at(open,12);
+            const float reach=length(b.at(open,33)-wrist);
+            t.hands[0].fist=1;s={};
+            const auto fist=solved(b,t,s,c);
+            const Vec3 palm=normalized(body::Pose(const_cast<float*>(fist.data()),38).direction(12,b.rig.handPalm[0]));
+            check(length(b.at(fist,33)-wrist)<reach*.6f,"the finger did not close");
+            // The tip ends up on the palm's side of the hand.
+            check(dot(b.at(fist,33)-b.at(fist,30),palm)>.02f,"the finger closed the wrong way");
+            for(const int j:{30,31,32,33,35,36,37})
+                near(length(b.at(fist,j)-b.at(fist,j-1)),length(b.at(b.rest,j)-b.at(b.rest,j-1)),1e-4f);
+            // The thumb wraps over the curled finger.
+            check(length(b.at(fist,37)-b.at(fist,31))<.03f,"the thumb did not wrap the fingers");
+            near(length(b.at(fist,12)-wristOf(t.hands[0],0)),0,1e-3f);
+        }
+    });
+    test("body: a taller player gets a body scaled about the feet", [] {
+        auto b=testBody();
+        auto t=lookingAhead({0,1.87f,.09f});
+        t.hands[0]={true,{.3f,1.25f,.45f},gripFacing({0,0,1})};
+        body::Config c;c.hideHead=false;
+        body::State s;body::Result r;
+        const auto pose=solved(b,t,s,c,1.1f,&r);
+        near(length(b.at(pose,11)-b.at(pose,10)),.26f*1.1f,1e-4f);
+        check(r.headError<1e-3f&&r.handError[0]<1e-3f,"the scaled body missed its targets");
+        check(r.grounded&&std::abs(b.at(pose,23).y-b.at(b.rest,23).y*1.1f)<1e-3f,"the scaled feet left the ground");
+    });
+    // A right fist driven along `path` at 90 Hz; `relative` is the hand
+    // relative to the player (the world position minus the player's travel).
+    struct Swing {
+        Punches punches;
+        std::vector<PunchEvent> out;
+        std::vector<PunchTarget> targets{{7,{0,0,-1},1.8f,.3f}};
+        void at(Vec3 fist,Vec3 travel={},bool busy=false){
+            std::array<PunchHand,2> hands{};
+            hands[1]={true,fist,fist-travel,busy};
+            punches.update(1.f/90,hands,targets,out);
+        }
+        // From `a` to `b` at `speed` m/s, the player travelling at `carried`.
+        void move(Vec3 a,Vec3 b,float speed,Vec3 carried={},bool busy=false){
+            const int n=std::max(1,static_cast<int>(std::lround(length(b-a)/speed*90)));
+            for(int i=0;i<=n;++i){const Vec3 travel=carried*(i/90.f);at(a+(b-a)*(static_cast<float>(i)/n)+travel,travel,busy);}
+        }
+    };
+    test("punch: a fist driven into a thug lands one punch, as hard as it went in", [] {
+        Swing s;
+        s.move({0,1.4f,-.2f},{0,1.4f,-1.f},6);
+        check(s.out.size()==1,"one swing did not land exactly one punch");
+        const auto& e=s.out[0];
+        check(e.target==7&&e.hand==1,"the punch hit the wrong thing");
+        near(e.speed,6,.4f);
+        check(e.direction.z<-.99f,"the blow points the wrong way");
+        near(e.point.z,-.7f,.07f);
+        check(e.knockback==Knockback::Knockdown&&e.damage>25&&e.damage<35,"a firm punch did the wrong harm");
+        // Pulled back slowly and thrown again: a second punch.
+        s.move({0,1.4f,-.8f},{0,1.4f,-.2f},.8f);
+        s.move({0,1.4f,-.2f},{0,1.4f,-1.f},4);
+        check(s.out.size()==2&&s.out[1].knockback==Knockback::Stagger,"a second, lighter punch was wrong");
+    });
+    test("punch: touches, grazes, a busy hand and a fist carried along are no punches", [] {
+        Swing slow;slow.move({0,1.4f,-.2f},{0,1.4f,-1.f},1);
+        check(slow.out.empty(),"a slow touch punched");
+        Swing graze;graze.move({-.6f,1.4f,-.63f},{.6f,1.4f,-.63f},7);
+        check(graze.out.empty(),"a fast graze across his front punched");
+        Swing busy;busy.move({0,1.4f,-.2f},{0,1.4f,-1.f},6,{},true);
+        check(busy.out.empty(),"a hand holding a web punched");
+        // The player flies through the thug at 30 m/s, the arm still.
+        Swing carried;carried.targets[0].feet={0,0,-6};
+        carried.move({0,1.4f,0},{0,1.4f,0},1,{0,0,-30});
+        for(int i=0;i<30;++i)carried.at({0,1.4f,-30.f*(i+2)/90},{0,0,-30.f*(i+2)/90});
+        check(carried.out.empty(),"a fist carried along by the player's flight punched");
+    });
+    test("punch: an uppercut pops him up and a very hard blow sends him flying", [] {
+        Swing upper;upper.move({0,.6f,-.55f},{0,1.9f,-.75f},7);
+        check(upper.out.size()==1&&upper.out[0].knockback==Knockback::PopUp,"an uppercut did not pop him up");
+        Swing hard;hard.move({0,1.4f,.2f},{0,1.4f,-1.f},12);
+        check(hard.out.size()==1&&hard.out[0].knockback==Knockback::SuperFlyBack&&hard.out[0].strength==1,"a very hard punch was weak");
+    });
+    test("punch: a short punch from within his reach still lands", [] {
+        Swing s;
+        // The fist starts 0.35 m from his axis, inside the capsule's reach.
+        s.move({0,1.4f,-.65f},{0,1.4f,-.85f},5);
+        check(s.out.size()==1,"a close-range punch did not land");
+    });
+    test("punch: a capsule is met on its side and on its caps, and missed beside it", [] {
+        const PunchTarget t{1,{0,0,0},1.8f,.3f};
+        float share{};Vec3 point{};
+        check(sweepCapsule({1,1,0},{0,1,0},.1f,t,share,point),"the side was missed");
+        near(share,.6f);near(point.x,.3f);
+        check(sweepCapsule({0,3,0},{0,1,0},.1f,t,share,point),"the top was missed");
+        near(share,.55f);near(point.y,1.8f);
+        check(!sweepCapsule({1,1,0},{1,1,1},.1f,t,share,point),"a fist passing beside hit");
+        check(!sweepCapsule({0,2.3f,0},{1,2.3f,0},.1f,t,share,point),"a fist passing overhead hit");
+    });
+    test("punch configuration rejects invalid tuning", [] {
+        auto bad=[](auto change){PunchConfig c;change(c);try{Punches p(c);return false;}catch(const std::invalid_argument&){return true;}};
+        check(bad([](PunchConfig& c){c.fullSpeed=1;}),"full strength below the punch speed accepted");
+        check(bad([](PunchConfig& c){c.maxDamage=1;}),"less damage at full strength accepted");
+        check(bad([](PunchConfig& c){c.minSpeed=std::numeric_limits<float>::quiet_NaN();}),"NaN speed accepted");
+        check(!bad([](PunchConfig&){}),"defaults rejected");
     });
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;

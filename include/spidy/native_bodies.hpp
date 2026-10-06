@@ -82,13 +82,44 @@ bool predicted(uint64_t actor, Vec3& centre, Vec3& velocity, Vec3& measured);
 bool fling(uint64_t machine, uint64_t record, Vec3 velocity);
 // Whether the machine's state is BotStateFlung now.
 bool flung(uint64_t machine);
+// Damage dealt through the game's own DamageSystem (the static object at
+// 62a4ec0), as its melee and its shockwaves deal it: a direct request
+// against one actor (1eb6d60: target handle, hit direction, hit point, hit
+// normal; the system keeps them for the DamageEvent's HitDirection,
+// HitPosition and HitNormal), whose DamageRequest (0x1a8 bytes) is then
+// filled by its reflected fields (Damager +138, Type +13c, Amount +144,
+// Knockback +150, KnockbackAmount +154, ImpactImpulse +190, DamageHash
+// +19c), each with its field's bit in the masks at +8 and +18 (the bit is the
+// field's index in the reflection: 8 Damager ... 26 DamageHash). The system's
+// pool has no lock: requests are issued on the main thread at the next step.
+// The victim reacts as the game has it react to such a blow (its hit
+// reaction, knockdown, flight; it loses health and can be knocked out).
+// An actor's handle is (generation (+10, 11 bits) << 20) | index (+c, 20
+// bits) of its record in the actor table [7a44380] (0xc0 bytes a record).
+struct Damage {
+    uint64_t victim{}, damager{}; // actor records; no damager: nobody's
+    Vec3 point{}, direction{}, normal{};
+    float amount{};
+    uint32_t type = 1; // DamageType: 1 kMelee, 7 kKinetic
+    // Knockback level (0 kNone ... 9 kSuperFlyBack, punch.hpp's Knockback);
+    // -1 and negative amounts leave a field as the system defaults it.
+    int32_t knockback = -1;
+    float knockbackAmount = -1, impulse = -1;
+    uint32_t hash{}; // DamageHash; 0 leaves it unset
+};
+// Queues one for the next physics step. Returns its ticket, 0 when the
+// module is off or the queue is full.
+uint64_t damage(const Damage&);
+// The newest ticket issued: requests are issued in the order queued.
+uint64_t damageIssued();
 struct Counters {
     // Physics steps seen; props freed and rebuilt; body velocities set;
     // instance poses Spidy set; bots flung and flights steered; requests the
     // game refused, and slots whose lease lapsed; props let go that came to
-    // rest; and props flying free in real time now.
+    // rest; and props flying free in real time now. Damage requests issued,
+    // and those dropped (an actor gone, the system's pool full).
     uint64_t steps{}, frees{}, rebuilds{}, writes{}, follows{}, flings{}, steers{}, rejected{}, expired{},
-        rested{}, flying{};
+        rested{}, flying{}, damages{}, damageDropped{};
 };
 Counters counters();
 // Physics steps seen so far, and the real time the latest took (seconds).

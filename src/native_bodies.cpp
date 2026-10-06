@@ -29,6 +29,12 @@ constexpr uintptr_t worldGlobal = 0x78939e8, physicsGlobal = 0x609a570, recordTa
                     physicsComponent = 0x3d0a460, actorTable = 0x7a436e8, actorCount = 0x7a43704,
                     registryTable = 0x7a44320, registryCount = 0x7a44340, stateMachine = 0x4f843d0,
                     flungState = 0x3832fd8, flungDriver = 0x386c448;
+// The DamageSystem, its direct request (target, hit direction, point,
+// normal), the request it hands out when its pool is full, and the actor
+// table actor handles index.
+constexpr uintptr_t damageSystem = 0x62a4ec0, directDamageRva = 0x1eb6d60, spareRequest = 0x123868,
+                    actorRecords = 0x7a44380, actorRecordCount = 0x7a4439c;
+using DirectDamage = uint8_t* (*)(void*, const uint32_t*, const Vec3*, const Vec3*, const Vec3*);
 constexpr uint16_t debris = 3; // the mode the game's own throws use
 constexpr int activate = 0;    // hknpActivationMode::ACTIVATE
 constexpr unsigned maxSystemBodies = 16;
@@ -63,6 +69,15 @@ struct Fling {
     bool pending{};
 };
 Fling flings[slots];
+// Damage to issue at the next step, in order, with its ticket.
+struct PendingDamage {
+    Damage damage{};
+    uint64_t ticket{};
+};
+constexpr unsigned damageSlots = 16;
+PendingDamage pendingDamage[damageSlots];
+unsigned pendingDamages{};
+uint64_t nextTicket{}, issuedTicket{};
 // A prop the web freed: its root body as the latest step found it.
 struct Followed {
     uint64_t actor{}, component{}, until{};
@@ -131,6 +146,54 @@ bool liveActor(uintptr_t actor, uint32_t& handle) {
     return actor && (handle >> 24) && entries && count > 0 && index < static_cast<uint32_t>(count) &&
            pointer(entries + index * 16ull) == actor &&
            value<uint8_t>(entries + index * 16ull + 8) == handle >> 24 && !value<uint8_t>(actor + 0x5f);
+}
+// An actor record's handle, if the record is still the live one its index
+// names in the actor table; 0 otherwise.
+uint32_t actorHandle(uintptr_t record) {
+    const auto index = value<uint32_t>(record + 0xc) & 0xfffff;
+    const auto generation = value<uint16_t>(record + 0x10) & 0x7ff;
+    const auto records = pointer(base + actorRecords);
+    const auto count = value<uint32_t>(base + actorRecordCount);
+    if (!record || !generation || !records || index >= count || records + index * 0xc0ull != record)
+        return 0;
+    return static_cast<uint32_t>(generation) << 20 | index;
+}
+// One direct damage request, filled with the fields asked for.
+bool damageNow(const Damage& d) {
+    const uint32_t victim = actorHandle(d.victim);
+    const Vec3 direction = normalized(d.direction), normal = normalized(d.normal);
+    if (!victim || !finite(d.point) || length(direction) < .5f || !std::isfinite(d.amount))
+        return false;
+    const auto system = reinterpret_cast<void*>(base + damageSystem);
+    uint8_t* request{};
+    __try {
+        request = reinterpret_cast<DirectDamage>(base + directDamageRva)(
+            system, &victim, &direction, &d.point, length(normal) > .5f ? &normal : &direction);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    if (!request || reinterpret_cast<uintptr_t>(request) == base + damageSystem + spareRequest)
+        return false; // the pool was full: the system handed out its spare
+    uint64_t fields{};
+    const auto set = [&](uint32_t offset, const void* v, int bit) {
+        std::memcpy(request + offset, v, 4);
+        fields |= 1ull << bit;
+    };
+    if (const uint32_t damager = d.damager ? actorHandle(d.damager) : 0)
+        set(0x138, &damager, 8);
+    set(0x13c, &d.type, 9);
+    set(0x144, &d.amount, 11);
+    if (d.knockback >= 0)
+        set(0x150, &d.knockback, 14);
+    if (d.knockbackAmount >= 0)
+        set(0x154, &d.knockbackAmount, 15);
+    if (d.impulse >= 0)
+        set(0x190, &d.impulse, 23);
+    if (d.hash)
+        set(0x19c, &d.hash, 26);
+    *reinterpret_cast<uint64_t*>(request + 8) |= fields;
+    *reinterpret_cast<uint64_t*>(request + 0x18) |= fields;
+    return true;
 }
 // A registered component of this vtable whose record is `record`.
 bool registered(uintptr_t component, uintptr_t vtable, uintptr_t record) {
@@ -278,6 +341,26 @@ void flingNow(const Fling& f) {
         ++totals.rejected;
 }
 void apply(uintptr_t world, const void* input) {
+    // Damage first: the DamageSystem is gameplay's, not the physics world's,
+    // and the game runs its own code in it, so it is issued outside the lock.
+    PendingDamage blows[damageSlots]{};
+    AcquireSRWLockExclusive(&lock);
+    const unsigned blowCount = pendingDamages;
+    std::copy(pendingDamage, pendingDamage + blowCount, blows);
+    pendingDamages = 0;
+    ReleaseSRWLockExclusive(&lock);
+    if (blowCount) {
+        uint64_t issued{}, dropped{}, last{};
+        for (unsigned i = 0; i < blowCount; ++i) {
+            (damageNow(blows[i].damage) ? issued : dropped)++;
+            last = blows[i].ticket;
+        }
+        AcquireSRWLockExclusive(&lock);
+        totals.damages += issued;
+        totals.damageDropped += dropped;
+        issuedTicket = std::max(issuedTicket, last);
+        ReleaseSRWLockExclusive(&lock);
+    }
     float dt{};
     if (!read(reinterpret_cast<uintptr_t>(input), &dt, sizeof(dt)) || !std::isfinite(dt) || dt <= 0 ||
         dt > .2f)
@@ -510,7 +593,10 @@ uint32_t native_bodies::start(uintptr_t gameBase) {
             !entry(flungParamsRva, {0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48,
                                     0x83, 0xec, 0x20, 0x48}) ||
             !entry(flungTypeRva, {0x48, 0x83, 0xec, 0x28, 0x8b, 0x0d, 0x56, 0xad, 0xb1, 0x07, 0x65, 0x48,
-                                  0x8b, 0x04, 0x25, 0x58})) {
+                                  0x8b, 0x04, 0x25, 0x58}) ||
+            !entry(directDamageRva, {0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10, 0x48, 0x89,
+                                     0x74, 0x24, 0x18, 0x48}) ||
+            pointer(base + damageSystem) != base + 0x4f5db58) {
             result = 8001;
             break;
         }
@@ -536,6 +622,8 @@ uint32_t native_bodies::start(uintptr_t gameBase) {
             f = {};
         for (auto& f : followed)
             f = {};
+        pendingDamages = 0;
+        issuedTicket = nextTicket;
         totals = {};
         realStep = 0;
         scale = previousScale = 1;
@@ -654,6 +742,25 @@ bool native_bodies::fling(uint64_t machine, uint64_t record, Vec3 velocity) {
         *slot = {machine, record, limited(velocity, 45), true};
     ReleaseSRWLockExclusive(&lock);
     return slot != nullptr;
+}
+uint64_t native_bodies::damage(const Damage& d) {
+    if (!enabled || !d.victim || !finite(d.point) || !finite(d.direction) || !std::isfinite(d.amount) ||
+        d.amount < 0 || d.knockback > 9)
+        return 0;
+    AcquireSRWLockExclusive(&lock);
+    uint64_t ticket{};
+    if (pendingDamages < damageSlots) {
+        ticket = ++nextTicket;
+        pendingDamage[pendingDamages++] = {d, ticket};
+    }
+    ReleaseSRWLockExclusive(&lock);
+    return ticket;
+}
+uint64_t native_bodies::damageIssued() {
+    AcquireSRWLockShared(&lock);
+    const auto out = issuedTicket;
+    ReleaseSRWLockShared(&lock);
+    return out;
 }
 bool native_bodies::flung(uint64_t machine) {
     const auto state = pointer(machine + 0x70);
