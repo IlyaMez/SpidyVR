@@ -95,15 +95,28 @@ inline bool headView(const Command& c, Mat4& pose, Bounds& lens, float margin = 
     return lens.left > -100 && lens.right < 100 && lens.top > -100 && lens.bottom < 100;
 }
 struct FrameData {
-    uint32_t magic = 0x53455044, version = 2, bytes = sizeof(FrameData), error{};
+    uint32_t magic = 0x53455044, version = 4, bytes = sizeof(FrameData), error{};
     int64_t sequence{};
     uint64_t accepted{}, latched{}, jobCopies[2]{}, jobBegins[2]{}, jobEnds[2]{};
     uint64_t copiedSerial[2]{}, begunSerial[2]{}, endedSerial[2]{};
     uint64_t copiedJob[2]{};
     // Eye job copies the game dropped without rendering, reclaimed by age.
     uint64_t reclaimed{};
+    // Per eye, at each job copy: whether the eye's previous camera position
+    // (view +560, shifted by the engine at the start of the frame) differs
+    // from the one being rendered, and whether that pose was placed in the
+    // frame being rendered or in an earlier one. Eyes placed in view
+    // maintenance were always a frame late and never had a moving history.
+    uint64_t historyMoved[2]{}, historyStill[2]{}, sameFramePoses[2]{}, lateFramePoses[2]{};
+    // Left-eye job copies made while the left hand held a game rope, and the
+    // newest rope's first point relative to that eye's rendered position. With
+    // a fixed hand and head this stays constant; an eye placed a frame late
+    // shifts it by the player's travel in one frame.
+    uint64_t ropeFrames{};
+    float ropeFromEye[3]{};
+    uint32_t reserved{};
 };
-static_assert(sizeof(FrameData) == 160);
+static_assert(sizeof(FrameData) == 248);
 // Hero position a frame's views are placed from. The game's web lines start
 // where its hero rope update read the hero, which can trail the render
 // transform by a simulation step; eyes placed from that same sample keep the
@@ -125,4 +138,9 @@ class FrameHero {
 // World offset the native views applied to the command rendered in a scene
 // generation. Overlays add it to their eye and hand poses for that image.
 bool renderOffset(uint64_t generation, Vec3& offset);
+// First point of a hand's game rope in the frame a scene generation rendered.
+bool renderWebStart(uint64_t generation, unsigned hand, Vec3& start);
+// Largest distance, in one new image, from a tracked web shooter to the game
+// rope it holds. The session report shows whether webs leave the hands.
+void reportWebGap(float metres);
 } // namespace spidy::native_eyes

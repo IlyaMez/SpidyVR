@@ -49,10 +49,13 @@ using SetPose = void (*)(Descriptor*, const float*);
 using Lens = void (*)(Descriptor*, float, float, float, float, float, float, float, float, float, float, bool,
                       bool);
 using Tone = uint64_t (*)(void*, void*, void*, void*, void*, uint64_t);
+using RenderOffscreen = uint8_t (*)();
 Maintain originalMaintain{}, originalUpdate{}, originalCopyFinal{};
 Tone originalTone{};
 Submit originalSubmit{};
+RenderOffscreen originalRenderOffscreen{};
 void* submitHook{};
+void* renderOffscreenHook{};
 // The stock camera's latest submit was replaced by the tracked head view.
 std::atomic<bool> activeAligned{};
 using RenderActor = void (*)(void*, void*, uint8_t);
@@ -78,9 +81,21 @@ uint32_t hiddenHandle{};
 struct RenderOffset {
     uint64_t generation{};
     Vec3 offset{};
+    // Game rope starts of the same frame (bit per hand in `ropes`).
+    Vec3 ropeStarts[2]{};
+    uint32_t ropes{};
 };
 std::array<RenderOffset, 64> offsets{};
 SRWLOCK offsetLock = SRWLOCK_INIT;
+// Hero position the active view was placed from this frame (main thread).
+Vec3 activeHeroPosition{};
+bool activeHeroPlaced{};
+// Frames end with view maintenance (main thread). placedFrame is the frame
+// whose eye poses were placed last; a job copied in a later frame got a late pose.
+uint64_t frameIndex{}, placedFrame{};
+// Diagnostic comparison only (SpidyEyePlacement): place eyes in maintenance,
+// as builds before October 5 did.
+std::atomic<bool> lateEyes{};
 using InitBuffers = bool (*)(void*, const void*, const char*);
 InitBuffers originalInitBuffers{};
 void* initBuffersHook{};
@@ -110,8 +125,8 @@ std::atomic<uint64_t> commandDeadline{};
 std::atomic<float> flatAspect{16.f / 9};
 std::atomic<uint64_t> latchedSerial{}, generation{};
 EyeJobTable jobs; // jobLock
-// Hero rope-update samples already used by view maintenance and the active view.
-native_eyes::FrameHero maintainHero, activeHero;
+// Hero rope-update samples already used by eye placement and the active view.
+native_eyes::FrameHero placedHero, activeHero;
 bool read(uintptr_t p, void* out, size_t n) {
     __try {
         if (p < 0x10000)
@@ -315,13 +330,15 @@ void updateHero(bool immersive) {
 }
 // `lag` is the hero's render-transform distance from the shared rope-update
 // sample the eyes used, or negative when they used the render transform.
-void recordOffset(uint64_t frame, Vec3 offset, bool anchored, bool rejected, float lag) {
+// `activeLag` is the distance from the hero position the active view used
+// this frame, or negative when that view was not placed.
+void recordOffset(const RenderOffset& placed, bool anchored, bool rejected, float lag, float activeLag) {
     AcquireSRWLockExclusive(&offsetLock);
-    offsets[frame % offsets.size()] = {frame, offset};
+    offsets[placed.generation % offsets.size()] = placed;
     ReleaseSRWLockExclusive(&offsetLock);
     if (!anchored && !rejected)
         return;
-    const float distance = length(offset);
+    const float distance = length(placed.offset);
     AcquireSRWLockExclusive(&telemetry);
     auto& data = SpidyAppearanceData;
     InterlockedIncrement64(&data.sequence);
@@ -335,6 +352,11 @@ void recordOffset(uint64_t frame, Vec3 offset, bool anchored, bool rejected, flo
             data.heroLagLast = lag;
             data.heroLagMax = std::max(data.heroLagMax, lag);
             data.heroLagSum += lag;
+        }
+        if (activeLag > .001f) {
+            ++data.activeLagFrames;
+            data.activeLagLast = activeLag;
+            data.activeLagMax = std::max(data.activeLagMax, activeLag);
         }
     }
     data.anchorRejected += rejected;
@@ -399,6 +421,20 @@ void copyJob(void* view, void* settings, void* a, void* b, bool c) {
             // filled after about 10,000 frames, and every later eye frame went
             // unmarked until presentation stalled. Old copies are reclaimed.
             d.reclaimed += jobs.record({job, latchedSerial.load(), generation.load(), i});
+            float rendered[3]{}, previous[3]{};
+            if (read(reinterpret_cast<uintptr_t>(view) + 0x30, rendered, sizeof(rendered)) &&
+                read(reinterpret_cast<uintptr_t>(view) + 0x560, previous, sizeof(previous)))
+                ++(std::memcmp(rendered, previous, sizeof(rendered)) ? d.historyMoved : d.historyStill)[i];
+            ++(placedFrame == frameIndex ? d.sameFramePoses : d.lateFramePoses)[i];
+            uint64_t ropeSamples{};
+            Vec3 ropeHero{}, ropeStarts[2]{};
+            native_webs::heroSample(ropeSamples, ropeHero);
+            if (i == 0 && (native_webs::ropeStarts(ropeSamples, ropeStarts) & 1)) {
+                ++d.ropeFrames;
+                d.ropeFromEye[0] = ropeStarts[0].x - rendered[0];
+                d.ropeFromEye[1] = ropeStarts[0].y - rendered[1];
+                d.ropeFromEye[2] = ropeStarts[0].z - rendered[2];
+            }
             ++d.jobCopies[i];
             d.copiedSerial[i] = latchedSerial;
             d.copiedJob[i] = reinterpret_cast<uint64_t>(job);
@@ -550,10 +586,13 @@ bool activeView(const Descriptor* incoming, Descriptor& out) {
     native_eyes::Bounds lens{};
     bool placed = native_eyes::headView(desired, pose, lens);
     if (placed) {
-        // The same render-frame correction maintain() gives the eyes.
+        // The same render-frame correction placeEyes() gives the eyes.
         Vec3 offset{}, rendered = ropeHero;
-        if (desired.anchored && (shared || heroPosition(rendered)))
+        if (desired.anchored && (shared || heroPosition(rendered))) {
             native_eyes::reanchorOffset(desired.anchor, rendered, offset);
+            activeHeroPosition = rendered;
+            activeHeroPlaced = true;
+        }
         pose[12] += offset.x;
         pose[13] += offset.y;
         pose[14] += offset.z;
@@ -600,16 +639,119 @@ void submit(void* view, const Descriptor* incoming) {
     }
     originalSubmit(view, incoming);
 }
+// Stop, expiry, or a lapsed untimed lease: the eyes leave the render list.
+bool retiring() {
+    return stopRequested || GetTickCount64() >= deadline ||
+           (!config.durationMs && GetTickCount64() >= commandDeadline);
+}
+// Places both eyes for the frame whose render jobs are about to be set up.
+// The frame function 175a060 shifts every view's camera history (18a13c0 ->
+// 189ee00: previous = current), runs gameplay, sets up the offscreen views'
+// jobs (1920240 -> 186d050 -> 19206a0, which copies each view in 19223e0),
+// then the game views', and only then runs view maintenance (187e320 ->
+// 18a0bb0). Until October 5 the eyes were placed in maintenance, so a pose was
+// rendered one frame later. Each eye then trailed its frame's scene by one
+// step of player travel, which drew the game's web lines that far ahead of
+// the tracked hands (0.7 m at 32 m/s), and the next frame's history shift made
+// each eye's previous camera equal to its current one, so motion vectors and
+// temporal anti-aliasing saw no camera motion.
+void placeEyes() {
+    Descriptor main{};
+    const auto primary = pointer(base + 0x7a34dd0);
+    const bool render = read(primary, &main, sizeof(main)) && native_view::valid(main) && !retiring();
+    // This frame's hero rope update, if one ran since the previous frame.
+    uint64_t ropeSamples{};
+    Vec3 ropeHero{};
+    native_webs::heroSample(ropeSamples, ropeHero);
+    const bool shared = placedHero.fresh(ropeSamples, ropeHero);
+    const bool activePlaced = activeHeroPlaced;
+    activeHeroPlaced = false;
+    native_eyes::Command desired{};
+    bool controlled{};
+    if (render) {
+        AcquireSRWLockShared(&commandLock);
+        desired = command;
+        controlled = desired.enabled && GetTickCount64() < commandDeadline;
+        ReleaseSRWLockShared(&commandLock);
+    }
+    latchedImmersive = render && enabled && controlled && desired.enabled == 1;
+    if ((config.createViews & 4) && (latchedImmersive || hiddenHero.load()))
+        updateHero(latchedImmersive);
+    if (!render)
+        return;
+    latchedSerial = controlled ? desired.serial : 0;
+    localActor = playerRecord.load() ? pointer(playerRecord.load()) : 0;
+    if (!activeAligned) // otherwise main carries the head lens; submit() kept the stock shape
+        flatAspect = (main.values[0x404 / 4] - main.values[0x400 / 4]) /
+                     (main.values[0x40c / 4] - main.values[0x408 / 4]);
+    RenderOffset placed{};
+    placed.generation = ++generation;
+    placedFrame = frameIndex;
+    AcquireSRWLockExclusive(&jobLock);
+    InterlockedIncrement64(&SpidyStereoFrames.sequence);
+    SpidyStereoFrames.latched = latchedSerial;
+    InterlockedIncrement64(&SpidyStereoFrames.sequence);
+    ReleaseSRWLockExclusive(&jobLock);
+    // Tracking sampled the player before this frame's gameplay moved it. Move
+    // both eyes with the player to the frame being rendered, so the camera,
+    // world, and body come from one simulation state. Use the position the
+    // game's web lines started from this frame; they then leave the wrists.
+    bool anchored{}, rejected{};
+    float lag = -1, activeLag = -1;
+    if (latchedImmersive && desired.anchored) {
+        const auto& hero = heroFrames[heroSlot.load(std::memory_order_acquire) % heroFrames.size()];
+        const Vec3 transform{hero.transform[12], hero.transform[13], hero.transform[14]};
+        const Vec3 rendered = shared ? ropeHero : transform;
+        anchored = hero.instance && native_eyes::reanchorOffset(desired.anchor, rendered, placed.offset);
+        rejected = !anchored;
+        if (shared) {
+            lag = length(transform - ropeHero);
+            placed.ropes = native_webs::ropeStarts(ropeSamples, placed.ropeStarts);
+        }
+        if (activePlaced)
+            activeLag = length(activeHeroPosition - rendered);
+    }
+    recordOffset(placed, anchored, rejected, lag, activeLag);
+    for (auto& slot : eyes)
+        // A load can replace the native view pool between frames. maintain()
+        // forgets an eye that left it; until then, never write to one.
+        if (auto eye = slot.load(); eye && owned(eye)) {
+            auto descriptor = main;
+            const unsigned index = eye == eyes[0].load() ? 0 : 1;
+            if (controlled && desired.enabled == 2) {
+                reinterpret_cast<Submit>(base + 0x1899ab0)(eye, &descriptor);
+                continue;
+            }
+            auto pose = controlled
+                            ? desired.eyes[index].world
+                            : native_view::relativePose(main.pose(), {{index == 0 ? -.032f : .032f, 0, 0}, {}});
+            pose[12] += placed.offset.x;
+            pose[13] += placed.offset.y;
+            pose[14] += placed.offset.z;
+            // A square diagnostic image needs a square 90-degree frustum.
+            // The main camera has an ultrawide desktop projection. Rebuild all
+            // derived matrices through the verified native lens constructor.
+            const float aspect = static_cast<float>(config.width) / config.height;
+            const auto& fov = desired.eyes[index].fov;
+            reinterpret_cast<Lens>(base + 0x187bb00)(
+                &descriptor, main.nearZ(), main.farZ(), controlled ? std::tan(fov[0]) : -aspect,
+                controlled ? std::tan(fov[1]) : aspect, controlled ? -std::tan(fov[3]) : -1,
+                controlled ? -std::tan(fov[2]) : 1, 0, 0, 0, 0, false, false);
+            reinterpret_cast<SetPose>(base + 0x187ca10)(&descriptor, pose.data());
+            reinterpret_cast<Submit>(base + 0x1899ab0)(eye, &descriptor);
+        }
+}
+// 1920240 sets up this frame's render jobs for the offscreen views.
+uint8_t renderOffscreen() {
+    if (!lateEyes && (enabled || live.load() || hiddenHero.load()))
+        placeEyes();
+    return originalRenderOffscreen();
+}
 void maintain(void* manager) {
     const bool ours = reinterpret_cast<uintptr_t>(manager) == base + 0x7a34dd0;
     Descriptor main{};
     auto primary = pointer(base + 0x7a34dd0);
     const bool valid = ours && read(primary, &main, sizeof(main)) && native_view::valid(main);
-    // This frame's hero rope update, if one ran since the previous maintenance.
-    uint64_t ropeSamples{};
-    Vec3 ropeHero{};
-    native_webs::heroSample(ropeSamples, ropeHero);
-    const bool shared = ours && maintainHero.fresh(ropeSamples, ropeHero);
     AcquireSRWLockExclusive(&creation);
     // A load can replace the native view pool. Check ownership before any write.
     if (ours)
@@ -671,9 +813,7 @@ void maintain(void* manager) {
         }
     }
     ReleaseSRWLockExclusive(&creation);
-    const bool remove = stopRequested || GetTickCount64() >= deadline ||
-                        (!config.durationMs && GetTickCount64() >= commandDeadline);
-    if (ours && remove)
+    if (ours && retiring())
         for (unsigned i = 0; i < 2; ++i)
             if (auto eye = eyes[i].load(); eye && !retired[i]) {
                 // Exclude from new render jobs but retain storage for already queued
@@ -689,83 +829,14 @@ void maintain(void* manager) {
                 InterlockedIncrement64(&SpidyStereoData.sequence);
                 ReleaseSRWLockExclusive(&telemetry);
             }
-    // The engine initializes queued resources here. Pose is assigned before its
-    // per-view history update so culling and previous matrices see the same pose.
-    const bool render = ours && valid && !remove;
-    native_eyes::Command desired{};
-    bool controlled{};
-    if (render) {
-        AcquireSRWLockShared(&commandLock);
-        desired = command;
-        controlled = desired.enabled && GetTickCount64() < commandDeadline;
-        ReleaseSRWLockShared(&commandLock);
-    }
-    if (ours) {
-        latchedImmersive = render && enabled && controlled && desired.enabled == 1;
-        if ((config.createViews & 4) && (latchedImmersive || hiddenHero.load()))
-            updateHero(latchedImmersive);
-    }
-    if (render) {
-        latchedSerial = controlled ? desired.serial : 0;
-        localActor = playerRecord.load() ? pointer(playerRecord.load()) : 0;
-        if (!activeAligned) // otherwise main carries the head lens; submit() kept the stock shape
-            flatAspect = (main.values[0x404 / 4] - main.values[0x400 / 4]) /
-                         (main.values[0x40c / 4] - main.values[0x408 / 4]);
-        const auto frame = ++generation;
-        AcquireSRWLockExclusive(&jobLock);
-        InterlockedIncrement64(&SpidyStereoFrames.sequence);
-        SpidyStereoFrames.latched = latchedSerial;
-        InterlockedIncrement64(&SpidyStereoFrames.sequence);
-        ReleaseSRWLockExclusive(&jobLock);
-        // Tracking samples the player before this frame's gameplay update may
-        // have moved it. Move both eyes with the player to the rendered frame,
-        // so the camera, world, and body come from one simulation state. Use
-        // the position the game's web lines started from this frame. Any move
-        // of the render transform between the rope update and here would
-        // otherwise separate the webs from the wrists by that distance.
-        Vec3 offset{};
-        bool anchored{}, rejected{};
-        float lag = -1;
-        if (latchedImmersive && desired.anchored) {
-            const auto& hero = heroFrames[heroSlot.load(std::memory_order_acquire) % heroFrames.size()];
-            const Vec3 transform{hero.transform[12], hero.transform[13], hero.transform[14]};
-            const Vec3 rendered = shared ? ropeHero : transform;
-            anchored = hero.instance && native_eyes::reanchorOffset(desired.anchor, rendered, offset);
-            rejected = !anchored;
-            if (shared)
-                lag = length(transform - ropeHero);
-        }
-        recordOffset(frame, offset, anchored, rejected, lag);
-        for (auto& slot : eyes)
-            if (auto eye = slot.load()) {
-                auto descriptor = main;
-                const unsigned index = eye == eyes[0].load() ? 0 : 1;
-                if (controlled && desired.enabled == 2) {
-                    reinterpret_cast<Submit>(base + 0x1899ab0)(eye, &descriptor);
-                    continue;
-                }
-                auto pose = controlled
-                                ? desired.eyes[index].world
-                                : native_view::relativePose(main.pose(), {{index == 0 ? -.032f : .032f, 0, 0}, {}});
-                pose[12] += offset.x;
-                pose[13] += offset.y;
-                pose[14] += offset.z;
-                // A square diagnostic image needs a square 90-degree frustum.
-                // The main camera has an ultrawide desktop projection. Rebuild all
-                // derived matrices through the verified native lens constructor.
-                const float aspect = static_cast<float>(config.width) / config.height;
-                const auto& fov = desired.eyes[index].fov;
-                reinterpret_cast<Lens>(base + 0x187bb00)(
-                    &descriptor, main.nearZ(), main.farZ(), controlled ? std::tan(fov[0]) : -aspect,
-                    controlled ? std::tan(fov[1]) : aspect, controlled ? -std::tan(fov[3]) : -1,
-                    controlled ? -std::tan(fov[2]) : 1, 0, 0, 0, 0, false, false);
-                reinterpret_cast<SetPose>(base + 0x187ca10)(&descriptor, pose.data());
-                reinterpret_cast<Submit>(base + 0x1899ab0)(eye, &descriptor);
-            }
-    }
+    // The engine initializes queued resources here. Eye poses are placed in
+    // placeEyes(), before the next frame's render jobs copy the views.
+    if (ours && lateEyes)
+        placeEyes();
     originalMaintain(manager);
     if (!ours)
         return;
+    ++frameIndex;
     AcquireSRWLockExclusive(&telemetry);
     auto& d = SpidyStereoData;
     InterlockedIncrement64(&d.sequence);
@@ -888,10 +959,21 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
         const unsigned char submitBytes[] = {0x48, 0x3b, 0xd1, 0x74, 0x7c, 0x48, 0x8b, 0xc1};
         const unsigned char cameraSubmitBytes[] = {0xe8, 0x6c, 0x2a, 0x25, 0x00};
         const unsigned char poseBytes[] = {0x40, 0x53, 0x48, 0x83, 0xec, 0x60, 0x0f, 0x10, 0x02};
+        // Offscreen render setup, its only call (in the frame function 175a060,
+        // after the history shift 18a13c0 and before view maintenance), and the
+        // history shift's per-view copy 189ee00 that placeEyes() relies on.
+        const unsigned char renderOffscreenBytes[] = {0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24,
+                                                      0x10, 0x57, 0x48, 0x83, 0xec, 0x20, 0x40, 0xb7, 0x01};
+        const unsigned char frameOffscreenBytes[] = {0xe8, 0x92, 0x57, 0x1c, 0x00};
+        const unsigned char historyBytes[] = {0x48, 0x89, 0x5c, 0x24, 0x08, 0x57, 0x48, 0x83, 0xec, 0x20,
+                                              0x48, 0x8b, 0xf9, 0x41, 0xb8, 0x30, 0x05, 0x00, 0x00};
         if (!entry(0x18a0bb0, maintainBytes, sizeof(maintainBytes)) ||
             !entry(0x1899ab0, submitBytes, sizeof(submitBytes)) ||
             !entry(0x164703f, cameraSubmitBytes, sizeof(cameraSubmitBytes)) ||
             !entry(0x187ca10, poseBytes, sizeof(poseBytes)) ||
+            !entry(0x1920240, renderOffscreenBytes, sizeof(renderOffscreenBytes)) ||
+            !entry(0x175aaa9, frameOffscreenBytes, sizeof(frameOffscreenBytes)) ||
+            !entry(0x189ee00, historyBytes, sizeof(historyBytes)) ||
             !entry(0x18a09c0, createBytes, sizeof(createBytes)) ||
             !entry(0x189bd30, updateBytes, sizeof(updateBytes)) ||
             ((config.createViews & 2) && !entry(0x186c670, readbackBytes, sizeof(readbackBytes))) ||
@@ -927,6 +1009,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
             renderActorHook = reinterpret_cast<void*>(base + 0x17991a0);
             setupDisplayHook = reinterpret_cast<void*>(base + 0x1920310);
             submitHook = reinterpret_cast<void*>(base + 0x1899ab0);
+            renderOffscreenHook = reinterpret_cast<void*>(base + 0x1920240);
             s = MH_CreateHook(maintainHook, reinterpret_cast<void*>(maintain),
                               reinterpret_cast<void**>(&originalMaintain));
             if (s == MH_OK)
@@ -959,11 +1042,14 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
             if (s == MH_OK)
                 s = MH_CreateHook(submitHook, reinterpret_cast<void*>(submit),
                                   reinterpret_cast<void**>(&originalSubmit));
+            if (s == MH_OK)
+                s = MH_CreateHook(renderOffscreenHook, reinterpret_cast<void*>(renderOffscreen),
+                                  reinterpret_cast<void**>(&originalRenderOffscreen));
             if (s != MH_OK) {
                 result = 1200 + s;
                 for (auto hook :
                      {maintainHook, updateHook, copyFinalHook, toneHook, copyJobHook, beginJobHook,
-                      endJobHook, initBuffersHook, renderActorHook, setupDisplayHook, submitHook})
+                      endJobHook, initBuffersHook, renderActorHook, setupDisplayHook, submitHook, renderOffscreenHook})
                     MH_RemoveHook(hook);
                 break;
             }
@@ -978,14 +1064,14 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
         if (s == MH_OK)
             s = MH_EnableHook(toneHook);
         for (auto hook : {copyJobHook, beginJobHook, endJobHook, initBuffersHook, renderActorHook,
-                          setupDisplayHook, submitHook})
+                          setupDisplayHook, submitHook, renderOffscreenHook})
             if (s == MH_OK)
                 s = MH_EnableHook(hook);
         if (s == MH_OK)
             s = MH_EnableHook(maintainHook);
         if (s != MH_OK) {
             for (auto hook : {updateHook, copyFinalHook, toneHook, copyJobHook, beginJobHook, endJobHook,
-                              initBuffersHook, renderActorHook, setupDisplayHook, submitHook})
+                              initBuffersHook, renderActorHook, setupDisplayHook, submitHook, renderOffscreenHook})
                 MH_DisableHook(hook);
             result = 1300 + s;
             break;
@@ -1021,7 +1107,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStop(void*) {
     else if (hooked) {
         enabled = false;
         for (auto hook : {maintainHook, updateHook, copyFinalHook, toneHook, copyJobHook, beginJobHook,
-                          endJobHook, initBuffersHook, renderActorHook, setupDisplayHook, submitHook}) {
+                          endJobHook, initBuffersHook, renderActorHook, setupDisplayHook, submitHook, renderOffscreenHook}) {
             auto s = MH_DisableHook(hook);
             if (s != MH_OK && s != MH_ERROR_DISABLED)
                 result = 1500 + s;
@@ -1058,6 +1144,13 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
         DisableThreadLibraryCalls(instance);
     return TRUE;
 }
+// Diagnostic: 1 places the eyes in view maintenance, as before October 5; 0
+// restores placement before the frame's render jobs. tools/probe_eye_frames.py
+// compares the two in the running game.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyEyePlacement(void* late) {
+    lateEyes = late != nullptr;
+    return 0;
+}
 extern "C" float SpidyFlatAspect() {
     return flatAspect.load();
 }
@@ -1070,4 +1163,26 @@ bool spidy::native_eyes::renderOffset(uint64_t frame, Vec3& offset) {
     ReleaseSRWLockShared(&offsetLock);
     offset = entry.generation == frame ? entry.offset : Vec3{};
     return frame && entry.generation == frame;
+}
+bool spidy::native_eyes::renderWebStart(uint64_t frame, unsigned hand, Vec3& start) {
+    AcquireSRWLockShared(&offsetLock);
+    const auto entry = offsets[frame % offsets.size()];
+    ReleaseSRWLockShared(&offsetLock);
+    if (!frame || entry.generation != frame || hand >= 2 || !(entry.ropes & (1u << hand)))
+        return false;
+    start = entry.ropeStarts[hand];
+    return true;
+}
+void spidy::native_eyes::reportWebGap(float metres) {
+    if (!std::isfinite(metres) || metres < 0)
+        return;
+    AcquireSRWLockExclusive(&telemetry);
+    auto& data = SpidyAppearanceData;
+    InterlockedIncrement64(&data.sequence);
+    ++data.webGapFrames;
+    data.webGapLast = metres;
+    data.webGapMax = std::max(data.webGapMax, metres);
+    data.webGapSum += metres;
+    InterlockedIncrement64(&data.sequence);
+    ReleaseSRWLockExclusive(&telemetry);
 }

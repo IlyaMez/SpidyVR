@@ -145,6 +145,96 @@ std::vector<unsigned char> D3D12Renderer::readback(ID3D12Resource* target) {
     readback->Unmap(0, &written);
     return pixels;
 }
+std::uint64_t D3D12Renderer::capture(ID3D12Resource* target) noexcept {
+    if (!target || !device_ || !queue_ || !fence_)
+        return 0;
+    const auto completed = fence_->GetCompletedValue();
+    if (completed == UINT64_MAX || completed < captureFence_)
+        return 0; // device removed, or the previous copy still writes the buffer
+    const auto desc = target->GetDesc();
+    if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.SampleDesc.Count != 1 ||
+        (desc.Format != DXGI_FORMAT_R8G8B8A8_UNORM && desc.Format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB &&
+         desc.Format != DXGI_FORMAT_R8G8B8A8_TYPELESS))
+        return 0;
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+    UINT64 total{};
+    device_->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nullptr, nullptr, &total);
+    if (!total || total == UINT64_MAX)
+        return 0;
+    if (!captureBuffer_ || captureBytes_ < total) {
+        captureBuffer_.Reset();
+        captureMapped_ = nullptr;
+        captureBytes_ = 0;
+        D3D12_RESOURCE_DESC buffer{};
+        buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        buffer.Width = total;
+        buffer.Height = 1;
+        buffer.DepthOrArraySize = 1;
+        buffer.MipLevels = 1;
+        buffer.SampleDesc.Count = 1;
+        buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        auto h = heap(D3D12_HEAP_TYPE_READBACK);
+        ComPtr<ID3D12Resource> created;
+        void* mapped{};
+        if (FAILED(device_->CreateCommittedResource(&h, D3D12_HEAP_FLAG_NONE, &buffer,
+                                                    D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                    IID_PPV_ARGS(&created))) ||
+            FAILED(created->Map(0, nullptr, &mapped)) || !mapped)
+            return 0;
+        captureBuffer_ = created;
+        captureMapped_ = static_cast<const unsigned char*>(mapped);
+        captureBytes_ = total;
+    }
+    if (!captureList_) {
+        ComPtr<ID3D12CommandAllocator> allocator;
+        ComPtr<ID3D12GraphicsCommandList> list;
+        if (FAILED(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator))) ||
+            FAILED(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr,
+                                              IID_PPV_ARGS(&list))) ||
+            FAILED(list->Close()))
+            return 0;
+        captureAllocator_ = allocator;
+        captureList_ = list;
+    }
+    if (FAILED(captureAllocator_->Reset()) || FAILED(captureList_->Reset(captureAllocator_.Get(), nullptr)))
+        return 0;
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = target;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    captureList_->ResourceBarrier(1, &barrier);
+    D3D12_TEXTURE_COPY_LOCATION src{}, dst{};
+    src.pResource = target;
+    src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dst.pResource = captureBuffer_.Get();
+    dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dst.PlacedFootprint = footprint;
+    captureList_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+    std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
+    captureList_->ResourceBarrier(1, &barrier);
+    if (FAILED(captureList_->Close()))
+        return 0;
+    ID3D12CommandList* lists[] = {captureList_.Get()};
+    queue_->ExecuteCommandLists(1, lists);
+    // The fence value is shared with renderViews, which waits for the newest.
+    if (FAILED(queue_->Signal(fence_.Get(), fenceValue_ + 1)))
+        return 0;
+    captureFence_ = ++fenceValue_;
+    captureLayout_ = {captureMapped_ + footprint.Offset, static_cast<unsigned>(desc.Width), desc.Height,
+                      footprint.Footprint.RowPitch};
+    return ++captureTicket_;
+}
+bool D3D12Renderer::captured(std::uint64_t ticket, Captured& out) const noexcept {
+    if (!ticket || ticket != captureTicket_ || !fence_ || !captureMapped_)
+        return false;
+    const auto completed = fence_->GetCompletedValue();
+    if (completed == UINT64_MAX || completed < captureFence_)
+        return false;
+    out = captureLayout_;
+    return true;
+}
 void D3D12Renderer::pipeline(DXGI_FORMAT format) {
     if (pipeline_ && format == format_)
         return;
@@ -317,6 +407,128 @@ void D3D12Renderer::renderViews(std::span<const ViewTarget> views, std::span<con
     hr(queue_->Signal(fence_.Get(), ++fenceValue_), "Signal overlay completion");
     if (waitForCompletion)
         waitForSubmission();
+}
+namespace {
+bool srgb(DXGI_FORMAT format) {
+    return format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB || format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB ||
+           format == DXGI_FORMAT_B8G8R8X8_UNORM_SRGB;
+}
+} // namespace
+void D3D12Renderer::blit(ID3D12Resource* source, DXGI_FORMAT sourceView, bool linearSource, const ViewTarget& target) {
+    if (!source || !target.texture || !target.width || !target.height)
+        throw std::runtime_error("Blit requires a source and a target");
+    waitForSubmission();
+    if (!blitRoot_) {
+        D3D12_DESCRIPTOR_RANGE range{D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, 0};
+        D3D12_ROOT_PARAMETER parameters[2]{};
+        parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        parameters[0].DescriptorTable = {1, &range};
+        parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        parameters[1].Constants.Num32BitValues = 2;
+        parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        D3D12_STATIC_SAMPLER_DESC sampler{};
+        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        sampler.MaxLOD = D3D12_FLOAT32_MAX;
+        sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        D3D12_ROOT_SIGNATURE_DESC rs{2, parameters, 1, &sampler, D3D12_ROOT_SIGNATURE_FLAG_NONE};
+        ComPtr<ID3DBlob> signature, error;
+        hr(D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error),
+           "Serialize blit root signature");
+        hr(device_->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(),
+                                        IID_PPV_ARGS(&blitRoot_)),
+           "Create blit root signature");
+        D3D12_DESCRIPTOR_HEAP_DESC heap{};
+        heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        heap.NumDescriptors = 1;
+        heap.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        hr(device_->CreateDescriptorHeap(&heap, IID_PPV_ARGS(&srv_)), "Create blit descriptor heap");
+    }
+    if (!blitPipeline_ || blitFormat_ != target.format) {
+        // An sRGB target encodes what the pixel shader returns, so display-
+        // encoded input is decoded first and stored values come out unchanged.
+        const char* shader = R"(
+Texture2D source : register(t0);
+SamplerState scaled : register(s0);
+cbuffer Mode : register(b0) { uint linearSource; uint srgbTarget; };
+struct Out { float4 position : SV_POSITION; float2 uv : TEXCOORD; };
+Out vs(uint id : SV_VertexID) {
+    Out o;
+    o.uv = float2((id << 1) & 2, id & 2);
+    o.position = float4(o.uv * float2(2, -2) + float2(-1, 1), 0, 1);
+    return o;
+}
+float3 decode(float3 c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
+float3 encode(float3 c) { return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1 / 2.4) - 0.055; }
+float4 ps(Out i) : SV_TARGET {
+    float3 c = source.SampleLevel(scaled, i.uv, 0).rgb;
+    if (linearSource)
+        c = srgbTarget ? max(c, 0) : encode(saturate(c));
+    else if (srgbTarget)
+        c = decode(saturate(c));
+    return float4(c, 1);
+}
+)";
+        ComPtr<ID3DBlob> vs, ps, error;
+        hr(D3DCompile(shader, std::strlen(shader), "spidy_blit", nullptr, nullptr, "vs", "vs_5_0",
+                      D3DCOMPILE_ENABLE_STRICTNESS, 0, &vs, &error),
+           "Compile blit vertex shader");
+        hr(D3DCompile(shader, std::strlen(shader), "spidy_blit", nullptr, nullptr, "ps", "ps_5_0",
+                      D3DCOMPILE_ENABLE_STRICTNESS, 0, &ps, &error),
+           "Compile blit pixel shader");
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};
+        p.pRootSignature = blitRoot_.Get();
+        p.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
+        p.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
+        p.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        p.NumRenderTargets = 1;
+        p.RTVFormats[0] = target.format;
+        p.SampleDesc.Count = 1;
+        p.SampleMask = UINT_MAX;
+        p.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+        p.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+        p.RasterizerState.DepthClipEnable = TRUE;
+        auto& blend = p.BlendState.RenderTarget[0];
+        blend.SrcBlend = blend.SrcBlendAlpha = D3D12_BLEND_ONE;
+        blend.DestBlend = blend.DestBlendAlpha = D3D12_BLEND_ZERO;
+        blend.BlendOp = blend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        blend.LogicOp = D3D12_LOGIC_OP_NOOP;
+        blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+        blitPipeline_.Reset();
+        hr(device_->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&blitPipeline_)), "Create blit pipeline");
+        blitFormat_ = target.format;
+    }
+    D3D12_SHADER_RESOURCE_VIEW_DESC sv{};
+    sv.Format = sourceView;
+    sv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    sv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    sv.Texture2D.MipLevels = 1;
+    device_->CreateShaderResourceView(source, &sv, srv_->GetCPUDescriptorHandleForHeapStart());
+    D3D12_RENDER_TARGET_VIEW_DESC rv{};
+    rv.Format = target.format;
+    rv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+    const auto rtv = rtv_->GetCPUDescriptorHandleForHeapStart();
+    device_->CreateRenderTargetView(target.texture, &rv, rtv);
+    hr(allocator_->Reset(), "Reset blit allocator");
+    hr(list_->Reset(allocator_.Get(), blitPipeline_.Get()), "Reset blit list");
+    list_->SetGraphicsRootSignature(blitRoot_.Get());
+    ID3D12DescriptorHeap* heaps[] = {srv_.Get()};
+    list_->SetDescriptorHeaps(1, heaps);
+    list_->SetGraphicsRootDescriptorTable(0, srv_->GetGPUDescriptorHandleForHeapStart());
+    const UINT mode[] = {linearSource ? 1u : 0u, srgb(target.format) ? 1u : 0u};
+    list_->SetGraphicsRoot32BitConstants(1, 2, mode, 0);
+    list_->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+    D3D12_VIEWPORT viewport{0, 0, static_cast<float>(target.width), static_cast<float>(target.height), 0, 1};
+    D3D12_RECT rect{0, 0, static_cast<LONG>(target.width), static_cast<LONG>(target.height)};
+    list_->RSSetViewports(1, &viewport);
+    list_->RSSetScissorRects(1, &rect);
+    list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    list_->DrawInstanced(3, 1, 0, 0);
+    hr(list_->Close(), "Close blit list");
+    ID3D12CommandList* lists[] = {list_.Get()};
+    queue_->ExecuteCommandLists(1, lists);
+    hr(queue_->Signal(fence_.Get(), ++fenceValue_), "Signal blit completion");
 }
 void addBox(std::vector<Vertex>& out, Vec3 lo, Vec3 hi, Vec3 color) {
     Vec3 p[] = {{lo.x, lo.y, lo.z}, {hi.x, lo.y, lo.z}, {hi.x, hi.y, lo.z}, {lo.x, hi.y, lo.z},

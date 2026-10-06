@@ -5,6 +5,7 @@ param(
     [string]$Python,
     [switch]$CaptureImages,
     [switch]$OverlayWebs,
+    [switch]$NoWebGrab,
     [switch]$StockMonitorView,
     [switch]$FullDesktopView,
     [switch]$AttachOnly
@@ -17,7 +18,8 @@ if(-not $Python) {
     else { $Python=(Get-Command python.exe -ErrorAction Stop).Source }
 }
 foreach($name in @('spidy_headset_probe.exe','spidy_bridge.dll','spidy_render_probe.dll',
-                   'spidy_ray_bridge.dll','spidy_movement_bridge.dll','spidy_stereo_probe.dll')) {
+                   'spidy_ray_bridge.dll','spidy_movement_bridge.dll','spidy_stereo_probe.dll',
+                   'spidy_render_memory.dll')) {
     $requiredFile=Join-Path $projectRoot "build\windows-ninja\$name"
     if(-not(Test-Path -LiteralPath $requiredFile)) { throw 'Build first with tools\build.ps1 -Observer.' }
 }
@@ -27,15 +29,24 @@ if($Size) { Write-Host "Eye resolution override: $Size x $Size." }
 else { Write-Host 'Eye resolution: Virtual Desktop / Quest runtime recommendation.' }
 if($Seconds) { Write-Host "Timed test: $Seconds seconds." }
 else { Write-Host 'VR stays active until you close the game or press Ctrl+C here.' }
+Write-Host 'VR starts with the game: its intro, menus, loading and cutscenes show on a screen in the headset.'
+Write-Host 'There the controllers are an Xbox controller: thumbstick moves, A selects, B goes back, grips switch tabs.'
+Write-Host 'In VR the menu button pauses and Y opens the game menu (map, suits, skills).'
+Write-Host 'Keep the game window in front on the desktop: the game pauses while another window is.'
 Write-Host 'Click both thumbsticks to switch between immersive VR and a flat game screen in the headset.'
-Write-Host 'Keep grip held to swing. Trigger + grip attaches; release grip to let go.'
-Write-Host "Swing speed cap: $SwingSpeed m/s. Release and press trigger again while gripping to reel."
+Write-Host "Squeeze a grip to shoot that hand's web. Keep it held to swing; release it to let go."
+Write-Host "Swing speed cap: $SwingSpeed m/s. Pull the trigger while a web is attached to reel in."
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $report=Join-Path $projectRoot "reports\game-vr-$stamp.json"
 $captureArgs=@()
 if($CaptureImages) { $captureArgs=@('--capture-images') }
 if($OverlayWebs) { $captureArgs+=@('--overlay-webs'); Write-Host 'Webs: Spidy overlay strands.' }
 else { Write-Host "Webs: the game's own web lines (add -OverlayWebs for Spidy's strands)." }
+if($NoWebGrab) { $captureArgs+=@('--no-web-grab'); Write-Host 'Web grab off: webs only swing.' }
+else {
+    Write-Host 'A web aimed at a throwable prop or a thug catches it: trigger reels it in, a sharp pull yanks'
+    Write-Host 'it to your hand, release the grip to throw (add -NoWebGrab to only swing).'
+}
 if($StockMonitorView) {
     $captureArgs+=@('--stock-monitor-view')
     Write-Host 'Monitor: stock game camera. The game culls and shades for it, not your head.'

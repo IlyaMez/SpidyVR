@@ -1,6 +1,7 @@
 // Draws tracked-hand webs with the game's own rope system. Rope slots are
 // created, aimed, and released only inside the hero rope manager's update,
 // the same phase in which the game's hero states use them.
+#include "spidy/native_appearance.hpp"
 #include "spidy/native_eye_frame.hpp"
 #include "spidy/native_webs.hpp"
 #include <MinHook.h>
@@ -20,7 +21,9 @@ constexpr uint32_t swingRope = 2; // rope type table: 2 = Swing
 // (676dd0 -> 6795b0). EnsureRope sets it to -1. Refreshing it every update
 // lets the game remove Spidy's webs by itself if Spidy stops running.
 constexpr float leaseSeconds = .3f;
-uintptr_t base{}, record{};
+uintptr_t base{};
+// The local player's actor record; retarget() follows it to a new actor.
+std::atomic<uintptr_t> record{};
 Update originalUpdate{};
 void* updateHook{};
 bool hooked{};
@@ -30,6 +33,11 @@ std::atomic<uint64_t> lastHeroUpdate{};
 SRWLOCK lifecycle = SRWLOCK_INIT, requestLock = SRWLOCK_INIT, statusLock = SRWLOCK_INIT, heroLock = SRWLOCK_INIT;
 Vec3 heroPosition{};
 uint64_t heroSamples{};
+// First point of each owned rope as built in the update that took hero sample
+// `startSample` (heroLock).
+Vec3 builtStarts[2]{};
+uint32_t builtHands{};
+uint64_t startSample{};
 native_webs::Request request{};
 uint64_t requestDeadline{};
 native_webs::Status current{};
@@ -40,6 +48,9 @@ struct Owned {
     bool failed{};
 };
 Owned owned[2]; // hero rope manager update only
+// The rope manager the handles above belong to. A new player brings a new
+// one, and an old handle there would name one of the game's own ropes.
+uintptr_t ownedManager{};
 bool read(uintptr_t p, void* out, size_t n) {
     __try {
         if (p < 0x10000)
@@ -89,9 +100,14 @@ void publishParts(uintptr_t manager) {
 }
 void update(void* manager, float dt) {
     const auto mgr = reinterpret_cast<uintptr_t>(manager);
-    if (!enabled || pointer(mgr) != base + 0x38b3df8 || pointer(mgr + 8) != record) {
+    const auto heroRecord = record.load();
+    if (!enabled || !heroRecord || pointer(mgr) != base + 0x38b3df8 || pointer(mgr + 8) != heroRecord) {
         originalUpdate(manager, dt);
         return;
+    }
+    if (mgr != ownedManager) {
+        owned[0] = owned[1] = {};
+        ownedManager = mgr;
     }
     lastHeroUpdate = GetTickCount64();
     native_webs::Request wanted{};
@@ -105,11 +121,12 @@ void update(void* manager, float dt) {
     // camera never steps between two hero positions when a web attaches.
     Vec3 travel{};
     float hero[16]{};
-    const bool placed = read(pointer(record), hero, sizeof(hero));
+    const bool placed = read(pointer(heroRecord), hero, sizeof(hero));
+    uint64_t sample{};
     if (placed) {
         AcquireSRWLockExclusive(&heroLock);
         heroPosition = {hero[12], hero[13], hero[14]};
-        ++heroSamples;
+        sample = ++heroSamples;
         ReleaseSRWLockExclusive(&heroLock);
     }
     if (live && placed)
@@ -119,7 +136,8 @@ void update(void* manager, float dt) {
     const auto release = reinterpret_cast<Release>(base + 0x67b610);
     const auto get = reinterpret_cast<Get>(base + 0x67b7b0);
     uint64_t created{}, released{}, failures{};
-    uint32_t failed{}, count{}, drawn{};
+    uint32_t failed{}, count{}, drawn{}, builtMask{};
+    Vec3 built[2]{};
     float startError = -1;
     for (unsigned hand = 0; hand < 2; ++hand) {
         auto& rope = owned[hand];
@@ -167,30 +185,42 @@ void update(void* manager, float dt) {
             if (!want.tracked)
                 continue; // keep the previous positions for a web that is dissolving
             const Vec3 start = want.wrist + travel;
-            Vec3 toward = normalized(want.anchor - start);
-            if (!want.attached || !finite(toward))
-                toward = {};
-            const Vec3 grip = start + toward * .06f;
-            for (const auto [offset, point] : {std::pair{0x7d60, start}, std::pair{0x7d78, grip},
-                                               std::pair{0x7d90, grip}, std::pair{0x7da8, grip}})
-                if (finite(point))
-                    std::memcpy(reinterpret_cast<void*>(mgr + offset + hand * 12), &point, sizeof(point));
+            if (!finite(start))
+                continue;
+            // A non-zero Grip makes 679dc0 pass two hand points to the hero
+            // override 95f9c0, which rebuilds rope points 0-7 as a 0.45 m tail
+            // hanging from the hand and trailing opposite the hand's world
+            // velocity (7df8). At swing speed that tail streamed behind the
+            // wrist as a second strand. Grip (0,0,0) keeps one hand point, so
+            // the rope runs straight from Start to the anchor.
+            const Vec3 none{};
+            for (const auto [offset, point] : {std::pair{0x7d60, start}, std::pair{0x7d78, none},
+                                               std::pair{0x7d90, start}, std::pair{0x7da8, start}})
+                std::memcpy(reinterpret_cast<void*>(mgr + offset + hand * 12), &point, sizeof(point));
             starts[hand] = start;
-            wrote[hand] = finite(start);
+            wrote[hand] = true;
         }
         originalUpdate(manager, dt);
         std::memcpy(reinterpret_cast<void*>(mgr + 0x7d40), hashes, sizeof(hashes));
-        // 679dc0 stores the start it built each rope from at rope +1c. An
-        // attached rope uses this update's start; a released one (+70c bit 2)
-        // drifts from it, so a gap here means the rope stopped following.
-        for (unsigned hand = 0; hand < 2; ++hand) {
-            Vec3 built{};
+        // 679dc0 starts each attached rope's points (rope +1c) at Start. A
+        // released one (+70c bit 2) drifts from it, and the tail above moved
+        // point 0 away, so a gap here means the rope does not leave the wrist.
+        for (unsigned hand = 0; hand < 2; ++hand)
             if (const auto slot = wrote[hand] && owned[hand].handle ? get(manager, owned[hand].handle) : 0;
-                slot && read(slot + 0x1c, &built, sizeof(built)) && finite(built))
-                startError = std::max(startError, length(built - starts[hand]));
-        }
+                slot && read(slot + 0x1c, &built[hand], sizeof(Vec3)) && finite(built[hand])) {
+                startError = std::max(startError, length(built[hand] - starts[hand]));
+                builtMask |= 1u << hand;
+            }
     } else {
         originalUpdate(manager, dt);
+    }
+    if (sample) {
+        AcquireSRWLockExclusive(&heroLock);
+        builtStarts[0] = built[0];
+        builtStarts[1] = built[1];
+        builtHands = builtMask;
+        startSample = sample;
+        ReleaseSRWLockExclusive(&heroLock);
     }
     publishParts(mgr);
     ownedRopes = count;
@@ -228,7 +258,7 @@ uint32_t native_webs::start(uintptr_t gameBase, uintptr_t heroRecord) {
                                               0xec, 0x20, 0x44, 0x8b, 0x1a, 0x41, 0x0f, 0xb6};
         const unsigned char getBytes[] = {0x0f, 0xb7, 0xc2, 0x83, 0xf8, 0x10, 0x73, 0x30,
                                           0x4c, 0x69, 0xc0, 0xc8, 0x07, 0x00, 0x00, 0x41};
-        if (!base || !record || !entry(0x676dd0, updateBytes, sizeof(updateBytes)) ||
+        if (!base || !record.load() || !entry(0x676dd0, updateBytes, sizeof(updateBytes)) ||
             !entry(0x677d20, ensureBytes, sizeof(ensureBytes)) ||
             !entry(0x67d7c0, targetBytes, sizeof(targetBytes)) ||
             !entry(0x67b610, releaseBytes, sizeof(releaseBytes)) || !entry(0x67b7b0, getBytes, sizeof(getBytes))) {
@@ -269,6 +299,11 @@ uint32_t native_webs::start(uintptr_t gameBase, uintptr_t heroRecord) {
     ReleaseSRWLockExclusive(&lifecycle);
     return result;
 }
+void native_webs::retarget(uintptr_t heroRecord) {
+    AcquireSRWLockExclusive(&lifecycle);
+    record = heroRecord;
+    ReleaseSRWLockExclusive(&lifecycle);
+}
 void native_webs::submit(const Request& next, uint32_t leaseMs) {
     AcquireSRWLockExclusive(&requestLock);
     request = next;
@@ -293,6 +328,14 @@ bool native_webs::heroSample(uint64_t& samples, Vec3& position) {
     ReleaseSRWLockShared(&heroLock);
     return samples != 0;
 }
+uint32_t native_webs::ropeStarts(uint64_t sample, Vec3 starts[2]) {
+    AcquireSRWLockShared(&heroLock);
+    const uint32_t hands = sample && sample == startSample ? builtHands : 0;
+    starts[0] = builtStarts[0];
+    starts[1] = builtStarts[1];
+    ReleaseSRWLockShared(&heroLock);
+    return hands;
+}
 bool native_webs::webInstance(uintptr_t candidate) {
     if (!candidate)
         return false;
@@ -300,6 +343,30 @@ bool native_webs::webInstance(uintptr_t candidate) {
         if (part.load(std::memory_order_relaxed) == candidate)
             return true;
     return false;
+}
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyWebsStart(void* input) {
+    native_webs::ProbeConfig c{};
+    if (!read(reinterpret_cast<uintptr_t>(input), &c, sizeof(c)) || c.magic != 0x53574243 || c.version != 1 ||
+        c.bytes != sizeof(c) || c.pid != GetCurrentProcessId() ||
+        c.base != reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) || !c.record)
+        return 6501;
+    // The eye views hide this hero and anchor to it, as in a VR session.
+    native_appearance::setPlayerRecord(c.record);
+    return native_webs::start(c.base, c.record);
+}
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyWebsSubmit(void* input) {
+    native_webs::ProbeCommand c{};
+    if (!read(reinterpret_cast<uintptr_t>(input), &c, sizeof(c)) || c.magic != 0x5357424d || c.version != 1 ||
+        c.bytes != sizeof(c) || c.leaseMs > 500 || !finite(c.request.feet))
+        return 6502;
+    for (const auto& hand : c.request.hands)
+        if (hand.attached > 1 || hand.tracked > 1 || !finite(hand.anchor) || !finite(hand.wrist))
+            return 6502;
+    native_webs::submit(c.request, c.leaseMs);
+    return 0;
+}
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyWebsStop(void*) {
+    return native_webs::stop();
 }
 uint32_t native_webs::stop() {
     AcquireSRWLockExclusive(&lifecycle);

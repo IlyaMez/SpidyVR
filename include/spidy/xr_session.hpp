@@ -66,6 +66,8 @@ class XrRuntime {
     XrSessionState state_ = XR_SESSION_STATE_UNKNOWN;
     XrActionSet actionSet_{};
     XrAction aim_{}, grip_{}, trigger_{}, squeeze_{}, stick_{}, stickClick_{}, jump_{}, reset_{}, haptic_{};
+    // The other face buttons and the menu button, for the game's menus.
+    XrAction buttonB_{}, buttonX_{}, menu_{};
     std::array<XrPath, 2> handPaths_{};
     std::array<XrSpace, 2> aimSpaces_{}, gripSpaces_{};
     struct Eye {

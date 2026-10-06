@@ -234,12 +234,15 @@ void XrRuntime::actions() {
     xr(xrCreateActionSet(instance_, &set, &actionSet_), "Create actions");
     aim_ = action("aim", "Aim web", XR_ACTION_TYPE_POSE_INPUT);
     grip_ = action("hand", "Tracked hand", XR_ACTION_TYPE_POSE_INPUT);
-    trigger_ = action("trigger", "Arm web / reel", XR_ACTION_TYPE_FLOAT_INPUT);
-    squeeze_ = action("grip", "Hold web", XR_ACTION_TYPE_FLOAT_INPUT);
+    trigger_ = action("trigger", "Reel web", XR_ACTION_TYPE_FLOAT_INPUT);
+    squeeze_ = action("grip", "Shoot and hold web", XR_ACTION_TYPE_FLOAT_INPUT);
     stick_ = action("stick", "Move / turn", XR_ACTION_TYPE_VECTOR2F_INPUT);
     stickClick_ = action("stick_click", "Toggle VR / flat screen", XR_ACTION_TYPE_BOOLEAN_INPUT);
     jump_ = action("jump", "Jump / point launch", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
     reset_ = action("reset", "Reset lab position", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
+    buttonB_ = action("button_b", "Back (menus)", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
+    buttonX_ = action("button_x", "X (menus)", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
+    menu_ = action("menu", "Pause menu", XR_ACTION_TYPE_BOOLEAN_INPUT, false);
     haptic_ = action("haptic", "Web feedback", XR_ACTION_TYPE_VIBRATION_OUTPUT);
     for (bool index : {false, true}) {
         std::vector<XrActionSuggestedBinding> bindings;
@@ -259,6 +262,12 @@ void XrRuntime::actions() {
         bindings.push_back({jump_, path("/user/hand/right/input/a/click")});
         bindings.push_back(
             {reset_, path(index ? "/user/hand/left/input/b/click" : "/user/hand/left/input/y/click")});
+        bindings.push_back({buttonB_, path("/user/hand/right/input/b/click")});
+        bindings.push_back(
+            {buttonX_, path(index ? "/user/hand/left/input/a/click" : "/user/hand/left/input/x/click")});
+        // Index controllers have no menu button; their system button is the runtime's.
+        if (!index)
+            bindings.push_back({menu_, path("/user/hand/left/input/menu/click")});
         XrInteractionProfileSuggestedBinding suggest{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
         suggest.interactionProfile = path(index ? "/interaction_profiles/valve/index_controller"
                                                 : "/interaction_profiles/oculus/touch_controller");
@@ -387,6 +396,9 @@ XrFrame XrRuntime::input(XrTime time) {
     };
     frame.jump = boolean(jump_);
     frame.reset = boolean(reset_);
+    frame.buttons = (frame.jump ? buttonA : 0u) | (boolean(buttonB_) ? buttonB : 0u) |
+                    (boolean(buttonX_) ? buttonX : 0u) | (frame.reset ? buttonY : 0u) |
+                    (boolean(menu_) ? buttonMenu : 0u);
     return frame;
 }
 void XrRuntime::haptic(int hand, float strength) {

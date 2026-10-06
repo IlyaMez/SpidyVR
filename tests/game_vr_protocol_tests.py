@@ -3,17 +3,22 @@ import math
 import pathlib
 import struct
 import sys
+import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]/'tools'))
 from probe_stereo_gpu import snapshot as gpu_snapshot, save_eye_images
-from run_game_vr import snapshot as xr_snapshot, accepted as accepted_xr, timing_snapshot, frame_rates, appearance_snapshot
+from run_game_vr import (snapshot as xr_snapshot, accepted as accepted_xr, timing_snapshot, frame_rates,
+                         appearance_snapshot, eye_snapshot, save_eye_snapshot, rgb_rows, crop_origin,
+                         game_memory, keep_game_log, commit_warning, VR_COMMIT_MB)
 from probe_collision import snapshot as collision_snapshot
 from probe_movement import snapshot as movement_snapshot
 from probe_native_motion import snapshot as motion_snapshot
 from capture_game_state import Game, LIVE_VTABLES
 from probe_native_rays import snapshot as ray_snapshot, command as ray_command
-from probe_game_swing import snapshot as swing_snapshot, command as swing_command, assess as assess_swing
+from probe_game_swing import (snapshot as swing_snapshot, command as swing_command, assess as assess_swing,
+                              flight_summary)
+from probe_game_grab import grab_snapshot, hand_command as grab_hand_command
 
 
 class Reader:
@@ -26,8 +31,8 @@ class Reader:
 
 class ProtocolTests(unittest.TestCase):
     def test_appearance_decodes_each_eye_and_rejects_torn_reads(self):
-        raw = bytearray(288)
-        struct.pack_into('<4I6Q', raw, 0, 0x53415044, 4, 288, 1, 6, 11, 12, 21, 22, 0x123456789)
+        raw = bytearray(328)
+        struct.pack_into('<4I6Q', raw, 0, 0x53415044, 5, 328, 1, 6, 11, 12, 21, 22, 0x123456789)
         struct.pack_into('<2f', raw, 280, -1, -1)
         struct.pack_into('<3Q2I4Q2f2I2Q2fd', raw, 64, 300, 2, 1, 0x4000002a, 0x120,
                          3, 4, 0xabc0, 0xdef0, .25, 1.5, 0x5000001, 0x100, 40, 2, .5, 1.25, 10.0)
@@ -49,6 +54,8 @@ class ProtocolTests(unittest.TestCase):
         self.assertIsNone(result['active_view_fov_deg'])
         self.assertEqual((result['shared_hero_frames'], result['hero_lag_mean_m']), (0, 0.0))
         self.assertEqual((result['web_start_error_m'], result['web_start_error_max_m']), (None, None))
+        self.assertEqual((result['web_hand_gap_frames'], result['web_hand_gap_mean_m']), (0, 0.0))
+        self.assertEqual(result['active_view_lag_frames'], 0)
         struct.pack_into('<2I4Q', raw, 176, 2, 2, 5, 4, 1, 900)
         struct.pack_into('<2Q5f', raw, 216, 120, 3, -1, 1, -.5, 2, 3.5)
         result = appearance_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)
@@ -64,6 +71,12 @@ class ProtocolTests(unittest.TestCase):
         struct.pack_into('<2f', raw, 280, 0, .5)
         result = appearance_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)
         self.assertEqual((result['web_start_error_m'], result['web_start_error_max_m']), (0, .5))
+        struct.pack_into('<Q2fdQ2f', raw, 288, 4, .125, .75, 1.0, 3, .5, .625)
+        result = appearance_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)
+        self.assertEqual((result['web_hand_gap_frames'], result['web_hand_gap_last_m'], result['web_hand_gap_max_m'],
+                          result['web_hand_gap_mean_m']), (4, .125, .75, .25))
+        self.assertEqual((result['active_view_lag_frames'], result['active_view_lag_last_m'],
+                          result['active_view_lag_max_m']), (3, .5, .625))
         horizontal, vertical = result['active_view_fov_deg']
         self.assertAlmostEqual(horizontal, 90, places=4)
         self.assertAlmostEqual(vertical, math.degrees(math.atan(2) + math.atan(.5)), places=4)
@@ -141,6 +154,33 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(struct.unpack_from('<4f',packet,44),(0,0,0,1))
         self.assertEqual(struct.unpack_from('<I2f',packet,72),(1,1,1))
 
+    def test_grab_feedback_decodes_each_hand_the_body_driver_and_rejects_torn_reads(self):
+        raw = bytearray(320)
+        struct.pack_into('<4Iq10Q4I', raw, 0, 0x53475244, 1, 320, 2, 6, *range(1, 11), 5, 0, 6, 0)
+        struct.pack_into('<2IQ4f2I', raw, 120, 3, 1, 0x2156b32d740, -293.5, 2.25, -179.5, 1.35, 1, 0)
+        struct.pack_into('<2IQ4f2I', raw, 160, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        struct.pack_into('<4f9Q', raw, 200, 6.5, 2.5, -13.25, 8.0, *range(20, 29))
+        struct.pack_into('<6f2f', raw, 288, 1, 2, 3, 4, 5, 6, .00415, .0332)
+        result = grab_snapshot(Reader(raw, struct.pack('<q', 6)), 0)
+        self.assertEqual((result['grabs'], result['throws'], result['lost'], result['landed']), (3, 6, 8, 10))
+        self.assertEqual((result['candidates'], result['kinds']), (5, 6))
+        self.assertEqual((result['hands'][0]['phase'], result['hands'][0]['kind']), ('held', 1))
+        self.assertEqual(result['hands'][0]['target'], '0x2156b32d740')
+        self.assertEqual(result['hands'][0]['end'], (-293.5, 2.25, -179.5))
+        self.assertEqual(result['hands'][1]['phase'], 'none')
+        self.assertEqual((result['last_throw'], result['time_scale']), ((6.5, 2.5, -13.25), 8.0))
+        self.assertEqual((result['body_steps'], result['frees'], result['expired']), (20, 21, 28))
+        self.assertEqual((result['commanded'], result['observed']), ((1, 2, 3), (4, 5, 6)))
+        self.assertAlmostEqual(result['step_dt'], .0332, places=6)
+        torn = bytearray(raw)
+        struct.pack_into('<q', torn, 16, 7)
+        self.assertIsNone(grab_snapshot(Reader(*([torn, struct.pack('<q', 7)]*8)), 0))
+        packet = grab_hand_command(9, (1, 2, 3), (0, 0, -1), (0, 0, .1), trigger=.25, grip=1)
+        self.assertEqual(len(packet), 168)
+        self.assertEqual(struct.unpack_from('<3I', packet), (0x5357434d, 2, 168))
+        self.assertEqual(struct.unpack_from('<3f', packet, 60), (0, 0, struct.unpack('<f', struct.pack('<f', .1))[0]))
+        self.assertEqual(struct.unpack_from('<I2f', packet, 72), (1, .25, 1))
+
     def test_ray_geometry_serial_and_body_generation_boundaries(self):
         raw = bytearray(784)
         struct.pack_into('<4IQ5Q4I', raw, 0, 0x53525944, 2, 784, 2, 4, 9, 10, 100, 8, 0xabc, 1, 0, 7, 0)
@@ -171,6 +211,141 @@ class ProtocolTests(unittest.TestCase):
                 save_eye_images(game, final, pathlib.Path('eyes.json'))
             write.assert_not_called()
 
+    def eye_header(self, count=3, pixels=0x50000, width=64, height=64, pitch=256, sequence=8):
+        raw = bytearray(112)
+        struct.pack_into('<4IQ4Q4I2f8f', raw, 0, 0x53455353, 1, 112, 2, sequence, count, pixels, 77, 99,
+                         width, height, pitch, 0, 31.5, .25, 10, 20, -1, -1, -1, -1, 40, 44)
+        return raw
+
+    def test_eye_snapshot_header_decodes_hands_and_rejects_torn_reads(self):
+        raw = self.eye_header()
+        shot = eye_snapshot(Reader(raw, struct.pack('<Q', 8)), 0)
+        self.assertEqual((shot['count'], shot['pixels'], shot['generation'], shot['serial']), (3, 0x50000, 77, 99))
+        self.assertEqual((shot['width'], shot['height'], shot['row_pitch'], shot['flat_screen']), (64, 64, 256, False))
+        self.assertEqual((shot['speed_mps'], shot['web_hand_gap_m']), (31.5, .25))
+        self.assertEqual(shot['game_web'], [False, True])
+        self.assertEqual(shot['wrist_px'], [[10, 20], None])
+        self.assertEqual(shot['rope_start_px'], [None, [40, 44]])
+        self.assertIsNone(eye_snapshot(Reader(*([raw, struct.pack('<Q', 10)]*8)), 0))
+        self.assertIsNone(eye_snapshot(Reader(raw[:50]), 0))
+        struct.pack_into('<f', raw, 76, -1)
+        self.assertIsNone(eye_snapshot(Reader(raw, struct.pack('<Q', 8)), 0)['web_hand_gap_m'])
+
+    def test_eye_rows_keep_colour_order_through_reduction_and_cropping(self):
+        width, height, pitch = 8, 4, 40  # padded rows, as GPU readbacks have
+        data = bytearray(pitch*height)
+        for y in range(height):
+            for x in range(width):
+                data[y*pitch+x*4:y*pitch+x*4+4] = bytes((x, y, x+16*y, 255))
+        self.assertEqual(rgb_rows(bytes(data), pitch, 0, 0, width, height), (8, 4, b''.join(
+            bytes((x, y, x+16*y)) for y in range(height) for x in range(width))))
+        self.assertEqual(rgb_rows(bytes(data), pitch, 0, 0, width, height, 3), (3, 2, b''.join(
+            bytes((x, y, x+16*y)) for y in (0, 3) for x in (0, 3, 6))))
+        self.assertEqual(rgb_rows(bytes(data), pitch, 5, 1, 2, 2), (2, 2, b''.join(
+            bytes((x, y, x+16*y)) for y in (1, 2) for x in (5, 6))))
+        self.assertEqual([crop_origin(c, 512, 3072) for c in (-40, 100, 1536, 3000, 9000)],
+                         [0, 0, 1280, 2560, 2560])
+
+    def test_eye_snapshot_saves_view_and_hand_crop_and_drops_replaced_copies(self):
+        raw = self.eye_header()
+        shot = eye_snapshot(Reader(raw, struct.pack('<Q', 8)), 0)
+        pixels = bytes(256*63+64*4)
+        folder = MagicMock()
+        with patch('run_game_vr.write_rgb_png') as write:
+            game = Reader(pixels, raw, struct.pack('<Q', 8))
+            files = save_eye_snapshot(game, 0, shot, folder, '0003', view=32, crop=16)
+            self.assertEqual(files, dict(view='0003-view.png', view_scale=2, right_hand='0003-right-hand.png',
+                                         right_hand_origin=[32, 36]))
+            self.assertEqual([call.args[1:3] for call in write.call_args_list], [(32, 32), (16, 16)])
+            write.reset_mock()
+            # A newer copy replaced the pixels while they were read.
+            newer = self.eye_header(count=4, sequence=10)
+            self.assertIsNone(save_eye_snapshot(Reader(pixels, newer, struct.pack('<Q', 10)), 0, shot, folder, '0003'))
+            self.assertIsNone(save_eye_snapshot(Reader(pixels[:100], raw, struct.pack('<Q', 8)), 0, shot, folder, '0003'))
+            shot['pixels'] = 0
+            self.assertIsNone(save_eye_snapshot(Reader(), 0, shot, folder, '0003'))
+            write.assert_not_called()
+
+    def test_game_log_is_kept_beside_the_report_with_its_memory_lines(self):
+        line = ('13:33:01:870 (00009916) > [Render] Working set: 3170MB Page file: 10144MB Video Budget: 31418MB '
+                'Video Usage: 3296MB Sys Budget: 45929MB Sys Usage: 379MB Tex Usage: 974MB Tex Budget: 3874MB '
+                'BVH heaps: 60MB BVH size: 55MB Demoted: 12MB fps: 43.5')
+        log = '13:31:58:000 (1) > [Startup] Build: v4.630.0.0\n'+line+'\n13:34:01:870 (2) > [Render] Working set: 31\n'
+        rows = game_memory(log)
+        self.assertEqual(rows, [dict(time='13:33:01', working_set_mb=3170, commit_mb=10144, video_budget_mb=31418,
+                                     video_usage_mb=3296, texture_usage_mb=974, texture_budget_mb=3874,
+                                     demoted_mb=12, fps=43.5)])
+        with tempfile.TemporaryDirectory() as folder:
+            folder = pathlib.Path(folder)
+            (folder/'game.log').write_text(log, encoding='utf-8')
+            copy, memory = keep_game_log(folder/'game-vr-1.json', folder/'game.log')
+            self.assertEqual(copy, folder/'game-vr-1-game.log')
+            self.assertEqual(copy.read_text(encoding='utf-8'), log)
+            self.assertEqual(memory, rows)
+            # A session without a readable game log still gets its report.
+            self.assertEqual(keep_game_log(folder/'game-vr-2.json', folder/'missing.log'), (None, []))
+            self.assertFalse((folder/'game-vr-2-game.log').exists())
+
+    def test_memory_warning_only_when_windows_cannot_promise_a_vr_session(self):
+        self.assertIsNone(commit_warning(None))  # unknown: nothing to say
+        self.assertIsNone(commit_warning(VR_COMMIT_MB))
+        # October 5: 14.5 GB left with the game closed.
+        text = commit_warning(14848)
+        self.assertRegex(text, r'^WARNING: Windows can promise programs only 14\.5 GB more memory, and the game in '
+                               r'VR takes about 19 GB\. Close large programs')
+        self.assertIn('page file', text)
+        # A game that is already running holds part of the total: 14.6 GB after loading, measured.
+        self.assertIsNone(commit_warning(VR_COMMIT_MB-14557, 14557))
+        self.assertIn('only 4.3 GB more memory, and VR takes about 4 GB on top of the running game. Close',
+                      commit_warning(VR_COMMIT_MB-14558, 14557))
+        self.assertIsNone(commit_warning(4096, needed_mb=4096))
+        self.assertIsNotNone(commit_warning(4095, needed_mb=4096))
+        # A game that already holds more than a session takes needs nothing more.
+        self.assertIsNone(commit_warning(0, VR_COMMIT_MB+1))
+        # The running game's share is read from Windows; this process stands in for the game.
+        import os
+        import run_game_vr
+        with patch.object(run_game_vr, 'find_game', return_value=os.getpid()):
+            self.assertTrue(4 < run_game_vr.game_commit_mb() < 4096)
+        with patch.object(run_game_vr, 'find_game', side_effect=RuntimeError('Spider-Man is not running.')):
+            self.assertIsNone(run_game_vr.game_commit_mb())
+        self.assertIsNone(run_game_vr.process_commit_mb(0))  # no such process to ask
+        # At a console the person there decides; an unattended run only prints.
+        ask = Mock()
+        with patch('builtins.print') as shown:
+            run_game_vr.announce_low_memory(None, True, ask)
+            run_game_vr.announce_low_memory(text, False, ask)
+            ask.assert_not_called()
+            shown.assert_called_once_with(text, flush=True)
+            run_game_vr.announce_low_memory(text, True, ask)
+            ask.assert_called_once()
+            run_game_vr.announce_low_memory(text, True, Mock(side_effect=EOFError))
+            with self.assertRaises(KeyboardInterrupt):  # cancels the launch
+                run_game_vr.announce_low_memory(text, True, Mock(side_effect=KeyboardInterrupt))
+
+    def test_vr_starts_once_the_game_draws_frames_and_shows_one_queue(self):
+        import run_game_vr
+        game = Mock()
+        # The renderer runs (30 frames) before the queue is looked for; startup can show no queue
+        # or two for a moment.
+        frames = [None, dict(frames=3), dict(frames=40), dict(frames=80), dict(frames=120)]
+        with patch.object(run_game_vr, 'alive', return_value=True), \
+             patch.object(run_game_vr, 'render_memory_snapshot', side_effect=frames) as memory, \
+             patch.object(run_game_vr, 'discover_queue',
+                          side_effect=[RuntimeError('Exactly one direct game queue required'), 0x1234]) as queue, \
+             patch.object(run_game_vr.time, 'sleep'):
+            self.assertEqual(run_game_vr.wait_for_renderer(game, 5, 0x3000), 0x1234)
+        self.assertEqual((memory.call_count, queue.call_count), (4, 2))
+        # Without the render memory module (an attached game), the queue alone decides.
+        with patch.object(run_game_vr, 'alive', return_value=True), \
+             patch.object(run_game_vr, 'discover_queue', return_value=0x99) as queue:
+            self.assertEqual(run_game_vr.wait_for_renderer(game, 5, None), 0x99)
+        with patch.object(run_game_vr, 'alive', side_effect=[True, False, False]), \
+             patch.object(run_game_vr, 'discover_queue', side_effect=RuntimeError('no queue')), \
+             patch.object(run_game_vr.time, 'sleep'):
+            with self.assertRaisesRegex(RuntimeError, 'closed while starting'):
+                run_game_vr.wait_for_renderer(game, 5, None)
+
     def test_gpu_stamps_and_eye_states_have_correct_boundaries(self):
         raw = bytearray(208)
         struct.pack_into('<4IQ', raw, 0, 0x53475044, 2, 208, 2, 4)
@@ -185,12 +360,13 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual((result['captured'],result['reused'],result['captured_serial']),(101,202,303))
 
     def test_all_readers_reject_incompatible_dlls(self):
-        for reader, magic, size in ((gpu_snapshot, 0x53475044, 208), (xr_snapshot, 0x53585244, 576),
+        for reader, magic, size in ((gpu_snapshot, 0x53475044, 208), (xr_snapshot, 0x53585244, 648),
                                      (collision_snapshot, 0x53435044, 2160),
                                      (movement_snapshot, 0x534d5044, 57408),
                                      (motion_snapshot, 0x534d5644, 176), (ray_snapshot, 0x53525944, 784),
                                      (swing_snapshot,0x53574441,240),(timing_snapshot,0x5358544d,344),
-                                     (appearance_snapshot,0x53415044,288)):
+                                     (appearance_snapshot,0x53415044,328),(eye_snapshot,0x53455353,112),
+                                     (grab_snapshot,0x53475244,320)):
             raw = bytearray(size)
             struct.pack_into('<4IQ', raw, 0, magic, 99, size, 2, 4)
             with self.assertRaisesRegex(RuntimeError, 'protocol mismatch'):
@@ -250,6 +426,23 @@ class ProtocolTests(unittest.TestCase):
         self.assertAlmostEqual(result['air_vertical'], -.15)
         self.assertIsNone(motion_snapshot(Reader(*([raw, struct.pack('<Q', 6)]*8)), 0))
 
+    def test_flight_summary_counts_steps_that_ran_without_the_command(self):
+        def step(index, driven, velocity, status=2, contact=2):
+            return dict(steps=index, controlled=driven, status=status, contact=contact, velocity=velocity)
+        # Steady flight, sampled every step: gravity only, no zigzag, nothing dropped.
+        steady = [step(100+i, 50+i, (10, -.1*i, 0)) for i in range(6)]
+        summary = flight_summary(steady)
+        self.assertEqual((summary['controlled_air_steps'], summary['steps_without_command']), (6, 0))
+        self.assertAlmostEqual(summary['alternation_mps'], 0)
+        # Step 103 ran on the game's own fall speed: its sample is not a controlled one, and
+        # the count of controlled steps fell one behind the count of steps.
+        hitch = steady[:3]+[step(103, 52, (4, -28, 0), status=1)]+[step(104+i, 53+i, (10, -.4, 0)) for i in range(3)]
+        self.assertEqual(flight_summary(hitch)['steps_without_command'], 1)
+        # A sparse sampler sees only the counters.
+        self.assertEqual(flight_summary([steady[0], step(104, 53, (10, -.4, 0))])['steps_without_command'], 1)
+        # Separate flights are not one flight with thousands of missed steps.
+        self.assertEqual(flight_summary([steady[0], step(900, 60, (10, 0, 0))])['steps_without_command'], 0)
+
     def registry(self, slot_generation=5, header_generation=5, changed=False):
         game = Game.__new__(Game)
         game.base = 0x10000000
@@ -277,23 +470,46 @@ class ProtocolTests(unittest.TestCase):
             game.candidate.assert_not_called()
 
     def test_xr_never_publishes_partly_updated_pose(self):
-        raw = bytearray(576)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 3, 576, 3, 4)
+        raw = bytearray(648)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 6, 648, 3, 4)
         self.assertIsNone(xr_snapshot(Reader(*([raw, struct.pack('<Q', 6)]*8)), 0))
 
     def test_xr_decodes_both_hands_and_status_message(self):
-        raw = bytearray(576)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 3, 576, 3, 4)
+        raw = bytearray(648)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 6, 648, 3, 4)
         struct.pack_into('<16f', raw, 160, *range(16))
         struct.pack_into('<16f', raw, 224, *range(16, 32))
         raw[288:295] = b'Tracked'
         struct.pack_into('<2Q',raw,544,50,90)
         struct.pack_into('<4I',raw,560,1,7,2688,2784)
+        struct.pack_into('<2IQ', raw, 576, 3, 0, 1234)
         result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual((result['hands'][0][12], result['hands'][1][12]), (12, 28))
         self.assertEqual(result['message'], 'Tracked')
         self.assertEqual((result['unique_submitted'],result['reused_submitted']),(50,90))
         self.assertEqual((result['flat_screen'],result['toggles'],result['eye_width'],result['eye_height']),(1,7,2688,2784))
+        # The game's camera on the virtual screen while gameplay was unavailable.
+        self.assertEqual((result['presentation'], result['screen_submitted']), ('game_screen', 1234))
+        self.assertEqual((result['gate'], result['camera_mover']), ([], None))
+
+    def test_xr_says_why_gameplay_was_unavailable_and_which_camera_ran(self):
+        raw = bytearray(648)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 6, 648, 3, 4)
+        # A played scene whose camera the gate does not accept, the third player of the session,
+        # and the menu button held on the virtual controller the game has read 900 times.
+        struct.pack_into('<2I2Q2IQ', raw, 592, 8, 0x3872860, 3, 0x2aefe723280, 0x10, 1, 900)
+        result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
+        self.assertEqual((result['gate'], result['camera_mover']), (['other_camera'], 'exterior'))
+        self.assertEqual((result['players'], result['player_record']), (3, '0x2aefe723280'))
+        self.assertEqual((result['pad_buttons'], result['pad_installed'], result['pad_reads']), ('0x10', True, 900))
+        # The player's follow camera commits too, before the other camera each frame.
+        struct.pack_into('<2Q', raw, 632, 4800, 2400)
+        result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
+        self.assertEqual((result['camera_commits'], result['player_commits']), (4800, 2400))
+        # No player and no camera commit; an unnamed camera keeps its offset.
+        struct.pack_into('<2I', raw, 592, 5, 0x3999999)
+        result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
+        self.assertEqual((result['gate'], result['camera_mover']), (['no_player', 'no_camera_commit'], '0x3999999'))
 
 
 if __name__ == '__main__':

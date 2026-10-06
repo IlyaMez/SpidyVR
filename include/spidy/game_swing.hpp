@@ -5,23 +5,90 @@
 #include <limits>
 
 namespace spidy::game_swing {
+// Gravity and air steering are the strengths the October 4-5 test builds
+// actually applied. Those builds configured 18 and 12, but steered from
+// one-step-old state (see InFlightStep), which applied about a third of each.
 struct Config {
     uint32_t magic = 0x53574346, version = 1, bytes = sizeof(Config), pid{};
     uint64_t base{}, record{}, mover{}, motionModule{};
     uint32_t durationMs = 20000;
-    float maxSpeed = 32, gravity = 18;
-    uint32_t reserved{};
+    float maxSpeed = 32, gravity = 6;
+    // Web grab: what a web may catch (bits 1 << game_targets::Kind; 0 = no
+    // grabbing, as before). Only kinds the game adapter can move take effect.
+    uint32_t grabKinds{};
 };
 inline SwingConfig physicsConfig(const Config& c) {
     SwingConfig physics;
     physics.maxSpeed = c.maxSpeed;
     physics.gravity = c.gravity;
     physics.reelSpeed = 16;
-    physics.airAcceleration = 12;
+    physics.airAcceleration = 4;
     physics.maxZipImpulse = 18;
     physics.zipMultiplier = 4.5f;
     return physics;
 }
+// MoverStandard applies a velocity command during the physics step after the
+// one Spidy observes: the observed position starts the step already in flight,
+// and the observed velocity is the command before last. Steering from those
+// made even and odd steps two independent trajectories. Each received gravity
+// and steering every other step, and a yank kicked only one of them, so the
+// body alternated between two velocities and the view shook until landing.
+// Predict from where the step in flight leaves the body instead.
+class InFlightStep {
+  public:
+    struct Sample {
+        uint64_t step{}, serial{};   // native step and the command serial it applies
+        Vec3 position{}, achieved{}; // start of this step; velocity of the previous one
+        float dt{};                  // duration of this step
+        bool controlled{};           // this step applies Spidy's command `serial`
+    };
+    // Body at the start of the step that the next command will govern.
+    Body predict(const Sample& s, bool grounded) {
+        const Record* flight = s.controlled ? find(s.serial) : nullptr;
+        // The command that produced the observed velocity. Without an
+        // observation in between, the step in flight repeats the same command.
+        const Record* produced = s.step == step_ + 1 ? (controlled_ ? find(serial_) : nullptr) : flight;
+        Vec3 velocity = flight ? flight->end : s.achieved;
+        Vec3 travel = (flight ? flight->requested : s.achieved) * s.dt;
+        if (produced) {
+            // Collision took this part of the command away. Remove motion into
+            // that surface; a projection cannot remove one contact twice.
+            const Vec3 lost = produced->requested - s.achieved;
+            if (length(lost) > .25f) {
+                const Vec3 into = normalized(lost);
+                velocity -= into * std::max(0.f, dot(velocity, into));
+                travel -= into * std::max(0.f, dot(travel, into));
+            }
+        }
+        step_ = s.step;
+        serial_ = s.serial;
+        controlled_ = s.controlled;
+        return {s.position + travel, velocity, grounded};
+    }
+    // A submitted command: its velocity and the solver's velocity at its end.
+    void issued(uint64_t serial, Vec3 requested, Vec3 end) {
+        records_[next_++ % records_.size()] = {serial, requested, end};
+    }
+    void reset() {
+        *this = {};
+    }
+
+  private:
+    struct Record {
+        uint64_t serial{};
+        Vec3 requested{}, end{};
+    };
+    const Record* find(uint64_t serial) const {
+        for (const auto& record : records_)
+            if (serial && record.serial == serial)
+                return &record;
+        return nullptr;
+    }
+    std::array<Record, 8> records_{};
+    size_t next_{};
+    uint64_t step_{}, serial_{};
+    bool controlled_{};
+};
 struct Hand {
     Pose aim{};
     Vec3 relative{};

@@ -31,6 +31,10 @@ struct SwingConfig {
     float yankSpeed = 1.3f, yankDistance = .14f, yankWindow = .25f, zipMultiplier = 3.5f, maxZipImpulse = 12;
     float jumpSpeed = 6, pointLaunchWindow = .25f, zipLandingWindow = 1.2f;
     float fixedStep = 1.0f / 120.0f;
+    // A held web lets go only when something stays between the body and the
+    // anchor this long. Hits this close to the anchor (or a tenth of the rope,
+    // if longer) are the anchor's own facade, ledges and sills, not a wall.
+    float obstructionTime = .15f, anchorClearance = 1.5f;
     bool airAnchors = true; // A clear ray attaches at maximum reach, including open sky.
 };
 struct HandInput {
@@ -78,6 +82,12 @@ class Swing {
     // steering state without treating a repeated pose as a new hand sample.
     MotionIntent predictNativeStep(float seconds, const Input&, const WorldQueries&, Body actual,
                                    float inputSeconds);
+    // A prediction covers a step whose length is not known yet. Once the
+    // external engine reports how long that step lasts, call this before the
+    // next prediction, so a winch has reeled for the real time. Frame times
+    // vary by milliseconds; a rope that shortened for a different time than
+    // the body travelled snapped the body by centimetres, a 1 m/s jolt.
+    void settleStep(float predictedSeconds, float actualSeconds);
     void reset(Body body = {});
     void releaseAll();
     bool pointLaunchReady() const {
@@ -99,14 +109,25 @@ class Swing {
 
   private:
     struct HandState {
-        bool chord{}, sample{}, zipUsed{}, triggerReleased{}, blocked{}, reeling{};
+        // held: grip squeezed, with release hysteresis. A web shoots only on the
+        // press that sets it, so a lost web never re-fires while the grip stays held.
+        bool held{}, sample{}, zipUsed{}, triggerReleased{}, reeling{};
         Vec3 previous{};
-        float pullDistance{}, pullTime{}, retryAfter{};
+        float pullDistance{}, pullTime{}, obstructed{};
+        float winch{}; // how fast this hand's rope shortened in the last step
     };
     void inputs(float dt, const Input&, const WorldQueries&);
     void step(float dt, const Input&, const WorldQueries&, const World* collision);
     void move(Vec3 target, const World* collision);
     void release(int hand, EventKind reason = EventKind::Release);
+    // Whether a hit on the line from `from` to `anchor` is a real wall between them.
+    bool blocks(const RayHit& hit, Vec3 from, Vec3 anchor) const;
+    // Rope lengths after winding each hand's rope in at its rate for a time,
+    // which may be negative, within what the ropes and their anchors allow.
+    std::array<float, 2> reeled(std::array<float, 2> rates, float seconds) const;
+    // The share of this hand's winch rate the body's velocity takes up, given
+    // the unit direction from its anchor to the body.
+    float follow(int hand, Vec3 radial) const;
     SwingConfig config_;
     Body body_{};
     std::array<Web, 2> webs_{};

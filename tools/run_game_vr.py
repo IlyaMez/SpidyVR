@@ -1,32 +1,166 @@
 """Launch/attach native VR, with optional bounded tests and automatic eye resolution."""
 import argparse
 import ctypes as c
+from ctypes import wintypes
 import json
 import math
 import os
 import pathlib
+import re
 import struct
 import subprocess
 import sys
 import time
 import signal
+import threading
+import uuid
+import zlib
 from collections import deque
-from capture_game_state import Game, LIVE_VTABLES, find_game, open_process, close
-from capture_movement import component
+from capture_game_state import Game, find_game, open_process, close
 from bridge_game import ROOT, HOOKS, prepare, snapshot as bridge_snapshot
 from inspect_game import PE
 from observe_game import call_remote, call_with_payload, modules
 from probe_stereo_gpu import discover_queue, snapshot as gpu_snapshot, save_eye_images
-from probe_stereo import frame_snapshot
+from probe_stereo import frame_snapshot, render_memory_snapshot
 from probe_native_rays import snapshot as ray_snapshot
 from probe_game_swing import snapshot as swing_snapshot
 from probe_native_motion import snapshot as motion_snapshot
-from vr_launcher import LauncherLock, alive, wait_for_game
+from vr_launcher import LauncherLock, alive, bring_to_front, wait_for_game, enlarge_render_memory, RENDER_MEMORY_HOOKS
 import vr_display
 
 GAME_HOOKS = (*HOOKS, 0x2e67010, 0x1fbe360, 0x1fbda50, 0xa7b3a0, 0x1f9db60,
               0x18a0bb0, 0x189bd30, 0x186cc00, 0x1846c20, 0x19223e0,
-              0x189e310, 0x189e3a0, 0x1873470, 0x17991a0, 0x1920310, 0x676dd0)
+              0x189e310, 0x189e3a0, 0x1873470, 0x17991a0, 0x1920310, 0x676dd0, 0x1920240)
+# What the game process commits in a VR session at 3072 x 3264 per eye (16.7-17.1 GB on October 5),
+# with Spidy's render memory ring and some room to grow.
+VR_COMMIT_MB = 19000
+# Eye snapshots kept per session (the newest), and the header fields saved with each.
+EYE_SHOTS = 72
+EYE_SHOT_FIELDS = ('count', 'generation', 'serial', 'width', 'height', 'flat_screen', 'speed_mps',
+                   'web_hand_gap_m', 'game_web', 'wrist_px', 'rope_start_px')
+
+
+GAME_NAME = "Marvel's Spider-Man Remastered"  # its folder in Documents, and its log's name there
+GAME_MEMORY_FIELDS = {'Working set': 'working_set_mb', 'Page file': 'commit_mb', 'Video Usage': 'video_usage_mb',
+                      'Video Budget': 'video_budget_mb', 'Tex Usage': 'texture_usage_mb',
+                      'Tex Budget': 'texture_budget_mb', 'Demoted': 'demoted_mb', 'fps': 'fps'}
+
+
+def documents_folder():
+    """The user's Documents folder, wherever OneDrive or the user has moved it."""
+    known, path = (c.c_ubyte*16).from_buffer_copy(uuid.UUID('FDD39AD0-238F-46AF-ADB4-6C85480369C7').bytes_le), c.c_void_p()
+    shell, ole = c.windll.shell32, c.windll.ole32
+    shell.SHGetKnownFolderPath.argtypes = [c.c_void_p, wintypes.DWORD, wintypes.HANDLE, c.POINTER(c.c_void_p)]
+    ole.CoTaskMemFree.argtypes = [c.c_void_p]
+    if shell.SHGetKnownFolderPath(known, 0, None, c.byref(path)) or not path.value:
+        return pathlib.Path.home()/'Documents'
+    try:
+        return pathlib.Path(c.wstring_at(path.value))
+    finally:
+        ole.CoTaskMemFree(path)
+
+
+def game_memory(log):
+    """The memory and frame rate line the game writes to its log about once a minute."""
+    rows = []
+    for line in log.splitlines():
+        if '[Render] Working set:' not in line:
+            continue
+        found = dict(re.findall(r'(%s): ?([0-9.]+)' % '|'.join(GAME_MEMORY_FIELDS), line))
+        if len(found) == len(GAME_MEMORY_FIELDS):
+            rows.append(dict(time=line[:8], **{GAME_MEMORY_FIELDS[k]: float(v) for k, v in found.items()}))
+    return rows
+
+
+def keep_game_log(report, source=None):
+    """Copy the game's log beside the report; the game overwrites it the next time it starts.
+
+    Returns the copy's path and the game's memory lines, or (None, []) without a readable log.
+    """
+    source = source or documents_folder()/GAME_NAME/(GAME_NAME+'.log')
+    try:
+        log = source.read_text(encoding='utf-8', errors='replace')
+        copy = report.with_name(report.stem+'-game.log')
+        copy.write_text(log, encoding='utf-8')
+    except OSError:
+        return None, []
+    return copy, game_memory(log)
+
+
+class MemoryStatus(c.Structure):
+    _fields_ = [('dwLength', wintypes.DWORD), ('dwMemoryLoad', wintypes.DWORD), ('ullTotalPhys', c.c_uint64),
+                ('ullAvailPhys', c.c_uint64), ('ullTotalPageFile', c.c_uint64), ('ullAvailPageFile', c.c_uint64),
+                ('ullTotalVirtual', c.c_uint64), ('ullAvailVirtual', c.c_uint64),
+                ('ullAvailExtendedVirtual', c.c_uint64)]
+
+
+def free_commit_mb():
+    """Memory Windows can still promise to programs (RAM plus page file, minus what is committed)."""
+    status = MemoryStatus(dwLength=c.sizeof(MemoryStatus))
+    if not c.windll.kernel32.GlobalMemoryStatusEx(c.byref(status)):
+        return None
+    return status.ullAvailPageFile >> 20
+
+
+class ProcessMemory(c.Structure):
+    _fields_ = [('cb', wintypes.DWORD), ('PageFaultCount', wintypes.DWORD), ('PeakWorkingSetSize', c.c_size_t),
+                ('WorkingSetSize', c.c_size_t), ('QuotaPeakPagedPoolUsage', c.c_size_t),
+                ('QuotaPagedPoolUsage', c.c_size_t), ('QuotaPeakNonPagedPoolUsage', c.c_size_t),
+                ('QuotaNonPagedPoolUsage', c.c_size_t), ('PagefileUsage', c.c_size_t),
+                ('PeakPagefileUsage', c.c_size_t), ('PrivateUsage', c.c_size_t)]
+
+
+def process_commit_mb(pid):
+    """Memory Windows has promised a process (its private bytes), or None if it cannot be asked."""
+    process = open_process(0x1000, False, pid)
+    if not process:
+        return None
+    try:
+        counters = ProcessMemory(cb=c.sizeof(ProcessMemory))
+        query = c.windll.kernel32.K32GetProcessMemoryInfo
+        query.argtypes = [wintypes.HANDLE, c.POINTER(ProcessMemory), wintypes.DWORD]
+        return counters.PrivateUsage >> 20 if query(process, c.byref(counters), counters.cb) else None
+    finally:
+        close(process)
+
+
+def game_commit_mb():
+    """What a game that is already running has been promised, or None when no single game runs."""
+    try:
+        return process_commit_mb(find_game())
+    except RuntimeError:
+        return None
+
+
+def commit_warning(free_mb, game_mb=None, needed_mb=VR_COMMIT_MB):
+    """Text for the console when Windows has less memory left to promise than a VR session takes.
+
+    Windows then grows its page file while the game plays, and requests for memory stall or fail
+    meanwhile; the session of 14:39 on October 5 crashed with 0.6 GB left. `game_mb` is what a
+    game that is already running holds of the total.
+    """
+    needed = needed_mb-(game_mb or 0)
+    if free_mb is None or free_mb >= needed:
+        return None
+    return (f'WARNING: Windows can promise programs only {free_mb/1024:.1f} GB more memory, and '
+            f"{'VR takes about' if game_mb else 'the game in VR takes about'} {needed/1024:.0f} GB"
+            f"{' on top of the running game' if game_mb else ''}. Close large programs (browsers, chat and "
+            'launcher apps) or enlarge the Windows page file, or the game may stall and can crash.')
+
+
+def announce_low_memory(warning, interactive, ask=input):
+    """Print the memory warning. At a console, the person there decides whether to go on.
+
+    Ctrl+C at the question cancels the launch before anything has been started or changed.
+    """
+    if not warning:
+        return
+    print(warning, flush=True)
+    if interactive:
+        try:
+            ask('Press Enter to start anyway, or Ctrl+C to stop and make room first. ')
+        except EOFError:
+            pass
 
 
 def frame_rates(samples):
@@ -76,12 +210,23 @@ def preflight():
     print(result.stdout.strip(), flush=True)
 
 
+PRESENTATIONS = {0: 'none', 1: 'immersive', 2: 'flat', 3: 'game_screen'}
+# Why a frame had no gameplay (game_xr.cpp GateReason).
+GATE_REASONS = ((1, 'no_player'), (2, 'bridge_stopped'), (4, 'no_camera_commit'), (8, 'other_camera'),
+                (16, 'tracking'))
+# Camera movers (Camera2 vtables, image offsets) the gate has names for.
+CAMERA_MOVERS = {0x3871fd8: 'follow', 0x38720d0: 'combat', 0x38727f0: 'death', 0x3872860: 'exterior',
+                 0x38721e0: 'look', 0x38728f0: 'look_game', 0x3872a08: 'melee_animation',
+                 0x385b3f0: 'relative_animation', 0x3872c18: 'turret', 0x3872d28: 'vehicle',
+                 0x4f76d90: 'photo_mode'}
+
+
 def snapshot(game, address):
     for _ in range(8):
-        raw = game.read(address, 576)
-        if len(raw) != 576:
+        raw = game.read(address, 648)
+        if len(raw) != 648:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53585244, 3, 576):
+        if struct.unpack_from('<3I', raw) != (0x53585244, 6, 648):
             raise RuntimeError('Game XR protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -95,6 +240,23 @@ def snapshot(game, address):
                       message=raw[288:544].split(b'\0', 1)[0].decode('utf-8', 'replace'))
         result.update(zip(('unique_submitted','reused_submitted'),struct.unpack_from('<2Q',raw,544)))
         result.update(zip(('flat_screen','toggles','eye_width','eye_height'),struct.unpack_from('<4I',raw,560)))
+        # What the last headset frame showed; game_screen frames showed the game's own camera on the
+        # virtual screen because gameplay was unavailable (menus, hint cards, cutscenes, animated cameras).
+        presentation, = struct.unpack_from('<I', raw, 576)
+        result.update(presentation=PRESENTATIONS.get(presentation, presentation),
+                      screen_submitted=struct.unpack_from('<Q', raw, 584)[0])
+        # Why gameplay was unavailable, and which camera the game used meanwhile (a scene that
+        # stays on the screen although it is played: its camera is missing from the gate).
+        gate, mover = struct.unpack_from('<2I', raw, 592)
+        players, record = struct.unpack_from('<2Q', raw, 600)
+        pad_buttons, pad_installed = struct.unpack_from('<2I', raw, 616)
+        result.update(gate=[name for bit, name in GATE_REASONS if gate & bit],
+                      camera_mover=CAMERA_MOVERS.get(mover, hex(mover) if mover else None),
+                      players=players, player_record=hex(record), pad_buttons=hex(pad_buttons),
+                      pad_installed=bool(pad_installed), pad_reads=struct.unpack_from('<Q', raw, 624)[0])
+        # Camera commits, and those on the player by the follow or combat camera. Both rising while
+        # the gate says other_camera: another camera commits after the player's every frame.
+        result.update(zip(('camera_commits', 'player_commits'), struct.unpack_from('<2Q', raw, 632)))
         return result
     return None
 
@@ -110,10 +272,10 @@ def lens_degrees(left, right, top, bottom):
 
 def appearance_snapshot(game, address):
     for _ in range(8):
-        raw = game.read(address, 288)
-        if len(raw) != 288:
+        raw = game.read(address, 328)
+        if len(raw) != 328:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53415044, 4, 288):
+        if struct.unpack_from('<3I', raw) != (0x53415044, 5, 328):
             raise RuntimeError('Native appearance protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -134,6 +296,8 @@ def appearance_snapshot(game, address):
         active_shift = struct.unpack_from('<f', raw, 248)[0]
         shared_hero, lag_last, lag_max, lag_sum = struct.unpack_from('<Q2fd', raw, 256)
         web_start_last, web_start_max = struct.unpack_from('<2f', raw, 280)
+        gap_frames, gap_last, gap_max, gap_sum = struct.unpack_from('<Q2fd', raw, 288)
+        active_lag_frames, active_lag_last, active_lag_max = struct.unpack_from('<Q2f', raw, 312)
         return dict(hidden_avatar=[left, right], srgb_overlay=[srgb_left, srgb_right], player_actor=hex(actor),
                     hero_state=HERO_STATES.get(state, state), hero_handle=hex(handle), hero_flags=hex(flags),
                     native_hidden_frames=hidden_frames, native_hides=hides, native_restores=restores,
@@ -151,8 +315,101 @@ def appearance_snapshot(game, address):
                     hero_lag_last_m=lag_last, hero_lag_max_m=lag_max,
                     hero_lag_mean_m=lag_sum/shared_hero if shared_hero else 0.0,
                     web_start_error_m=web_start_last if web_start_last >= 0 else None,
-                    web_start_error_max_m=web_start_max if web_start_max >= 0 else None)
+                    web_start_error_max_m=web_start_max if web_start_max >= 0 else None,
+                    # Tracked web shooter to the game's rope in the same image; near zero when webs leave the hands.
+                    web_hand_gap_frames=gap_frames, web_hand_gap_last_m=gap_last, web_hand_gap_max_m=gap_max,
+                    web_hand_gap_mean_m=gap_sum/gap_frames if gap_frames else 0.0,
+                    active_view_lag_frames=active_lag_frames, active_view_lag_last_m=active_lag_last,
+                    active_view_lag_max_m=active_lag_max)
     return None
+
+
+def eye_snapshot(game, address):
+    """Header of the newest copy of the left eye as shown in the headset (include/spidy/eye_snapshot.hpp)."""
+    for _ in range(8):
+        raw = game.read(address, 112)
+        if len(raw) != 112:
+            return None
+        if struct.unpack_from('<3I', raw) != (0x53455353, 1, 112):
+            raise RuntimeError('Eye snapshot protocol mismatch')
+        sequence = struct.unpack_from('<Q', raw, 16)[0]
+        if sequence & 1 or raw[16:24] != game.read(address+16, 8):
+            continue
+        flags = struct.unpack_from('<I', raw, 12)[0]
+        count, pixels, generation, serial = struct.unpack_from('<4Q', raw, 24)
+        width, height, row_pitch, flat = struct.unpack_from('<4I', raw, 56)
+        speed, gap = struct.unpack_from('<2f', raw, 72)
+        points = struct.unpack_from('<8f', raw, 80)
+        pixel = lambda i: [points[i], points[i+1]] if points[i] >= 0 and points[i+1] >= 0 else None
+        return dict(sequence=sequence, count=count, pixels=pixels, generation=generation, serial=serial,
+                    width=width, height=height, row_pitch=row_pitch, flat_screen=bool(flat), speed_mps=speed,
+                    web_hand_gap_m=gap if gap >= 0 else None, game_web=[bool(flags & 1), bool(flags & 2)],
+                    wrist_px=[pixel(0), pixel(2)], rope_start_px=[pixel(4), pixel(6)])
+    return None
+
+
+def write_rgb_png(path, width, height, rgb):
+    def chunk(name, payload):
+        return struct.pack('>I', len(payload))+name+payload+struct.pack('>I', zlib.crc32(name+payload))
+    rows = b''.join(b'\0'+rgb[y*width*3:(y+1)*width*3] for y in range(height))
+    path.write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR', struct.pack('>2I5B', width, height, 8, 2, 0, 0, 0)) +
+                     chunk(b'IDAT', zlib.compress(rows, 3))+chunk(b'IEND', b''))
+
+
+def rgb_rows(data, row_pitch, left, top, width, height, step=1):
+    """RGB bytes of every `step`-th pixel of a rectangle of RGBA rows. Returns (columns, rows, bytes)."""
+    out = []
+    columns = len(range(0, width, step))
+    for y in range(top, top+height, step):
+        row = data[y*row_pitch+left*4:y*row_pitch+(left+width)*4]
+        rgb = bytearray(columns*3)
+        for channel in range(3):
+            rgb[channel::3] = row[channel::4*step]
+        out.append(bytes(rgb))
+    return columns, len(out), b''.join(out)
+
+
+def remove_eye_files(folder, files):
+    for name in files.values():
+        if isinstance(name, str):
+            (folder/name).unlink(missing_ok=True)
+
+
+def crop_origin(center, size, limit):
+    """Left or top edge of a `size`-pixel window around `center`, kept inside 0..limit."""
+    return max(0, min(int(round(center))-size//2, limit-size))
+
+
+def save_eye_snapshot(game, address, shot, folder, name, view=544, crop=512):
+    """Save the newest eye copy: the whole image reduced to about `view` pixels, and a full-resolution
+    `crop` around a hand that holds a game web. Returns the file names, or None if the copy was replaced
+    or unreadable."""
+    width, height, pitch = shot['width'], shot['height'], shot['row_pitch']
+    if not (64 <= width <= 4096 and 64 <= height <= 4096 and width*4 <= pitch <= 4096*4+4096) or shot['pixels'] < 0x10000:
+        return None
+    size = pitch*(height-1)+width*4
+    data = game.read(shot['pixels'], size)
+    again = eye_snapshot(game, address)
+    if len(data) != size or not again or (again['count'], again['sequence']) != (shot['count'], shot['sequence']):
+        return None
+    folder.mkdir(parents=True, exist_ok=True)
+    files = {}
+    step = max(1, math.ceil(max(width, height)/view))
+    columns, rows, rgb = rgb_rows(data, pitch, 0, 0, width, height, step)
+    write_rgb_png(folder/f'{name}-view.png', columns, rows, rgb)
+    files['view'] = f'{name}-view.png'
+    files['view_scale'] = step
+    for hand, label in enumerate(('left', 'right')):
+        point = shot['rope_start_px'][hand] or (shot['wrist_px'][hand] if shot['game_web'][hand] else None)
+        if not point or not (0 <= point[0] < width and 0 <= point[1] < height):
+            continue
+        side = min(crop, width, height)
+        left, top = crop_origin(point[0], side, width), crop_origin(point[1], side, height)
+        columns, rows, rgb = rgb_rows(data, pitch, left, top, side, side)
+        write_rgb_png(folder/f'{name}-{label}-hand.png', columns, rows, rgb)
+        files[f'{label}_hand'] = f'{name}-{label}-hand.png'
+        files[f'{label}_hand_origin'] = [left, top]
+    return files
 
 
 def timing_snapshot(game, address):
@@ -171,6 +428,30 @@ def timing_snapshot(game, address):
             result[name]=dict(count=count,mean_ms=total/count if count else 0,max_ms=maximum,last_ms=last)
         return result
     return None
+
+
+def wait_for_renderer(game, process, render_data, timeout=180):
+    """The game's graphics queue, as soon as the game draws frames (its intro, seconds after it starts).
+
+    `render_data` is the render memory module's telemetry, when that module is loaded: its frame count
+    shows the renderer running before the queue is looked for.
+    """
+    deadline = time.monotonic()+timeout
+    problem = 'the game drew no frames'
+    while alive(game) and time.monotonic() < deadline:
+        memory = render_memory_snapshot(game, render_data) if render_data else None
+        if render_data and (not memory or memory['frames'] < 30):
+            time.sleep(.25)
+            continue
+        try:
+            return discover_queue(game, process)
+        except RuntimeError as error:
+            # Startup can show no queue, or a second one, for a moment.
+            problem = str(error)
+            time.sleep(.5)
+    if not alive(game):
+        raise RuntimeError('The game closed while starting.')
+    raise RuntimeError(f'No game graphics queue within {timeout:.0f} seconds: {problem}.')
 
 
 def game_running():
@@ -201,12 +482,12 @@ def main():
     p.add_argument('--stop-after',type=float,default=0,help='End an untimed session after this many seconds for validation')
     p.add_argument('--capture-images', action='store_true',help='Enable diagnostic CPU eye readback (adds overhead)')
     p.add_argument('--overlay-webs', action='store_true',help="Draw Spidy's overlay webs instead of the game's web lines")
+    p.add_argument('--no-web-grab', action='store_true', help='Webs never catch props or thugs; they only swing')
     p.add_argument('--stock-monitor-view', action='store_true',
                    help="Keep the stock camera as the game's active view; culling and shadows then follow it, not the head")
     p.add_argument('--swing-speed', type=float, default=32, help='Native swing speed cap in m/s (default 32)')
     p.add_argument('--full-desktop-view', action='store_true',
                    help="Start the game with its own display settings instead of a small VR window")
-    p.add_argument('--seed-capture', type=pathlib.Path)
     p.add_argument('--output', type=pathlib.Path, default=ROOT/'reports/game-vr.json')
     a = p.parse_args()
     if a.stop_after and (a.seconds or not 5<=a.stop_after<=300):
@@ -214,6 +495,8 @@ def main():
     if (a.seconds!=0 and not 2 <= a.seconds <= 25) or (a.size!=0 and not 64 <= a.size <= 4096) or not 1 <= a.swing_speed <= 65:
         p.error('Use 0 or 2..25 seconds, 0 or 64..4096 pixels, and 1..65 m/s')
     preflight()
+    announce_low_memory(commit_warning(free_commit_mb(), game_commit_mb()),
+                        bool(sys.stdin and sys.stdin.isatty()))
 
     def prepare_display():
         values = vr_display.prepare_launch(small=not a.full_desktop_view)
@@ -221,69 +504,57 @@ def main():
             print(f"Desktop view: {values['WindowWidth']} x {values['WindowHeight']} window to save GPU time; "
                   'your display settings return when the game closes.', flush=True)
 
-    game = wait_for_game(prepare=prepare_display) if a.auto_launch else Game(find_game())
+    render_module = {}
+
+    def render_memory_module(pid):
+        # In time only in a game that has just started: it creates its render memory once.
+        try:
+            render_module.update(enlarge_render_memory(pid))
+        except (OSError, RuntimeError) as error:
+            print(f'WARNING: render memory module unavailable ({error}).', flush=True)
+
+    # VR starts with the game: its intro, menus and loading show on a screen in the headset until
+    # there is gameplay. The worker finds each player itself (a loaded save, a respawn, a character
+    # switch); before October 5's seventh build the launcher found one, once, and VR stayed on the
+    # screen after any reload.
+    if a.auto_launch:
+        game = wait_for_game(prepare=prepare_display, early=render_memory_module, ready=lambda game: True)
+    else:
+        game = Game(find_game())
+        render_memory_module(game.pid)
     process = bridge = xr = rays = None
     bridge_active = xr_active = False
     previous_signal=None
+    session_report = console_handler = None
+    report_written = False
+    closing, flushed = threading.Event(), threading.Event()
     try:
         pe = PE(game.path.read_bytes())
-        original_entries = {rva:pe.bytes(rva,16) for rva in GAME_HOOKS}
-        if any(game.read(game.base+rva,16) != code for rva,code in original_entries.items()):
+        original_entries = {rva:pe.bytes(rva,16) for rva in (*GAME_HOOKS, *RENDER_MEMORY_HOOKS)}
+        if any(game.read(game.base+rva,16) != original_entries[rva] for rva in GAME_HOOKS):
             raise RuntimeError('A required game entry is already patched. Start a fresh game process.')
-        LIVE_VTABLES['hero_mover'] = 0x38b2c98
-        if a.seed_capture:
-            seed = json.loads(a.seed_capture.read_text())
-            if seed['pid'] != game.pid or int(seed['module_base'], 16) != game.base:
-                raise RuntimeError('Player capture belongs to another game process')
-            candidates = seed['candidates']
-        else:
-            print('Reading the current local player from the component registry.', flush=True)
-            candidates = game.registered_candidates()
-            scanned, complete = 0, False
-            source = 'component_registry'
-            if not any(x['kind'] == 'hero_local' for x in candidates):
-                print('Using bounded heap discovery (up to 20 seconds).', flush=True)
-                found, scanned, complete = game.discover(8192 << 20, 20)
-                candidates = list(found.values())
-                source = 'heap_scan'
-            seed = dict(pid=game.pid, module_base=hex(game.base), candidates=candidates,
-                        scanned_mib=scanned/(1 << 20), scan_complete=complete, discovery_source=source)
-            a.output.parent.mkdir(parents=True, exist_ok=True)
-            a.output.with_name(a.output.stem+'-player.json').write_text(json.dumps(seed, indent=2)+'\n')
-        heroes = [game.candidate(int(x['object'], 16), 'hero_local') for x in candidates if x['kind'] == 'hero_local']
-        heroes = [h for h in heroes if h]
-        if len(heroes) != 1:
-            raise RuntimeError('Exactly one independently validated local hero is required')
-        hero = heroes[0]
-        managers = [x for x in game.registered_candidates() if x['kind'] == 'hero_mover' and
-                    x['actor_record'] == hero['actor_record']]
-        if len(managers) != 1:
-            raise RuntimeError('Exactly one local movement manager is required')
-        handle = struct.unpack('<I',game.read(int(managers[0]['object'],16)+0xdb4,4))[0]
-        mover = component(game,handle)
         process = open_process(0x0400 | 0x0010 | 0x0020 | 0x0008 | 0x0002, False, game.pid)
         if not process:
             raise c.WinError(c.get_last_error())
+        render_data = render_module.get('SpidyRenderMemoryData')
+        queue = wait_for_renderer(game, process, render_data)
+        if not bring_to_front(game.pid):
+            print('Click the game window once: the game pauses while another window is in front.', flush=True)
         bridge, bridge_hash = prepare(game.pid, process,
-            names=('SpidyStart', 'SpidyStop', 'SpidySubmit', 'SpidyBridgeData', 'SpidyBridgeSample'))
-        config = struct.pack('<4I3Q', 0x53424346, 1, 40, game.pid, game.base,
-                             int(hero['object'], 16), int(hero['actor_record'], 16))
+            names=('SpidyStart', 'SpidyStop', 'SpidySubmit', 'SpidyRetarget', 'SpidyBridgeData',
+                   'SpidyBridgeSample'))
+        # No player yet: the VR worker hands the bridge each one it finds.
+        config = struct.pack('<4I3Q', 0x53424346, 1, 40, game.pid, game.base, 0, 0)
         code = call_with_payload(process, bridge['SpidyStart'], config)
         if code:
             raise RuntimeError(f'Input bridge start: {code}')
         bridge_active = True
-        queue = discover_queue(game, process)
-        b = bridge_snapshot(game, bridge['SpidyBridgeData'])
-        camera_deadline=time.monotonic()+10
-        while a.auto_launch and (not b or not b['matched']) and time.monotonic()<camera_deadline and alive(game):
-            time.sleep(.1)
-            b=bridge_snapshot(game,bridge['SpidyBridgeData'])
-        if not b or not b['matched']:
-            raise RuntimeError('The active game camera does not follow the discovered player')
         bridge_module = next(m['base'] for m in modules(game.pid) if m['name'].lower() == 'spidy_bridge.dll')
         rays, ray_hash = prepare(game.pid, process, ROOT/'build/windows-ninja/spidy_ray_bridge.dll',
             ROOT/'reports/ray-modules', ('SpidyRayStart', 'SpidyRaySubmit', 'SpidyRayStop',
-                                       'SpidyRaySample', 'SpidyRayData', 'SpidySwingData'))
+                                       'SpidyRaySample', 'SpidyRayData', 'SpidySwingData', 'SpidyGrabData'))
+        # Imported here: probe_game_grab imports from this module.
+        from probe_game_grab import grab_snapshot
         ray_module = next(m['base'] for m in modules(game.pid) if m['name'].lower() == 'spidy_ray_bridge.dll')
         motion, motion_hash = prepare(game.pid,process,ROOT/'build/windows-ninja/spidy_movement_bridge.dll',
             ROOT/'reports/motion-modules',('SpidyMotionStart','SpidyMotionSubmit','SpidyMotionSample',
@@ -292,12 +563,12 @@ def main():
         xr, xr_hash = prepare(game.pid, process, ROOT/'build/windows-ninja/spidy_stereo_probe.dll',
             ROOT/'reports/stereo-modules', ('SpidyXrStart', 'SpidyXrStop', 'SpidyXrKeepAlive', 'SpidyXrData',
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
-                                           'SpidyStereoFrames'))
-        config = struct.pack('<4I7Q2IfI', 0x53585243, 5, 88, game.pid, game.base, queue,
-                             bridge_module, ray_module, motion_module, int(hero['actor_record'],16), mover,
+                                           'SpidyStereoFrames', 'SpidyXrSnapshot'))
+        config = struct.pack('<4I7Q2IfI', 0x53585243, 6, 88, game.pid, game.base, queue,
+                             bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
-                             (4 if a.stock_monitor_view else 0))
+                             (4 if a.stock_monitor_view else 0) | (8 if a.no_web_grab else 0))
         code = call_with_payload(process, xr['SpidyXrStart'], config)
         if code:
             raise RuntimeError(f'Game XR start: {code}')
@@ -306,74 +577,175 @@ def main():
         samples = deque(maxlen=12000)
         ray_samples = deque(maxlen=12000)
         swing_samples = deque(maxlen=12000)
+        # The web grab: a sample when a counter or a hand's grab changes, else once a second.
+        grab_samples = deque(maxlen=12000)
         motion_samples = deque(maxlen=12000)
+        eye_shots = deque()
+        eye_folder = a.output.with_name(a.output.stem+'-eyes')
+        shot_count = 0
         appearance = None
         eye_jobs = None
+        render_memory = None
+        lowest_commit = start_commit = free_commit_mb()
+        printed_ring = False
         previous = None
         printed_dimensions=False
         renewed=0
         stop_requested=False
+
+        def session_report(**extra):
+            """Everything sampled so far. It is written however the session ends."""
+            return dict(pid=game.pid, eye_size=a.size, swing_speed=a.swing_speed, motion_hash=motion_hash,
+                        xr_hash=xr_hash, ray_hash=ray_hash, samples=list(samples),
+                        swing_samples=list(swing_samples), motion_samples=list(motion_samples),
+                        grab_samples=list(grab_samples),
+                        ray_samples=list(ray_samples), appearance=appearance, eye_jobs=eye_jobs,
+                        render_memory=render_memory,
+                        free_commit_mb=dict(start=start_commit, lowest=lowest_commit),
+                        eye_snapshots=list(eye_shots), eye_snapshot_folder=str(eye_folder) if eye_shots else None,
+                        frame_rates=frame_rates(list(samples)), final=samples[-1] if samples else None, **extra)
+
+        def write_report(result):
+            nonlocal report_written
+            a.output.parent.mkdir(parents=True, exist_ok=True)
+            # Texture and video memory pressure and the game's own frame rate, minute by minute.
+            copy, memory = keep_game_log(a.output)
+            result.update(game_log=str(copy) if copy else None, game_memory=memory)
+            a.output.write_text(json.dumps(result, indent=2)+'\n')
+            report_written = True
+
         def request_stop(_signal,_frame):
             nonlocal stop_requested
             stop_requested=True
             print('Stopping VR and restoring game hooks...',flush=True)
         previous_signal=signal.signal(signal.SIGINT,request_stop)
-        while not stop_requested and (not a.seconds or time.monotonic()-started < a.seconds+40) and alive(game):
-            if a.stop_after and time.monotonic()-started>=a.stop_after: break
-            if not a.seconds and time.monotonic()-renewed>=1:
-                if call_remote(process,xr['SpidyXrKeepAlive']): break
-                renewed=time.monotonic()
-            sample = snapshot(game, xr['SpidyXrData'])
-            if sample:
-                sample['seconds'] = time.monotonic()-started
-                appearance = appearance_snapshot(game, xr['SpidyAppearanceData']) or appearance
-                sample['appearance'] = appearance
-                # Eye job copies the game dropped unrendered (reclaimed by age).
-                eye_jobs = frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs
-                sample['eye_jobs_reclaimed'] = eye_jobs['reclaimed'] if eye_jobs else None
-                samples.append(sample)
-                if sample['eye_width'] and not printed_dimensions:
-                    print(f"Rendering {sample['eye_width']} x {sample['eye_height']} pixels per eye.",flush=True)
-                    printed_dimensions=True
-                aim = ray_snapshot(game, rays['SpidyRayData'])
-                if aim and aim['serial'] and (not ray_samples or aim['serial'] != ray_samples[-1]['serial']):
-                    ray_samples.append(aim)
-                swing = swing_snapshot(game,rays['SpidySwingData'])
-                if swing and swing['steps'] and (not swing_samples or swing['steps'] != swing_samples[-1]['steps']):
-                    swing_samples.append(swing)
-                movement = motion_snapshot(game, motion['SpidyMotionData'])
-                if movement and movement['steps'] and (not motion_samples or movement['steps'] != motion_samples[-1]['steps']):
-                    motion_samples.append(movement)
-                state = (sample['status'], sample['message'])
-                if state != previous:
-                    print(sample['message'], flush=True)
-                    previous = state
-                if sample['status'] in (4, 5):
-                    break
-            time.sleep(.05)
+
+        def console_event(kind):
+            # Closing the console window (2), logoff (5), or shutdown (6) ends this process within
+            # about five seconds. Hold Windows off until the report is on disk.
+            if kind not in (2, 5, 6):
+                return False
+            closing.set()
+            flushed.wait(4.5)
+            return True
+        console_handler = c.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)(console_event)
+        c.windll.kernel32.SetConsoleCtrlHandler(console_handler, True)
+        loop_error = None
+        try:
+            while (not stop_requested and not closing.is_set() and
+                   (not a.seconds or time.monotonic()-started < a.seconds+40) and alive(game)):
+                if a.stop_after and time.monotonic()-started>=a.stop_after: break
+                if not a.seconds and time.monotonic()-renewed>=1:
+                    if call_remote(process,xr['SpidyXrKeepAlive']): break
+                    renewed=time.monotonic()
+                sample = snapshot(game, xr['SpidyXrData'])
+                if sample:
+                    sample['seconds'] = time.monotonic()-started
+                    appearance = appearance_snapshot(game, xr['SpidyAppearanceData']) or appearance
+                    sample['appearance'] = appearance
+                    # Eye job copies the game dropped unrendered (reclaimed by age).
+                    eye_jobs = frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs
+                    sample['eye_jobs_reclaimed'] = eye_jobs['reclaimed'] if eye_jobs else None
+                    # Frames whose render memory request did not fit lose a view's work.
+                    if render_data:
+                        render_memory = render_memory_snapshot(game, render_data) or render_memory
+                    if render_memory:
+                        sample['render_frame_mb'] = render_memory['last_frame_mb']
+                        sample['render_overflow_frames'] = render_memory['overflow_frames']
+                        if render_memory['frames'] > 2 and not printed_ring:
+                            printed_ring = True
+                            if render_memory['ring'] == 'spidy_ring':
+                                print(f"Render memory: {render_memory['ring_mb']:.0f} MB for two frames "
+                                      f"(the game's own: {render_memory['game_ring_mb']:.0f} MB).", flush=True)
+                            else:
+                                print("WARNING: the game is on its own 128 MB of render memory, which three "
+                                      'views overflow in heavy scenes: eye frames drop and the game can '
+                                      'crash. Close the game and start it with Launch Spidy VR.', flush=True)
+                    sample['free_commit_mb'] = free_commit_mb()
+                    if sample['free_commit_mb'] is not None:
+                        lowest_commit = min(lowest_commit or sample['free_commit_mb'], sample['free_commit_mb'])
+                    samples.append(sample)
+                    if sample['eye_width'] and not printed_dimensions:
+                        print(f"Rendering {sample['eye_width']} x {sample['eye_height']} pixels per eye.",flush=True)
+                        printed_dimensions=True
+                    aim = ray_snapshot(game, rays['SpidyRayData'])
+                    if aim and aim['serial'] and (not ray_samples or aim['serial'] != ray_samples[-1]['serial']):
+                        ray_samples.append(aim)
+                    swing = swing_snapshot(game,rays['SpidySwingData'])
+                    if swing and swing['steps'] and (not swing_samples or swing['steps'] != swing_samples[-1]['steps']):
+                        swing_samples.append(swing)
+                    grab = grab_snapshot(game, rays['SpidyGrabData'])
+                    if grab:
+                        grab['seconds'] = round(time.monotonic()-started, 3)
+                        key = [grab[k] for k in ('grabs', 'yanks', 'catches', 'throws', 'releases', 'lost', 'landed',
+                                                 'flings', 'refused', 'drive_failures', 'error')]
+                        key += [h['phase'] for h in grab['hands']]
+                        last = grab_samples[-1] if grab_samples else None
+                        if not last or last['key'] != key or grab['seconds']-last['seconds'] >= 1:
+                            grab['key'] = key
+                            grab_samples.append(grab)
+                    movement = motion_snapshot(game, motion['SpidyMotionData'])
+                    if movement and movement['steps'] and (not motion_samples or movement['steps'] != motion_samples[-1]['steps']):
+                        motion_samples.append(movement)
+                    # What the headset showed: the newest copy of the left eye, when there is a new one.
+                    shot = eye_snapshot(game, xr['SpidyXrSnapshot'])
+                    if shot and shot['pixels'] and shot['count'] != shot_count:
+                        shot_count = shot['count']
+                        try:
+                            files = save_eye_snapshot(game, xr['SpidyXrSnapshot'], shot, eye_folder,
+                                                      f"{shot['count']:04d}")
+                        except OSError:
+                            files = None  # a full disk must not end the session
+                        if files:
+                            eye_shots.append(dict(seconds=sample['seconds'], files=files,
+                                                  **{k: shot[k] for k in EYE_SHOT_FIELDS}))
+                            while len(eye_shots) > EYE_SHOTS:
+                                remove_eye_files(eye_folder, eye_shots.popleft()['files'])
+                    state = (sample['status'], sample['message'])
+                    if state != previous:
+                        print(sample['message'], flush=True)
+                        previous = state
+                    if sample['status'] in (4, 5):
+                        break
+                time.sleep(.05)
+        except (OSError, RuntimeError) as error:
+            # A closing game fails remote calls while its process handle still reports it running.
+            # The 12:05 session on October 5 ended that way and its report was never written.
+            loop_error = error
+        if closing.is_set():
+            write_report(session_report(launcher_closed=True))
+            flushed.set()
+        if loop_error is not None:
+            leaving = time.monotonic()+10
+            while alive(game) and time.monotonic() < leaving:
+                time.sleep(.1)
         if not alive(game):
             xr_active=bridge_active=False
-            result=dict(pid=game.pid,game_exited=True,eye_size=a.size,samples=list(samples),
-                        swing_speed=a.swing_speed, motion_hash=motion_hash, xr_hash=xr_hash, ray_hash=ray_hash,
-                        motion_samples=list(motion_samples), appearance=appearance, eye_jobs=eye_jobs,
-                        frame_rates=frame_rates(list(samples)),final=samples[-1] if samples else None,
-                        swing_samples=list(swing_samples),ray_samples=list(ray_samples))
-            a.output.parent.mkdir(parents=True,exist_ok=True)
-            a.output.write_text(json.dumps(result,indent=2)+'\n')
+            write_report(session_report(game_exited=True, error=str(loop_error) if loop_error else None))
             print(f'Game closed. Session report: {a.output.resolve()}',flush=True)
             return 0
+        if loop_error is not None:
+            write_report(session_report(game_exited=False, error=str(loop_error)))
+            print(f'Session report: {a.output.resolve()}',flush=True)
+            raise loop_error
         xr_stop = call_remote(process, xr['SpidyXrStop'])
         xr_active = xr_stop != 0
         bridge_stop = call_remote(process, bridge['SpidyStop'])
         bridge_active = bridge_stop != 0
+        final_render_memory = render_memory_snapshot(game, render_data) if render_data else None
+        render_stop = call_remote(process, render_module['SpidyRenderMemoryStop']) if render_module else 0
         result = dict(pid=game.pid, module_base=hex(game.base), bridge_hash=bridge_hash, xr_hash=xr_hash,
             eye_size=a.size,capture_images=a.capture_images,timing=timing_snapshot(game,xr['SpidyXrTimingData']),
             ray_hash=ray_hash, ray_samples=list(ray_samples), rays=ray_snapshot(game, rays['SpidyRayData']),
             motion_hash=motion_hash, swing_speed=a.swing_speed, swing_samples=list(swing_samples),
+            grab_samples=list(grab_samples), grab=grab_snapshot(game, rays['SpidyGrabData']),
             motion_samples=list(motion_samples), appearance=appearance_snapshot(game,xr['SpidyAppearanceData']),
             eye_jobs=frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs,
+            render_memory=final_render_memory or render_memory, render_stop=render_stop,
+            free_commit_mb=dict(start=start_commit, lowest=lowest_commit),
             swing=swing_snapshot(game,rays['SpidySwingData']),
             samples=list(samples), final=snapshot(game, xr['SpidyXrData']), gpu=gpu_snapshot(game, xr['SpidyGpuData']),
+            eye_snapshots=list(eye_shots), eye_snapshot_folder=str(eye_folder) if eye_shots else None,
             bridge=bridge_snapshot(game, bridge['SpidyBridgeData']), xr_stop=xr_stop, bridge_stop=bridge_stop)
         result['game_entries_restored'] = all(game.read(game.base+rva,16) == code
                                               for rva,code in original_entries.items())
@@ -385,7 +757,7 @@ def main():
         except (OSError, ValueError, RuntimeError) as error:
             result['image_capture_error'] = str(error)
         result['passed'] = accepted(result)
-        a.output.write_text(json.dumps(result, indent=2)+'\n')
+        write_report(result)
         final = result['final']
         print(json.dumps(dict(final=final, gpu=result['gpu'], appearance=result['appearance'],
                               xr_stop=xr_stop, bridge_stop=bridge_stop), indent=2))
@@ -396,14 +768,31 @@ def main():
             print(f"New native scene pairs: {rates['new_scene_fps']:.1f}/s; "
                   f"XR submissions including reuse: {rates['submitted_fps']:.1f}/s; "
                   f"reused pairs: {rates['reused_fps']:.1f}/s.",flush=True)
+        if result['render_memory']:
+            memory = result['render_memory']
+            print(f"Render memory: two frames used at most {memory['worst_two_frames_mb']:.0f} of "
+                  f"{memory['ring_mb']:.0f} MB; {memory['overflow_frames']} of {memory['frames']} frames "
+                  'did not fit.', flush=True)
         print(f"Test {'passed' if result['passed'] else 'failed'}; report: {a.output.resolve()}", flush=True)
         return 0 if result['passed'] else 1
     finally:
         if previous_signal is not None: signal.signal(signal.SIGINT,previous_signal)
-        if xr_active and alive(game):
-            call_remote(process, xr['SpidyXrStop'])
-        if bridge_active and alive(game):
-            call_remote(process, bridge['SpidyStop'])
+        if session_report and not report_written:
+            # Stopping failed part-way. Keep what was sampled.
+            try: write_report(session_report(incomplete=True))
+            except (OSError, ValueError): pass
+        flushed.set()
+        if console_handler: c.windll.kernel32.SetConsoleCtrlHandler(console_handler, False)
+        try:
+            if xr_active and alive(game):
+                call_remote(process, xr['SpidyXrStop'])
+            if bridge_active and alive(game):
+                call_remote(process, bridge['SpidyStop'])
+            # Last: it only counts frames, and the other two drive the game.
+            if render_module and process and alive(game):
+                call_remote(process, render_module['SpidyRenderMemoryStop'])
+        except OSError:
+            pass  # the game is closing; its exit removes the hooks with it
         if process:
             close(process)
         settle_display(alive(game))

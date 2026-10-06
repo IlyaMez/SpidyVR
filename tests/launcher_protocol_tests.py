@@ -4,7 +4,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, call, patch
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'tools'))
 import vr_display as display
 import vr_launcher as launcher
@@ -130,6 +130,60 @@ class LauncherTests(unittest.TestCase):
              patch.object(launcher.time,'sleep'):
             with self.assertRaisesRegex(RuntimeError,'game closed'): launcher.wait_for_game()
             game.close.assert_called_once()
+
+    def test_new_process_is_prepared_once_before_the_game_is_opened(self):
+        order=Mock()
+        game=Mock(pid=42)
+        order.game.side_effect=[OSError('still being set up'),game]
+        order.ready.return_value=True
+        missing=RuntimeError('Spider-Man is not running.')
+        with patch.object(launcher,'find_game',side_effect=[missing,missing,missing,42,42]), \
+             patch.object(launcher.pathlib.Path,'is_file',return_value=True), \
+             patch.object(launcher.subprocess,'Popen',order.launch),patch.object(launcher,'Game',order.game), \
+             patch.object(launcher.time,'sleep',order.sleep):
+            self.assertIs(launcher.wait_for_game(early=order.early,ready=order.ready),game)
+        # The game creates its render memory three seconds in: the process is looked for twenty times
+        # a second, and prepared before the half second that opening it takes.
+        self.assertEqual(order.mock_calls,[call.launch(ANY),call.sleep(.05),call.sleep(.05),call.early(42),
+                                           call.game(42),call.sleep(.05),call.game(42),call.ready(game)])
+
+    def test_replaced_process_is_prepared_again_and_the_old_handle_released(self):
+        first,second=Mock(pid=42),Mock(pid=43)
+        early=Mock()
+        with patch.object(launcher,'find_game',side_effect=[42,42,42,43]), \
+             patch.object(launcher,'Game',side_effect=[first,second]),patch.object(launcher.time,'sleep'), \
+             patch.object(launcher.subprocess,'Popen') as launch:
+            self.assertIs(launcher.wait_for_game(early=early,ready=Mock(side_effect=[False,False,True])),second)
+            launch.assert_not_called()
+        self.assertEqual(early.mock_calls,[call(42),call(43)])
+        first.close.assert_called_once()
+        second.close.assert_not_called()
+
+    def test_render_memory_module_retries_a_starting_process_but_not_its_own_refusal(self):
+        exports=dict(SpidyRenderMemoryStart=0x1000,SpidyRenderMemoryStop=0x2000,SpidyRenderMemoryData=0x3000)
+        with patch.object(launcher,'open_process',side_effect=[0,5,5,5]), \
+             patch.object(launcher,'load_module',side_effect=[StopIteration(),OSError('refused'),(exports,'hash')]), \
+             patch.object(launcher,'call_remote',return_value=0) as called,patch.object(launcher,'close') as closed, \
+             patch.object(launcher.time,'sleep') as slept:
+            self.assertEqual(launcher.enlarge_render_memory(42),exports)
+        called.assert_called_once_with(5,0x1000,launcher.RENDER_RING_MB)
+        self.assertEqual(slept.mock_calls,[call(.05)]*3)
+        self.assertEqual(closed.mock_calls,[call(5)]*3) # every handle that was opened
+        # 7001: not the supported game build. Asking again cannot change the answer.
+        with patch.object(launcher,'open_process',return_value=5), \
+             patch.object(launcher,'load_module',return_value=(exports,'hash')) as load, \
+             patch.object(launcher,'call_remote',return_value=7001),patch.object(launcher,'close') as closed, \
+             patch.object(launcher.time,'sleep') as slept:
+            with self.assertRaisesRegex(RuntimeError,'7001'): launcher.enlarge_render_memory(42)
+        load.assert_called_once()
+        slept.assert_not_called()
+        closed.assert_called_once_with(5)
+        # A process that stays unusable is given up as an error the session tools report.
+        with patch.object(launcher,'open_process',return_value=5),patch.object(launcher,'close'), \
+             patch.object(launcher,'load_module',side_effect=StopIteration()) as load, \
+             patch.object(launcher.time,'sleep'),patch.object(launcher.time,'monotonic',side_effect=[0,1,3]):
+            with self.assertRaisesRegex(RuntimeError,'no modules'): launcher.enlarge_render_memory(42)
+        self.assertEqual(load.call_count,2)
 
 
 if __name__=='__main__': unittest.main()

@@ -16,7 +16,10 @@ __declspec(dllexport) Data SpidyBridgeData;
 }
 
 namespace {
-uintptr_t base{}, record{}, hero{};
+uintptr_t base{};
+// The local player. Zero until a save is loaded; SpidyRetarget follows it
+// to each new actor (a loaded save, a respawn, a character switch).
+std::atomic<uintptr_t> record{}, hero{};
 SRWLOCK lifecycle = SRWLOCK_INIT, controls = SRWLOCK_INIT, telemetry = SRWLOCK_INIT;
 Control control;
 uint64_t deadline{};
@@ -75,8 +78,11 @@ Control current() {
     ReleaseSRWLockShared(&controls);
     return out;
 }
+bool isPlayer(uintptr_t h, uintptr_t r) {
+    return h && r && pointer(h) == base + 0x38a93c8 && pointer(h + 8) == r && pointer(r) != 0;
+}
 bool livePlayer() {
-    return pointer(hero) == base + 0x38a93c8 && pointer(hero + 8) == record && pointer(record) != 0;
+    return isPlayer(hero.load(), record.load());
 }
 void commit(void* self, void* target) {
     const auto caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
@@ -85,9 +91,10 @@ void commit(void* self, void* target) {
     const auto targetAddress = reinterpret_cast<uintptr_t>(target);
     const auto vt = pointer(mover);
     const auto camera = pointer(pointer(mover + 8));
-    const auto player = pointer(record);
+    const auto local = record.load();
+    const auto player = pointer(local);
     float before[16]{}, after[16]{}, body[16]{};
-    const bool valid = livePlayer() && pointer(targetAddress + 8) == record &&
+    const bool valid = livePlayer() && pointer(targetAddress + 8) == local &&
                        (vt == base + 0x3871fd8 || vt == base + 0x38720d0) && camera != player &&
                        transform(camera, before) && transform(player, body);
     const auto command = current();
@@ -228,12 +235,14 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
             result = 1001;
             break;
         }
-        hero = config.hero;
-        record = config.actorRecord;
-        if (!livePlayer()) {
+        // Without a player (the game is still in its menus) the bridge waits
+        // for SpidyRetarget; until then no camera commit matches.
+        if ((config.hero || config.actorRecord) && !isPlayer(config.hero, config.actorRecord)) {
             result = 1002;
             break;
         }
+        hero = config.hero;
+        record = config.actorRecord;
         const unsigned char commitBytes[] = {0x48, 0x83, 0xec, 0x38, 0xf2, 0x0f,
                                              0x10, 0x81, 0x3c, 0x03, 0,    0};
         const unsigned char queryBytes[] = {0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x74,
@@ -293,6 +302,24 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
     SpidyBridgeData.error = result;
     ReleaseSRWLockExclusive(&lifecycle);
     return result;
+}
+// Follows the local player to another actor; zero detaches until there is
+// one again. Same Config as SpidyStart.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyRetarget(void* value) {
+    Config next{};
+    if (!read(reinterpret_cast<uintptr_t>(value), &next, sizeof(next)) || next.magic != configMagic ||
+        next.protocol != version || next.bytes != sizeof(next) || next.pid != GetCurrentProcessId() ||
+        !base || next.imageBase != base || !next.hero != !next.actorRecord)
+        return 1001;
+    if (next.hero && !isPlayer(next.hero, next.actorRecord))
+        return 1002;
+    AcquireSRWLockExclusive(&lifecycle);
+    // A commit in between sees no player rather than a mix of two.
+    record = 0;
+    hero = next.hero;
+    record = next.actorRecord;
+    ReleaseSRWLockExclusive(&lifecycle);
+    return 0;
 }
 extern "C" __declspec(dllexport) DWORD WINAPI SpidyStop(void*) {
     AcquireSRWLockExclusive(&lifecycle);

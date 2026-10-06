@@ -1,12 +1,14 @@
 #include "spidy/native_eye_gpu.hpp"
 #include "spidy/copy_eye_texture.hpp"
 #include "spidy/eye_pair_state.hpp"
+#include "spidy/presentation_gate.hpp"
 #include <MinHook.h>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <dxgi1_4.h>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
@@ -15,8 +17,10 @@
 #include <wrl/client.h>
 using Microsoft::WRL::ComPtr;
 using namespace spidy;
+extern "C" IMAGE_DOS_HEADER __ImageBase;
 extern "C" {
 __declspec(dllexport) native_gpu::Data SpidyGpuData;
+__declspec(dllexport) native_gpu::ScreenData SpidyScreenData;
 }
 namespace spidy::native_gpu {
 namespace {
@@ -26,11 +30,17 @@ using Reset = HRESULT(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12Comm
 using Execute = void(STDMETHODCALLTYPE*)(ID3D12CommandQueue*, UINT, ID3D12CommandList* const*);
 using EndQuery = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12QueryHeap*, D3D12_QUERY_TYPE,
                                           UINT);
+using Present = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT);
+using Present1 = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
 Barrier originalBarrier{};
 Reset originalReset{};
 Execute originalExecute{};
 EndQuery originalEndQuery{};
+Present originalPresent{};
+Present1 originalPresent1{};
 std::array<void*, 4> hooks{};
+// DXGI Present and Present1; absent when no swapchain could be made to find them.
+std::array<void*, 2> presentHooks{};
 std::atomic<bool> enabled{};
 std::atomic<uint32_t> fault{};
 std::mutex lifecycle, submission, recording, telemetry;
@@ -76,10 +86,42 @@ struct CopyCommands {
     ComPtr<ID3D12GraphicsCommandList> list;
     uint64_t fence{};
 };
-std::array<CopyCommands, 3> captureCommands, presentCommands;
+std::array<CopyCommands, 3> captureCommands, presentCommands, screenCommands;
 std::array<ComPtr<ID3D12Resource>, 2> stagedEyes;
 EyePairState::Stamp capturedStamp;
 uint64_t capturedPairs{}, reusedPairs{}, capturedMs{};
+// The game's presented frame (submission lock). A texture replaced by a new
+// size stays alive for a few seconds, for draws still reading it.
+std::atomic<bool> screenWanted{};
+Screen screen;
+uint64_t screenMs{};
+struct Retired {
+    ComPtr<ID3D12Resource> texture;
+    uint64_t releaseMs{};
+};
+std::vector<Retired> retiredScreens;
+std::vector<uint8_t> screenPixels; // probe readback of the newest copy
+std::atomic<uint64_t> screenPresents{};
+std::atomic<uint32_t> screenSkipped{}, backBufferFormat{};
+void publishScreen(uint32_t status, const void* rows, uint32_t rowBytes) {
+    std::lock_guard lock(telemetry);
+    auto& d = SpidyScreenData;
+    InterlockedIncrement64(&d.sequence);
+    if (status)
+        d.status = status;
+    d.frames = screen.frame;
+    d.width = screen.width;
+    d.height = screen.height;
+    d.format = screen.view;
+    if (rows) {
+        d.pixels = reinterpret_cast<uint64_t>(rows);
+        d.rowBytes = rowBytes;
+    }
+    d.presents = screenPresents;
+    d.skip = screenSkipped;
+    d.backBufferFormat = backBufferFormat;
+    InterlockedIncrement64(&d.sequence);
+}
 bool read(uintptr_t p, void* out, size_t n) {
     __try {
         if (p < 0x10000)
@@ -459,7 +501,242 @@ void STDMETHODCALLTYPE execute(ID3D12CommandQueue* q, UINT count, ID3D12CommandL
     if (fault)
         copyReady.notify_all();
 }
+DXGI_FORMAT typelessFamily(DXGI_FORMAT view) {
+    switch (view) {
+    case DXGI_FORMAT_R8G8B8A8_UNORM:
+        return DXGI_FORMAT_R8G8B8A8_TYPELESS;
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+        return DXGI_FORMAT_B8G8R8A8_TYPELESS;
+    case DXGI_FORMAT_R10G10B10A2_UNORM:
+        return DXGI_FORMAT_R10G10B10A2_TYPELESS;
+    default:
+        return DXGI_FORMAT_R16G16B16A16_TYPELESS;
+    }
+}
+// Present thread: copies the back buffer about to be shown on the game's
+// render queue, after the frame it rendered there and before the queue renders
+// into that buffer again. The swapchain reports the queue it was created with,
+// which with Streamline is a wrapper of that queue, so the game's swapchain is
+// recognized by its back buffer's device.
+ScreenSkip copyScreen(IDXGISwapChain* swapchain) {
+    ComPtr<IDXGISwapChain3> chain;
+    ComPtr<ID3D12Resource> buffer;
+    if (FAILED(swapchain->QueryInterface(IID_PPV_ARGS(&chain))) ||
+        FAILED(chain->GetBuffer(chain->GetCurrentBackBufferIndex(), IID_PPV_ARGS(&buffer))))
+        return screenNoBuffer;
+    ComPtr<ID3D12Device> owner;
+    ComPtr<IUnknown> ownerIdentity, gameIdentity;
+    if (FAILED(buffer->GetDevice(IID_PPV_ARGS(&owner))) || FAILED(owner.As(&ownerIdentity)) ||
+        FAILED(device.As(&gameIdentity)) || ownerIdentity.Get() != gameIdentity.Get())
+        return screenOtherDevice;
+    const auto desc = buffer->GetDesc();
+    backBufferFormat = desc.Format;
+    bool linear{};
+    const auto view = screenView(desc.Format, linear);
+    if (view == DXGI_FORMAT_UNKNOWN)
+        return screenFormat;
+    if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.SampleDesc.Count != 1 ||
+        desc.DepthOrArraySize != 1 || desc.MipLevels != 1 || !validEyeSize(desc.Width) || !validEyeSize(desc.Height))
+        return screenShape;
+    std::lock_guard submitLock(submission);
+    std::lock_guard recordLock(recording);
+    if (!enabled || fault || GetTickCount64() >= deadline)
+        return screenStopped;
+    const auto now = GetTickCount64();
+    std::erase_if(retiredScreens, [&](const Retired& old) { return now >= old.releaseMs; });
+    if (!screen.texture || screen.width != desc.Width || screen.height != desc.Height || screen.view != view) {
+        if (screen.texture)
+            retiredScreens.push_back({screen.texture, now + 3000});
+        screen = {};
+        auto copy = desc;
+        copy.Format = typelessFamily(view);
+        copy.Flags = D3D12_RESOURCE_FLAG_NONE;
+        copy.Alignment = 0;
+        D3D12_HEAP_PROPERTIES heap{};
+        heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+        if (FAILED(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &copy,
+                                                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
+                                                   IID_PPV_ARGS(&screen.texture))))
+            return screenTexture;
+        screen.view = view;
+        screen.linear = linear;
+        screen.width = static_cast<uint32_t>(desc.Width);
+        screen.height = desc.Height;
+    }
+    auto* slot = readyCommands(screenCommands);
+    if (!slot)
+        return screenBusy; // earlier copies still in flight: skip this frame
+    D3D12_RESOURCE_BARRIER b[2]{};
+    b[0].Type = b[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b[0].Transition = {buffer.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_PRESENT,
+                       D3D12_RESOURCE_STATE_COPY_SOURCE};
+    b[1].Transition = {screen.texture.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST};
+    originalBarrier(slot->list.Get(), 2, b);
+    slot->list->CopyResource(screen.texture.Get(), buffer.Get());
+    for (auto& barrier : b)
+        std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
+    originalBarrier(slot->list.Get(), 2, b);
+    if (!submitCommands(*slot))
+        return screenStopped;
+    ++screen.frame;
+    screenMs = now;
+    return screenCopied;
+}
+void captureScreen(IDXGISwapChain* swapchain) {
+    ++screenPresents;
+    screenSkipped = copyScreen(swapchain);
+    publishScreen(0, nullptr, 0);
+}
+HRESULT STDMETHODCALLTYPE present(IDXGISwapChain* swapchain, UINT interval, UINT flags) {
+    if (enabled && screenWanted && !(flags & DXGI_PRESENT_TEST))
+        captureScreen(swapchain);
+    return originalPresent(swapchain, interval, flags);
+}
+HRESULT STDMETHODCALLTYPE present1(IDXGISwapChain1* swapchain, UINT interval, UINT flags,
+                                   const DXGI_PRESENT_PARAMETERS* parameters) {
+    if (enabled && screenWanted && !(flags & DXGI_PRESENT_TEST))
+        captureScreen(swapchain);
+    return originalPresent1(swapchain, interval, flags, parameters);
+}
+// Every swapchain in the process shares DXGI's Present methods. A throwaway
+// 64-pixel swapchain on a hidden window, on a queue of its own, gives their
+// addresses; the hooks act only on swapchains presenting on the game's queue.
+bool presentEntries(void*& presentAddress, void*& present1Address) {
+    using CreateFactory = HRESULT(WINAPI*)(UINT, REFIID, void**);
+    const auto dxgi = GetModuleHandleW(L"dxgi.dll");
+    const auto create = dxgi ? reinterpret_cast<CreateFactory>(GetProcAddress(dxgi, "CreateDXGIFactory2")) : nullptr;
+    if (!create)
+        return false;
+    WNDCLASSEXW type{sizeof(type)};
+    type.lpfnWndProc = DefWindowProcW;
+    type.hInstance = reinterpret_cast<HINSTANCE>(&__ImageBase);
+    type.lpszClassName = L"SpidyPresentEntries";
+    RegisterClassExW(&type);
+    const auto window = CreateWindowExW(0, type.lpszClassName, L"", WS_OVERLAPPEDWINDOW, 0, 0, 64, 64, nullptr,
+                                        nullptr, type.hInstance, nullptr);
+    if (!window)
+        return false;
+    bool found{};
+    {
+        ComPtr<IDXGIFactory2> factory;
+        ComPtr<ID3D12CommandQueue> own;
+        ComPtr<IDXGISwapChain1> chain;
+        D3D12_COMMAND_QUEUE_DESC q{};
+        q.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+        DXGI_SWAP_CHAIN_DESC1 d{};
+        d.Width = d.Height = 64;
+        d.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        d.SampleDesc.Count = 1;
+        d.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        d.BufferCount = 2;
+        d.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        if (SUCCEEDED(create(0, IID_PPV_ARGS(&factory))) && SUCCEEDED(device->CreateCommandQueue(&q, IID_PPV_ARGS(&own))) &&
+            SUCCEEDED(factory->CreateSwapChainForHwnd(own.Get(), window, &d, nullptr, nullptr, &chain))) {
+            const auto table = *reinterpret_cast<void***>(chain.Get());
+            presentAddress = table[8];   // IDXGISwapChain::Present
+            present1Address = table[22]; // IDXGISwapChain1::Present1
+            found = true;
+        }
+    }
+    DestroyWindow(window);
+    return found;
+}
 } // namespace
+DXGI_FORMAT screenView(DXGI_FORMAT backBuffer, bool& linear) {
+    linear = false;
+    switch (backBuffer) {
+    case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+    case DXGI_FORMAT_R8G8B8A8_UNORM:
+    case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+        return DXGI_FORMAT_B8G8R8A8_UNORM;
+    case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+    case DXGI_FORMAT_R10G10B10A2_UNORM:
+        return DXGI_FORMAT_R10G10B10A2_UNORM;
+    case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+    case DXGI_FORMAT_R16G16B16A16_FLOAT:
+        linear = true;
+        return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    default:
+        return DXGI_FORMAT_UNKNOWN;
+    }
+}
+void wantScreen(bool wanted) {
+    screenWanted = wanted;
+}
+bool latestScreen(Screen& out, uint64_t maxAgeMs) {
+    std::lock_guard submitLock(submission);
+    const auto now = GetTickCount64();
+    if (!screen.texture || !screen.frame || now < screenMs || now - screenMs > maxAgeMs)
+        return false;
+    out = screen;
+    return true;
+}
+// Probes only: reads the newest copy back to memory, waiting for the GPU.
+DWORD readScreen() {
+    std::lock_guard submitLock(submission);
+    std::lock_guard recordLock(recording);
+    if (!enabled || fault || !screen.texture || !screen.frame)
+        return 3951;
+    const auto desc = screen.texture->GetDesc();
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout{};
+    UINT64 bytes{};
+    device->GetCopyableFootprints(&desc, 0, 1, 0, &layout, nullptr, nullptr, &bytes);
+    D3D12_HEAP_PROPERTIES heap{};
+    heap.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC buffer{};
+    buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    buffer.Width = bytes;
+    buffer.Height = 1;
+    buffer.DepthOrArraySize = 1;
+    buffer.MipLevels = 1;
+    buffer.SampleDesc.Count = 1;
+    buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    ComPtr<ID3D12Resource> readback;
+    if (FAILED(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer, D3D12_RESOURCE_STATE_COPY_DEST,
+                                               nullptr, IID_PPV_ARGS(&readback))))
+        return 3952;
+    auto* slot = readyCommands(screenCommands);
+    if (!slot)
+        return 3953;
+    D3D12_RESOURCE_BARRIER b{};
+    b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b.Transition = {screen.texture.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE};
+    originalBarrier(slot->list.Get(), 1, &b);
+    D3D12_TEXTURE_COPY_LOCATION src{}, dst{};
+    src.pResource = screen.texture.Get();
+    src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dst.pResource = readback.Get();
+    dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dst.PlacedFootprint = layout;
+    slot->list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+    std::swap(b.Transition.StateBefore, b.Transition.StateAfter);
+    originalBarrier(slot->list.Get(), 1, &b);
+    if (!submitCommands(*slot))
+        return 3954;
+    if (fence->GetCompletedValue() < fenceValue &&
+        (FAILED(fence->SetEventOnCompletion(fenceValue, fenceEvent)) ||
+         WaitForSingleObject(fenceEvent, 2000) != WAIT_OBJECT_0))
+        return 3955;
+    void* data{};
+    if (FAILED(readback->Map(0, nullptr, &data)))
+        return 3956;
+    const auto rowBytes = static_cast<uint32_t>(desc.Width * (screen.view == DXGI_FORMAT_R16G16B16A16_FLOAT ? 8 : 4));
+    screenPixels.resize(static_cast<size_t>(rowBytes) * desc.Height);
+    for (UINT y = 0; y < desc.Height; ++y)
+        std::memcpy(screenPixels.data() + static_cast<size_t>(y) * rowBytes,
+                    static_cast<uint8_t*>(data) + layout.Offset + static_cast<size_t>(y) * layout.Footprint.RowPitch,
+                    rowBytes);
+    D3D12_RANGE written{0, 0};
+    readback->Unmap(0, &written);
+    publishScreen(1, screenPixels.data(), rowBytes);
+    return 0;
+}
 void enterMarker(unsigned eye, uint64_t serial, uint64_t generation, bool ended) {
     currentMarker = {eye, {serial, generation}, ended, eye < 2};
 }
@@ -532,7 +809,7 @@ bool copyLatest(ID3D12Resource* left, ID3D12Resource* right, uint64_t& serial, u
     std::lock_guard submitLock(submission);
     std::lock_guard recordLock(recording);
     if (!enabled || !staged || fault || !capturedStamp.serial || GetTickCount64() >= deadline ||
-        GetTickCount64() - capturedMs > 150)
+        GetTickCount64() - capturedMs > imageHoldMs)
         return false;
     ID3D12Resource* incoming[] = {left, right};
     for (unsigned i = 0; i < 2; ++i) {
@@ -642,19 +919,79 @@ DWORD start(void* input) {
                 MH_DisableHook(t);
             return 1300 + s;
         }
+    // The game's presented frame is optional: without it the headset shows
+    // nothing while gameplay is unavailable, as before.
+    void* presentAddress{};
+    void* present1Address{};
+    if (presentEntries(presentAddress, present1Address) &&
+        MH_CreateHook(presentAddress, reinterpret_cast<void*>(present), reinterpret_cast<void**>(&originalPresent)) ==
+            MH_OK) {
+        presentHooks[0] = presentAddress;
+        if (MH_CreateHook(present1Address, reinterpret_cast<void*>(present1),
+                          reinterpret_cast<void**>(&originalPresent1)) == MH_OK)
+            presentHooks[1] = present1Address;
+        bool hookedPresent = true;
+        for (auto h : presentHooks)
+            if (h)
+                hookedPresent = MH_EnableHook(h) == MH_OK && hookedPresent;
+        publishScreen(hookedPresent ? 1 : 2, nullptr, 0);
+    }
     std::lock_guard lock(telemetry);
     InterlockedIncrement64(&SpidyGpuData.sequence);
     SpidyGpuData.status = 1;
     InterlockedIncrement64(&SpidyGpuData.sequence);
     return 0;
 }
+bool readPixels() { // submission and recording held by caller; GPU work complete
+    for (unsigned i = 0; i < 2; ++i) {
+        void* data{};
+        const auto& layout = layouts[i];
+        // The last row has no pitch padding: rows whose bytes are not a
+        // multiple of 256 make the buffer shorter than RowPitch * height.
+        D3D12_RANGE range{0, static_cast<SIZE_T>(layout.Offset + static_cast<UINT64>(layout.Footprint.RowPitch) *
+                                                                       (height - 1) +
+                                                 width * 4)};
+        if (FAILED(readbacks[i]->Map(0, &range, &data)))
+            return false;
+        for (unsigned y = 0; y < height; ++y)
+            std::memcpy(pixels[i].data() + static_cast<size_t>(y) * width * 4,
+                        static_cast<uint8_t*>(data) + layout.Offset +
+                            static_cast<size_t>(y) * layout.Footprint.RowPitch,
+                        width * 4);
+        D3D12_RANGE written{0, 0};
+        readbacks[i]->Unmap(0, &written);
+    }
+    return true;
+}
+DWORD freeze() {
+    std::lock_guard life(lifecycle);
+    std::lock_guard submitLock(submission);
+    std::lock_guard recordLock(recording);
+    if (!enabled || !captureImages || staged || copyToXr)
+        return 3901;
+    if (!pairs || !readbacks[0] || !readbacks[1])
+        return 3902;
+    if (fence->GetCompletedValue() < fenceValue &&
+        (FAILED(fence->SetEventOnCompletion(fenceValue, fenceEvent)) ||
+         WaitForSingleObject(fenceEvent, 1000) != WAIT_OBJECT_0))
+        return 3903;
+    if (!readPixels())
+        return 3904;
+    publish();
+    return 0;
+}
 DWORD stop() {
     std::lock_guard life(lifecycle);
     enabled = false;
+    screenWanted = false;
     copyReady.notify_all();
-    if (hooked)
+    if (hooked) {
         for (auto h : hooks)
             MH_DisableHook(h);
+        for (auto h : presentHooks)
+            if (h)
+                MH_DisableHook(h);
+    }
     std::lock_guard submitLock(submission);
     std::lock_guard recordLock(recording);
     if (fence && fence->GetCompletedValue() < fenceValue) {
@@ -664,23 +1001,8 @@ DWORD stop() {
     }
     if (fence && (fence->GetCompletedValue() == UINT64_MAX || fence->GetCompletedValue() < fenceValue))
         fault = 3601;
-    if (pairs && captureImages && !fault)
-        for (unsigned i = 0; i < 2; ++i) {
-            void* data{};
-            const auto& layout = layouts[i];
-            D3D12_RANGE range{0, static_cast<SIZE_T>(layout.Offset + layout.Footprint.RowPitch * height)};
-            if (FAILED(readbacks[i]->Map(0, &range, &data))) {
-                fault = 3602;
-                break;
-            }
-            for (unsigned y = 0; y < height; ++y)
-                std::memcpy(pixels[i].data() + static_cast<size_t>(y) * width * 4,
-                            static_cast<uint8_t*>(data) + layout.Offset +
-                                static_cast<size_t>(y) * layout.Footprint.RowPitch,
-                            width * 4);
-            D3D12_RANGE written{0, 0};
-            readbacks[i]->Unmap(0, &written);
-        }
+    if (pairs && captureImages && !fault && !readPixels())
+        fault = 3602;
     publish();
     std::lock_guard lock(telemetry);
     InterlockedIncrement64(&SpidyGpuData.sequence);
@@ -694,4 +1016,19 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyGpuStart(void* input) {
 }
 extern "C" __declspec(dllexport) DWORD WINAPI SpidyGpuStop(void*) {
     return native_gpu::stop();
+}
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyGpuFreeze(void*) {
+    return native_gpu::freeze();
+}
+// Probes: 0 stops and 1 starts copying the game's presented frame; 2 reads
+// the newest copy back into SpidyScreenData.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyGpuScreen(void* mode) {
+    const auto value = reinterpret_cast<uintptr_t>(mode);
+    if (value > 2)
+        return 3950;
+    if (value < 2) {
+        native_gpu::wantScreen(value == 1);
+        return 0;
+    }
+    return native_gpu::readScreen();
 }

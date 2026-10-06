@@ -2,7 +2,11 @@
 #include "spidy/native_appearance.hpp"
 // The input bridge remains a separately verified, separately stoppable module.
 #include "spidy/eye_resolution.hpp"
+#include "spidy/eye_snapshot.hpp"
 #include "spidy/game_bridge_protocol.hpp"
+#include "spidy/game_grab.hpp"
+#include "spidy/game_pad.hpp"
+#include "spidy/game_player.hpp"
 #include "spidy/game_swing.hpp"
 #include "spidy/game_tracking.hpp"
 #include "spidy/native_eye_frame.hpp"
@@ -21,16 +25,27 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 5, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 6, bytes = sizeof(XrConfig), pid{};
+    // record and mover are no longer used: VR starts with the game, before
+    // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
     uint32_t durationMs = 20000, eyeSize = defaultEyeSize;
     float swingSpeed = 32;
     // bit 0: CPU eye capture; bit 1: Spidy's overlay webs instead of the game's;
-    // bit 2: keep the stock camera as the game's active (monitor) view in VR
+    // bit 2: keep the stock camera as the game's active (monitor) view in VR;
+    // bit 3: no web grab (webs never catch props or thugs)
     uint32_t options{};
 };
+// Why the last frame had no gameplay (XrData::gate bits).
+enum GateReason : uint32_t {
+    gateNoPlayer = 1,     // no save loaded, or a level change in progress
+    gateBridge = 2,       // the input bridge is not running
+    gateNoCommit = 4,     // no camera commit for 100 ms: paused, loading, a cutscene
+    gateOtherCamera = 8,  // the camera is not the player's follow or combat camera
+    gateTracking = 16,    // the headset's pose or timing was not usable
+};
 struct XrData {
-    uint32_t magic = 0x53585244, version = 3, bytes = sizeof(XrData), status{};
+    uint32_t magic = 0x53585244, version = 6, bytes = sizeof(XrData), status{};
     int64_t sequence{};
     uint64_t frames{}, tracked{}, submitted{}, dropped{}, leftHands{}, rightHands{}, serial{}, generation{};
     uint32_t nativeKeys{}, error{};
@@ -38,11 +53,30 @@ struct XrData {
     char message[256]{};
     uint64_t uniqueSubmitted{}, reusedSubmitted{};
     uint32_t flatScreen{}, toggles{}, eyeWidth{}, eyeHeight{};
+    // What the last frame showed (Presentation), and frames that showed the
+    // game's presented frame on the screen because gameplay was unavailable.
+    uint32_t presentation{}, reserved{};
+    uint64_t screenSubmitted{};
+    // GateReason bits of the last frame, and the vtable (image offset) of the
+    // camera mover that last committed: which camera a scene without VR used.
+    uint32_t gate{}, cameraMover{};
+    // Players found so far (each loaded save, respawn or character switch),
+    // and the current one's actor record.
+    uint64_t players{}, playerRecord{};
+    // Xbox buttons the VR controllers hold for the game, and the game's reads
+    // of that virtual controller.
+    uint32_t padButtons{}, padInstalled{};
+    uint64_t padReads{};
+    // The input bridge's camera commits, and those on the player by an
+    // accepted camera. Both rising while the gate says other_camera: two
+    // cameras commit each frame and the other one commits last.
+    uint64_t cameraCommits{}, playerCommits{};
 };
-static_assert(sizeof(XrConfig) == 88 && sizeof(XrData) == 576);
+static_assert(sizeof(XrConfig) == 88 && sizeof(XrData) == 648);
 extern "C" {
 __declspec(dllexport) XrData SpidyXrData;
 __declspec(dllexport) XrTimingData SpidyXrTimingData;
+__declspec(dllexport) EyeSnapshot SpidyXrSnapshot;
 DWORD WINAPI SpidyStart(void*);
 DWORD WINAPI SpidyStop(void*);
 DWORD WINAPI SpidySetEyes(void*);
@@ -51,9 +85,9 @@ float SpidyFlatAspect();
 namespace {
 using BridgeCall = DWORD(WINAPI*)(void*);
 XrConfig config;
-BridgeCall submitInput{}, sampleBridge{}, stopBridge{};
+BridgeCall submitInput{}, sampleBridge{}, stopBridge{}, retargetBridge{};
 BridgeCall startRays{}, submitRays{}, stopRays{};
-BridgeCall startSwing{}, submitSwing{}, sampleSwing{}, stopSwing{};
+BridgeCall startSwing{}, submitSwing{}, sampleSwing{}, stopSwing{}, retargetSwing{}, sampleGrab{};
 std::mutex lifecycle, telemetry;
 HANDLE worker{};
 std::atomic<bool> stopRequested{};
@@ -80,6 +114,25 @@ void check(DWORD code, const char* operation) {
     if (code)
         throw std::runtime_error(std::string(operation) + ": " + std::to_string(code));
 }
+// Publishes a completed eye copy, or withdraws the previous one before its
+// pixels are released.
+void publishSnapshot(EyeSnapshot shot, const D3D12Renderer::Captured* pixels) {
+    std::lock_guard lock(telemetry);
+    auto& d = SpidyXrSnapshot;
+    InterlockedIncrement64(&d.sequence);
+    const auto sequence = d.sequence;
+    const auto count = d.count + (pixels != nullptr);
+    d = shot;
+    d.sequence = sequence;
+    d.count = count;
+    if (pixels) {
+        d.pixels = reinterpret_cast<uint64_t>(pixels->pixels);
+        d.width = pixels->width;
+        d.height = pixels->height;
+        d.rowPitch = pixels->rowPitch;
+    }
+    InterlockedIncrement64(&d.sequence);
+}
 struct RuntimeSelection {
     std::wstring previous;
     bool present{};
@@ -105,10 +158,18 @@ struct RuntimeSelection {
 DWORD WINAPI run(void*) {
     bool nativeStarted = false, gpuStarted = false, raysStarted = false, swingStarted = false, websStarted = false;
     uint64_t serial = 1, nativeDeadline{};
-    uint64_t firstImageDeadline{}, lastPresentedMs{};
-    bool presented{};
+    // lastPresentedMs: an image was on show. lastNewImageMs: the game delivered a newer one.
+    uint64_t firstImageDeadline{}, lastPresentedMs{}, lastNewImageMs{};
+    bool presented{}, wasGameplay{};
+    // The last frame's predicted display time; held images age against it.
+    int64_t displayTime{};
+    Presentation shownKind{};
     uint32_t error{};
     std::string failure;
+    // VR starts with the game, before there is a player; each loaded save,
+    // respawn or character switch brings a new one.
+    game_player::Watch players;
+    bool padInstalled{};
     try {
         auto queue = reinterpret_cast<ID3D12CommandQueue*>(config.queue);
         ComPtr<ID3D12Device> device;
@@ -121,11 +182,31 @@ DWORD WINAPI run(void*) {
         }
         D3D12Renderer overlay;
         overlay.initialize(device.Get(), queue);
-        message(2, 0, "Waiting for headset tracking and gameplay");
+        // The session report's copies of the left eye live in the overlay's
+        // readback buffer; withdraw the last one before the overlay goes.
+        struct WithdrawSnapshot {
+            ~WithdrawSnapshot() {
+                publishSnapshot({}, nullptr);
+            }
+        } withdrawSnapshot;
+        EyeSnapshotSchedule snapshots;
+        EyeSnapshot pendingSnapshot{};
+        uint64_t snapshotTicket{}, gapGeneration{};
+        message(2, 0, "Waiting for the headset");
+        players.start(config.base);
+        game_player::Player player{};
+        uint64_t playerChanges{}, playersFound{};
+        // Menus are played with a virtual Xbox controller (game_pad).
+        padInstalled = !game_pad::install();
+        uint64_t padRetryMs = GetTickCount64() + 1000;
+        // The last frame showed the game screen; A held from there (Resume,
+        // Continue) is not a jump once gameplay is back.
+        bool wasScreen{}, jumpFromScreen{};
         GameTrackingRig rig;
         GameMotionFrame motion;
         NativeEyeHistory history;
         VrShortcut shortcut;
+        GameScreen gameScreen;
         bool flatScreen{};
         Pose screenPose{};
         const auto dimensions = runtime.eyeDimensions();
@@ -138,12 +219,14 @@ DWORD WINAPI run(void*) {
             InterlockedIncrement64(&SpidyXrData.sequence);
         }
         game_swing::Data swingState;
+        // What each hand's web holds, when it caught a thug instead of a wall.
+        game_grab::Data grabState;
+        uint32_t grabPhases[2]{};
         WebTimeline webTimes;
         bool attachedBefore[2]{};
         uint64_t zipBefore{};
         uint64_t submittedFrames{};
         uint64_t previousPresentedGeneration{};
-        const auto focusDeadline = GetTickCount64() + 30000;
         LARGE_INTEGER frequency{};
         QueryPerformanceFrequency(&frequency);
         auto controls = [&](uint32_t keys) {
@@ -154,18 +237,60 @@ DWORD WINAPI run(void*) {
             c.keys = keys;
             check(submitInput(&c), "Controller input");
         };
+        // The game replaced its player or has none: every module that acts on
+        // the player follows. A player gone again before this reaches the
+        // modules is reported by the watch once more.
+        auto attach = [&](const game_player::Player& next) {
+            const auto follow = [&](const game_player::Player& p) {
+                bridge::Config target;
+                target.pid = config.pid;
+                target.imageBase = config.base;
+                target.hero = p.hero;
+                target.actorRecord = p.record;
+                if (retargetBridge(&target))
+                    return false;
+                if (!swingStarted)
+                    return true;
+                game_swing::Config swing;
+                swing.pid = config.pid;
+                swing.base = config.base;
+                swing.record = p.record;
+                swing.mover = p.mover;
+                return !retargetSwing(&swing);
+            };
+            player = follow(next) ? next : game_player::Player{};
+            if (!player.hero)
+                follow({});
+            native_appearance::setPlayerRecord(player.record);
+            if (websStarted)
+                native_webs::retarget(player.record);
+            playersFound += player.hero != 0;
+            // The tracking space aligns with the new body's camera again.
+            rig.reset();
+            history.clear();
+        };
         while (!stopRequested && (!nativeDeadline || GetTickCount64() < nativeDeadline)) {
             if (!config.durationMs && GetTickCount64() >= keepAliveDeadline)
                 break;
             double copyMs{}, overlayMs{};
-            if (!nativeDeadline && GetTickCount64() >= focusDeadline)
-                throw std::runtime_error("No focused headset gameplay within 30 seconds");
-            if (motion.active && firstImageDeadline && !presented && GetTickCount64() >= firstImageDeadline)
+            Presentation drawn{};
+            // This frame shows the game's presented frame on the screen.
+            bool showScreen{};
+            if (!padInstalled && GetTickCount64() >= padRetryMs) {
+                padInstalled = !game_pad::install();
+                padRetryMs = GetTickCount64() + 1000;
+            }
+            if (motion.active && firstImageDeadline && !lastNewImageMs && GetTickCount64() >= firstImageDeadline)
                 throw std::runtime_error("No native eye images reached OpenXR within 3 seconds");
-            if (motion.active && lastPresentedMs && GetTickCount64() - lastPresentedMs >= 3000)
+            if (motion.active && lastNewImageMs && GetTickCount64() - lastNewImageMs >= 3000)
                 throw std::runtime_error("Native eye presentation stalled for 3 seconds");
             const bool active = runtime.frameStereo(
                 [&](const XrFrame& frame) {
+                    uint64_t changes{};
+                    if (const auto found = players.current(changes); changes != playerChanges) {
+                        playerChanges = changes;
+                        attach(found);
+                    }
                     bridge::Data game{};
                     check(sampleBridge(&game), "Gameplay sample");
                     LARGE_INTEGER now{};
@@ -173,20 +298,27 @@ DWORD WINAPI run(void*) {
                     Mat4 body{}, camera{};
                     std::memcpy(body.data(), game.player, 64);
                     std::memcpy(camera.data(), game.before, 64);
-                    const bool gameplay =
-                        game.state == 1 && game.qpc && now.QuadPart >= static_cast<int64_t>(game.qpc) &&
-                        static_cast<double>(now.QuadPart - game.qpc) / frequency.QuadPart < .1 &&
-                        native_view::validPose(body) && native_view::validPose(camera);
-                    if (shortcut.update(frame.focused && frame.valid && gameplay, frame.hands[0].stickClick,
+                    // Gameplay: the player's own follow or combat camera
+                    // committed within 100 ms (game_bridge.cpp).
+                    const bool bridgeRunning = game.state == 1;
+                    const bool committed = game.qpc && now.QuadPart >= static_cast<int64_t>(game.qpc) &&
+                                           static_cast<double>(now.QuadPart - game.qpc) / frequency.QuadPart < .1;
+                    const bool followsPlayer = native_view::validPose(body) && native_view::validPose(camera);
+                    const bool gameplay = player.hero && bridgeRunning && committed && followsPlayer;
+                    uint64_t moverTable{};
+                    read(game.mover, &moverTable, sizeof(moverTable));
+                    // The headset is worn, focused and tracked: an image can be shown.
+                    const bool viewing = frame.focused && frame.valid;
+                    displayTime = frame.predictedDisplayTime;
+                    if (shortcut.update(viewing && gameplay, frame.hands[0].stickClick,
                                         frame.hands[1].stickClick)) {
                         flatScreen = !flatScreen;
                         rig.reset();
                         history.clear();
-                        lastPresentedMs = 0;
+                        lastPresentedMs = lastNewImageMs = 0;
                         presented = false;
                         firstImageDeadline = GetTickCount64() + 3000;
-                        screenPose = frame.head;
-                        screenPose.position += frame.head.orientation.rotate({0, 0, -2.5f});
+                        screenPose = screenAhead(frame.head);
                         runtime.haptic(0, .35f);
                         runtime.haptic(1, .35f);
                         std::lock_guard lock(telemetry);
@@ -195,21 +327,50 @@ DWORD WINAPI run(void*) {
                         SpidyXrData.flatScreen = flatScreen;
                         InterlockedIncrement64(&SpidyXrData.sequence);
                     }
-                    if (flatScreen && frame.recentered) {
-                        screenPose = frame.head;
-                        screenPose.position += frame.head.orientation.rotate({0, 0, -2.5f});
-                    }
-                    motion = rig.update(frame, {body[12], body[13], body[14]},
+                    if (!frame.jump)
+                        jumpFromScreen = false;
+                    else if (wasScreen)
+                        jumpFromScreen = true;
+                    XrFrame controller = frame;
+                    controller.jump = frame.jump && !jumpFromScreen;
+                    motion = rig.update(controller, {body[12], body[13], body[14]},
                                         {camera[8], camera[9], camera[10]}, gameplay);
-                    if (!motion.active || motion.releaseWebs)
+                    // Without gameplay (menus, hint cards, cutscenes, animated
+                    // cameras, loading) the game's own camera goes on the screen.
+                    bool screen{};
+                    if (viewing)
+                        screen = gameScreen.update(motion.active, GetTickCount64());
+                    else
+                        gameScreen.reset();
+                    wasScreen = screen;
+                    // On the screen the controllers are the game's Xbox
+                    // controller; in VR it gets Start (menu), Back (Y) and
+                    // the native walking and jumping (submitted below).
+                    const auto mapping = !viewing ? game_pad::Mapping::none
+                                         : screen ? game_pad::Mapping::menus
+                                                  : game_pad::Mapping::gameplay;
+                    const uint32_t gate =
+                        (player.hero ? 0 : gateNoPlayer) | (bridgeRunning ? 0 : gateBridge) |
+                        (committed ? 0 : gateNoCommit) | (followsPlayer ? 0 : gateOtherCamera) |
+                        (gameplay && !motion.active ? gateTracking : 0);
+                    if ((gameScreen.entered() && !flatScreen) || ((flatScreen || screen) && frame.recentered))
+                        screenPose = screenAhead(frame.head);
+                    // An image keeps the tracking-space poses it was rendered
+                    // for, valid until the tracking space itself changes.
+                    if (!viewing || frame.recentered)
                         history.clear();
-                    if (!motion.active) {
-                        lastPresentedMs = firstImageDeadline = 0;
+                    if (!viewing) {
+                        lastPresentedMs = lastNewImageMs = firstImageDeadline = 0;
                         presented = false;
-                    } else if (nativeStarted && !firstImageDeadline && !presented) {
-                        firstImageDeadline = GetTickCount64() + 3000;
+                    } else if (motion.active && !wasGameplay) {
+                        // Gameplay counts its own images: the screen before it
+                        // may have had none for a while (loading).
+                        lastNewImageMs = 0;
+                        presented = false;
+                        firstImageDeadline = nativeStarted ? GetTickCount64() + 3000 : 0;
                     }
-                    const bool controlsVisible = recentPresentation(lastPresentedMs, GetTickCount64());
+                    wasGameplay = motion.active;
+                    const bool controlsVisible = recentPresentation(lastNewImageMs, GetTickCount64());
                     if (motion.active && !raysStarted) {
                         native_rays::Config rays;
                         rays.pid = config.pid;
@@ -228,11 +389,12 @@ DWORD WINAPI run(void*) {
                         game_swing::Config swing;
                         swing.pid = config.pid;
                         swing.base = config.base;
-                        swing.record = config.record;
-                        swing.mover = config.mover;
+                        swing.record = player.record;
+                        swing.mover = player.mover;
                         swing.motionModule = config.motionModule;
                         swing.durationMs = moduleDuration;
                         swing.maxSpeed = config.swingSpeed;
+                        swing.grabKinds = (config.options & 8) || !sampleGrab ? 0 : game_grab::movableKinds;
                         check(startSwing(&swing), "Start native swinging");
                         swingStarted = true;
                     }
@@ -256,12 +418,30 @@ DWORD WINAPI run(void*) {
                         check(submitSwing(&input), "Tracked swing input");
                         check(sampleSwing(&swingState), "Native swing feedback");
                         check(swingState.error, "Native swinging");
+                        if (!sampleGrab || sampleGrab(&grabState))
+                            grabState = {};
                         for (unsigned i = 0; i < 2; ++i) {
+                            // A web that caught a thug ends on him, wherever he goes.
+                            const auto& held = grabState.hands[i];
+                            const bool grabbing = input.focused && held.phase != 0;
+                            const bool wasGrabbing = grabPhases[i] != 0;
+                            if (grabbing) {
+                                swingState.webs[i] = {1, 0, held.end, held.length, held.taut ? 1.f : 0.f};
+                                // Caught, yanked, at the hand: each its own pulse.
+                                const auto phase = static_cast<GrabPhase>(held.phase);
+                                if (held.phase != grabPhases[i])
+                                    runtime.haptic(i, phase == GrabPhase::Yanked ? 1.f
+                                                      : phase == GrabPhase::Held ? .4f
+                                                                                 : .55f);
+                            } else if (wasGrabbing) {
+                                runtime.haptic(i, .6f); // thrown or let go
+                            }
+                            grabPhases[i] = grabbing ? held.phase : 0;
                             const bool attached =
                                 input.focused && swingState.status && swingState.webs[i].attached;
-                            if (attached != attachedBefore[i])
+                            if (attached != attachedBefore[i] && !grabbing && !wasGrabbing)
                                 runtime.haptic(i, attached ? .65f : .2f);
-                            if (attached && swingState.zips > zipBefore)
+                            if (attached && swingState.zips > zipBefore && !grabbing)
                                 runtime.haptic(i, 1);
                             attachedBefore[i] = attached;
                             webTimes.update(i, attached, swingState.webs[i].anchor, webWrist(motion.hands[i]),
@@ -283,11 +463,23 @@ DWORD WINAPI run(void*) {
                             native_webs::submit(webs, 200);
                         }
                     }
+                    const bool steering = motion.active && !flatScreen && controlsVisible;
                     const auto keys = swingNativeKeys(
-                        motion.active && !flatScreen && controlsVisible, swingState.owned != 0,
-                        motion.nativeKeys, static_cast<SwingTakeoff::Phase>(swingState.takeoffPhase),
-                        swingState.takeoff != 0);
+                        steering, swingState.owned != 0, motion.nativeKeys,
+                        static_cast<SwingTakeoff::Phase>(swingState.takeoffPhase), swingState.takeoff != 0);
                     controls(keys);
+                    if (padInstalled) {
+                        // The same walking and jumping on the virtual Xbox
+                        // controller: after the VR menus, the game plays the
+                        // player with it and ignores the bridge's keys.
+                        game_pad::Walk walk;
+                        if (steering && !swingState.owned) {
+                            walk.right = motion.walkRight;
+                            walk.forward = motion.walkForward;
+                        }
+                        walk.jump = (keys & swingJumpKey) != 0;
+                        game_pad::submit(game_pad::fromControllers(frame, mapping, walk), 200);
+                    }
                     {
                         std::lock_guard lock(telemetry);
                         auto& d = SpidyXrData;
@@ -297,6 +489,18 @@ DWORD WINAPI run(void*) {
                         d.leftHands += frame.hands[0].valid;
                         d.rightHands += frame.hands[1].valid;
                         d.nativeKeys = keys;
+                        d.gate = gate;
+                        d.cameraMover = moverTable > config.base && moverTable - config.base < 0x10000000
+                                            ? static_cast<uint32_t>(moverTable - config.base)
+                                            : 0;
+                        d.players = playersFound;
+                        d.playerRecord = player.record;
+                        const auto pad = game_pad::telemetry();
+                        d.padButtons = pad.buttons;
+                        d.padInstalled = pad.installed;
+                        d.padReads = pad.reads;
+                        d.cameraCommits = game.cameraCalls;
+                        d.playerCommits = game.matched;
                         std::memcpy(d.head, motion.head.data(), 64);
                         const Mat4 basis = {1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1};
                         for (unsigned i = 0; i < 2; ++i) {
@@ -305,9 +509,15 @@ DWORD WINAPI run(void*) {
                         }
                         InterlockedIncrement64(&d.sequence);
                     }
-                    if (!motion.active)
+                    // Copies of the game's presented frame, for the screen.
+                    if (gpuStarted)
+                        native_gpu::wantScreen(viewing && !motion.active);
+                    showScreen = screen;
+                    if (!viewing)
                         return false;
-                    if (!nativeStarted) {
+                    if (!gpuStarted) {
+                        // From here the headset shows the game: its screen until
+                        // gameplay, then the eye views.
                         native_gpu::Config gpu;
                         gpu.pid = config.pid;
                         gpu.base = config.base;
@@ -317,6 +527,17 @@ DWORD WINAPI run(void*) {
                         gpu.captureImages = config.options & 1;
                         check(native_gpu::start(&gpu), "Start native GPU bridge");
                         gpuStarted = true;
+                        nativeDeadline =
+                            config.durationMs ? GetTickCount64() + config.durationMs : UINT64_MAX;
+                        message(3, 0, "Headset active");
+                        return false; // initialization can exceed one predicted display interval
+                    }
+                    // Without gameplay the screen shows the game's presented
+                    // frame; until it is up, the last image stays. The eye
+                    // views get no command and stop rendering meanwhile.
+                    if (!motion.active)
+                        return screen || gameScreen.holding();
+                    if (!nativeStarted) {
                         struct NativeConfig {
                             uint32_t magic, version, bytes, pid;
                             uint64_t base;
@@ -331,11 +552,9 @@ DWORD WINAPI run(void*) {
                         check(SpidyStart(&views), "Start native views");
                         nativeStarted = true;
                         // Game-drawn webs are optional: without them the overlay draws webs.
-                        websStarted = !(config.options & 2) && !native_webs::start(config.base, config.record);
-                        nativeDeadline =
-                            config.durationMs ? GetTickCount64() + config.durationMs : UINT64_MAX;
+                        websStarted = !(config.options & 2) && !native_webs::start(config.base, player.record);
                         firstImageDeadline = GetTickCount64() + 3000;
-                        message(3, 0, "Head tracking active; waiting for first native eye pair");
+                        message(3, 0, "Gameplay found; waiting for the first eye images");
                         return false; // initialization can exceed one predicted display interval
                     }
                     // Keep publishing tracking while the engine renders earlier
@@ -373,17 +592,45 @@ DWORD WINAPI run(void*) {
                 },
                 [&](std::array<XrRuntime::EyeTarget, 2>& targets) {
                     const auto copyStart = std::chrono::steady_clock::now();
+                    native_gpu::Screen image;
+                    if (showScreen && native_gpu::latestScreen(image, imageHoldMs)) {
+                        // The game's presented frame, scaled into the image the screen shows.
+                        const auto& left = targets[0];
+                        overlay.blit(image.texture.Get(), image.view, image.linear,
+                                     {left.texture, left.format, left.width, left.height, {}});
+                        copyMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                                           copyStart)
+                                     .count();
+                        runtime.presentation(true, screenPose,
+                                             static_cast<float>(image.width) / static_cast<float>(image.height));
+                        drawn = Presentation::gameScreen;
+                        D3D12Renderer::Captured pixels;
+                        if (snapshotTicket && overlay.captured(snapshotTicket, pixels)) {
+                            publishSnapshot(pendingSnapshot, &pixels);
+                            snapshotTicket = 0;
+                        }
+                        if (!snapshotTicket && snapshots.due(GetTickCount64(), 0, false) &&
+                            (snapshotTicket = overlay.capture(left.texture)) != 0) {
+                            pendingSnapshot = {};
+                            pendingSnapshot.flatScreen = 1;
+                        }
+                        std::lock_guard lock(telemetry);
+                        InterlockedIncrement64(&SpidyXrData.sequence);
+                        SpidyXrData.serial = SpidyXrData.generation = 0;
+                        InterlockedIncrement64(&SpidyXrData.sequence);
+                        return true;
+                    }
                     uint64_t imageSerial{}, imageGeneration{};
                     bool copied = native_gpu::copyLatest(targets[0].texture, targets[1].texture, imageSerial,
                                                          imageGeneration);
                     check(native_gpu::error(), "GPU eye bridge");
-                    const auto* saved =
-                        copied ? history.find(imageSerial, motion.predictedDisplayTime) : nullptr;
+                    const auto* saved = copied ? history.find(imageSerial, displayTime) : nullptr;
                     copied = copied && saved;
                     copyMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
                                                                        copyStart)
                                  .count();
                     if (copied) {
+                        drawn = saved->flatScreen ? Presentation::flat : Presentation::immersive;
                         runtime.presentation(saved->flatScreen, saved->screenPose, saved->screenAspect);
                         const auto& rendered = saved->motion;
                         for (unsigned eye = 0; eye < 2; ++eye) {
@@ -410,6 +657,11 @@ DWORD WINAPI run(void*) {
                             (std::tan(lens.right) - std::tan(lens.left)) / static_cast<float>(targets[0].width);
                         const auto shown = saved->motion.predictedDisplayTime;
                         std::vector<Vertex> vertices;
+                        // Where the overlay puts each tracked web shooter, and
+                        // where the game's rope for this image's frame starts.
+                        Vec3 shooters[2]{}, ropeStarts[2]{};
+                        uint32_t shooterHands{}, ropeHands{};
+                        float webGap = -1;
                         for (unsigned hand = 0; !saved->flatScreen && hand < 2; ++hand) {
                             const auto& web = saved->webs[hand];
                             const auto& timing = saved->webTimes[hand];
@@ -430,7 +682,14 @@ DWORD WINAPI run(void*) {
                             pose.position += travel;
                             addTrackedHand(vertices, pose, hand, rendered.swing.hands[hand].grip,
                                            web.attached != 0);
+                            shooters[hand] = webWrist(pose);
+                            shooterHands |= 1u << hand;
                             if (gameWeb) {
+                                if (web.attached &&
+                                    native_eyes::renderWebStart(imageGeneration, hand, ropeStarts[hand])) {
+                                    ropeHands |= 1u << hand;
+                                    webGap = std::max(webGap, length(shooters[hand] - ropeStarts[hand]));
+                                }
                                 continue;
                             } else if (web.attached) {
                                 line.start = webWrist(pose);
@@ -462,6 +721,38 @@ DWORD WINAPI run(void*) {
                         overlayMs = std::chrono::duration<double, std::milli>(
                                         std::chrono::steady_clock::now() - overlayStart)
                                         .count();
+                        if (webGap >= 0 && imageGeneration != gapGeneration) {
+                            native_eyes::reportWebGap(webGap);
+                            gapGeneration = imageGeneration;
+                        }
+                        // Session report: publish a finished copy of the left
+                        // eye, then queue the next when one is due.
+                        D3D12Renderer::Captured pixels;
+                        if (snapshotTicket && overlay.captured(snapshotTicket, pixels)) {
+                            publishSnapshot(pendingSnapshot, &pixels);
+                            snapshotTicket = 0;
+                        }
+                        const float speed = swingState.status ? length(swingState.velocity) : 0;
+                        if (!snapshotTicket && snapshots.due(GetTickCount64(), speed, ropeHands != 0) &&
+                            (snapshotTicket = overlay.capture(targets[0].texture)) != 0) {
+                            pendingSnapshot = {};
+                            pendingSnapshot.flags = ropeHands;
+                            pendingSnapshot.generation = imageGeneration;
+                            pendingSnapshot.serial = imageSerial;
+                            pendingSnapshot.flatScreen = saved->flatScreen;
+                            pendingSnapshot.speed = speed;
+                            pendingSnapshot.webGap = webGap;
+                            const auto& eye = overlayViews[0];
+                            for (unsigned hand = 0; hand < 2; ++hand) {
+                                if (shooterHands & (1u << hand))
+                                    eyePixel(eye.viewProjection, shooters[hand], eye.width, eye.height,
+                                             pendingSnapshot.wrist[hand][0], pendingSnapshot.wrist[hand][1]);
+                                if (ropeHands & (1u << hand))
+                                    eyePixel(eye.viewProjection, ropeStarts[hand], eye.width, eye.height,
+                                             pendingSnapshot.ropeStart[hand][0],
+                                             pendingSnapshot.ropeStart[hand][1]);
+                            }
+                        }
                     }
                     std::lock_guard lock(telemetry);
                     auto& d = SpidyXrData;
@@ -485,24 +776,42 @@ DWORD WINAPI run(void*) {
             }
             // Count only a successful xrEndFrame containing a projection layer.
             // A GPU copy alone does not confirm that OpenXR accepted the frame.
-            if (runtime.lastFrameSubmitted()) {
+            const bool submitted = runtime.lastFrameSubmitted();
+            if (submitted) {
                 ++submittedFrames;
                 lastPresentedMs = GetTickCount64();
-                if (!presented) {
+                if (!presented || drawn != shownKind) {
                     presented = true;
+                    shownKind = drawn;
                     message(3, 0,
-                            flatScreen ? "Flat screen - click both thumbsticks for VR"
-                                       : "VR active - click both thumbsticks for flat screen");
+                            drawn == Presentation::gameScreen
+                                ? "Game screen (menus, loading, cutscenes): the controllers work as an Xbox "
+                                  "controller - VR resumes with gameplay"
+                            : drawn == Presentation::flat
+                                ? "Flat screen - click both thumbsticks for VR"
+                                : "VR active - menu button pauses, Y opens the game menu; click both "
+                                  "thumbsticks for flat screen");
                 }
+            }
+            {
                 std::lock_guard lock(telemetry);
-                InterlockedIncrement64(&SpidyXrData.sequence);
-                ++SpidyXrData.submitted;
-                if (SpidyXrData.generation != previousPresentedGeneration)
-                    ++SpidyXrData.uniqueSubmitted;
-                else
-                    ++SpidyXrData.reusedSubmitted;
-                previousPresentedGeneration = SpidyXrData.generation;
-                InterlockedIncrement64(&SpidyXrData.sequence);
+                auto& d = SpidyXrData;
+                InterlockedIncrement64(&d.sequence);
+                d.presentation = static_cast<uint32_t>(submitted ? drawn : Presentation::none);
+                if (submitted) {
+                    ++d.submitted;
+                    // Game-screen frames are not eye images: neither new nor reused ones.
+                    if (drawn == Presentation::gameScreen) {
+                        ++d.screenSubmitted;
+                    } else if (d.generation != previousPresentedGeneration) {
+                        ++d.uniqueSubmitted;
+                        lastNewImageMs = lastPresentedMs;
+                        previousPresentedGeneration = d.generation;
+                    } else {
+                        ++d.reusedSubmitted;
+                    }
+                }
+                InterlockedIncrement64(&d.sequence);
             }
             if (!active)
                 break;
@@ -512,6 +821,9 @@ DWORD WINAPI run(void*) {
         error = 1;
         failure = e.what();
     }
+    players.stop();
+    if (padInstalled)
+        game_pad::uninstall();
     bridge::Control release;
     release.serial = ++serial;
     release.leaseMs = 0;
@@ -568,10 +880,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 5 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 6 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
-        !config.motionModule || !config.record || !config.mover || config.options > 7 ||
+        !config.motionModule || config.options > 15 ||
         !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 || config.swingSpeed > 65 ||
         (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||
         (config.eyeSize && !validEyeSize(config.eyeSize)))
@@ -580,6 +892,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     submitInput = reinterpret_cast<BridgeCall>(GetProcAddress(module, "SpidySubmit"));
     sampleBridge = reinterpret_cast<BridgeCall>(GetProcAddress(module, "SpidyBridgeSample"));
     stopBridge = reinterpret_cast<BridgeCall>(GetProcAddress(module, "SpidyStop"));
+    retargetBridge = reinterpret_cast<BridgeCall>(GetProcAddress(module, "SpidyRetarget"));
     auto rays = reinterpret_cast<HMODULE>(config.rayModule);
     startRays = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyRayStart"));
     submitRays = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyRaySubmit"));
@@ -588,11 +901,15 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     submitSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingSubmit"));
     sampleSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingSample"));
     stopSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingStop"));
-    if (!submitInput || !sampleBridge || !stopBridge || !startRays || !submitRays || !stopRays ||
-        !startSwing || !submitSwing || !sampleSwing || !stopSwing)
+    retargetSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingRetarget"));
+    // Optional: an older ray module has no web grab.
+    sampleGrab = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyGrabSample"));
+    if (!submitInput || !sampleBridge || !stopBridge || !retargetBridge || !startRays || !submitRays ||
+        !stopRays || !startSwing || !submitSwing || !sampleSwing || !stopSwing || !retargetSwing)
         return 1002;
     stopRequested = false;
-    native_appearance::setPlayerRecord(config.record);
+    // The worker attaches each player it finds; none yet.
+    native_appearance::setPlayerRecord(0);
     keepAliveDeadline = GetTickCount64() + 10000;
     message(1, 0, "Starting Virtual Desktop OpenXR");
     worker = CreateThread(nullptr, 0, run, nullptr, 0, nullptr);

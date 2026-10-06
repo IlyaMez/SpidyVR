@@ -15,7 +15,7 @@ enum HeroState : uint32_t {
     heroBadTransform = 4,
 };
 struct Data {
-    uint32_t magic = 0x53415044, version = 4, bytes = sizeof(Data), heroState{};
+    uint32_t magic = 0x53415044, version = 5, bytes = sizeof(Data), heroState{};
     int64_t sequence{};
     uint64_t hiddenAvatar[2]{}, srgbOverlay[2]{}, playerActor{};
     // Frames rendered with the hero's native visibility switched off for
@@ -45,13 +45,23 @@ struct Data {
     uint32_t reserved{};
     // Anchored frames whose eyes were placed from the hero position the game's
     // web lines started from that frame, and how far the hero's render
-    // transform had moved from it by view maintenance, in metres. Before this
-    // shared sample, that distance separated the webs from the tracked wrists.
+    // transform was from it when the eyes were placed, in metres.
     uint64_t sharedHeroFrames{};
     float heroLagLast{}, heroLagMax{};
     double heroLagSum{};
     // native_webs::Status start error: rope-built start to requested start.
     float webStartLast = -1, webStartMax = -1;
+    // New eye images whose overlay drew a hand holding a game web, and the
+    // distance in that image's frame from the hand's web shooter to the first
+    // point of the game's rope, in metres. Eyes placed a frame late put this
+    // at one frame of player travel (0.7 m at 32 m/s) until October 5.
+    uint64_t webGapFrames{};
+    float webGapLast{}, webGapMax{};
+    double webGapSum{};
+    // Frames in which the engine's active (culling) view was placed from a
+    // hero position other than the eyes', and that distance in metres.
+    uint64_t activeLagFrames{};
+    float activeLagLast{}, activeLagMax{};
 };
-static_assert(sizeof(Data) == 288);
+static_assert(sizeof(Data) == 328);
 } // namespace spidy::native_appearance

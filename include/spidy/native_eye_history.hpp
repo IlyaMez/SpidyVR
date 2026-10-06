@@ -1,6 +1,7 @@
 #pragma once
 #include "game_swing.hpp"
 #include "game_tracking.hpp"
+#include "presentation_gate.hpp"
 #include "web_visual.hpp"
 
 namespace spidy {
@@ -23,7 +24,7 @@ class NativeEyeHistory {
         const auto& frame = frames_[serial % frames_.size()];
         const auto captured = frame.motion.predictedDisplayTime;
         return serial && frame.serial == serial && captured > 0 && now >= captured &&
-                       now - captured <= 150000000
+                       now - captured <= static_cast<int64_t>(imageHoldMs) * 1000000
                    ? &frame
                    : nullptr;
     }

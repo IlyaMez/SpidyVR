@@ -1,6 +1,8 @@
 // Swing prediction runs inside a native world-query lease. MoverStandard remains
 // responsible for body collision and committing the resulting position.
 #include "spidy/game_swing.hpp"
+#include "spidy/game_grab.hpp"
+#include "spidy/native_bodies.hpp"
 #include "spidy/native_movement.hpp"
 #include "spidy/native_query_context.hpp"
 #include <atomic>
@@ -13,15 +15,24 @@ __declspec(dllexport) Data SpidySwingData;
 }
 namespace {
 using Call = DWORD(WINAPI*)(void*);
-Call startMotion{}, submitMotion{}, sampleMotion{}, stopMotion{};
+// A movement command must outlast the slowest step the solver accepts (50 ms)
+// twice over, because visit() tolerates one missed observation, plus the 16 ms
+// grain of the tick count its lease is measured with.
+constexpr uint32_t motionLeaseMs = 150;
+Call startMotion{}, submitMotion{}, sampleMotion{}, stopMotion{}, retargetMotion{}, driveMotion{},
+    sampleDriven{};
 Config config;
 Command command;
 Swing solver;
-InputSampleClock inputClock;
+InputSampleClock inputClock, grabInputClock;
+InFlightStep inFlight;
 SRWLOCK lifecycle = SRWLOCK_INIT, control = SRWLOCK_INIT, output = SRWLOCK_INIT, simulation = SRWLOCK_INIT;
 std::atomic<bool> enabled{};
 bool started{}, owned{}, initialized{};
 uint64_t deadline{}, inputDeadline{}, motionSerial{}, lastStep{}, worldIdentity{};
+// Step length the last prediction assumed, and the native step it was made in.
+float predictedDt{};
+uint64_t predictedStep{};
 SwingTakeoff takeoffTransition;
 LARGE_INTEGER frequency{};
 bool copy(void* destination, const void* source, size_t bytes) {
@@ -43,11 +54,14 @@ void relinquishMotion() {
     }
     owned = false;
 }
-void cancel() {
+// The swing alone: a perched player's webs are let go, a grab keeps its target.
+void cancelSwing() {
     relinquishMotion();
     takeoffTransition.reset();
     solver.releaseAll();
     inputClock.reset();
+    inFlight.reset();
+    predictedDt = 0;
     AcquireSRWLockExclusive(&output);
     InterlockedIncrement64(&SpidySwingData.sequence);
     SpidySwingData.owned = SpidySwingData.takeoff = 0;
@@ -56,6 +70,11 @@ void cancel() {
         web = {};
     InterlockedIncrement64(&SpidySwingData.sequence);
     ReleaseSRWLockExclusive(&output);
+}
+void cancel() {
+    cancelSwing();
+    game_grab::cancel();
+    grabInputClock.reset();
 }
 void fault(uint32_t error) {
     cancel();
@@ -98,9 +117,37 @@ void visit(const native_rays::QueryContext& world) {
     QueryPerformanceCounter(&now);
     const bool fresh = motion.qpc && now.QuadPart >= static_cast<int64_t>(motion.qpc) &&
                        static_cast<double>(now.QuadPart - motion.qpc) / frequency.QuadPart < .05;
-    if (!c.focused || !fresh || (motion.status != 1 && motion.status != 2) ||
-        motion.moverFlags & 0x80000000u || (worldIdentity && worldIdentity != world.identity())) {
+    if (!c.focused || (worldIdentity && worldIdentity != world.identity())) {
         cancel();
+        worldIdentity = world.identity();
+        return;
+    }
+    const auto in = input(c);
+    // The grab takes every input sample as it comes, so the swing never sees
+    // a grip press before the grab has had it, and steps with the game's
+    // physics: a perched or standing player's mover does not step, and
+    // webbing a thug from a perch must work all the same.
+    {
+        // The player for picks and throws: where it stands, and its speed when moving.
+        uintptr_t transform{};
+        float feet[16]{};
+        Vec3 at = motion.position;
+        if (copy(&transform, reinterpret_cast<const void*>(config.record), sizeof(transform)) &&
+            copy(feet, reinterpret_cast<const void*>(transform), sizeof(feet)) &&
+            finite({feet[12], feet[13], feet[14]}))
+            at = {feet[12], feet[13], feet[14]};
+        const Body player{at + Vec3{0, 1, 0}, fresh ? motion.achievedVelocity : Vec3{}, motion.grounded != 0};
+        game_grab::claim(grabInputClock.consume(c), in, world, player);
+        float grabDt{};
+        if (game_grab::due(grabDt))
+            game_grab::step(grabDt, world);
+        if (world.error()) {
+            fault(world.error());
+            return;
+        }
+    }
+    if (!fresh || (motion.status != 1 && motion.status != 2) || motion.moverFlags & 0x80000000u) {
+        cancelSwing();
         worldIdentity = world.identity();
         return;
     }
@@ -117,13 +164,26 @@ void visit(const native_rays::QueryContext& world) {
     worldIdentity = world.identity();
     // The actor transform is at the feet. Rope constraints/visibility need a
     // harness above the supporting surface, while native motion stays in feet coordinates.
-    Body body{motion.position + Vec3{0, 1, 0}, motion.achievedVelocity, motion.grounded != 0};
+    const Vec3 harness = motion.position + Vec3{0, 1, 0};
+    // The next command starts where the step in flight ends.
+    const Body body = inFlight.predict(
+        {motion.steps, motion.serial, harness, motion.achievedVelocity, motion.dt, motion.status == 2},
+        motion.grounded != 0);
     if (!initialized) {
         solver.reset(body);
         initialized = true;
     }
+    // The last prediction assumed the step now in flight would last as long
+    // as the one before it. An unobserved step in between ran the same command.
+    if (predictedDt > 0 && motion.steps > predictedStep)
+        solver.settleStep(predictedDt, motion.dt * static_cast<float>(motion.steps - predictedStep));
+    predictedDt = motion.dt;
+    predictedStep = motion.steps;
     const float inputSeconds = inputClock.consume(c);
-    const auto predicted = solver.predictNativeStep(motion.dt, input(c), world, body, inputSeconds);
+    // A press aimed at something a web can catch belongs to the grab: the
+    // swing gets the input without that hand's grip.
+    const auto predicted =
+        solver.predictNativeStep(motion.dt, game_grab::forSwing(in), world, body, inputSeconds);
     if (world.error()) {
         fault(world.error());
         return;
@@ -151,18 +211,20 @@ void visit(const native_rays::QueryContext& world) {
     // Constraint correction and world-coordinate float rounding can make the
     // requested displacement slightly exceed the solver's velocity limit.
     // Cap the actual native request instead of relinquishing control midair.
-    Vec3 requested = limited(delta / motion.dt, std::min(config.maxSpeed * (1.f - 1e-6f), 1.75f / motion.dt));
+    const float cap = std::min(config.maxSpeed * (1.f - 1e-6f), 1.75f / motion.dt);
+    const Vec3 average = delta / motion.dt;
+    Vec3 requested = limited(average, cap);
     bool overhead{};
     for (const auto& web : solver.webs())
         overhead |= web.attached && web.anchor.y > body.position.y + .5f;
     const bool wantsLift = requested.y > .25f || (newAttachment && overhead) || c.jump || pointLaunched;
+    // Takeoff follows the native jump's measured progress.
     const auto transition =
         takeoffTransition.update(GetTickCount64(), attached, body.grounded, collidable, wantsLift,
-                                 zipped || pointLaunched || newAttachment, body.position, body.velocity,
+                                 zipped || pointLaunched || newAttachment, harness, motion.achievedVelocity,
                                  (zipped || pointLaunched) ? predicted.velocity : Vec3{}, pointLaunched);
     if (transition.resumed)
-        requested = limited(requested + transition.launchVelocity - body.velocity,
-                            std::min(config.maxSpeed * (1.f - 1e-6f), 1.75f / motion.dt));
+        requested = limited(requested + transition.launchVelocity - body.velocity, cap);
     // Walking/landing and takeoff belong to the native state machine, even if
     // we owned flight on the preceding frame. Preserve held webs across this handoff.
     const bool drive =
@@ -171,12 +233,22 @@ void visit(const native_rays::QueryContext& world) {
         native_movement::Command request;
         request.enabled = 1;
         request.serial = ++motionSerial;
-        request.leaseMs = 50;
+        // The command is applied by the next native step, one frame from now,
+        // and repeated if an observation is missed. With a 50 ms lease, a frame
+        // longer than that ran the step without it: the game then moved the
+        // body at its own fall speed for the time spent airborne (28-42 m/s
+        // down in the October 5 reports), a drop of a metre followed by a
+        // snap back at the speed limit.
+        request.leaseMs = motionLeaseMs;
         request.velocity = requested;
         if (const auto error = submitMotion(&request)) {
             fault(error);
             return;
         }
+        // The solver's velocity at the end of this command, with the same
+        // speed cap and takeoff launch applied to it as to the request.
+        inFlight.issued(request.serial, requested,
+                        limited(predicted.velocity + requested - average, config.maxSpeed));
         owned = true;
     } else if (owned) {
         relinquishMotion();
@@ -230,7 +302,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStart(void* input) {
         }
         if (!copy(&config, input, sizeof(config)) || config.magic != 0x53574346 || config.version != 1 ||
             config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
-            config.base != reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) || config.reserved ||
+            config.base != reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) || config.grabKinds > 0xe ||
             (config.durationMs && config.durationMs < 1000) || config.durationMs > 30000 ||
             !std::isfinite(config.maxSpeed) || config.maxSpeed <= 0 || config.maxSpeed > 65 ||
             !std::isfinite(config.gravity) || config.gravity < 0 || config.gravity > 30) {
@@ -242,10 +314,14 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStart(void* input) {
         submitMotion = reinterpret_cast<Call>(GetProcAddress(module, "SpidyMotionSubmit"));
         sampleMotion = reinterpret_cast<Call>(GetProcAddress(module, "SpidyMotionSample"));
         stopMotion = reinterpret_cast<Call>(GetProcAddress(module, "SpidyMotionStop"));
-        if (!startMotion || !submitMotion || !sampleMotion || !stopMotion) {
+        retargetMotion = reinterpret_cast<Call>(GetProcAddress(module, "SpidyMotionRetarget"));
+        if (!startMotion || !submitMotion || !sampleMotion || !stopMotion || !retargetMotion) {
             result = 1002;
             break;
         }
+        // Optional: a movement module without them cannot move bots on a web.
+        driveMotion = reinterpret_cast<Call>(GetProcAddress(module, "SpidyMotionDrive"));
+        sampleDriven = reinterpret_cast<Call>(GetProcAddress(module, "SpidyMotionDrivenSample"));
         native_movement::Config motion;
         motion.pid = config.pid;
         motion.base = config.base;
@@ -260,9 +336,47 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStart(void* input) {
         solver = Swing(physicsConfig(config));
         QueryPerformanceFrequency(&frequency);
         deadline = config.durationMs ? GetTickCount64() + config.durationMs : UINT64_MAX;
+        game_grab::start(config.base, reinterpret_cast<game_grab::Call>(driveMotion),
+                         reinterpret_cast<game_grab::Call>(sampleDriven),
+                         driveMotion && sampleDriven ? config.grabKinds : 0);
         enabled = true;
         native_rays::setVisitor(visit);
     } while (false);
+    ReleaseSRWLockExclusive(&lifecycle);
+    return result;
+}
+// The local player became another actor (a loaded save, a respawn, a
+// character switch). Webs and flight belonged to the previous body; the
+// solver starts again from the new one. Only record and mover are used.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingRetarget(void* input) {
+    Config next;
+    if (!copy(&next, input, sizeof(next)) || next.magic != 0x53574346 || next.version != 1 ||
+        next.bytes != sizeof(next) || next.pid != GetCurrentProcessId() ||
+        next.base != reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)))
+        return 1001;
+    AcquireSRWLockExclusive(&lifecycle);
+    DWORD result{};
+    if (!started) {
+        result = 1004;
+    } else {
+        AcquireSRWLockExclusive(&simulation);
+        cancel();
+        initialized = false;
+        lastStep = worldIdentity = predictedStep = 0;
+        native_movement::Config motion;
+        motion.pid = config.pid;
+        motion.base = config.base;
+        motion.record = next.record;
+        motion.mover = next.mover;
+        motion.durationMs = config.durationMs;
+        motion.maxSpeed = config.maxSpeed;
+        motion.syncAirVelocity = 1;
+        if (!(result = retargetMotion(&motion))) {
+            config.record = next.record;
+            config.mover = next.mover;
+        }
+        ReleaseSRWLockExclusive(&simulation);
+    }
     ReleaseSRWLockExclusive(&lifecycle);
     return result;
 }
@@ -299,12 +413,43 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSample(void* out) {
     ReleaseSRWLockShared(&control);
     return copy(out, &sample, sizeof(sample)) ? 0 : 2201;
 }
+// The web grab's telemetry (game_grab::Data): what each hand's web holds.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyGrabSample(void* out) {
+    auto sample = game_grab::data();
+    AcquireSRWLockShared(&control);
+    if (!enabled || GetTickCount64() >= deadline || GetTickCount64() >= inputDeadline || !command.focused)
+        for (auto& hand : sample.hands)
+            hand = {};
+    ReleaseSRWLockShared(&control);
+    return copy(out, &sample, sizeof(sample)) ? 0 : 2201;
+}
+// Headless checks of what the web does to a bot, at any distance: fling it
+// (BotStateFlung at a velocity, or a new velocity for the flight it is on).
+// Output: whether its state machine is in BotStateFlung now.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyGrabTest(void* input) {
+    struct Test {
+        uint32_t magic, version, bytes, flung;
+        uint64_t machine, record;
+        Vec3 velocity;
+        uint32_t reserved;
+    } t{};
+    if (!copy(&t, input, sizeof(t)) || t.magic != 0x53475454 || t.version != 1 || t.bytes != sizeof(t) ||
+        !finite(t.velocity) || length(t.velocity) > 45)
+        return 2001;
+    if (!enabled)
+        return 2002;
+    const bool queued = !t.machine || native_bodies::fling(t.machine, t.record, t.velocity);
+    t.flung = native_bodies::flung(t.machine);
+    copy(input, &t, sizeof(t));
+    return queued ? 0 : 2004;
+}
 extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStop(void*) {
     AcquireSRWLockExclusive(&lifecycle);
     native_rays::setVisitor(nullptr);
     AcquireSRWLockExclusive(&simulation);
     enabled = false;
     cancel();
+    game_grab::stop();
     ReleaseSRWLockExclusive(&simulation);
     const DWORD result = started ? stopMotion(nullptr) : 0;
     AcquireSRWLockExclusive(&output);

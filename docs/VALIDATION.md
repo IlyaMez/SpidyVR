@@ -1,6 +1,653 @@
-# Validation — 2026-10-05
+# Validation — 2026-10-06
 
-## Small desktop window for VR launches — current build, awaiting headset check
+## Walking, jumping and web pulls through the virtual controller — current build, awaiting headset check
+
+The user, after the 08:39 session (`reports/game-vr-20261006-083949.json`, the
+first headset session with the seventh build's virtual controller): "i cant
+move in game in vr (i can shoot webs but can pull myself or move or jump) menus
+work fine".
+
+The session: the player stood at (-305.31, 32.15, -153.30), the Times Square
+perch of the save, for all 2,122 movement samples; the head moved only as far
+as the user leaned (0.6 m). Webs attached 25 times. Pulls that wanted lift from
+the perch made the takeoff press jump (`takeoff_phase` 1, 2, 3), and it gave up
+after 1.4 s, 6 times; the collision flags stayed 0x2060001 and the swing
+controlled no step. In the 14:39 session of October 5, at the same perch, the
+same takeoff flipped them to 0x2060010 about 0.1 s after its press and the
+player rose at 11 m/s. The worker did send the keys (W/A/S/D combinations and
+Space in 209 samples). The game log has `XInput controller connected`,
+`Gamepads connected: 0 -> 1` and `Gamepad for main player: 8` as VR started;
+no earlier session's log has an XInput controller.
+
+In the game, no headset, same build and perch; only the input bridge and the
+virtual controller loaded:
+
+| Menus played with | Bridge W 1.5 s / Space 0.35 s | Real Space / S (`SendInput`) | Controller A | Controller left stick |
+|---|---|---|---|---|
+| Virtual controller (as in VR) | 0 m / 0 m (game read the keys 769 and 362 times) | 0 m / 0 m | 2.87 m jump | full 7.42 m, half 1.55 m in 1.5 s |
+| Keyboard (Enter), controller never pressed | Space 3.01 m jump | | | |
+| Keyboard, then the controller connected at rest | Space 2.99 m jump | | | |
+| Keyboard, then one A on the controller | Space 0 m | 0 m | first A 0 m (swallowed), second 2.55 m | |
+
+The device that last pressed a button plays the player; a connected controller
+at rest takes nothing over, and key presses after a controller press did not
+switch back. VR menus are played with the virtual controller, so in VR the game
+ignored every key the bridge served. Takeoff presses jump for 160 ms: a 160 ms A
+jumped the player 1.95 m from the street.
+
+The fix: in VR the virtual controller also carries walking and jumping as the
+swing leaves them, besides the bridge's keys. Its left stick is the Touch stick
+turned into the stock camera's axes, analog (the keys only have 8 directions at
+full speed), zero while the swing owns the body; A is the bridge's Space bit,
+with the takeoff's release and press. The worker submits the controller after
+the swing's sample, as it does the keys.
+
+Offline: 115 core checks (new: the rig's stick in the camera's axes; gameplay
+controller with walking and jumping), the GPU test and 56 Python checks pass.
+
+## Web grab: catching, yanking, carrying and throwing props and thugs — preceding build, awaiting headset check
+
+The user asked: "design and implement a system like the one in the game where
+i could web objects and npcs and throw them around". Design, tuning and the full
+measurements are in [WEB-GRAB.md](WEB-GRAB.md).
+
+Offline. `spidy_tests.exe` passes 114 checks, 20 of them for the grab (core and
+lab); `spidy_graphics_test.exe` passes; the Python protocol tests pass 56,
+including the grab telemetry's layout. Simulated tuning: a critically damped
+hold spring carried a target 12-18 cm past a hand that moved 1 m in 0.2 s and
+stopped; the first-order follower that replaced it, 4-6 cm.
+
+In the game, no headset (`tools/probe_game_grab.py`, Times Square, the player
+perched 32 m up; `reports/grab-probe.json`, `grab-probe-yank.json`):
+
+- A throwable prop's bodies are static (flags 0x1, motion 0, category 0x43f
+  including the web bit), so before this build a web aimed at one swung from it.
+- Freed with SetFreebody and SetMode debris alone, its bodies moved (6.5 m up in
+  0.5 s) while the prop was still drawn where it had stood: it had no keyframe
+  record. A physics rebuild gives it one, and the game draws it after its body.
+  Moved in the steps before the game's first sync, it was drawn 5 m off; three
+  still steps after the rebuild fixed that.
+- The game steps Havok by a fixed 1/30 s per frame (609a560; TimeScaleSystem
+  owns it). At 240 frames a second a released prop fell 32 m in 0.3 s, about 64
+  times real gravity. With the ratio measured each step and props flown in real
+  time until they rest, a thrown prop crossed 44 m in 2.4 s.
+- Reel: 43 m in 4.25 s; caught, carried 0.8-1.6 m from the hand around a 0.3 m
+  circle; thrown at 19 m/s. Yank: 43 m in 1.77 s, nearest 1.09 m to the hand,
+  thrown at 17 m/s. No web lost in either run; the hooks were restored.
+- Earlier runs failed in ways now fixed: a prop's own body cut its web after
+  0.3 s; ticking the grab twice per physics step gave half the pull; a slack web
+  let the game's 8-times physics drop the prop and the web snapped it back (a
+  yo-yo of +-45 m/s); a fixed 1.5 s yank timeout stopped 8.5 m short.
+
+Bots: the components (BotMoverManagerGame +0xdb4 names the bot's MoverStandard)
+were read in a live game, and the RequestState slot and the flung reaction's
+entry points offline. Not verified in the game: the only bot in free roam was
+160 m away and its mover did not step. Pedestrians have no physics and are not
+offered.
+
+## The player after a reload, VR from the game's start, menus with the VR controllers — preceding build, awaiting headset check
+
+After the 21:12 session the user reported "game always stays flat", then asked:
+"also add ability to navigate menus in vr and start the game in vr from the get
+go".
+
+What the report shows (`game-vr-20261005-211234`). 4,330 frames went to the
+headset in 68 s, every one the game screen; `tracked` stayed 0, so the gameplay
+gate never opened, and no swing or motion sample exists. The eye snapshots show
+the session: Peter Parker at F.E.A.S.T. (a story mission), the pause menu, a
+loading screen at 31-41 s, then Spider-Man in free roam at Times Square from 46
+s, still on the screen. The game log has the load at 21:14:13.
+
+Cause. The launcher found the player once, from outside the process, and
+started the input bridge with that hero and actor record. The bridge accepts a
+camera commit only when its target is that record. Loading a save, restarting a
+checkpoint or switching characters replaces the player's actor and components,
+so from the load on no commit could match. Measured in the game without a
+headset (`tools/probe_menu_pad.py`, the user's save at Times Square):
+
+- After a checkpoint restart the old hero, record and mover were gone and new
+  ones appeared 6.1 s later. With the old target the follow camera committed
+  470 times in a second and none matched: the 21:12 session from 46 s.
+- Handed the new player (`SpidyRetarget`), 496 of 496 commits matched and the
+  gate's conditions held in 99% of samples; after the first load, 500 of 500.
+- The Peter section before the load had the player the launcher found, so it
+  failed for another reason. The session has no camera data; Peter's camera is
+  most likely one the gate does not accept (the commit method also belongs to
+  LookCameraMover, LookCameraMoverGame and TurretCameraMover) or one that does
+  not commit. XR telemetry now records it.
+
+The game pauses while another window is in front: started from Steam behind the
+launching window, its intro sat still for three minutes, drawing black, and it
+read no controller. In front, it played on at once.
+
+Changes:
+
+- `game_player.cpp` finds the player in-process from the component registry, as
+  `capture_game_state.py` does from outside: exactly one hero (vtable
+  `38a93c8`) with a valid actor transform, exactly one HeroMoverManager on the
+  same record, and its MoverStandard by handle. A thread keeps it: a live
+  player is re-checked every 100 ms, a lost one searched for every 250 ms (7-9
+  ms per search). Same hero and record as the outside search, both times.
+- The VR worker hands each new player, or none, to the input bridge
+  (`SpidyRetarget`, new), the swing module (`SpidySwingRetarget`, which resets
+  its solver and retargets the movement module, `SpidyMotionRetarget`), the
+  game's web lines (`native_webs::retarget`; rope handles reset with the rope
+  manager) and the avatar hiding; the tracking rig and image history start
+  over.
+- VR starts with the game. The launcher waits for the renderer (30 frames
+  through the render memory module, then exactly one direct queue), starts the
+  input bridge without a player, and starts the VR worker with none (config v6).
+  The GPU bridge, and with it the game screen, starts when the headset is
+  focused; the eye views start with the first gameplay, as before the sixth
+  build. No 30-second headset deadline: VR waits for the headset. Measured: the
+  renderer was ready 8.8 and 10.3 s after launch.
+- `game_pad.cpp` serves controller 0 through the game's XInput
+  (`XInputGetState` and `XInputGetCapabilities` in whichever of xinput1_4,
+  1_3 and 9_1_0 is loaded; the game loads the DLL itself). On the game screen
+  the Touch controllers map to Xbox buttons, sticks, triggers and bumpers (the
+  grips); in VR only the menu button (Start) and Y (Back) pass. A real
+  controller in slot 0 is merged. Once served, the controller stays connected.
+  The OpenXR session binds B, X and the left menu button. A held from the screen
+  does not jump.
+- The launcher brings the game window to the front (`bring_to_front`).
+- XR telemetry v6 (648 bytes): `gate` (no_player, bridge_stopped,
+  no_camera_commit, other_camera, tracking), `camera_mover` (the last committing
+  camera's class), `camera_commits` and `player_commits` (both rising under
+  other_camera: a second camera commits after the player's every frame),
+  `players`, `player_record`, `pad_buttons`, `pad_installed`, `pad_reads`.
+
+In the game, driven only through the virtual controller: A presses every 2 s
+took the game from its intro logos through the title and main menu to a loaded
+save (39 s from launch to player with the window brought forward by the
+launcher's function; 13 s from the title when brought forward by hand). Start
+opened the pause menu, with Xbox prompts; D-pad down and two flicks of the left
+stick each moved the selection one item; A and the confirmation restarted the
+checkpoint; Back opened the game menu (map, LB/RB tabs, LT/RT zoom); B closed
+it. The game read controller 0 about 2,500 times a second while in front, and
+not once while behind another window.
+
+Validation: 94/94 core checks (new: the controller mapping in menus, in VR and
+without the headset, and bad readings), 26 + 13 + 11 + 5 Python checks (new:
+XR telemetry v6 with gate reasons, camera names and commit counts; VR waits for
+frames and one queue). Saves: the game rewrote `slot0-s.save` with its own autosave on
+Continue; the copy from before is in `reports/backups/saves-20261005-menu-pad/`.
+
+Headset check: start with `Launch Spidy VR.cmd` with the game closed. The
+headset should show the intro about ten seconds after launch; play the menus
+with the controllers, Continue, and VR should start with gameplay. Pause with
+the menu button and resume with A; open the map with Y. Restart a checkpoint or
+die once: VR must come back after the load. In the report, `players` counts the
+players found; a scene that stays on the screen while you play shows its reason
+in `gate` and its camera in `camera_mover`.
+
+## Game screen for menus, hint cards and cutscenes — preceding build
+
+After the 19:36 and 19:40 sessions the user reported: "main menu, cutscenes and
+i think stuff like damage indication overlay or spidey senses are causing the
+screen to go black (in vr). also everything looks a bit to dark (or too bright)
+like an extra ambient occlussion or something is active", and then that the
+session's eye snapshots look brighter than the headset.
+
+What the reports show. The VR loop had a picture only while its gameplay gate
+was open: a camera commit (`1e1d600`) from the follow or combat camera mover,
+less than 0.1 s old, with valid player and camera transforms. Closed, every
+frame went out with no layer, which is black. In `game-vr-20261005-193658` it
+was closed for 7.9, 12.2, 4.7, 5.8 and 16.2 s; in `-194057` for 4.4, 2.9 and
+22.4 s. Aligned with the physics samples by time:
+
+- Four stretches of the 19:36 session ran no physics step at all: the game was
+  paused, while render memory shows it still drew about 5 MB a frame of its own
+  view. The opening mission's hint cards (Spider-Sense, health) pause the game
+  until dismissed, which fits what the user took for spider sense and damage
+  overlays.
+- The last stretch at 19:36 and the one from 21.5 s at 19:40 ran physics at 240
+  steps a second with the player standing: the game's own rate once the eyes
+  stopped, in a cutscene.
+- 17-21 s at 19:40 ran physics at the usual rate with the player walking
+  indoors at 5 m/s: a camera that does not commit.
+- The commit method (vtable slot `0xc0`) belongs to FollowCameraMover,
+  CombatCameraMover, LookCameraMover, LookCameraMoverGame, TurretCameraMover
+  and PerfTestCameraMover; the gate accepts the first two.
+  MeleeRelAnimCameraMover, RelativeAnimCameraMover, DeathCameraMover,
+  ExteriorCameraMover, VehicleCameraMover, PhotomodeLookCameraMover and the
+  cinematic cameras never call it.
+
+In the game without a headset (`tools/probe_game_screen.py`, the user's save
+at the Fisk construction site; reports `game-screen-2` to `-5`):
+
+- The eye views kept rendering in the pause menu: 139 new pairs in 2 s, against
+  117 in play.
+- They carry the HUD but not the pause menu, subtitles, or world markers (enemy
+  reticles); the game draws those into its presented frame only. An eye copying
+  the stock camera showed the paused scene without the menu or its dimming
+  (luma 81 of 255, the window 36).
+- Brightness, same camera: eye 81.8, window 83.9 (linear light 0.170 against
+  0.174); darks -0.5 to -1.6 levels, midtones -3. Alpha was 255 in every pixel.
+  The session snapshots are the exact bytes copied into the
+  `R8G8B8A8_UNORM_SRGB` swapchain, so a darker look in the headset arises after
+  that handoff, which receives standard sRGB content with opaque alpha. This
+  build does not change it.
+
+Changes:
+
+- Without gameplay the last immersive image stays up for 250 ms
+  (`GameScreen`), then the headset shows the game's presented frame on a level
+  virtual screen 2.5 m ahead (`screenAhead`, heading only), until gameplay
+  returns. The eye views get no command meanwhile and stop rendering.
+- `native_eye_gpu.cpp` hooks DXGI Present and Present1, whose addresses come
+  from a throwaway 64-pixel swapchain on a hidden window. While the screen is
+  wanted it copies the back buffer on the game's render queue before the
+  present. The swapchain reports a Streamline-wrapped queue, not the one the
+  game renders on (first attempt: no copies), so the game's swapchain is
+  recognized by its back buffer's device.
+- `D3D12Renderer::blit` draws the copy into the left eye image for the quad.
+  An sRGB target gets the stored values unchanged; float frames are encoded.
+- `game_xr.cpp`: native views start when the headset is focused, not only in
+  gameplay; the first-image watchdog counts new images, from each start of
+  gameplay; the pose history survives gameplay gaps (cleared on focus loss and
+  recentering), and held images age by the frame's display time. XR telemetry
+  v4 (592 bytes) adds `presentation` and `screen_submitted`. The flat-screen
+  toggle places its screen level too.
+- The GPU capture's readback range overran the buffer by the last row's pitch
+  padding when a row was not a multiple of 256 bytes (1290 pixels here); every
+  freeze failed with 3904. VR sizes were multiples and unaffected.
+
+Validation: 93/93 core checks (new: the screen's hold, entry, return to
+gameplay and clock reversal; level placement at five pitches, with roll), the
+GPU test at 1536 x 1536 (new: 8-bit, 10-bit and float frames drawn into an
+sRGB typeless target within 1 level; debug layer clean), and 53/53 Python
+checks. In the game (`game-screen-5`): 118, 137 and 123 copies of the
+presented frame in 2-second phases of play, pause menu and resumed play
+(R8G8B8A8_UNORM, 1290 x 540), each identical to the window to the byte; all
+entries restored. The draw into the headset's swapchain and the quad were not
+run in the game: they need the headset. The game re-saved its autosave and
+preferences on each Continue, as in the user's sessions;
+`reports/backups/saves-20261005-game-screen/` holds the files from before.
+
+Headset check: open the pause menu and the map, dismiss a hint card, watch a
+cutscene, die once. Each should appear on a screen ahead, and VR resume with
+play. The report's `presentation` shows `game_screen` for those stretches and
+`screen_submitted` counts the frames. The screen has the desktop window's
+resolution (1290 x 540 with the launcher's small window); `-FullDesktopView`
+sharpens it at the cost of rendering that view at full size in VR.
+
+## Render memory ring, held images, memory headroom — preceding build
+
+After the 14:39 session with the fourth build the user reported: "webs are
+fixed! still got the artifact i got before - black flickering and quads all
+across my vision, objects, building and ground dissapearing, geometry randomly
+exploding into impossible polygons", and then "the game crashed on the second
+spike of those". The session's report is `reports/game-vr-20261005-143902.json`,
+with the game's log and the left-eye images beside it.
+
+What the report shows. In three stretches (220-260 s, 350-390 s, and 461-495 s
+into the session, after which the game crashed) the game copied eye render jobs
+and never rendered them: 60-87 a second, 3,047 of the session's 22,379 copies.
+In those stretches new eye pairs arrived 11-20 times a second while the game's
+own frame rate rose to 48-56, and Spidy ended 2-19 headset frames a second
+without an image. The second stretch has none of those; the user was standing
+still. In the session's 329 s of driven flight no physics step ran without its
+movement command, so the lease described in the next section was not involved.
+
+The cause is the game's frame allocator, "RenderAlloc" (the object at `7938880`):
+
+- `1872d90` creates it (its only call is `188a19c`): a 128 MB ring, reserved and
+  committed at once. `1872930` (316 call sites) and `1872860` (35) allocate from
+  it with an interlocked add. `1872b90` (only call `187e623`, inside `187e320`)
+  rolls it over at the end of each frame. The frame that just ended stays
+  allocated while the render thread draws it, so a frame may use the ring minus
+  what the frame before it used.
+- A request that does not fit sets the overflow flag (`+0x41`). `1872930` then
+  returns null. `1872860` falls back to the heap and queues the block for
+  release two frames later (`1c5dab0`; flushed by `1c5e900` from `175a1a4`).
+  With a null result `19206a0` skips the view and `1793be0` the actor's job.
+- The stock game uses 6-8 MB a frame. With the two eye views and the game view
+  moved to the head, frames used 47-64 MB swinging at Times Square with
+  512-pixel eyes and the same with 1536-pixel eyes: the memory holds draw lists
+  and commands, not pixels. Two such frames are 119-127 MB of the 128.
+- Refused requests still advance the usage counter. One sampled overflow frame
+  had 526 MB requested of the 128 MB ring, and the game's own two-frame record
+  reached 1,223 MB.
+
+Read from the code and not observed running: of the 316 call sites of
+`1872930`, a heuristic pass found the result tested before use at 289; two of
+the others pass it straight to `memset` (`1857a9e`, `185b158`). The rollover
+takes the usage counters as the extent of the frame, so after a frame with that
+much refused it leaves the next frame no region at all, and computes the region
+after that from a null pointer (`first - ring` at `1872ca4`), which gives a size
+unrelated to the ring.
+
+Why the ring is replaced where it is created and nowhere else. Render commands
+refer to frame memory by 32-bit offsets from the ring's base (encoded at
+`179db08`, decoded at `177059c` and `1770a13`). A ring moved at a rollover
+crashed the game in the decoder (`17706db`). The address space for 4-6 GB around
+the ring had no free gap of 16 MB, so the ring cannot grow in place, and no
+second arena fits within reach of an offset.
+
+Changes:
+
+- `spidy_render_memory.dll` (`src/native_render_memory.cpp`) hooks `1872d90`.
+  After the game's own creation, and only if the allocator is exactly as
+  creation leaves it, the hook allocates a 512 MB ring, points the allocator at
+  it, and releases the game's. A hook on `1872b90` counts frames, frames with a
+  refused request, and the largest frame and pair of frames. Signature checks
+  cover both functions and their call sites. `Data.status` says which ring the
+  game is on. The ring outlives the session that installed it, and a later
+  session on the same game recognizes it.
+- `tools/vr_launcher.py` looks for the game process every 50 ms and loads that
+  module as soon as the process exists, before it opens the game for anything
+  else. The game creates the ring 3.4 s after its process is first seen
+  (kernel32 and user32 are loaded at that point, d3d12 0.4 s later, the GPU
+  driver 1.5 s later).
+  Loading is retried while the new process still refuses module listings. Run
+  as a script, the launcher starts the game the same way for checks without a
+  headset.
+- `run_game_vr.py` records `render_memory` in the report, samples
+  `render_frame_mb` and `render_overflow_frames`, prints which ring the game is
+  on, and warns when it is the game's own (a game that was already running).
+- Images. `XrRuntime::frameStereo` ends a frame with no layer when the draw
+  callback has no image. `copyLatest` refused a staged pair older than 150 ms,
+  and `NativeEyeHistory::find` refused its pose, so at 11-20 new pairs a second
+  the headset went black between pairs. Both now hold the last pair for
+  1000 ms (`imageHoldMs`). Controls need a new image within 500 ms
+  (`controlHoldMs`; before, any submitted image within 250 ms), and the
+  three-second stall watchdog counts from the last new image.
+- Memory headroom. `run_game_vr.py` warns before it starts the game when
+  Windows can promise less than a session takes (19 GB, less what a game that
+  is already running holds), and records `free_commit_mb` at the start, with
+  every sample, and at its lowest.
+
+In-game checks without a headset, RTX 5090. Each run used a freshly started
+game, which was closed afterwards; all hook entries were restored and the saves
+stayed byte-identical to the copy taken before. "Release stress" is a scratch
+variant of `probe_web_frames.py`, not in the repository, in which both hands
+shoot and release game webs every 0.9 s during the swing. All runs have three
+views (`--views 13`); the eye images are 90° wide unless noted. Frame counts
+start when the module does, so they include menus and loading.
+
+| Report | Ring | Test | Frames that did not fit | Eye jobs lost | Most used by two frames |
+|---|---|---|---|---|---|
+| `web-frames-6` | game's, 128 MB | `probe_web_frames.py` | 0 of 14,085 | 0 of 345 | 119.4 MB |
+| `web-release-7` | game's | release stress, 110° eyes, 8 s swing | 0 of 14,183 | 0 | 127.2 MB |
+| `web-release-8` | game's | release stress, 120° eyes, 8 s swing | 13 of 13,609 | 24 of 395 | over the ring |
+| `web-frames-5` | Spidy's, 512 MB | `probe_web_frames.py` | 0 of 23,289 | 0 of 345 | 121.6 MB |
+| `web-frames-7` | Spidy's, final build | `probe_web_frames.py` | 0 of 14,817 | 0 of 369 | 120.0 MB |
+| `web-release-10` | Spidy's, final build | release stress, 120° eyes, 6 s swing | 0 of 22,666 | 0 of 305 | 136.6 MB |
+
+Two earlier runs of the 110° stress on the game's ring, before the allocator
+was instrumented, lost 15 and 8 eye jobs (`web-release-5`, and `-6` with
+1536-pixel eyes); `web-release-7` is the same test fitting with under 1 MB to
+spare. A first run of the 120° stress on Spidy's ring (`web-release-9`) was
+stopped after 5.7 s by the test's own guard on Windows commit, with 138.3 MB as
+the most for two frames and no job lost. In the final build, a second start of
+the module in the same game reported Spidy's ring, 512 MB, with its counters
+restarted, and stopping it restored both entries.
+
+The crash. The game's log ends with an access violation at `0x1199cfbb`. The
+log prints the low half of the address only; with the module at `7ff70fd40000`
+that is `Spider-Man.exe+1c5cfbb`. No minidump was written. `1c5cf90` takes a
+block from a pool's free list, and the faulting instruction reads the block's
+link to the next (`mov rcx, [rax]`); its callers are the game's small-block heap
+(`1c63770`). So the head of a free list was not a readable address: the heap's
+bookkeeping had been overwritten, or memory it counted on was not there. Two
+conditions of that session can lead there, and which one did is not established:
+
+- Render memory overflow, above. The game is not built to run in that state.
+- Windows had no memory left to promise. The game's log gives 14.0 GB available
+  of a 65.5 GB commit limit when the game started. Its once-a-minute memory line
+  shows the process holding 14,968 MB a minute in, 16,721 MB a minute later, and
+  17,112 MB at the end. At the crash the limit was 67.5 GB (Windows had enlarged
+  the page file) with 0.6 GB available. In a separate experiment a job limit on
+  the game's commit made it log `CreateHeap ... failed` (`0x8007000e`) and
+  freeze (`reports/memory-limit-1.json`); the user's log has no such line, so no
+  GPU allocation failed outright, which does not rule out a failed allocation
+  elsewhere. On the test PC other programs held about 51 GB of commit with half
+  of the 61.6 GB of RAM free, and the page file was 4 GB.
+
+Validation: 91/91 core checks (new: the allocator's fields as creation leaves
+them, as replaced, and as a later session finds them; a recent new image as the
+condition for control; the hold boundaries of the pose history), the GPU test
+at 1536 x 1536, and 53/53 Python checks (new: the module is loaded once per
+process before the game is opened, retried while the process starts, and not
+retried after its own refusal; the render memory reader; the memory warning).
+
+Not verified: everything in the headset. Whether the break-up is gone; how a
+held image looks while the game is slow; whether 512 MB covers every scene
+(the report's `render_memory` gives the most two frames used and the frames
+that did not fit); what caused the crash. One left-eye image of the 14:39
+session (`0168`) shows a black polygon 0.72 s after a web release; the release
+stress did not reproduce it in 60 releases, and it is unexplained. A session
+attached to a game that is already running stays on the game's ring: it only
+warns.
+
+## Eyes placed before the frame's render jobs, reel momentum — preceding build, webs confirmed by the user
+
+After a session with the third build at 12:05 the user reported: "offsets still
+happens and game began breaking up after a few minutes of gameplay". That session
+left no report. `run_game_vr.py` called `SpidyXrKeepAlive` while the game was
+closing; the call raised `OSError`, and the launcher exited before writing.
+
+Why the web still started away from the hand. The frame function `175a060` runs
+in this order (disassembly; call sites in parentheses):
+
+1. `18a13c0` (`175a42f`): for every pool view and the eight offscreen slots,
+   `189ee00` copies the view's descriptor `+0` to `+0x530` and the old `+0x530`
+   to `+0xa60`. Previous camera = current camera.
+2. The gameplay update phases: hero movement, the hero's rope update
+   (`95f6c0` → `676dd0`), and the stock camera's submit (`1646e10` → `1899ab0`).
+3. `1920240` (`175aaa9`): for each offscreen slot of the manager at `7a34dd0`,
+   `186d050` → `19206a0` → `19223e0` copies the whole view (0x1f70 bytes) into
+   its render job. The pool views follow.
+4. `187e320` (`175acb4`) → view maintenance `18a0bb0`.
+
+Spidy submitted the eye poses in its maintenance hook, step 4, after step 3 had
+copied the views. Two consequences:
+
+- Every eye image was rendered from the previous frame's head and player
+  position. The game's web was built in step 2 from the current frame's hand,
+  so in the eye it started one frame of travel ahead of the hand: 0.4-0.7 m at
+  20-32 m/s and 15-33 ms frames, and different in every frame.
+- At the next step 1 the pose became its own previous camera. `186e520` fills
+  the per-view shader constants `GlobalViewportCBuffer` from that history
+  (`m_PrevCamWorldToClipMat` at `+0x80`, `m_PrevCameraPos` at `+0xc0` from the
+  previous descriptor at view `+0x530`), so for both eyes the previous camera
+  always equalled the current one. What that did to the image (anti-aliasing
+  history, motion blur, reflections) was not measured.
+
+Changes:
+
+- `stereo_probe.cpp`: a hook on `1920240` places the eyes (`placeEyes`: latch the
+  pose command, anchor it to this frame's hero sample, set lens and pose, submit)
+  before the original copies the views. Maintenance only creates and retires the
+  views. `SpidyEyePlacement(1)` restores the old placement for comparison.
+  Signature checks cover `1920240`, its call site `175aaa9`, and `189ee00`.
+- Eye frame telemetry v4 counts, per eye job copy, whether the pose was placed in
+  that frame (`same_frame_poses` / `late_frame_poses`) and whether the previous
+  camera differs from the current one (`history_moved` / `history_still`).
+  Appearance v5 adds `web_hand_gap_*`: the distance, in each presented image,
+  between the wrist the overlay draws and the game rope's first point.
+- `Swing`: a taut rope that is being reeled now carries the body's velocity at
+  the winch rate; the pull used to move only the position. With two taut ropes
+  the pass over both keeps what each has pulled and lets a rope hand back a
+  surplus (accumulated impulses); kept, the surplus pushed the body sideways
+  every step. The speed two ropes carry together is followed exactly up to a
+  right angle between them and held at that value beyond it, because it grows
+  without bound as they come to oppose each other. Winches that reach the span
+  between their anchors now share the remaining length instead of the left
+  hand's taking it. A rope within 5 mm of taut is treated as taut, so float
+  rounding no longer decides which of two ropes acts on the velocity.
+- `Swing::settleStep`, called by `game_swing.cpp`: a prediction covers a native
+  step whose length is unknown until the next observation. The rope was wound for
+  the previous step's length while the body travelled for the real one. The rope
+  is now wound for the difference, at the rate the winch really ran (none at the
+  shortest length).
+- `game_swing.cpp`: the movement command's lease is 150 ms instead of 50 ms. The
+  command is submitted in one frame and applied by MoverStandard's prequery in
+  the next, so with 50 ms (47-62 ms in practice, the lease is measured with the
+  16 ms tick count) any slower frame ran its step without the command. The game
+  then moves the body at the fall speed it derives from the time spent airborne.
+  In `reports/web-frames-3.json` two such steps occurred 0.9 and 1.1 s after
+  takeoff, at 27.5 and 32.6 m/s downward: the body dropped 0.9 m and 1.4 m in
+  one step, the solver pulled it back at the 32 m/s cap, and the velocity
+  alternated for about five steps. The morning headset sessions each contain
+  one such place in their retained samples (10:25: one step at 20.6 m/s down in
+  321 s of driven flight; 09:36: two steps in 156 s, one sampled at 42 m/s
+  down, speed 16 to 43 m/s). 150 ms covers two steps of the longest length the solver accepts
+  (50 ms), because one missed observation is tolerated.
+- `run_game_vr.py`: the report is written however the session ends (game closed,
+  Ctrl+C, console closed, a failed stop). It copies the game's log to
+  `<report>-game.log` and parses its memory lines into `game_memory`. The left
+  eye as presented is copied without blocking (`D3D12Renderer::capture` /
+  `captured`, `EyeSnapshotSchedule`) and saved to `<report>-eyes/`.
+- `probe_game_swing.flight_summary` reports `steps_without_command`: native
+  steps inside controlled flight that ran without the command.
+
+In-game checks, no headset, RTX 5090, game closed afterwards and all hook entries
+restored:
+
+- `probe_eye_frames.py` at the main menu (`reports/eye-frames-menu.json`). Old
+  placement: 658 eye job copies, 0 with a pose placed in that frame, previous
+  camera equal to the current one in all 658. New placement: 657 of 657 placed in
+  the frame, and the previous camera differed in 193 copies, exactly the 193 pose
+  commands sent.
+- `probe_web_frames.py` in free roam, final build (`reports/web-frames-4.json`):
+  one 100 m web, reeled, speed cap 32 m/s, gravity 6, a game web held 0.6 m in
+  front of a sideways eye camera. Old placement: the web's first point was a mean
+  0.455 m (max 0.605 m) from the expected point over 90 frames at a mean
+  19.6 m/s; mean frame travel was 0.453 m. New placement: mean 13 µm, max 23 µm
+  over 218 frames at a mean 31.6 m/s (0.60 m of travel per frame). In the saved
+  left-eye images the web ends on the marker with the new placement and misses it
+  with the old one. `web_start_error` and `hero_lag` stayed 0.0 m.
+- Flight in the same run, per native step: the second difference of achieved
+  velocity (an isolated jolt) had a median of 0.006 m/s and a 90th percentile of
+  0.029 m/s; the run before the reel changes (`reports/web-frames-1.json`) had
+  0.111 and 0.524, with 1.3-2.8 m/s jolts where the frame time moved by about a
+  millisecond, and lost 16.4 m/s in the step that released the web. The final
+  build lost nothing at release. Starting the reel is still a 16 m/s step, as
+  designed.
+- The lease: one driven step of that run took 62 ms of wall time, longer than
+  the old lease, and no step ran without the command. The run before the change
+  (`web-frames-3.json`, the same build otherwise) had the two dropped steps
+  described above.
+- The saves were byte-identical to the copy taken before the probes.
+
+Validation: 90/90 core checks (new: release while reeling keeps the winch speed;
+two reeling webs carry the body at the geometric speed and keep it on release;
+two winches never exceed 1.5 times the reel speed or teleport the body from any
+of six starting heights and three reel combinations; a rope at its shortest
+length ignores frame time corrections; reeling stays smooth with 16-28 ms frame
+times in a simulated one-step-late mover; eye snapshot schedule and projection),
+the GPU test including the nonblocking eye copy, and 48/48 Python checks.
+
+Not verified: everything in the headset. In particular whether doubled webs are
+gone (the repeated-frame doubling of the whole scene at 36-50 new pairs per
+second remains), how the corrected previous camera changes the image, and how
+reeling with momentum feels. "The game began breaking up" is not explained with
+certainty. The expired movement lease fits it: a metre-sized jerk of the whole
+world on every frame slower than about 50 ms in mid-swing, more often as the
+game slows down or hitches. But no report exists for that session, so the user's
+description has to confirm it. The 12:05 game log, read before the game was
+started again, showed about six minutes of VR at 44-51 frames per second,
+texture usage at its 3874 MB budget, a normal quit, and no crash, GPU, or
+low-memory event in the Windows logs. Windows had about 15 GB of commit left
+with the game closed, and the game commits 15-17 GB in a long session, which is
+another possible cause but not an observed one. In the next report,
+`flight_summary`-style counting of steps without the command (compare `steps`
+with `controlled` between driven `motion_samples`), `game_memory`, and the eye
+images are there to settle it.
+
+Outcome, from the 14:39 session with this build: the user confirmed the webs
+fixed. The break-up continued, and the movement lease was not its cause; that
+session had no step without the command in 329 s of driven flight. The cause
+was the game's render memory, in the section above.
+
+## Grip-only webs, straight game webs, in-flight steering — preceding build, web offset remained
+
+The user reported from `reports/game-vr-20261005-102512.json` (874 s, second
+build): web starts still offset at high speed and seen double, more after pressing
+the trigger mid-swing; webs sometimes shooting again and again mid-swing without
+releasing buttons; and after a physical yank, the whole world shaking until
+landing. They asked for webs to shoot on a grip press instead of trigger plus
+grip.
+
+The report's swing, motion, and XR sample lists are separate 12,000-entry queues
+appended at different rates, so their indices do not line up. Align them by the
+shared command serial (XR `serial`, swing `serial`), and convert swing/motion
+`qpc` at 10 MHz.
+
+Session findings:
+
+- Shake after a yank. `native_movement.cpp` applies the leased command at each
+  MoverStandard prequery, and `game_swing.cpp` observes that prequery's start
+  position and the previous step's achieved velocity, then submits the next
+  command. That command takes effect one step later. Steering from the observed
+  state made each command a function of the command two steps earlier, so even
+  and odd steps formed two independent trajectories. Every owned flight showed
+  them: achieved velocity alternated between, for example, (10.0, y, 28.5) and
+  (10.1, y + 1.9, 27.6) m/s, swapping whenever the sampler skipped a step. Each
+  trajectory received gravity only every other step and through the step-average
+  velocity, so vertical speed fell at 5-6 m/s² with gravity configured at 18. A
+  yank adds its impulse in one solve, so it reached only one trajectory, and
+  nothing re-coupled them in free flight until landing returned control to the
+  game. Simulating that pipeline with a yank reproduces it: vertical speed
+  alternates between about 11.5 and 0.5 m/s on consecutive steps, and gravity
+  acts at a third of its setting.
+- Web start offset. `hero_lag` stayed 0.0 m over 41,378 frames: the render
+  transform did not move between the rope update and view maintenance, so the
+  second build's shared hero sample changed nothing. `web_start_error` (rope `+1c`
+  to the requested start) began near 0 at each rope creation and grew to
+  0.42-0.45 m within about a second, also while standing. `679dc0` builds a point list at
+  rope `+1c` (count `+6ac`). When Grip (`7d78`) is non-zero and finite, it passes
+  two hand points to `HeroRopeManager` `vtable+0x78` (`95f9c0`), which for swing
+  ropes (type 2) appends `lerp(Start, Grip2, t)` and `lerp(Start, Grip, t)` as
+  points 8-9 and rebuilds points 0-7 as a tail from point 8 along minus the
+  hand's world velocity (`7df8`, from `95f6c0`) and down, each segment
+  length-limited. The tube runs through the tail, the hand, then the main line to
+  the anchor (`+720`). At swing speed the tail streams about 0.45 m behind the
+  wrist; in the headset it read as an offset start and a second strand.
+- Repeated shots. With trigger and grip held, `Swing::inputs` re-shot every
+  0.15 s after any automatic release or miss. The line from the body to the
+  anchor releases a web at the first hit anywhere along it, and swinging along a
+  facade it grazed ledges and sills next to the anchor. The swing samples hold
+  144 attachments, 22 obstruction releases, and 3 misses; 16 of the 22 releases
+  were followed by a new attachment within 0.5 s, 8 of them before the next
+  20 Hz sample.
+- The second build's eye job reclamation held: 41,467 generations, 1,026 dropped
+  copies reclaimed, no presentation stall. New pairs still arrived at 44.4 per
+  second, and 36.5% of the 70 frames per second sent to the headset were repeats.
+
+Changes:
+
+- `include/spidy/game_swing.hpp` `InFlightStep`, used by `game_swing.cpp`: the
+  solver starts from the observed position plus the displacement of the command
+  in flight, at the solver's own end velocity for that command. When the next
+  observation shows a command lost speed to collision, the motion into that
+  surface is projected out once, which cannot double-count one contact. Takeoff
+  still follows measured native progress.
+- `game_swing::physicsConfig`: gravity 6 and air acceleration 4 m/s², the values
+  the earlier builds applied in practice, so the swing feel the user approved is
+  kept. Yanks now apply their full configured strength.
+- `Swing`: a grip press (above 0.65, released below 0.35) shoots; the trigger
+  only reels, after a release if it was held at the attachment. There is no
+  retry while held. A hit within max(1.5 m, a tenth of the rope) of the anchor,
+  or within the body radius, is not an obstruction, for shooting or holding. A
+  held web releases only after 0.15 s of continuous obstruction.
+- `native_webs.cpp`: Grip is written as (0,0,0), so `679dc0` keeps one hand
+  point, skips the hero override, and runs the rope straight from the tracked
+  Start to the anchor. Grip2 and End are written as Start.
+- OpenXR action names now read "Reel web" (trigger) and "Shoot and hold web"
+  (grip); the lab's console help matches.
+
+Validation: 83/83 core checks (the held-gesture retry test now asserts the
+opposite; new checks cover grip-only shooting, no re-fire while held, a ledge
+beside the anchor, a passing versus a lasting wall, a simulated one-step-late
+mover with a yank followed by free flight at configured gravity with no
+alternation, and a wall contact removed exactly once), the GPU test, and 39/39
+Python checks. The tail removal follows from the disassembly; that the rope now
+starts at the wrist, and how the new controls and corrected gravity feel, need
+the headset. In the next report, `web_start_error` should stay near 0 m.
+
+## Small desktop window for VR launches — previous build
 
 The user asked to drop the flat-screen mirror if that saves performance. The
 desktop view cannot simply stop: the engine runs occlusion (`OcclDepthBufferSample`,

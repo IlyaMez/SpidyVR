@@ -30,8 +30,10 @@ web controls, and lifecycle behavior remain open.
 - Portable C++20 physics and input core, operating in meters and seconds.
 - Fixed 120 Hz physics, swept sphere collision in the lab, unilateral rope
   constraints, independent hands, maximum range, occlusion/unload release.
-- Grip to hold, trigger-plus-grip to attach, deliberate yank-to-zip with speed
-  and distance thresholds, reeling, and timed point launches.
+- A grip press to attach and holding the grip to keep the web, trigger to reel,
+  deliberate yank-to-zip with speed and distance thresholds, and timed point
+  launches. A web lost mid-swing stays released until the next grip press;
+  only an obstruction away from the anchor that lasts 0.15 s releases a web.
 - OpenXR instance/session lifecycle, predicted poses, per-eye swapchains, input
   actions, Touch/Index binding suggestions, haptic events, and focus checks.
 - D3D12 scene rendering, asymmetric eye projections, depth testing, and GPU
@@ -65,9 +67,27 @@ web controls, and lifecycle behavior remain open.
 - Released flight stays under the solver until landing, avoiding the known bad
   handoff to the game's accumulated airborne velocity. A 61-step native test
   verified attachment, hold, release, flight, landing, and hook restoration.
+- Each native command takes effect in the physics step after the one observed.
+  The solver starts from where the step in flight leaves the body, keeping one
+  trajectory with full gravity; collision losses seen in the next observation
+  are removed once.
+- A reeled rope carries the body's velocity at the winch rate, so letting go
+  while reeling keeps that speed. Two taut ropes share their pull through
+  accumulated impulses; the speed they carry together is followed exactly up to
+  a right angle between them and held there beyond it. Each prediction covers a
+  step of unknown length, so the rope is wound for the difference once the game
+  reports the step's real duration.
+- A movement command stays valid for 150 ms. With the earlier 50 ms, a slower
+  frame in mid-swing ran its physics step on the game's own fall speed. A
+  cancelled swing still hands the body to that fall speed; a clean midair
+  handoff remains open.
 - Quest trigger/grip, steering, and jump connect to that solver after successful
   eye submission. New controller samples have their own time interval, so faster
   physics callbacks do not reset a physical yank. Presentation stalls gate input.
+- A 512 MB per-frame render memory ring, installed where the game creates its
+  own 128 MB one, so that two eye views and the head-aligned game view fit. In
+  the game without a headset, three views used up to 137 MB for two frames with
+  no request refused; the headset check is open.
 - Articulated procedural gloves and web lines render over the copied native eyes.
   GPU tests verify the overlay preserves scene pixels and source textures. It
   uses its own depth buffer; world occlusion and native skeleton binding remain open.
@@ -110,6 +130,10 @@ Moving anchors, rope wrapping, wall traversal, combat, gadgets, finger tracking,
 and optional flips are later work. The current camera keeps a level horizon;
 head rotation is always preserved, and body animation does not rotate the view.
 
+Webbing props and thugs to yank, carry and throw them has begun outside this
+milestone: it works on throwable props in the game, measured without a headset;
+see [WEB-GRAB.md](WEB-GRAB.md).
+
 ## Rendering contract
 
 The normal launcher now starts the Steam game, skips its launcher screen, waits
@@ -124,19 +148,68 @@ native views, stops world/movement work, and restores the input bridge. Movement
 and pose commands retain their shorter leases. Timed diagnostics remain separate.
 Full save/load and respawn recovery is still pending.
 
+Eye poses reach the game's renderer in the frame they are placed. The game's
+frame function (`175a060`) first shifts every view's camera history (`18a13c0`:
+previous = current), then runs gameplay, including the hero's rope update, then
+copies each offscreen view into its render job (`1920240`), and only afterwards
+runs view maintenance (`18a0bb0`). Spidy places both eyes in a hook on `1920240`,
+before the copy. Placed in view maintenance, as before October 5, a pose was
+rendered one frame late and became its own previous camera. Maintenance now only
+creates and retires the eye views.
+
+Three scene views need more per-frame render memory than the game has. Every
+view's draw lists and render commands come out of one 128 MB ring
+("RenderAlloc", `7938880`), and two consecutive frames must fit in it; a request
+that does not fit drops that view's work for the frame, and the game is not
+built to keep running that way. The ring cannot change once frames exist,
+because render commands address it by 32-bit offsets from its base. So the
+launcher loads `spidy_render_memory.dll` as soon as the game process exists,
+and the module replaces the ring with a 512 MB one where the game creates it
+(`1872d90`), about three seconds after the process starts. A session attached
+to a game that was already running stays on the game's ring and says so. The
+session report's `render_memory` gives the ring in use, the most two frames
+used, and the number of frames with a request that did not fit.
+
 The game adapter runs OpenXR on its own thread. `frameStereo` reads tracking
 once, then acquires/waits both eye targets before its paired `draw` callback.
 Preparation publishes one expiring pose pair and records its tracking-space poses,
 world-space camera/hand poses, and web state. Matching native render generations
 are copied into staging textures on the game's direct queue. The draw callback
 copies the newest staged pair without waiting for another native render. Both
-eyes share a serial and generation. Missing/stale frames submit zero layers.
+eyes share a serial and generation. While the game delivers no newer pair, the
+last one is submitted again for up to 1000 ms, with the poses it was rendered
+for; a frame submitted with no layer is black in the headset.
+
+Without gameplay the stock camera stops committing and the rig has nothing to
+follow: pause menu and hint cards, cutscenes, finisher, scripted and death
+cameras, loading. The headset then shows the game's own presented frame, as
+its window shows it, on a level virtual screen 2.5 m ahead, placed when the
+screen comes up after the last immersive image has stayed up for 250 ms.
+While the screen is wanted, a hook on DXGI Present copies the back buffer on
+the game's queue just before the game presents it; the eye views get no
+command and stop rendering. The game draws its pause menu, hint cards,
+subtitles and world markers into that frame only; the eye views carry the HUD
+but none of those. Immersive VR returns with gameplay. Before the sixth build
+of October 5 all of these were black. Frames submit zero layers only before the first image,
+while the headset is not focused and tracked, and once a held image runs out
+with nothing newer.
+
+Since the seventh build of October 5 the session starts with the game, before
+there is a player: the screen shows the intro and menus, and on it the VR
+controllers are the game's Xbox controller (XInput controller 0). Once that
+controller has pressed a button the game ignores the keyboard for the player,
+so since the second build of October 6 native walking and jumping reach the
+game on it (left stick, A) as well as through the input bridge's keys. Gameplay
+needs a player, which the worker finds in the game's component registry and
+follows to every new actor (a loaded save, a respawn, a character switch): the
+input bridge, swing, movement and web-line modules and the avatar hiding act
+on the current one. The eye views start with the first gameplay.
 The lab's `frame` wrapper still draws each eye separately. XR color
 images must leave the callback in `D3D12_RESOURCE_STATE_RENDER_TARGET`.
 
 The copy accepts the compatible RGBA8 typeless backing used by VDXR. Movement
-requires an accepted image within the preceding 250 ms, and a three-second
-presentation stall ends the test. Hand/web drawing preserves the copied scene
+requires a new image within the preceding 500 ms, and three seconds without a
+new image end the session. Hand/web drawing preserves the copied scene
 color. Both eyes now use one overlay command list and upload. All image work is
 submitted on the exact direct queue bound to OpenXR before image release;
 queue ordering supplies the runtime dependency. CPU waits remain where upload
@@ -151,7 +224,8 @@ and [D3D12 CopyResource restrictions](https://learn.microsoft.com/en-us/windows/
 
 Projection layer poses remain in OpenXR tracking space and come from the exact
 pose serial used to render the submitted image, including reused images. Cached
-metadata expires after 150 ms and is cleared on focus loss or recentering. Both
+metadata expires after 1000 ms, with the image it belongs to, and is cleared on
+focus loss or recentering. Both
 the native scene and overlay use the saved world-space poses. World locomotion is
 applied to the camera used by the renderer. Applying it again to the submitted
 tracking-space layer would cause incorrect reprojection.

@@ -16,6 +16,9 @@ struct GameMotionFrame {
     std::array<Pose, 2> hands{};
     std::array<EyeFov, 2> fovs{};
     uint32_t nativeKeys{};
+    // The left stick in the stock camera's horizontal axes, -1..1: native
+    // walking on the virtual Xbox controller, where nativeKeys has W/A/S/D.
+    float walkRight{}, walkForward{};
     Vec3 anchor{}; // Player feet that placed this frame's head, eyes, and hands.
 };
 // Converts one complete predicted tracking sample into world-space head, eyes,

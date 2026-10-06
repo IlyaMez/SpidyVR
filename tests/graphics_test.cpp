@@ -2,6 +2,7 @@
 #include "spidy/d3d12_renderer.hpp"
 #include "spidy/lab_world.hpp"
 #include "spidy/web_visual.hpp"
+#include <cstring>
 #include <d3d12sdklayers.h>
 #include <filesystem>
 #include <fstream>
@@ -236,6 +237,28 @@ int main(int argc, char** argv) {
         for (unsigned eye = 0; eye < 2; ++eye)
             if (overlay.readback(copied[eye].Get()) != overlayPixels[eye])
                 throw std::runtime_error("Asynchronous stereo overlay changed the reference image");
+        // Session snapshots: a nonblocking copy queued behind an asynchronous
+        // overlay returns the submitted image exactly, from typed and typeless
+        // targets, and leaves the target as it was.
+        for (unsigned eye = 0; eye < 2; ++eye) {
+            overlay.renderViews(pairedViews, hands, true, false);
+            const auto ticket = overlay.capture(copied[eye].Get());
+            D3D12Renderer::Captured shot;
+            for (unsigned waited = 0; ticket && waited < 5000 && !overlay.captured(ticket, shot); ++waited)
+                Sleep(1);
+            if (!ticket || !overlay.captured(ticket, shot) || shot.width != width || shot.height != height ||
+                shot.rowPitch < width * 4)
+                throw std::runtime_error("Eye snapshot was not captured");
+            for (unsigned y = 0; y < height; ++y)
+                if (std::memcmp(shot.pixels + static_cast<size_t>(y) * shot.rowPitch,
+                                overlayPixels[eye].data() + static_cast<size_t>(y) * width * 4, width * 4))
+                    throw std::runtime_error("Eye snapshot differs from the submitted image");
+            if (overlay.captured(ticket + 1, shot) || overlay.captured(0, shot) || overlay.capture(nullptr))
+                throw std::runtime_error("Eye snapshot accepted an unknown ticket or target");
+            if (overlay.readback(copied[eye].Get()) != overlayPixels[eye])
+                throw std::runtime_error("Eye snapshot changed the submitted image");
+        }
+        std::cout << "PASS nonblocking eye snapshots after asynchronous overlays: exact pixels.\n";
         {
             // Game-style webs: a taut web with its splat, a slack web, and one
             // still being shot. Drawn over the left eye for visual inspection.
@@ -274,6 +297,71 @@ int main(int argc, char** argv) {
             if (argc >= 2)
                 saveBmp(std::filesystem::path(argv[1]) / "web-overlay.bmp", image, width, height);
             std::cout << "PASS game-style web overlay: " << drawn << " pixels, " << white << " bright.\n";
+        }
+        {
+            // The game screen: the game's presented frame drawn into an eye
+            // image. Display-encoded back buffers keep their stored values in
+            // the sRGB (VDXR typeless) target; light values are encoded.
+            const auto scene = multiply(projection(-.8f, .8f, -.65f, .65f), viewMatrix({{0, 19.7f, 19}, {}}));
+            auto make = [&](DXGI_FORMAT format) {
+                auto d = td;
+                d.Format = format;
+                ComPtr<ID3D12Resource> texture;
+                require(renderer.device()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &d,
+                                                                   D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr,
+                                                                   IID_PPV_ARGS(&texture)));
+                return texture;
+            };
+            auto drawn = [&](DXGI_FORMAT format, DXGI_FORMAT view) {
+                auto texture = make(format);
+                renderer.render(texture.Get(), view, width, height, scene, vertices);
+                return texture;
+            };
+            auto toShaderResource = [&](ID3D12Resource* texture) {
+                require(allocator->Reset());
+                require(list->Reset(allocator.Get(), nullptr));
+                D3D12_RESOURCE_BARRIER b{};
+                b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                b.Transition = {texture, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE};
+                list->ResourceBarrier(1, &b);
+                require(list->Close());
+                ID3D12CommandList* lists[] = {list.Get()};
+                renderer.queue()->ExecuteCommandLists(1, lists);
+                renderer.waitIdle();
+            };
+            auto worst = [](const std::vector<unsigned char>& a, const std::vector<unsigned char>& b) {
+                int largest = a.size() == b.size() ? 0 : 255;
+                for (size_t i = 0; largest < 255 && i < a.size(); ++i)
+                    if (i % 4 != 3)
+                        largest = std::max(largest, std::abs(int(a[i]) - int(b[i])));
+                return largest;
+            };
+            const auto encoded8 = drawn(DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM);
+            const auto encoded10 = drawn(DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM);
+            const auto light = drawn(DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT);
+            const auto stored = renderer.readback(encoded8.Get());
+            const auto srgbScene = drawn(DXGI_FORMAT_R8G8B8A8_TYPELESS, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
+            const auto encodedLight = renderer.readback(srgbScene.Get());
+            const auto eye = make(DXGI_FORMAT_R8G8B8A8_TYPELESS);
+            const D3D12Renderer::ViewTarget target{eye.Get(), DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, width, height, {}};
+            int errors[3]{};
+            for (int source = 0; source < 3; ++source) {
+                const auto& texture = source == 0 ? encoded8 : source == 1 ? encoded10 : light;
+                toShaderResource(texture.Get());
+                renderer.blit(texture.Get(),
+                              source == 0   ? DXGI_FORMAT_R8G8B8A8_UNORM
+                              : source == 1 ? DXGI_FORMAT_R10G10B10A2_UNORM
+                                            : DXGI_FORMAT_R16G16B16A16_FLOAT,
+                              source == 2, target);
+                errors[source] = worst(renderer.readback(eye.Get()), source == 2 ? encodedLight : stored);
+            }
+            if (errors[0] > 1 || errors[1] > 1 || errors[2] > 1)
+                throw std::runtime_error("Game screen changed the presented frame's values (" +
+                                         std::to_string(errors[0]) + ", " + std::to_string(errors[1]) + ", " +
+                                         std::to_string(errors[2]) + " levels)");
+            std::cout << "PASS game screen blit into the sRGB eye image: 8-bit, 10-bit and float frames within "
+                      << std::max({errors[0], errors[1], errors[2]}) << " level.\n";
         }
         if (argc >= 2) {
             std::filesystem::path folder = argv[1];

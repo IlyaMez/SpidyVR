@@ -3,6 +3,7 @@ import argparse
 import ctypes as c
 import json
 import math
+import pathlib
 import struct
 import sys
 import time
@@ -55,8 +56,44 @@ def command(serial, origin, anchor=None, held=False, focused=True, sample_second
     struct.pack_into('<10fI2f', raw, 32, *origin, *quaternion, 0,0,0, 1, float(held), float(held))
     struct.pack_into('<10fI2f', raw, 84, *origin, 0,0,0,1, 0,0,0, 0,0,0)
     struct.pack_into('<fI', raw, 152, sample_seconds, 0)
-    struct.pack_into('<Q', raw, 160, time.monotonic_ns())
+    # Sample times must increase with every command; time.monotonic_ns() repeats within a timer tick.
+    struct.pack_into('<Q', raw, 160, time.perf_counter_ns())
     return bytes(raw)
+
+
+def flight_summary(motion_samples):
+    """How steadily the game followed the swing's velocity commands.
+
+    Consecutive controlled airborne steps should differ only by gravity, steering, and rope
+    tension. Steering from one-step-old state made even and odd steps two separate trajectories,
+    whose velocities differed by metres per second; `alternation_mps` measures that zigzag as the
+    mean size of the second difference of the achieved velocity.
+
+    `steps_without_command` counts native steps in the middle of controlled flight that ran
+    without the command because its lease had expired. The game moves the body at its own fall
+    speed in such a step: a drop of about a metre, then a snap back.
+    """
+    controlled = [m for m in motion_samples if m['status'] == 2 and m['contact'] == 2]
+    dropped = sum(max(0, (b['steps']-a['steps'])-(b['controlled']-a['controlled']))
+                  for a, b in zip(controlled, controlled[1:]) if 0 < b['steps']-a['steps'] <= 12)
+    runs, run = [], []
+    for sample in controlled:
+        if run and sample['steps'] != run[-1]['steps']+1:
+            runs.append(run)
+            run = []
+        run.append(sample)
+    if run:
+        runs.append(run)
+    zigzag, steps, fastest = 0., 0, 0.
+    for run in runs:
+        for a, b, d in zip(run, run[1:], run[2:]):
+            second = [x-2*y+z for x, y, z in zip(a['velocity'], b['velocity'], d['velocity'])]
+            zigzag += math.sqrt(sum(x*x for x in second))
+            steps += 1
+        fastest = max([fastest]+[math.sqrt(sum(x*x for x in m['velocity'])) for m in run])
+    return dict(controlled_air_steps=len(controlled), consecutive_triples=steps,
+                alternation_mps=zigzag/steps if steps else None, fastest_mps=fastest,
+                steps_without_command=dropped)
 
 
 def assess(samples, final, restored, stops):
@@ -71,7 +108,14 @@ def assess(samples, final, restored, stops):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--from-ground', action='store_true')
+    parser.add_argument('--speed', type=float, default=8, help='swing speed cap in m/s (the VR launcher uses 32)')
+    parser.add_argument('--gravity', type=float, default=9.81, help='swing gravity in m/s^2 (VR uses 6)')
+    parser.add_argument('--hold', type=float, help='seconds to hold the web (default 1, or 2.5 from the ground)')
+    parser.add_argument('--output', type=pathlib.Path)
     args = parser.parse_args()
+    if not 1 <= args.speed <= 65 or not 0 <= args.gravity <= 30 or (args.hold is not None and not .2 <= args.hold <= 4.5):
+        parser.error('Use 1..65 m/s, 0..30 m/s^2, and a hold of 0.2..4.5 seconds')
+    hold = args.hold if args.hold is not None else (2.5 if args.from_ground else 1.0)
     game = Game(find_game())
     process = None
     bridge = rays = swing = motion = None
@@ -113,7 +157,7 @@ def main():
         invoke(rays['SpidyRayStart'],struct.pack('<4IQ2I',0x53525943,1,32,game.pid,game.base,8000,0x410))
         rays_active = True
         invoke(swing['SpidySwingStart'],struct.pack('<4I4QI2fI',0x53574346,1,64,game.pid,
-            game.base,int(hero['actor_record'],16),mover,motion_module,6000,8.,9.81,0))
+            game.base,int(hero['actor_record'],16),mover,motion_module,6000,args.speed,args.gravity,0))
         swing_active = True
         origin = game.transform(int(hero['actor_transform'],16))['position']
         started = time.monotonic()
@@ -163,7 +207,7 @@ def main():
                         if valid:
                             anchor = max(valid,key=lambda h:h['fraction'])['position']
                             attach_at = elapsed
-                held = attach_at is not None and elapsed-attach_at < (2.5 if args.from_ground else 1.0)
+                held = attach_at is not None and elapsed-attach_at < hold
                 serial += 1
                 invoke(swing['SpidySwingSubmit'],command(serial,hand,anchor,held))
             time.sleep(.01)
@@ -178,8 +222,11 @@ def main():
         assessment = assess(samples,final,restored,(stop_swing,stop_rays,stop_bridge))
         report = dict(pid=game.pid,ray_hash=ray_hash,motion_hash=motion_hash,origin=origin,anchor=anchor,
             attach_at=attach_at,samples=samples,motion_samples=motion_samples,takeoff_sent=takeoff_sent,from_ground=args.from_ground,final=final,restored=restored,
+            speed=args.speed,gravity=args.gravity,hold=hold,flight=flight_summary(motion_samples),
             stop_swing=stop_swing,stop_rays=stop_rays,stop_bridge=stop_bridge,**assessment)
-        (ROOT/('reports/native-swing-ground-repair.json' if args.from_ground else 'reports/native-swing-flight.json')).write_text(json.dumps(report,indent=2)+'\n')
+        output = args.output or ROOT/('reports/native-swing-ground-repair.json' if args.from_ground else 'reports/native-swing-flight.json')
+        output.write_text(json.dumps(report,indent=2)+'\n')
+        print(dict(flight=report['flight']))
         print(dict(final=final,restored=restored,**assessment))
         return 0 if assessment['passed'] else 1
     finally:

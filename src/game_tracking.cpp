@@ -122,10 +122,13 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
             out.hands[i] = rig_.toWorld(hand);
         }
     }
-    // Existing native input bridge uses these bits for W/A/S/D/Space. Rotate
-    // head-relative movement into the stock camera's horizontal axes.
+    // Existing native input bridge uses these bits for W/A/S/D/Space, the
+    // virtual Xbox controller the stick itself. Rotate head-relative movement
+    // into the stock camera's horizontal axes.
     const float forward = dot(out.swing.move, gameForward),
                 right = dot(out.swing.move, cross(gameForward, {0, 1, 0}));
+    out.walkRight = right;
+    out.walkForward = forward;
     if (forward > .3f)
         out.nativeKeys |= 1u << 0;
     if (right < -.3f)

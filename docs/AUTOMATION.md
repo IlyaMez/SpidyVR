@@ -106,33 +106,156 @@ For validation beyond the old timeout, `run_game_vr.py --auto-launch --stop-afte
 exercises the untimed worker with a bounded external stop.
 
 The launcher checks headset availability before starting the game or injecting.
-It starts the game but does not select a save or drive menus. When Codex operates
-the game, use the observed UI driver for those
-steps and close the game promptly after the prepared test. Keep it closed during
+It starts the game, waits until the game draws frames (30 frames counted by the
+render memory module, then exactly one direct queue), brings the game window to
+the front (the game pauses while another window is), starts the input bridge
+without a player and starts the VR worker, all within about ten seconds of the
+launch. The worker finds the player in-process (`src/game_player.cpp`) and hands
+every new one, or none, to the input bridge, swing, movement and web-line
+modules; before the seventh build of October 5 the launcher found one, once, and
+VR stayed on the game screen after any reload. The player selects the save with
+the VR controllers. When Codex operates the game, use the observed UI driver
+or `tools/probe_menu_pad.py` for those steps and close the game promptly after
+the prepared test. Keep it closed during
 builds and research. A sandboxed headset failure is inconclusive; the preflight
 must run with access to the desktop runtime before declaring the headset absent.
 
 The worker waits for an accepted native eye pair before enabling movement, stops
-active controls after a 250 ms presentation lapse, and aborts a three-second
-image stall. The native mover controls collision; requests expire if the swing
+active controls after 500 ms without a new image, shows the last image for up
+to a second while none arrives, and aborts after three seconds without one.
+Without gameplay (intro, menus, loading, pause menu, hint cards, cutscenes,
+finisher or death cameras) it shows the game's own presented frame on a virtual
+screen instead, and the VR controllers are the game's Xbox controller there
+(`src/game_pad.cpp`, XInput controller 0). In VR the menu button (Start) and
+Y (Back) reach the game as buttons, and native walking and jumping (the takeoff
+jump included) as its left stick and A, besides the input bridge's
+W/A/S/D/Space: once that controller has pressed a button, the game ignores the
+keyboard for the player. Samples carry `presentation` (`immersive`, `flat`,
+`game_screen`, or `none` for a frame without an image), `screen_submitted`
+(game-screen frames), `gate` (why gameplay was unavailable: `no_player`,
+`bridge_stopped`, `no_camera_commit`, `other_camera`, `tracking`),
+`camera_mover` (the class of the camera that last committed; a scene played on
+the screen names the camera the gate is missing), `camera_commits` and
+`player_commits` (the bridge's commits, and those the gate accepts), `players` and
+`player_record` (each player the worker followed), and `pad_buttons`,
+`pad_installed` and `pad_reads` (the virtual controller and the game's reads of
+it). The native mover controls collision; requests expire if the swing
 or XR worker stops renewing them. Owned movement synchronizes the native airborne
 velocity and clears the mover's duplicate fall accumulator. This correction
 still needs an in-game handoff test. Reports now include native movement samples
 with gravity-correction and airborne-event counters.
 
-Grip plus trigger attaches a hand's web. Release grip to let go, or release and
-press trigger again while gripping to reel. That press takes up existing slack
-immediately; reeling runs at 16 m/s. Physical yanks use tracked sample
-timestamps. Left stick steers, right stick snap-turns, and A jumps. The landing
+A grip press shoots a hand's web and holding the grip keeps it; release the grip
+to let go. The trigger reels while a web is attached (after a release, if it was
+held when the web attached). That press takes up existing slack immediately;
+reeling runs at 16 m/s and starts at that speed in one step. Physical yanks use
+tracked sample timestamps. Left stick steers, right stick snap-turns, and A jumps. The landing
 window for point launch is core-tested; the combined in-game headset controls
 remain unverified. Stereo/head movement and visible hands have user confirmation.
-Left Y retains its lab-only reset behavior.
+Left Y resets the lab position in the lab; in the game it is Back (the game
+menu), and the left menu button is Start (pause).
 
 The test report rejects intermediate XR/swing faults, incomplete GPU work, failed
 stop calls, and any checked game entry left patched. Its success flag validates
 these recorded checks; it does not establish visual quality, comfort, or completion
 of the milestone. `-CaptureImages` enables native eye PNGs captured before the
 hand overlay; image readback is otherwise disabled to avoid its per-frame cost.
+
+A session report is written however the session ends. A closing game refuses
+remote calls while its process handle still reports it running; the 12:05
+session on October 5 ended that way before this was handled, and left no report.
+Beside the report the launcher keeps `<report>-game.log`, a copy of the game's
+own log, and parses its once-a-minute `[Render] Working set: ...` lines into
+`game_memory` (commit, video and texture usage against their budgets, demoted
+textures, the game's frame rate). The game overwrites that log at every start,
+so read it before starting the game again when a session has no copy.
+`<report>-eyes/` holds the left eye as presented, copied without blocking every
+5 seconds (every 1.5 seconds while a game web is held above 15 m/s), with the
+pixel positions of the wrist and the web's first point in `eye_snapshots`.
+
+The launcher loads `spidy_render_memory.dll` into the game as soon as its
+process exists, about three seconds before the game creates its per-frame
+render memory; see the rendering contract in [MILESTONE-1.md](MILESTONE-1.md).
+The report's `render_memory` names the ring in use (`spidy_ring`, or
+`game_ring` when the game was already running), the most one frame and two
+consecutive frames used, and `overflow_frames`, the frames with a request that
+did not fit. Samples carry `render_frame_mb` and `render_overflow_frames`. A
+stretch in which `eye_jobs_reclaimed` climbs, new pairs fall, and the game's
+frame rate rises is the game dropping eye views for lack of that memory.
+
+The report also records `free_commit_mb`: what Windows could still promise to
+programs at the start, with each sample, and at its lowest. The launcher warns
+before starting when that is less than a session takes. The game's own log
+gives the same figure as `Avail page file` at startup and in its crash record.
+A crash record's address has lost its upper 32 bits. Restore them from the
+module base (`0x1199cfbb` with the module at `7ff70fd40000` is `7ff71199cfbb`),
+then subtract the base for the offset in `Spider-Man.exe`. Minidumps, when the
+game writes one, are in the game's folder under Documents.
+
+## Checks in the running game without a headset
+
+`tools/probe_eye_frames.py` (main menu) and `tools/probe_web_frames.py` (free
+roam) exercise the eye views, game webs, and the native swing in the real game
+with no headset connected; see their `--help`. `tools/probe_game_screen.py`
+steps through game states itself (Esc for the pause menu) and, for each, saves
+the headset's game-screen source (the copied back buffer) and a left eye copying
+the stock camera beside the game window's own image, with brightness and alpha
+statistics. `tools/probe_menu_pad.py` does what a VR session does from the
+game's start: `start` launches the game as the launcher does and times the
+renderer, `pad a --until-player` plays the title and main menu with the virtual
+Xbox controller until a player exists, `pad start`, `pad down` or `pad --left 0
+-1` play any menu, `shot NAME` saves the window, and `player --follow` compares
+the in-process player search with the outside one, hands the player to the
+input bridge and samples the gameplay gate. What they need:
+
+- A fresh game process for every run. Each Spidy module (rays, movement, swing,
+  eye views, GPU capture) starts once per process, and a second start is
+  rejected with code 1000.
+- Start that process with `python tools\vr_launcher.py`. It uses the VR
+  launcher's small window and loads the render memory module in time, and it
+  returns once the game has created its ring (`--ring 0` keeps the game's own
+  128 MB, to compare). `probe_web_frames.py --views 13` then renders three
+  views as a VR session does and fails if any frame's render memory did not
+  fit.
+- Steam drops a launch requested while the previous game process is still
+  leaving, without an error. Wait until the process is gone for a few seconds.
+  After a crash the process can linger for minutes; Steam's
+  `logs\console_log.txt` shows "Game process removed" when it is done.
+- The game with three views takes 13-15 GB of what Windows can promise. On
+  October 5 that left 1-3 GB on the test PC during runs, and once 0.7 GB. Check
+  the free commit before a run and close the game as soon as the run ends.
+- The game's main menu is a live 3D scene. Eye views and GPU capture work
+  there, so rendering checks do not need a loaded save.
+- The game pauses while another window is in front, and Windows keeps a game
+  that Steam starts behind the window that started it: the intro then sits
+  still, drawn black, and the game reads no controller. `vr_launcher.bring_to_front`
+  fixes that (`probe_menu_pad.py start` calls it).
+- Menus accept the virtual Xbox controller (`probe_menu_pad.py pad`) or real
+  keyboard input: `SendInput` scancodes while the game window is in the
+  foreground. Posted `WM_KEYDOWN` messages are ignored. From a fresh start,
+  `probe_menu_pad.py pad a --until-player` reaches a loaded save in about 40 s.
+  With the keyboard, wait for the profile menu to be drawn (about half a minute,
+  after the intro logos; check a screenshot), press Enter, wait about 4 s for
+  the main menu, and press Enter again on Continue. The player is ready
+  10-30 s later.
+- The device that last pressed a button plays the player. After the virtual
+  controller has pressed one (`probe_menu_pad.py pad`), the game ignores the
+  keyboard for the player: the input bridge's keys (it still reads them) and
+  `SendInput` alike, and the next key press does not switch back. Probes that
+  jump or walk with the bridge (`probe_web_frames.py`, `probe_game_swing.py`,
+  `probe_native_motion.py`, `probe_movement.py`, `capture_movement.py`,
+  `bridge_game.py --jump`) need a save loaded with
+  the keyboard and no virtual controller press since. The first press on the
+  controller after keyboard play is swallowed by the switch.
+- Screenshots of the game window need `PrintWindow(hwnd, dc, 3)`; a `BitBlt`
+  from the screen returns black.
+- Controller samples sent by a probe need distinct timestamps. Python's
+  `time.monotonic_ns()` repeats within a 15.6 ms tick; a repeated timestamp is
+  an invalid input interval and cancels the swing, so probes use
+  `time.perf_counter_ns()`.
+- Copy the save folder to `reports/backups/` before loading a save, close the
+  game promptly afterwards, and run `python tools\vr_display.py --restore` if
+  the launcher's small-window settings are still pending.
 
 ## Performance comparison
 

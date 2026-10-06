@@ -86,9 +86,11 @@ class SwingTakeoff {
     Vec3 origin_{}, launch_{};
 };
 
+// The input bridge's Space bit (game_bridge_protocol.hpp keyCodes[4]).
+constexpr uint32_t swingJumpKey = 1u << 4;
 inline uint32_t swingNativeKeys(bool active, bool owned, uint32_t keys, SwingTakeoff::Phase phase,
                                 bool takeoffJump) {
-    constexpr uint32_t jump = 1u << 4;
+    constexpr uint32_t jump = swingJumpKey;
     if (!active)
         return 0;
     if (owned)

@@ -6,12 +6,17 @@
 #include "spidy/eye_job_table.hpp"
 #include "spidy/eye_pair_state.hpp"
 #include "spidy/native_rays.hpp"
+#include "spidy/native_render_memory.hpp"
+#include "spidy/game_pad.hpp"
 #include "spidy/game_swing.hpp"
 #include "spidy/native_movement.hpp"
 #include "spidy/presentation_gate.hpp"
 #include "spidy/eye_resolution.hpp"
+#include "spidy/eye_snapshot.hpp"
 #include "spidy/vr_shortcut.hpp"
 #include "spidy/web_visual.hpp"
+#include "spidy/web_grab.hpp"
+#include "spidy/lab_props.hpp"
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -46,6 +51,83 @@ Input aimed() {
     Input in;
     in.hands[0] = {{{0, 0, 0}, {.70710678f, 0, 0, .70710678f}}, {0, 0, 0}, true, 1, 1};
     return in;
+}
+// Two point anchors up to the left and right of a body on the y axis.
+struct TwoAnchors : TestWorld {
+    Vec3 anchors[2]{{-10, 20, 0}, {10, 20, 0}};
+    std::optional<RayHit> raycast(Vec3 o, Vec3 d, float distance) const override {
+        for (unsigned i = 0; i < 2; ++i) {
+            const float t = dot(anchors[i] - o, d);
+            if (t > 0 && t <= distance && length(o + d * t - anchors[i]) < .02f)
+                return RayHit{anchors[i], {}, i + 1, true};
+        }
+        return {};
+    }
+    bool exists(std::uint64_t id) const override {
+        return id == 1 || id == 2;
+    }
+    // Both grips squeezed, each hand aiming at its anchor from `from`.
+    Input aimed(Vec3 from) const {
+        Input in;
+        for (unsigned i = 0; i < 2; ++i) {
+            const float angle = std::atan2(from.x - anchors[i].x, anchors[i].y - from.y);
+            in.hands[i] = {{from, Quat{0, 0, std::sin(angle / 2), std::cos(angle / 2)} *
+                                      Quat{.70710678f, 0, 0, .70710678f}},
+                           {0, 0, 0}, true, 0, 1};
+        }
+        return in;
+    }
+};
+// Grab targets on a straight-line integrator: a commanded target takes the
+// command's velocity; the others keep theirs.
+struct GrabTargets : TargetQueries {
+    std::vector<GrabTarget> items;
+    void add(std::uint64_t id,Vec3 position,float mass=25,float radius=.4f,TargetKind kind=TargetKind::Object) {
+        items.push_back({id,kind,position,{},mass,radius});
+    }
+    std::optional<GrabTarget> pick(Vec3 o,Vec3 d,float distance,float cone) const override {
+        std::optional<GrabTarget> best;float bestMiss=cone;
+        for(const auto& t:items)
+            if(const float miss=rayMiss(o,d,distance,t.position,t.radius);miss<=bestMiss){bestMiss=miss;best=t;}
+        return best;
+    }
+    std::optional<GrabTarget> find(std::uint64_t id) const override {
+        for(const auto& t:items)if(t.id==id)return t;
+        return {};
+    }
+    void characters(std::vector<GrabTarget>& out) const override {
+        for(const auto& t:items)if(t.kind==TargetKind::Character)out.push_back(t);
+    }
+    std::vector<std::pair<std::uint64_t,std::uint64_t>> owners; // surface, target
+    std::optional<std::uint64_t> owner(std::uint64_t surface) const override {
+        for(const auto& [s,t]:owners)if(s==surface)return t;
+        return {};
+    }
+    void apply(float dt,const std::vector<TargetCommand>& commands) {
+        for(auto& t:items) {
+            for(const auto& c:commands)if(c.id==t.id)t.velocity=c.velocity;
+            t.position+=t.velocity*dt;
+        }
+    }
+};
+// The left hand at (0,1,0), aiming along -Z, grip squeezed.
+Input forward() {
+    Input in;
+    in.hands[0]={{{0,1,0},{}},{0,0,0},true,0,1};
+    return in;
+}
+unsigned events(const WebGrab& grab,GrabEventKind kind) {
+    unsigned n=0;
+    for(const auto& e:grab.events())n+=e.kind==kind;
+    return n;
+}
+// One input sample, then physics at `hz` until the next one.
+void settle(WebGrab& grab,GrabTargets& targets,const World& world,const Body& player,const Input& in,
+            float seconds,int hz=360) {
+    grab.claim(seconds,in,world,targets,player);
+    const int steps=std::max(1,static_cast<int>(std::lround(seconds*hz)));
+    std::vector<TargetCommand> out;
+    for(int s=0;s<steps;++s){out.clear();grab.step(seconds/steps,world,targets,out);targets.apply(seconds/steps,out);}
 }
 SwingConfig inert() {
     SwingConfig c;
@@ -211,17 +293,58 @@ int main() {
         r=t.update(160,false,false,true,false,false,{0,.4f,0},{0,6,0},{});
         check(r.resumed&&r.launchVelocity.x>0,"point launch momentum lost");
     });
-    test("held web gesture retries when aim finds a surface", [] {
+    test("grip alone shoots a web and a held grip never shoots again", [] {
+        // The October 5 session re-fired webs every 0.15 s while trigger and
+        // grip stayed held, after each automatic release or miss.
         TestWorld world;world.enabled=false;auto config=inert();config.airAnchors=false;
-        Swing swing(config);auto in=aimed();
+        Swing swing(config);auto in=aimed();in.hands[0].trigger=0;
         Body actual{{0,1,0},{},true};
         swing.predictNativeStep(.01f,in,world,actual);
         check(!swing.webs()[0].attached,"miss attached");
         world.enabled=true;
         for(int i=0;i<20;++i)swing.predictNativeStep(.01f,in,world,actual);
-        check(swing.webs()[0].attached,"held gesture required a second button press");
+        check(!swing.webs()[0].attached,"held grip fired again after a miss");
+        in.hands[0].grip=.5f;swing.predictNativeStep(.01f,in,world,actual);
+        check(!swing.webs()[0].attached,"partial release rearmed the grip");
         in.hands[0].grip=0;swing.predictNativeStep(.01f,in,world,actual);
-        check(!swing.webs()[0].attached,"grip release failed");
+        in.hands[0].grip=1;swing.predictNativeStep(.01f,in,world,actual);
+        check(swing.webs()[0].attached,"grip press without trigger did not shoot");
+        world.enabled=false;swing.predictNativeStep(.01f,in,world,actual);
+        check(!swing.webs()[0].attached,"vanished surface kept the web");
+        world.enabled=true;
+        for(int i=0;i<20;++i)swing.predictNativeStep(.01f,in,world,actual);
+        check(!swing.webs()[0].attached,"held grip fired again after losing its web");
+        in.hands[0].grip=0;swing.predictNativeStep(.01f,in,world,actual);
+        check(!swing.webs()[0].attached,"grip release shot a web");
+    });
+    test("a line grazing the anchor's facade keeps the web; a lasting wall releases it", [] {
+        struct Facade : TestWorld {
+            Vec3 hit{};bool blocked{};
+            std::optional<RayHit> raycast(Vec3 o,Vec3 d,float distance) const override {
+                if(blocked && distance>5)return RayHit{hit,{},2,true};
+                return TestWorld::raycast(o,d,distance);
+            }
+        } world;
+        Swing swing(inert());auto in=aimed();
+        Body actual{{0,0,0},{},false};
+        swing.predictNativeStep(.01f,in,world,actual);
+        check(swing.webs()[0].attached,"no web");
+        world.blocked=true;world.hit={.2f,19,0}; // a sill 1 m below the anchor
+        for(int i=0;i<60;++i)swing.predictNativeStep(.01f,in,world,actual);
+        check(swing.webs()[0].attached,"ledge beside the anchor released the web");
+        world.hit={0,10,0}; // halfway: a wall between body and anchor
+        for(int i=0;i<10;++i)swing.predictNativeStep(.01f,in,world,actual);
+        check(swing.webs()[0].attached,"a passing obstruction released the web");
+        world.blocked=false;swing.predictNativeStep(.01f,in,world,actual);
+        world.blocked=true;
+        for(int i=0;i<10;++i)swing.predictNativeStep(.01f,in,world,actual);
+        check(swing.webs()[0].attached,"obstruction time was not reset by a clear line");
+        bool obstructed{};
+        for(int i=0;i<10;++i) {
+            swing.predictNativeStep(.01f,in,world,actual);
+            for(const auto& e:swing.events())obstructed|=e.kind==EventKind::Obstructed;
+        }
+        check(obstructed&&!swing.webs()[0].attached,"lasting wall kept the web");
     });
     test("game rig rejects focus loss stale frames bad lenses and stalls", [] {
         GameTrackingRig rig;auto f=trackedFrame();
@@ -252,6 +375,22 @@ int main() {
         f.predictedDisplayTime=3;const auto b=rig.update(f,{20,3,-4},{0,0,-1},true);
         near(b.head[12]-a.head[12],20);near(b.head[13]-a.head[13],3);
         near(length(b.swing.hands[0].gripRelativeToHead-a.swing.hands[0].gripRelativeToHead),0);
+    });
+    test("game rig walks along the stock camera's axes where the head looks", [] {
+        // Head turned 90 degrees left of the game camera: a stick pushed
+        // forward walks to the camera's left, on the stick as on the keys.
+        GameTrackingRig rig;auto f=trackedFrame();
+        rig.update(f,{},{0,0,-1},true);
+        f.predictedDisplayTime=2;f.head.orientation=Quat::yaw(1.5707963f);f.hands[0].stickY=1;
+        auto out=rig.update(f,{},{0,0,-1},true);
+        near(out.walkRight,-1);near(out.walkForward,0);
+        check(out.nativeKeys==(1u<<1),"keys disagree with the stick");
+        f.predictedDisplayTime=3;f.head.orientation={};f.hands[0].stickY=.5f;
+        out=rig.update(f,{},{0,0,-1},true);
+        near(out.walkRight,0);near(out.walkForward,.5f);
+        f.predictedDisplayTime=4;f.hands[0].stickY=.1f;
+        out=rig.update(f,{},{0,0,-1},true);
+        check(!out.walkRight&&!out.walkForward&&!out.nativeKeys,"resting stick walked");
     });
     test("invalid controller cannot walk or attach a web", [] {
         auto f=trackedFrame();f.hands[0].valid=false;f.hands[0].stickY=1;
@@ -320,7 +459,8 @@ int main() {
         TestWorld w;w.enabled=false;Swing clear(inert());
         Body body{{0,1,0},{},true};clear.predictNativeStep(.01f,in,w,body);
         check(clear.webs()[0].attached,"clear sky refused attachment");
-        w.enabled=true;w.anchor={0,10,0};clear.predictNativeStep(.01f,in,w,body);
+        w.enabled=true;w.anchor={0,10,0};
+        for(int i=0;i<20;++i)clear.predictNativeStep(.01f,in,w,body);
         check(!clear.webs()[0].attached,"sky rope crossed newly streamed geometry");
     });
     test("moving surfaces rejected until adapter supports them", [] {
@@ -553,12 +693,13 @@ int main() {
             Body actual{{0, 0, 0}, {20, 0, 0}, false};
             auto in = aimed();
             const float dt = 1.f / hz;
+            // Each step continues from the solver's end velocity, as the
+            // native adapter's in-flight prediction does.
             for (unsigned i = 0; i < static_cast<unsigned>(hz); ++i) {
-                const auto previous = actual.position;
                 const auto result = swing.predictNativeStep(dt, in, world, actual);
                 check(result.valid && swing.webs()[0].attached, "native swing lost its web");
                 actual.position = result.target;
-                actual.velocity = (result.target - previous) / dt;
+                actual.velocity = result.velocity;
                 check(length(actual.velocity) <= config.maxSpeed + .1f, "speed limit exceeded");
                 check(length(actual.position - world.anchor) <= swing.webs()[0].length + .01f,
                       "native swing escaped the rope");
@@ -569,11 +710,257 @@ int main() {
             in.move = {0, 0, 1};
             for (unsigned i = 0; i < static_cast<unsigned>(hz / 4); ++i) {
                 const auto result = swing.predictNativeStep(dt, in, world, actual);
-                actual.velocity = (result.target - actual.position) / dt;
+                actual.velocity = result.velocity;
                 actual.position = result.target;
             }
-            check(actual.velocity.z > 1, "air steering did not respond promptly");
+            check(actual.velocity.z > .9f, "air steering did not respond promptly");
         }
+    });
+    // MoverStandard as the swing adapter sees it: each physics step applies the
+    // newest command at its start, and the adapter observes that step's start
+    // position and the previous step's velocity, then submits the next command.
+    struct NativeMover {
+        float dt = 1.f / 42, wall = 1e9f; // the measured October 5 step; optional wall at x
+        Vec3 position{}, last{}, command{};
+        uint64_t step{}, serial{};
+        bool controlled{}, settle = true;
+        float previousDt = 1.f / 42; // length of the step that produced `position`
+        game_swing::InFlightStep flight;
+        // One step: observe, steer, then let the native step move the body.
+        // `dt` is the length of the step starting now; the game varies it.
+        Vec3 run(Swing& swing, const Input& in, const WorldQueries& world) {
+            ++step;
+            const Vec3 achieved = (position - last) / previousDt;
+            const auto body = flight.predict({step, serial, position, achieved, dt, controlled}, false);
+            if (settle && step > 1)
+                swing.settleStep(previousDt, dt); // the last prediction assumed previousDt
+            const auto intent = swing.predictNativeStep(dt, in, world, body, dt);
+            check(intent.valid, "native prediction rejected");
+            const Vec3 average = (intent.target - body.position) / dt;
+            const Vec3 requested = limited(average, swing.config().maxSpeed);
+            const Vec3 moving = controlled ? command : achieved; // command in flight this step
+            flight.issued(step + 1000, requested,
+                          limited(intent.velocity + requested - average, swing.config().maxSpeed));
+            serial = step + 1000;
+            command = requested;
+            controlled = true;
+            last = position;
+            position += moving * dt;
+            position.x = std::min(position.x, wall);
+            previousDt = dt;
+            return achieved;
+        }
+    };
+    test("native flight steers from the step in flight, not the observed one", [] {
+        // Steering from the observation alone made even and odd physics steps
+        // two trajectories with a third of the configured gravity each. A yank
+        // kicked only one of them, and the October 5 view shook until landing.
+        const auto config = game_swing::physicsConfig({});
+        TestWorld world;
+        Swing swing(config);
+        NativeMover mover;
+        mover.position = {0, 0, 0};
+        mover.last = mover.position - Vec3{8, 0, 0} * mover.dt;
+        auto in = aimed();
+        std::vector<Vec3> seen;
+        for (unsigned i = 0; i < 40; ++i) {
+            if (i >= 10 && i < 14)
+                in.hands[0].gripRelativeToHead.y -= .06f; // yank down, away from the anchor above
+            if (i == 20)
+                in.hands[0].grip = 0;
+            seen.push_back(mover.run(swing, in, world));
+        }
+        check(!swing.webs()[0].attached, "web not released");
+        // A command issued in run k moves the body in step k+1 and is observed
+        // in run k+2. The yank's command reaches the observations by run 15.
+        check(seen[15].y > seen[9].y + 3, "yank did not reach the native step");
+        // Free flight: consecutive steps differ by gravity only, and the
+        // velocity falls at the configured rate.
+        for (size_t i = 23; i < seen.size(); ++i)
+            check(length(seen[i] - seen[i - 1] - Vec3{0, -config.gravity * mover.dt, 0}) < .02f,
+                  "alternating velocities after a yank");
+        const float fall = (seen[22].y - seen.back().y) / (mover.dt * static_cast<float>(seen.size() - 1 - 22));
+        near(fall, config.gravity, .05f);
+    });
+    test("letting go of a web while reeling keeps the winch speed", [] {
+        // The body is carried in at the reel rate. With that motion applied to
+        // position only, the October 5 probe lost 16 m/s in one step at release.
+        TestWorld w;
+        Swing s(inert());
+        s.reset({{0, 0, 0}, {}, false});
+        auto in = aimed();
+        in.hands[0].trigger = 0;
+        s.update(.01f, in, w);
+        check(s.webs()[0].attached, "no web");
+        in.hands[0].trigger = 1;
+        for (int i = 0; i < 50; ++i)
+            s.update(.01f, in, w);
+        near(s.body().velocity.y, s.config().reelSpeed, .05f);
+        const float height = s.body().position.y;
+        in.hands[0].grip = in.hands[0].trigger = 0;
+        for (int i = 0; i < 25; ++i)
+            s.update(.01f, in, w);
+        check(!s.webs()[0].attached, "web not released");
+        near(s.body().velocity.y, s.config().reelSpeed, .05f);
+        near(s.body().position.y - height, s.config().reelSpeed * .25f, .1f);
+        // Stopping the reel while holding on leaves a slack rope: the body
+        // coasts inward, and the rope neither pushes nor lengthens.
+        Swing held(inert());
+        held.reset({{0, 0, 0}, {}, false});
+        in = aimed();
+        in.hands[0].trigger = 0;
+        held.update(.01f, in, w);
+        in.hands[0].trigger = 1;
+        for (int i = 0; i < 50; ++i)
+            held.update(.01f, in, w);
+        const float reeled = held.webs()[0].length;
+        in.hands[0].trigger = 0;
+        for (int i = 0; i < 25; ++i)
+            held.update(.01f, in, w);
+        check(held.webs()[0].attached, "web lost when the reel stopped");
+        near(held.webs()[0].length, reeled);
+        near(held.body().velocity.y, held.config().reelSpeed, .05f);
+    });
+    test("two reeling webs carry the body together and it keeps that speed on release", [] {
+        // Each rope shortens at the reel speed; at an angle they move the body
+        // faster than that. The velocity has to hold it, or letting go jolts.
+        TwoAnchors w;
+        Swing s(inert());
+        s.reset({{0, 0, 0}, {}, false});
+        auto in = w.aimed({0, 0, 0});
+        s.update(.01f, in, w);
+        check(s.webs()[0].attached && s.webs()[1].attached, "webs not attached");
+        in.hands[0].trigger = in.hands[1].trigger = 1;
+        for (int i = 0; i < 50; ++i)
+            s.update(.01f, in, w);
+        const Vec3 up = s.body().position;
+        const float cosine = (w.anchors[0].y - up.y) / length(w.anchors[0] - up);
+        near(up.x, 0, .01f);
+        check(up.y > 4, "the winches did not lift the body");
+        near(s.body().velocity.y, s.config().reelSpeed / cosine, .2f);
+        const float speed = s.body().velocity.y;
+        for (auto& hand : in.hands)
+            hand.grip = hand.trigger = 0;
+        for (int i = 0; i < 25; ++i)
+            s.update(.01f, in, w);
+        check(!s.webs()[0].attached && !s.webs()[1].attached, "webs not released");
+        near(s.body().velocity.y, speed, .01f);
+        near(s.body().position.y - up.y, speed * .25f, .1f);
+    });
+    test("winches on two ropes never run away with the body", [] {
+        // The exact carried speed grows without bound as two taut ropes come to
+        // oppose each other. The velocity follows it up to a right angle only.
+        for (float start : {0.f, 6.f, 12.f, 16.f, 19.f, 19.9f})
+            for (int mode = 0; mode < 3; ++mode) {
+                TwoAnchors w;
+                Swing s(inert());
+                s.reset({{0, start, 0}, {}, false});
+                auto in = w.aimed({0, start, 0});
+                s.update(.01f, in, w);
+                check(s.webs()[0].attached && s.webs()[1].attached, "webs not attached");
+                in.hands[0].trigger = mode != 1;
+                in.hands[1].trigger = mode != 0;
+                for (int i = 0; i < 300; ++i) {
+                    const Vec3 previous = s.body().position;
+                    s.update(.01f, in, w);
+                    check(length(s.body().velocity) <= s.config().reelSpeed * 1.5f,
+                          "winches ran away with the body");
+                    check(length(s.body().position - previous) < .65f, "winches teleported the body");
+                    for (const auto& web : s.webs())
+                        check(web.attached && length(s.body().position - web.anchor) <= web.length + .04f,
+                              "winched rope exceeded");
+                }
+            }
+    });
+    test("a rope at its shortest length ignores frame time corrections", [] {
+        TestWorld w;
+        w.anchor = {0, 4, 0};
+        Swing s(inert());
+        s.reset({{0, 0, 0}, {}, false});
+        auto in = aimed();
+        in.hands[0].trigger = 0;
+        s.update(.01f, in, w);
+        check(s.webs()[0].attached, "no web");
+        in.hands[0].trigger = 1;
+        s.update(.01f, in, w);
+        const float reeling = s.webs()[0].length;
+        check(reeling < 4, "the winch did not start");
+        s.settleStep(.02f, .03f); // the step ran 10 ms longer than predicted
+        near(s.webs()[0].length, reeling - s.config().reelSpeed * .01f);
+        s.settleStep(.03f, .02f);
+        near(s.webs()[0].length, reeling);
+        s.settleStep(.02f, 1.f); // not a frame time
+        s.settleStep(.02f, std::numeric_limits<float>::quiet_NaN());
+        near(s.webs()[0].length, reeling);
+        for (int i = 0; i < 100; ++i)
+            s.update(.01f, in, w);
+        near(s.webs()[0].length, s.config().minRope);
+        // The winch took nothing in at the limit, so there is nothing to correct.
+        s.settleStep(.03f, .02f);
+        near(s.webs()[0].length, s.config().minRope);
+        s.settleStep(.02f, .03f);
+        near(s.webs()[0].length, s.config().minRope);
+    });
+    test("native reeling stays smooth when the frame time varies and keeps its speed on release", [] {
+        // Frame times in the October 5 probe moved between 15 and 33 ms. The
+        // rope reeled for the predicted time while the body travelled for the
+        // real one, so the rope snapped the body by centimetres each time.
+        const float frames[] = {.018f, .026f, .0282f, .026f, .0178f, .0188f, .0196f, .0188f, .024f, .016f};
+        for (bool settle : {false, true}) {
+            const auto config = game_swing::physicsConfig({});
+            TestWorld world;
+            world.anchor = {0, 80, 0};
+            Swing swing(config);
+            NativeMover mover;
+            mover.settle = settle;
+            mover.last = mover.position;
+            auto in = aimed();
+            in.hands[0].trigger = 0;
+            float roughest = 0, before = 0, after = 0;
+            Vec3 previous{};
+            for (unsigned i = 0; i < 90; ++i) {
+                mover.dt = frames[i % 10];
+                if (i == 3)
+                    in.hands[0].trigger = 1; // reel
+                if (i == 70)
+                    in.hands[0].grip = in.hands[0].trigger = 0;
+                const Vec3 observed = mover.run(swing, in, world);
+                if (i >= 12 && i < 70)
+                    roughest = std::max(roughest, length(observed - previous));
+                if (i == 70)
+                    before = length(observed);
+                if (i == 75)
+                    after = length(observed);
+                previous = observed;
+            }
+            check(before > config.reelSpeed - 1, "reel never reached its speed");
+            if (settle) {
+                // Gravity alone changes the speed by 6 m/s^2 x 28 ms = 0.17 m/s per step.
+                check(roughest < .25f, "frame time changes still jolt a reeling body");
+                check(after > before - 1.f, "release lost the reel speed");
+            } else {
+                check(roughest > .5f, "the unsettled comparison no longer shows the jolt");
+            }
+        }
+    });
+    test("native flight removes motion a wall blocked exactly once", [] {
+        TestWorld world;
+        world.enabled = false;
+        Swing swing(game_swing::physicsConfig({}));
+        NativeMover mover;
+        mover.wall = 1;
+        mover.position = {0, 50, 0};
+        mover.last = mover.position - Vec3{10, 0, 0} * mover.dt;
+        Input in;
+        float lowest = 1e9f;
+        for (unsigned i = 0; i < 30; ++i) {
+            const auto observed = mover.run(swing, in, world);
+            lowest = std::min(lowest, mover.command.x);
+            check(observed.x > -.01f, "wall contact reversed the body");
+        }
+        check(lowest > -.01f && mover.command.x < .01f, "solver kept pushing into or away from the wall");
+        check(mover.command.y < -2, "sliding down the wall stopped falling");
+        near(mover.position.x, 1);
     });
     test("swept collision stops tunneling and slides", [] {
         LabWorld w({{{-1, -10, -10}, {1, 10, 10}, {}, 1}});
@@ -1098,13 +1485,144 @@ int main() {
         command.enabled=2;command.leaseMs=0;
         check(!native_eyes::valid(command),"flat camera without a lease accepted");
     });
-    test("movement requires a recently submitted headset image", [] {
+    test("movement requires a recent new headset image", [] {
         check(!recentPresentation(0,1000),"controls started before a first image");
         check(recentPresentation(1000,1000),"current image rejected");
-        check(recentPresentation(1000,1250),"valid image lease rejected");
-        check(!recentPresentation(1000,1251),"stalled presentation kept controls active");
+        // A stutter of a few hundred milliseconds must not drop the webs.
+        check(recentPresentation(1000,1500),"valid image lease rejected");
+        check(!recentPresentation(1000,1501),"stalled presentation kept controls active");
         check(!recentPresentation(1000,999),"clock reversal accepted");
         check(recentPresentation(1300,1301),"new image did not restore the gate");
+        check(controlHoldMs < imageHoldMs, "controls outlast the image they are steered by");
+    });
+    test("without gameplay the headset shows the game's own frame on a screen, not black", [] {
+        GameScreen screen;
+        check(!screen.update(true,1000) && !screen.holding(),"gameplay put the screen up");
+        // Pause menu, hint card or cutscene: the last immersive image first.
+        check(!screen.update(false,1100) && screen.holding(),"the last image was not held");
+        check(!screen.update(false,1100+screenDelayMs-1),"a short camera gap put the screen up");
+        check(screen.update(false,1100+screenDelayMs) && screen.entered() && !screen.holding(),
+              "the game's camera did not replace the held image");
+        check(screen.update(false,5000) && !screen.entered(),"the screen was placed again while up");
+        check(screenDelayMs < imageHoldMs,"the held image runs out before the screen comes up");
+        // Gameplay returns: immersive at once, and a later gap holds again.
+        check(!screen.update(true,5001) && !screen.holding(),"gameplay did not take the screen down");
+        check(!screen.update(false,6000) && screen.holding(),"a new gap did not hold the image");
+        check(!screen.update(true,6100),"a gap shorter than the delay flashed the screen");
+        check(!screen.update(false,7000),"the delay did not restart");
+        screen.reset();
+        check(!screen.update(false,7000) && screen.holding(),"reset kept the old gap");
+        check(!screen.update(false,6999),"clock reversal put the screen up");
+    });
+    test("the virtual screen stands level in front of the head", [] {
+        auto ahead=[](float pitch,float yaw,float roll) {
+            const auto axis=[](Vec3 v,float a) {return Quat{v.x*std::sin(a/2),v.y*std::sin(a/2),v.z*std::sin(a/2),std::cos(a/2)};};
+            return screenAhead({{1,1.7f,2},axis({0,1,0},yaw)*axis({1,0,0},pitch)*axis({0,0,1},roll)});
+        };
+        // Straight up or down, the top of the head gives the heading; a rolled
+        // head there faces elsewhere, so those are checked level.
+        for (float pitch : {0.f,-.6f,.5f,-1.5707f,1.5707f})
+            for (float roll : {0.f,.4f}) {
+                if (std::abs(pitch)>1.5f && roll!=0)
+                    continue;
+                const auto pose=ahead(pitch,.8f,roll);
+                // Facing back at the viewer from 2.5 m along the head's heading.
+                const Vec3 heading{-std::sin(.8f),0,-std::cos(.8f)};
+                near(pose.position.x,1+heading.x*2.5f);
+                near(pose.position.y,1.7f);
+                near(pose.position.z,2+heading.z*2.5f);
+                const auto back=pose.orientation.rotate({0,0,1}), up=pose.orientation.rotate({0,1,0});
+                near(dot(back,heading),-1);
+                near(up.y,1);
+            }
+    });
+    test("on the game screen the VR controllers are the game's Xbox controller", [] {
+        using namespace game_pad;
+        XrFrame f;
+        f.buttons=buttonA|buttonY|buttonMenu;
+        f.hands[0].stickX=-1;f.hands[0].stickY=.05f;f.hands[0].trigger=.5f;f.hands[0].squeeze=.9f;
+        f.hands[1].stickY=.6f;f.hands[1].trigger=1;f.hands[1].stickClick=true;
+        const auto menus=fromControllers(f,Mapping::menus);
+        check(menus.buttons==(a|y|start|leftShoulder|rightThumb),"menu buttons");
+        // Full deflection, a stick at rest a few percent off centre, analog triggers.
+        check(menus.thumbLX==-32767 && menus.thumbLY==0 && menus.thumbRX==0 && menus.thumbRY==19660,"sticks");
+        check(menus.leftTrigger==128 && menus.rightTrigger==255,"triggers");
+        // In VR the controllers swing: of their own buttons only pause (menu) and the game menu (Y) pass.
+        const auto play=fromControllers(f,Mapping::gameplay);
+        check(play==game_pad::State{static_cast<uint16_t>(start|back)},"gameplay passes only Start and Back");
+        // Walking and jumping come as the swing leaves them: the October 6
+        // session could not move at all while they went to the keyboard only.
+        const auto walking=fromControllers(f,Mapping::gameplay,{.5f,-1,true});
+        check(walking.buttons==(start|back|a),"native jump is not A");
+        check(walking.thumbLX==16384 && walking.thumbLY==-32767 && !walking.thumbRX && !walking.thumbRY,"walk stick");
+        check(!walking.leftTrigger && !walking.rightTrigger,"triggers leaked into gameplay");
+        check(fromControllers(f,Mapping::gameplay,{.05f,0,false})==play,"stick noise walked");
+        check(fromControllers(f,Mapping::none,{1,1,true})==game_pad::State{},"nothing without the headset");
+        XrFrame broken;
+        broken.hands[0].stickX=std::numeric_limits<float>::quiet_NaN();
+        broken.hands[1].trigger=std::numeric_limits<float>::infinity();
+        check(fromControllers(broken,Mapping::menus)==game_pad::State{},"bad readings stay at rest");
+    });
+    test("the render allocator gets a larger ring only where the game creates it", [] {
+        using namespace native_render_memory;
+        // As the game's creation (1872d90) leaves it: a 128 MB ring, all of it
+        // free for the first frame, nothing counted.
+        const uint64_t ring = 0x185b4180000;
+        Fields made;
+        made.ring = made.first = ring;
+        made.reserved = made.committed = made.firstSize = 128u << 20;
+        made.flags[3] = 1;
+        check(usable(made) && untouched(made), "a newly created allocator rejected");
+        const uint64_t larger = 0x20000000000;
+        const uint32_t bytes = 512u << 20;
+        const auto next = replaced(made, larger, bytes);
+        check(usable(next) && untouched(next), "the replaced allocator is not as new");
+        check(next.ring == larger && next.first == larger && next.reserved == bytes && next.committed == bytes &&
+                  next.firstSize == bytes,
+              "ring not replaced");
+        check(next.flags[3] == 1, "the allocator's flags changed");
+        // Mid-session (October 5): the next frame free from 27 MB to the last
+        // page and from the ring's start up to the frame that just ended.
+        // Render commands hold 32-bit offsets from the ring's base into those
+        // frames, so this ring must stay where it is.
+        auto running = made;
+        running.first = ring + 0x1b09300;
+        running.firstSize = 0x064f5d00;
+        running.second = ring;
+        running.secondSize = 0x0152f200;
+        running.lastFrame = 6u << 20;
+        running.worstPair = 14u << 20;
+        check(usable(running), "the game's ring in use rejected");
+        check(!untouched(running), "an allocator with frames in it treated as new");
+        for (int broken = 0; broken < 6; ++broken) {
+            auto bad = running;
+            if (broken == 0)
+                bad.ring = 0;
+            if (broken == 1)
+                bad.committed = bad.reserved + 1;
+            if (broken == 2)
+                bad.first = ring - 0x100;
+            if (broken == 3)
+                bad.secondSize = bad.committed + 1;
+            if (broken == 4)
+                bad.reserved = bad.committed = 3u << 30;
+            if (broken == 5)
+                bad.reserved = bad.committed = 1u << 20;
+            check(!usable(bad) && !untouched(bad), "a ring this module does not understand was accepted");
+        }
+        auto used = made;
+        used.firstUsed = 64;
+        check(!untouched(used), "an allocator that has handed out memory treated as new");
+        // What a session finds when it starts: no ring yet, the game's own, or
+        // the one an earlier session of the same game installed.
+        check(ringStatus(Fields{}, 0) == 1 && ringStatus(Fields{}, larger) == 1,
+              "a ring reported before the game made one");
+        check(ringStatus(running, 0) == 2 && ringStatus(running, larger) == 2,
+              "the game's own ring not reported as such");
+        auto later = next;
+        later.first = larger + 0x1b09300;
+        later.lastFrame = 60u << 20;
+        check(ringStatus(later, larger) == 3, "a later session does not recognize the installed ring");
     });
     test("delayed native images retain their own tracking and overlay poses", [] {
         NativeEyeHistory history;
@@ -1145,8 +1663,9 @@ int main() {
         history.remember(frame);
         check(!history.find(0,1000000000),"uncontrolled native image accepted");
         check(!history.find(7,999999999),"future image accepted");
-        check(history.find(7,1150000000),"valid image age boundary rejected");
-        check(!history.find(7,1150000001),"stale image retained");
+        // An image stays on show for a second while no newer one arrives.
+        check(history.find(7,2000000000),"valid image age boundary rejected");
+        check(!history.find(7,2000000001),"stale image retained");
         for(uint64_t i=8;i<=263;++i) {
             frame.serial=i;
             history.remember(frame);
@@ -1155,6 +1674,39 @@ int main() {
         check(history.find(263,1000000000),"new ring entry lost");
         history.clear();
         check(!history.find(263,1000000000),"pre-recenter render pose retained");
+    });
+    test("eye snapshots are routine every few seconds and sooner on a fast held web", [] {
+        EyeSnapshotSchedule s;
+        check(s.due(0,0,false),"first snapshot not taken at tick zero");
+        check(!s.due(4999,0,false)&&s.due(5000,0,false),"routine interval is not five seconds");
+        check(!s.due(6400,32,true),"event snapshot ignored its own interval");
+        check(s.due(6500,32,true),"fast held web did not bring the snapshot forward");
+        check(!s.due(8100,14,true)&&!s.due(8100,32,false),"slow swing or free flight counted as an event");
+        check(!s.due(8100,std::numeric_limits<float>::quiet_NaN(),true),"invalid speed counted as an event");
+        check(s.due(11500,0,false),"routine snapshots stopped after an event");
+        check(sizeof(EyeSnapshot)==112,"snapshot header changed size");
+    });
+    test("eye pixels follow the overlay projection and reject points behind the eye", [] {
+        const Pose eye{{10,20,30},Quat::yaw(.5f)};
+        const auto vp=multiply(projection(-.9f,.7f,-.8f,.75f,.03f,200.f),viewMatrix(eye));
+        float x{},y{};
+        // A point on the left and upper edges of the lens lands on the image corner.
+        const Vec3 corner=eye.position+eye.orientation.rotate({std::tan(-.9f)*4,std::tan(.75f)*4,-4});
+        check(eyePixel(vp,corner,3072,3264,x,y),"visible point rejected");
+        near(x,0,.05f);near(y,0,.05f);
+        const Vec3 ahead=eye.position+eye.orientation.rotate({0,0,-2});
+        check(eyePixel(vp,ahead,3072,3264,x,y),"point straight ahead rejected");
+        near(x,3072*std::tan(.9f)/(std::tan(.9f)+std::tan(.7f)),.05f);
+        near(y,3264*std::tan(.75f)/(std::tan(.75f)+std::tan(.8f)),.05f);
+        check(!eyePixel(vp,eye.position+eye.orientation.rotate({0,0,1}),3072,3264,x,y),"point behind the eye accepted");
+        check(!eyePixel(vp,{std::numeric_limits<float>::quiet_NaN(),0,0},3072,3264,x,y),"invalid point accepted");
+        // The native eye pose converts to the same camera the overlay uses.
+        const Mat4 basis{1,0,0,0,0,-1,0,0,0,0,-1,0,0,0,0,1};
+        const auto native=multiply(projection(-.9f,.7f,-.8f,.75f,.03f,200.f),
+                                   native_view::view(native_view::relativePose(basis,eye)));
+        float nx{},ny{};
+        check(eyePixel(native,ahead,3072,3264,nx,ny),"native camera rejected the point");
+        near(nx,x,.05f);near(ny,y,.05f);
     });
     test("native swing input rejects malformed tracking and keeps hand identity", [] {
         game_swing::Command c; c.focused=1; c.serial=1;
@@ -1172,6 +1724,355 @@ int main() {
         bad=c; bad.sampleSeconds=.101f; check(!game_swing::valid(bad),"stale input interval accepted");
         bad=c; bad.sampleSeconds=std::numeric_limits<float>::quiet_NaN();
         check(!game_swing::valid(bad),"NaN input interval accepted");
+    });
+    test("a web aimed at a prop grabs it and the swing never sees that press", [] {
+        TestWorld world;world.anchor={0,20,-30};
+        GrabTargets targets;targets.add(7,{0,1,-8});
+        WebGrab grab;Swing swing(inert());
+        Body player{{0,1,0},{},true};
+        const auto in=forward(),forSwing=grab.claim(1.f/90,in,world,targets,player);
+        check(grab.grabs()[0].phase==GrabPhase::Tethered&&grab.grabs()[0].target==7,"prop not grabbed");
+        near(forSwing.hands[0].grip,0);
+        swing.predictNativeStep(.01f,forSwing,world,player);
+        check(!swing.webs()[0].attached,"the same press also shot a swing web");
+        check(events(grab,GrabEventKind::Grab)==1,"no grab event");
+    });
+    test("a prop behind a wall cannot be grabbed and the press swings instead", [] {
+        struct Wall : TestWorld {
+            std::optional<RayHit> raycast(Vec3 o,Vec3 d,float distance) const override {
+                const float t=(o.z+5)/-d.z; // a wall across z=-5
+                if(d.z<0&&t<=distance)return RayHit{o+d*t,{0,0,1},3,true};
+                return {};
+            }
+            bool exists(std::uint64_t id) const override {return id==3;}
+        } world;
+        GrabTargets targets;targets.add(7,{0,1,-8});
+        WebGrab grab;Swing swing(inert());Body player{{0,1,0},{},true};
+        const auto forSwing=grab.claim(1.f/90,forward(),world,targets,player);
+        check(grab.grabs()[0].phase==GrabPhase::None,"grabbed through a wall");
+        swing.predictNativeStep(.01f,forSwing,world,player);
+        check(swing.webs()[0].attached,"the press was lost to the swing");
+    });
+    test("a slack web leaves its target alone; a taut one tows it after the hand", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-8});
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[0].trigger=0;
+        grab.claim(1.f/90,in,world,targets,player);
+        std::vector<TargetCommand> out;
+        for(int i=0;i<12;++i)grab.step(1.f/120,world,targets,out);
+        check(out.empty(),"taking hold already pulled the target");
+        // Walk the hand back two metres over a second: the web tows the target.
+        for(int i=1;i<=90;++i) {
+            in.hands[0].aim.position={0,1,2.f*i/90};
+            grab.claim(1.f/90,in,world,targets,player);
+            for(int s=0;s<4;++s){out.clear();grab.step(1.f/360,world,targets,out);targets.apply(1.f/360,out);}
+        }
+        const auto t=*targets.find(7);
+        check(t.position.z>-6.6f,"the target did not follow the hand");
+        check(length(t.position-in.hands[0].aim.position)<8.6f,"the web stretched without limit");
+        check(grab.grabs()[0].phase==GrabPhase::Tethered,"towing changed the grab");
+    });
+    test("trigger reels the target in to the hand and catches it", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-12});
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[0].trigger=0;
+        grab.claim(1.f/90,in,world,targets,player);
+        in.hands[0].trigger=1;
+        bool caught{};
+        for(int frame=0;frame<180&&!caught;++frame) {
+            grab.claim(1.f/90,in,world,targets,player);
+            caught|=events(grab,GrabEventKind::Catch)>0;
+            std::vector<TargetCommand> out;
+            for(int s=0;s<4;++s){out.clear();grab.step(1.f/360,world,targets,out);targets.apply(1.f/360,out);caught|=events(grab,GrabEventKind::Catch)>0;}
+        }
+        check(caught&&grab.grabs()[0].phase==GrabPhase::Held,"reeling never caught the target");
+        for(int i=0;i<90;++i)settle(grab,targets,world,player,in,1.f/90);
+        const Vec3 hold={0,1,-(grab.config().holdDistance+.4f)};
+        check(length(targets.find(7)->position-hold)<.05f,"a held target did not hang at the hold point");
+    });
+    test("the zip gesture yanks a target to the hand without overshooting it", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-20});
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[0].trigger=0;
+        grab.claim(1.f/90,in,world,targets,player);
+        // Pull the hand 0.3 m back toward the body in 0.1 s (head-relative).
+        for(int i=1;i<=9;++i){in.hands[0].gripRelativeToHead={0,0,.033f*i};grab.claim(1.f/90,in,world,targets,player);if(events(grab,GrabEventKind::Yank))break;}
+        check(grab.grabs()[0].phase==GrabPhase::Yanked,"the pull did not yank");
+        float nearest=-1e9f;bool caught{};
+        const Vec3 hold={0,1,-(grab.config().holdDistance+.4f)};
+        for(int frame=0;frame<120;++frame) {
+            grab.claim(1.f/90,in,world,targets,player);
+            std::vector<TargetCommand> out;
+            for(int s=0;s<4;++s){out.clear();grab.step(1.f/360,world,targets,out);targets.apply(1.f/360,out);caught|=events(grab,GrabEventKind::Catch)>0;}
+            nearest=std::max(nearest,targets.find(7)->position.z);
+        }
+        check(caught&&grab.grabs()[0].phase==GrabPhase::Held,"the yanked target was not caught");
+        near(targets.find(7)->position.z,hold.z,.05f);
+        check(nearest<hold.z+.25f,"the target flew past the hand");
+    });
+    test("a long yank flies all the way to the hand; a snagged one stays on its web", [] {
+        // On October 5 a fixed 1.5 s timeout ended a 43 m yank 8.5 m short of the hand.
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-45});
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[0].trigger=0;
+        grab.claim(1.f/90,in,world,targets,player);
+        for(int i=1;i<=9;++i){in.hands[0].gripRelativeToHead={0,0,.033f*i};grab.claim(1.f/90,in,world,targets,player);if(events(grab,GrabEventKind::Yank))break;}
+        bool caught{};
+        for(int frame=0;frame<360&&!caught;++frame) {
+            grab.claim(1.f/90,in,world,targets,player);
+            std::vector<TargetCommand> out;
+            for(int s=0;s<4;++s){out.clear();grab.step(1.f/360,world,targets,out);targets.apply(1.f/360,out);caught|=events(grab,GrabEventKind::Catch)>0;}
+        }
+        check(caught,"a 45 m yank did not reach the hand");
+        // Pinned in place (snagged): the yank gives up, the web stays.
+        GrabTargets pinned;pinned.add(8,{0,1,-20});
+        WebGrab other;auto hand=forward();hand.hands[0].trigger=0;
+        other.claim(1.f/90,hand,world,pinned,player);
+        for(int i=1;i<=9;++i){hand.hands[0].gripRelativeToHead={0,0,.033f*i};other.claim(1.f/90,hand,world,pinned,player);}
+        check(other.grabs()[0].phase==GrabPhase::Yanked,"no yank");
+        std::vector<TargetCommand> out;
+        for(int s=0;s<360;++s){out.clear();other.step(1.f/360,world,pinned,out);} // commands ignored: it cannot move
+        check(other.grabs()[0].phase==GrabPhase::Tethered,"a snagged yank never gave up");
+    });
+    test("a carried target follows the hand alike at any physics rate, without overshoot", [] {
+        auto run=[](int hz) {
+            TestWorld world;world.enabled=false;
+            GrabTargets targets;targets.add(7,{0,1,-1.3f});
+            WebGrab grab;Body player{{0,1,0},{},true};
+            auto in=forward();in.hands[0].trigger=1;
+            grab.claim(1.f/90,in,world,targets,player);
+            in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
+            in.hands[0].trigger=1;
+            for(int i=0;i<30;++i)settle(grab,targets,world,player,in,1.f/90,hz);
+            check(grab.grabs()[0].phase==GrabPhase::Held,"not held");
+            // A metre to the side in a fifth of a second, then still.
+            float most=0;
+            for(int i=0;i<108;++i) {
+                const float t=std::min(1.f,i/18.f);in.hands[0].aim.position.x=t*t*(3-2*t);
+                settle(grab,targets,world,player,in,1.f/90,hz);most=std::max(most,targets.find(7)->position.x);
+            }
+            check(most<1.08f,"the held target swung past the hand");
+            return targets.find(7)->position;
+        };
+        const auto baseline=run(240);
+        near(baseline.x,1,.01f);
+        for(int hz:{60,120,360})check(length(run(hz)-baseline)<.02f,"carrying depends on the physics rate");
+    });
+    test("a heavy target lags the hand that a light one follows", [] {
+        auto lag=[](float mass) {
+            TestWorld world;world.enabled=false;
+            GrabTargets targets;targets.add(7,{0,1,-1.3f},mass);
+            WebGrab grab;Body player{{0,1,0},{},true};
+            auto in=forward();in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
+            in.hands[0].trigger=1;
+            for(int i=0;i<30;++i)settle(grab,targets,world,player,in,1.f/90);
+            in.hands[0].aim.position.x=2;
+            for(int i=0;i<9;++i)settle(grab,targets,world,player,in,1.f/90);
+            return 2-targets.find(7)->position.x;
+        };
+        check(lag(300)>lag(25)+.1f,"mass made no difference to carrying");
+        check(lag(300)<1.9f,"a heavy target was not carried at all");
+    });
+    test("letting go throws with the arm's speed, never multiplying the player's own", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-1.3f});
+        WebGrab grab;Body player{{0,1,0},{20,0,0},false};
+        auto in=forward();in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
+        in.hands[0].trigger=1;
+        for(int i=0;i<30;++i)settle(grab,targets,world,player,in,1.f/90);
+        check(grab.grabs()[0].phase==GrabPhase::Held,"not held");
+        targets.items[0].velocity={20,3,0}; // carried along, plus 3 m/s up from the arm
+        in.hands[0].grip=0;grab.claim(1.f/90,in,world,targets,player);
+        check(events(grab,GrabEventKind::Throw)==1,"no throw");
+        std::vector<TargetCommand> out;grab.step(1.f/120,world,targets,out);
+        check(out.size()==1&&out[0].thrown,"the throw was not sent");
+        near(out[0].velocity.x,20);near(out[0].velocity.y,3*grab.config().throwMultiplier);
+        out.clear();grab.step(1.f/120,world,targets,out);
+        check(out.empty(),"the web kept acting after the throw");
+    });
+    test("a throw near a character is aimed into it", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-1.3f});
+        targets.add(9,{3,1,-25},80,.4f,TargetKind::Character);
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
+        in.hands[0].trigger=1;
+        for(int i=0;i<30;++i)settle(grab,targets,world,player,in,1.f/90);
+        targets.items[0].velocity={0,1,-9}; // a throw a few degrees off
+        in.hands[0].grip=0;grab.claim(1.f/90,in,world,targets,player);
+        std::vector<TargetCommand> out;grab.step(1.f/120,world,targets,out);
+        check(out.size()==1,"no throw");
+        // Fly the launch ballistically: it must pass through the character.
+        Vec3 p=targets.items[0].position,v=out[0].velocity;float closest=1e9f;
+        for(int i=0;i<2000;++i){v.y-=9.81f/1000;p+=v/1000;closest=std::min(closest,length(p-targets.items[1].position));}
+        check(closest<.15f,"the aimed throw missed");
+        near(length(out[0].velocity),length(Vec3{0,1,-9})*grab.config().throwMultiplier,.01f);
+    });
+    test("aimed throws reach a target only within their cone, flatter arc first", [] {
+        check(!aimThrow({},{0,0,-10},{10,0,-10},.2f,9.81f),"a target 45 degrees off was aimed at");
+        const auto v=aimThrow({},{0,0,-20},{0,0,-30},.2f,9.81f);
+        check(v.has_value(),"a target straight ahead was refused");
+        near(length(*v),20);
+        // 20 m/s reaches 30 m at 23.7 or 66.3 degrees: the flatter one.
+        near(v->y,20*std::sin(std::atan((400-std::sqrt(400*400-9.81f*9.81f*900))/(9.81f*30))),.01f);
+        const auto direct=aimThrow({},{0,0,-5},{0,0,-30},.2f,9.81f);
+        check(direct&&std::abs(direct->y)<1e-4f,"out of reach did not fall back to a straight throw");
+        near(rayMiss({},{0,0,-1},50,{0,0,-10},1),0);
+        check(std::isinf(rayMiss({},{0,0,-1},50,{0,0,10},1)),"a target behind the hand was in reach");
+        check(std::isinf(rayMiss({},{0,0,-1},5,{0,0,-10},1)),"a target beyond reach was in reach");
+        near(rayMiss({},{0,0,-1},50,{2,0,-10},1),std::atan2(2.f,10.f)-std::asin(1/std::sqrt(104.f)),1e-4f);
+    });
+    test("a grip held after its grab is lost never shoots a swing web", [] {
+        TestWorld world;world.anchor={0,20,-30};
+        GrabTargets targets;targets.add(7,{0,1,-8});
+        WebGrab grab;Swing swing(inert());Body player{{0,1,0},{},true};
+        auto in=forward();
+        grab.claim(1.f/90,in,world,targets,player);
+        targets.items.clear(); // despawned
+        std::vector<TargetCommand> out;grab.step(1.f/120,world,targets,out);
+        check(grab.grabs()[0].phase==GrabPhase::None&&events(grab,GrabEventKind::Lost)==1,"a vanished target stayed grabbed");
+        for(int i=0;i<10;++i) {
+            const auto forSwing=grab.claim(1.f/90,in,world,targets,player);
+            swing.predictNativeStep(.01f,forSwing,world,player);
+            check(!swing.webs()[0].attached,"the held grip shot a swing web");
+        }
+        in.hands[0].grip=0;swing.predictNativeStep(.01f,grab.claim(1.f/90,in,world,targets,player),world,player);
+        in.hands[0].grip=1;swing.predictNativeStep(.01f,grab.claim(1.f/90,in,world,targets,player),world,player);
+        check(swing.webs()[0].attached,"a fresh press with nothing to grab did not swing");
+    });
+    test("a web striking a long prop's near end takes it, and its own body never cuts the web", [] {
+        // A bench whose near end, 1.5 m before its centre, is the first thing
+        // the hand's ray meets: a static body, as the game's props are.
+        struct Bench : TestWorld {
+            Vec3 centre{0,1,-8};
+            std::optional<RayHit> raycast(Vec3 o,Vec3 d,float distance) const override {
+                const float t=dot(centre-o,d)-1.5f;
+                if(t>0&&t<=distance&&length(o+d*(t+1.5f)-centre)<.5f)return RayHit{o+d*t,{0,0,1},77,true};
+                return {};
+            }
+        } world;
+        GrabTargets targets;targets.add(7,world.centre);
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[0].trigger=0;
+        grab.claim(1.f/90,in,world,targets,player);
+        check(grab.grabs()[0].phase==GrabPhase::None,"a prop behind the bench was taken without its owner");
+        targets.owners.push_back({77,7});
+        in.hands[0].grip=0;grab.claim(1.f/90,in,world,targets,player);
+        in.hands[0].grip=1;grab.claim(1.f/90,in,world,targets,player);
+        check(grab.grabs()[0].phase==GrabPhase::Tethered&&grab.grabs()[0].target==7,"the struck prop was not taken");
+        std::vector<TargetCommand> out;
+        for(int i=0;i<120;++i)grab.step(1.f/120,world,targets,out);
+        check(grab.grabs()[0].phase==GrabPhase::Tethered,"the prop's own body cut its web");
+    });
+    test("a wall that stays between hand and target cuts the web", [] {
+        struct Gate : TestWorld {
+            bool closed{};
+            std::optional<RayHit> raycast(Vec3 o,Vec3 d,float distance) const override {
+                if(!closed||d.z>=0)return {};
+                const float t=(o.z+4)/-d.z;
+                return t<=distance?std::optional<RayHit>(RayHit{o+d*t,{0,0,1},3,true}):std::nullopt;
+            }
+        } world;
+        GrabTargets targets;targets.add(7,{0,1,-8});
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();grab.claim(1.f/90,in,world,targets,player);
+        world.closed=true;
+        std::vector<TargetCommand> out;
+        for(int i=0;i<24;++i)grab.step(1.f/120,world,targets,out);
+        check(grab.grabs()[0].phase==GrabPhase::Tethered,"a passing obstruction cut the web");
+        for(int i=0;i<24;++i)grab.step(1.f/120,world,targets,out);
+        check(grab.grabs()[0].phase==GrabPhase::None,"a lasting wall kept the web");
+    });
+    test("tracking or focus loss drops grabs until the grip is released", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-8});
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();grab.claim(1.f/90,in,world,targets,player);
+        in.hands[0].tracked=false;grab.claim(1.f/90,in,world,targets,player);
+        check(grab.grabs()[0].phase==GrabPhase::None,"tracking loss kept the grab");
+        in.hands[0].tracked=true;
+        check(grab.claim(1.f/90,in,world,targets,player).hands[0].grip==0&&grab.grabs()[0].phase==GrabPhase::None,"a held grip regrabbed");
+        in.hands[0].grip=0;grab.claim(1.f/90,in,world,targets,player);
+        in.hands[0].grip=1;grab.claim(1.f/90,in,world,targets,player);
+        check(grab.grabs()[0].phase==GrabPhase::Tethered,"cannot grab again");
+        in.focused=false;grab.claim(1.f/90,in,world,targets,player);
+        check(grab.grabs()[0].phase==GrabPhase::None,"focus loss kept the grab");
+    });
+    test("two hands carry one target together and throw it once", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-1.3f});
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[1]=in.hands[0];in.hands[1].aim.position.x=.2f;
+        in.hands[0].trigger=in.hands[1].trigger=0;grab.claim(1.f/90,in,world,targets,player);
+        in.hands[0].trigger=in.hands[1].trigger=1;
+        for(int i=0;i<60;++i)settle(grab,targets,world,player,in,1.f/90);
+        check(grab.grabs()[0].phase==GrabPhase::Held&&grab.grabs()[1].phase==GrabPhase::Held,"not held by both");
+        near(targets.find(7)->position.x,.1f,.03f);
+        targets.items[0].velocity={0,0,-6};
+        in.hands[0].grip=in.hands[1].grip=0;grab.claim(1.f/90,in,world,targets,player);
+        check(events(grab,GrabEventKind::Throw)==2,"both hands did not let go");
+        std::vector<TargetCommand> out;grab.step(1.f/120,world,targets,out);
+        check(out.size()==1,"one target was thrown twice");
+    });
+    test("lab: a thrown crate knocks a thug over, who gets up again", [] {
+        LabWorld world({{{-50,-1,-50},{50,0,50},{},1}});
+        std::vector<LabProp> list(2);
+        list[0].id=1;list[0].position={0,.32f,0};list[0].radius=.32f;list[0].mass=25;
+        list[1].id=2;list[1].kind=TargetKind::Character;list[1].mass=80;list[1].radius=.4f;
+        list[1].position={0,LabProps::standingHeight,-6};
+        LabProps props(list);
+        const TargetCommand throwIt{1,TargetKind::Object,{0,4,-14},true};
+        props.step(1.f/120,std::span(&throwIt,1),world);
+        for(int i=0;i<120;++i)props.step(1.f/120,{},world);
+        check(props.knockdowns()==1&&props.props()[1].stance==LabProp::Stance::Tumbling,"the hit did not knock the thug over");
+        check(props.props()[1].position.z<-6.05f,"the thug took none of the crate's momentum");
+        for(int i=0;i<120*6;++i)props.step(1.f/120,{},world);
+        check(props.props()[1].stance==LabProp::Stance::Standing,"the thug never got up");
+        near(props.props()[1].position.y,LabProps::standingHeight,.02f);
+    });
+    test("lab: props settle on the ground without sinking or buzzing", [] {
+        LabWorld world({{{-50,-1,-50},{50,0,50},{},1}});
+        std::vector<LabProp> list(1);
+        list[0].id=1;list[0].position={0,3,0};list[0].radius=.32f;list[0].velocity={4,0,1};
+        LabProps props(list);
+        for(int i=0;i<120*4;++i)props.step(1.f/120,{},world);
+        const auto& p=props.props()[0];
+        near(p.position.y,.32f,.01f);
+        check(length(p.velocity)<.05f,"a prop on the ground kept moving");
+        const auto before=p.position;
+        for(int i=0;i<120;++i)props.step(1.f/120,{},world);
+        check(length(props.props()[0].position-before)<.002f,"a resting prop crept");
+    });
+    test("lab: the web grab drives lab props end to end", [] {
+        LabWorld world({{{-50,-1,-50},{50,0,50},{},1}});
+        std::vector<LabProp> list(1);
+        list[0].id=1;list[0].position={0,.32f,-10};list[0].radius=.32f;list[0].mass=25;
+        LabProps props(list);
+        WebGrab grab;Body player{{0,1,0},{},true};
+        // Aimed 0.108 rad down from 1.4 m: at the crate's centre 10 m ahead.
+        Input in;in.hands[0].aim={{0,1.4f,0},Quat{std::sin(-.054f),0,0,std::cos(-.054f)}};
+        in.hands[0].tracked=true;in.hands[0].grip=1;
+        grab.claim(1.f/90,in,world,props,player);
+        check(grab.grabs()[0].phase==GrabPhase::Tethered,"the aimed crate was not grabbed");
+        in.hands[0].trigger=1;
+        for(int i=0;i<180;++i){grab.claim(1.f/90,in,world,props,player);props.advance(1.f/90,grab,world);}
+        check(grab.grabs()[0].phase==GrabPhase::Held,"reeling never brought the crate in");
+        check(length(props.props()[0].position-Vec3{0,1.4f,-1.22f})<.4f,"the crate is not at the hand");
+        in.hands[0].grip=0;grab.claim(1.f/90,in,world,props,player);props.advance(1.f/90,grab,world);
+        for(int i=0;i<300;++i){grab.claim(1.f/90,in,world,props,player);props.advance(1.f/90,grab,world);}
+        near(props.props()[0].position.y,.32f,.02f);
+    });
+    test("grab configuration rejects invalid tuning", [] {
+        auto bad=[](auto change){GrabConfig c;change(c);try{WebGrab g(c);return false;}catch(const std::invalid_argument&){return true;}};
+        check(bad([](GrabConfig& c){c.holdResponse=0;}),"zero hold response accepted");
+        check(bad([](GrabConfig& c){c.tetherStiffness=1.5f;}),"overstiff tether accepted");
+        check(bad([](GrabConfig& c){c.minYankFlight=30;}),"inverted yank speeds accepted");
+        check(bad([](GrabConfig& c){c.gravity=std::numeric_limits<float>::quiet_NaN();}),"NaN gravity accepted");
+        check(!bad([](GrabConfig&){}),"defaults rejected");
     });
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;

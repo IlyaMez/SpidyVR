@@ -38,20 +38,56 @@ def snapshot(game,address):
 
 def frame_snapshot(game,address):
     for _ in range(8):
-        raw=game.read(address,160);seq=game.read(address+16,8)
-        if len(raw)!=160 or len(seq)!=8:return None
-        if struct.unpack_from('<3I',raw)!=(0x53455044,2,160):raise RuntimeError('Eye frame protocol mismatch')
+        raw=game.read(address,248);seq=game.read(address+16,8)
+        if len(raw)!=248 or len(seq)!=8:return None
+        if struct.unpack_from('<3I',raw)!=(0x53455044,4,248):raise RuntimeError('Eye frame protocol mismatch')
         if struct.unpack_from('<Q',raw,16)[0]&1 or raw[16:24]!=seq:continue
+        # history_moved/still: the eye's previous camera differed from, or equalled, the rendered one.
+        # same/late_frame_poses: the rendered pose was placed in that frame, or in an earlier one.
         names=('accepted','latched','left_copies','right_copies','left_begins','right_begins','left_ends','right_ends',
                'left_copied','right_copied','left_begun','right_begun','left_ended','right_ended','left_job','right_job',
-               'reclaimed')
-        return dict(error=struct.unpack_from('<I',raw,12)[0],**dict(zip(names,struct.unpack_from('<17Q',raw,24))))
+               'reclaimed','left_history_moved','right_history_moved','left_history_still','right_history_still',
+               'left_same_frame_poses','right_same_frame_poses','left_late_frame_poses','right_late_frame_poses')
+        # rope_from_eye: first point of the left hand's game rope, relative to the left eye being rendered.
+        return dict(error=struct.unpack_from('<I',raw,12)[0],**dict(zip(names,struct.unpack_from('<25Q',raw,24))),
+                    rope_frames=struct.unpack_from('<Q',raw,224)[0],rope_from_eye=struct.unpack_from('<3f',raw,232))
     return None
 
 
-def motion_command(main,serial,seconds):
+RENDER_RINGS = {0: 'off', 1: 'not_created', 2: 'game_ring', 3: 'spidy_ring'}
+
+
+def render_memory_snapshot(game, address):
+    """The game's per-frame render memory (native_render_memory::Data), in megabytes.
+
+    Every view's draw lists and render commands for a frame come from one ring, and two consecutive
+    frames must fit in it. `overflow_frames` counts frames in which a request did not fit; the game
+    leaves out a view's work in such a frame. The game's own ring is 128 MB; three scene views
+    need Spidy's larger one (`ring` == 'spidy_ring'), which the game only gets when the module is
+    loaded while it starts (tools/vr_launcher.py).
+    """
+    for _ in range(8):
+        raw = game.read(address, 64)
+        seq = game.read(address+16, 8)
+        if len(raw) != 64 or len(seq) != 8:
+            return None
+        if struct.unpack_from('<3I', raw) != (0x53524d44, 1, 64):
+            raise RuntimeError('Render memory protocol mismatch')
+        if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != seq:
+            continue
+        status, = struct.unpack_from('<I', raw, 12)
+        frames, overflow = struct.unpack_from('<2Q', raw, 24)
+        game_ring, ring, last, worst, pair, error = struct.unpack_from('<6I', raw, 40)
+        return dict(ring=RENDER_RINGS.get(status, status), frames=frames, overflow_frames=overflow,
+                    game_ring_mb=game_ring/1024, ring_mb=ring/1024, last_frame_mb=last/1024,
+                    worst_frame_mb=worst/1024, worst_two_frames_mb=pair/1024, error=error)
+    return None
+
+
+def motion_command(main,serial,seconds,travel=0.):
     # Exercise the same paired world-pose command used by tracked eyes. This is
     # a deterministic diagnostic motion, not a substitute for headset tracking.
+    # `travel` slides both eyes along the camera's right axis, in metres.
     angle=math.radians(10)*math.sin(seconds*2);co,si=math.cos(angle),math.sin(angle)
     eyes=[]
     for i in range(2):
@@ -59,9 +95,10 @@ def motion_command(main,serial,seconds):
         for j in range(3):
             pose[j]=co*main[j]+si*main[8+j]
             pose[8+j]=-si*main[j]+co*main[8+j]
-            pose[12+j]=main[12+j]+(-.032 if i==0 else .032)*pose[j]
+            pose[12+j]=main[12+j]+travel*main[j]+(-.032 if i==0 else .032)*pose[j]
         eyes.extend(pose+[-math.pi/4,math.pi/4,-math.pi/4,math.pi/4])
-    return struct.pack('<4IQ2I40f',0x53455043,1,192,1,serial,250,0,*eyes)
+    # Command v2 (native_eye_frame.hpp): no player anchor, so the pose is used as sent.
+    return struct.pack('<4IQ2I40f3fI',0x53455043,2,208,1,serial,250,0,*eyes,0,0,0,0)
 
 
 def main():

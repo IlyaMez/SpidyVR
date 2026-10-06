@@ -11,6 +11,7 @@ using namespace spidy;
 using namespace spidy::native_movement;
 extern "C" {
 __declspec(dllexport) Data SpidyMotionData;
+__declspec(dllexport) DrivenData SpidyMotionDriven;
 }
 namespace {
 using Method = uintptr_t (*)(void*);
@@ -31,10 +32,17 @@ void* hooks[4]{};
 unsigned hookCount{};
 uint32_t handle{};
 std::atomic<bool> enabled{};
+// Set when the module follows the player to another mover: the next step's
+// achieved velocity would otherwise span the jump between the two bodies.
+std::atomic<bool> restarted{};
 std::atomic<unsigned> active{};
 std::atomic<uint64_t> corrections{};
 uint64_t deadline{}, commandDeadline{};
 SRWLOCK lifecycle = SRWLOCK_INIT, control = SRWLOCK_INIT, telemetry = SRWLOCK_INIT;
+// Other actors' movers on a web (driveLock); their telemetry is under `telemetry`.
+Drive drives[driveSlots]{};
+uint64_t driveDeadlines[driveSlots]{};
+SRWLOCK driveLock = SRWLOCK_INIT;
 // A collision step is synchronous up to dispatch of its body-query job. Gravity
 // correction is scoped to this exact native invocation, never another actor/thread.
 struct Override {
@@ -78,6 +86,18 @@ bool live() {
            read(table + index * 16 + 8, &generation, 4) && generation == (handle >> 20) && generation &&
            pointer(table + index * 16) == config.mover && pointer(config.mover) == config.base + 0x4f70168 &&
            pointer(config.mover + 8) == config.record && read(config.mover + 0x14, &own, 4) && own == handle;
+}
+// A registered MoverStandard on `record`, under its own handle.
+bool moverLive(uintptr_t mover, uintptr_t record) {
+    const auto table = pointer(config.base + 0x7a44320);
+    uint32_t count{}, generation{}, own{};
+    if (!table || !read(mover + 0x14, &own, 4) || !read(config.base + 0x7a44340, &count, 4) ||
+        count > 0x100000)
+        return false;
+    const auto index = own & 0xfffff;
+    return index < count && read(table + index * 16 + 8, &generation, 4) && generation == (own >> 20) &&
+           generation && pointer(table + index * 16) == mover && pointer(mover) == config.base + 0x4f70168 &&
+           pointer(mover + 8) == record && record;
 }
 Command leased() {
     Command c{};
@@ -153,10 +173,71 @@ uintptr_t applyGravity(void* self) {
     }
     return result;
 }
+// A step of another actor's mover: driven when a web holds it.
+uintptr_t queryDriven(void* self) {
+    const auto mover = reinterpret_cast<uintptr_t>(self);
+    unsigned slot = driveSlots;
+    Drive c{};
+    bool leasedNow{};
+    AcquireSRWLockShared(&driveLock);
+    for (unsigned i = 0; i < driveSlots; ++i)
+        if (drives[i].mover == mover) {
+            slot = i;
+            c = drives[i];
+            leasedNow = c.enabled && GetTickCount64() < driveDeadlines[i];
+            break;
+        }
+    ReleaseSRWLockShared(&driveLock);
+    if (slot == driveSlots || !moverLive(mover, c.record))
+        return prequery(self);
+    Vec3 position{};
+    uint32_t flags{}, collision{};
+    uint8_t contact{};
+    if (!read(pointer(c.record) + 0x30, &position, 12) || !finite(position) ||
+        !read(mover + 0x750, &flags, 4) || !read(mover + 0x144, &collision, 4) ||
+        !read(mover + 0x6ee, &contact, 1))
+        return prequery(self);
+    const float dt = timestep(self);
+    const bool drive = leasedNow && (collisionEnabled(collision) || (c.options & 1)) &&
+                       !(flags & 0x80000000u) && std::isfinite(dt) && dt > 0 && dt <= .05f &&
+                       length(c.velocity) * dt <= 2.f && !current;
+    Override step{self, position};
+    Override* previous = current;
+    if (drive) {
+        const Vec3 delta = c.velocity * dt, keepDirection{};
+        request(self, &delta, &keepDirection, 0);
+        step.target = position + delta;
+        current = &step;
+    }
+    const auto result = prequery(self);
+    current = previous;
+    AcquireSRWLockExclusive(&telemetry);
+    auto& d = SpidyMotionDriven;
+    InterlockedIncrement64(&d.sequence);
+    auto& m = d.movers[slot];
+    if (m.mover != mover || m.record != c.record)
+        m = {mover, c.record};
+    m.achievedVelocity = m.steps && m.dt > 0 ? (position - m.position) / m.dt : Vec3{};
+    m.position = position;
+    m.dt = dt;
+    ++m.steps;
+    m.controlled += drive;
+    m.serial = drive ? c.serial : 0;
+    m.grounded = groundedContact(contact);
+    m.contact = contact;
+    m.moverFlags = flags;
+    m.collisionFlags = collision;
+    InterlockedIncrement64(&d.sequence);
+    ReleaseSRWLockExclusive(&telemetry);
+    return result;
+}
 uintptr_t query(void* self) {
     Guard guard;
-    if (!enabled || GetTickCount64() >= deadline || reinterpret_cast<uintptr_t>(self) != config.mover ||
-        !live())
+    if (!enabled || GetTickCount64() >= deadline)
+        return prequery(self);
+    if (reinterpret_cast<uintptr_t>(self) != config.mover)
+        return queryDriven(self);
+    if (!live())
         return prequery(self);
     Vec3 position{};
     uint32_t flags{}, collision{};
@@ -189,7 +270,7 @@ uintptr_t query(void* self) {
     auto& d = SpidyMotionData;
     InterlockedIncrement64(&d.sequence);
     // The previous step's collision result is available at the next prequery.
-    d.achievedVelocity = d.steps && d.dt > 0 ? (position - d.position) / d.dt : Vec3{};
+    d.achievedVelocity = !restarted.exchange(false) && d.steps && d.dt > 0 ? (position - d.position) / d.dt : Vec3{};
     d.position = position;
     d.requested = requested;
     d.dt = dt;
@@ -302,6 +383,41 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionStart(void* input) {
     ReleaseSRWLockExclusive(&lifecycle);
     return result;
 }
+// Follows the local player to another actor's mover (a loaded save, a
+// respawn, a character switch); zeros detach until there is one again. Only
+// record and mover of the Config are used.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionRetarget(void* input) {
+    Config next{};
+    if (!read(reinterpret_cast<uintptr_t>(input), &next, sizeof(next)) || next.magic != 0x534d5643 ||
+        next.version != 2 || next.bytes != sizeof(next) || next.pid != GetCurrentProcessId() ||
+        next.base != config.base || !next.mover != !next.record)
+        return 1001;
+    AcquireSRWLockExclusive(&lifecycle);
+    DWORD result{};
+    uint32_t nextHandle{};
+    if (!hookCount) {
+        result = 1004;
+    } else if (next.mover && !read(next.mover + 0x14, &nextHandle, 4)) {
+        result = 1002;
+    } else {
+        // Hooks match their mover first: with none, every step runs stock while
+        // record and handle change, and a step never sees half of each player.
+        InterlockedExchange64(reinterpret_cast<volatile LONG64*>(&config.mover), 0);
+        AcquireSRWLockExclusive(&control);
+        command.enabled = 0;
+        ReleaseSRWLockExclusive(&control);
+        config.record = next.record;
+        handle = nextHandle;
+        restarted = true;
+        InterlockedExchange64(reinterpret_cast<volatile LONG64*>(&config.mover), static_cast<LONG64>(next.mover));
+        if (next.mover && !live()) {
+            InterlockedExchange64(reinterpret_cast<volatile LONG64*>(&config.mover), 0);
+            result = 1002;
+        }
+    }
+    ReleaseSRWLockExclusive(&lifecycle);
+    return result;
+}
 extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionSubmit(void* input) {
     Command c{};
     if (!read(reinterpret_cast<uintptr_t>(input), &c, sizeof(c)) || c.magic != 0x534d564d || c.version != 1 ||
@@ -320,6 +436,58 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionSubmit(void* input) {
     }
     ReleaseSRWLockExclusive(&control);
     return result;
+}
+// Drives another actor's mover (a bot on a web), or lets it go (enabled 0).
+// A mover takes a free slot on its first command, and keeps it with its step
+// telemetry, driven or not, until another mover needs a slot.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionDrive(void* input) {
+    Drive c{};
+    if (!read(reinterpret_cast<uintptr_t>(input), &c, sizeof(c)) || c.magic != 0x534d5652 || c.version != 1 ||
+        c.bytes != sizeof(c) || !c.serial || c.enabled > 1 || !c.mover || !c.record || c.leaseMs > 250 ||
+        (c.enabled && !c.leaseMs) || !finite(c.velocity) || length(c.velocity) > 65 || c.options > 1 ||
+        c.reserved2)
+        return 2001;
+    if (!enabled || GetTickCount64() >= deadline)
+        return 2002;
+    if (c.mover == config.mover)
+        return 2005; // the player's own mover takes SpidyMotionSubmit
+    AcquireSRWLockExclusive(&driveLock);
+    DWORD result{};
+    unsigned slot = driveSlots, free = driveSlots;
+    const auto now = GetTickCount64();
+    for (unsigned i = 0; i < driveSlots; ++i) {
+        if (drives[i].mover == c.mover)
+            slot = i;
+        else if (free == driveSlots && (!drives[i].enabled || now >= driveDeadlines[i]))
+            free = i;
+    }
+    if (slot == driveSlots)
+        slot = free;
+    if (slot == driveSlots)
+        result = 2004;
+    else if (c.serial <= drives[slot].serial && drives[slot].mover == c.mover)
+        result = 2003;
+    else {
+        // Let go (enabled 0), a mover keeps its slot and its telemetry until
+        // another mover needs the slot.
+        drives[slot] = c;
+        driveDeadlines[slot] = now + c.leaseMs;
+    }
+    ReleaseSRWLockExclusive(&driveLock);
+    return result;
+}
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionDrivenSample(void* out) {
+    AcquireSRWLockShared(&telemetry);
+    DrivenData sample = SpidyMotionDriven;
+    ReleaseSRWLockShared(&telemetry);
+    __try {
+        if (reinterpret_cast<uintptr_t>(out) < 0x10000)
+            return 2201;
+        std::memcpy(out, &sample, sizeof(sample));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 2201;
+    }
+    return 0;
 }
 extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionStop(void*) {
     AcquireSRWLockExclusive(&lifecycle);
