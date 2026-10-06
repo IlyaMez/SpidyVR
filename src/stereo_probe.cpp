@@ -22,7 +22,8 @@ struct Config {
 };
 struct EyeSample {
     uint64_t view{}, texture{}, textureObject{}, updates{};
-    uint32_t flags{}, width{}, height{}, reserved{};
+    // occlusion: the eye has its own occlusion object (view +1ba0).
+    uint32_t flags{}, width{}, height{}, occlusion{};
     float pose[16]{};
     uint64_t readback{};
     uint32_t readbackBytes{}, readbackCompleted{};
@@ -153,6 +154,20 @@ bool owned(void* view) {
 bool entry(uintptr_t rva, const unsigned char* expected, size_t n) {
     unsigned char b[32]{};
     return n <= sizeof(b) && read(base + rva, b, n) && !std::memcmp(b, expected, n);
+}
+// Offscreen views are made without the occlusion culling the game's views
+// have: their setup (186c1f0) passes 1 as the pool initializer's skip argument,
+// so the culling (ModelOcclJob 17935a0 and a dozen other readers of +1208 and
+// +1ba0) found no occlusion object and kept every instance in an eye's
+// frustum, hidden behind buildings or not. 189fed0 builds the object from the
+// view's render buffers (+1640), as 189ce20 does for game views; each eye's
+// render job then samples the eye's own depth into it (19206a0). It stores the
+// object before constructing it, so it may only run on a new eye that no
+// render job has copied yet.
+void giveOcclusion(void* view) {
+    const auto address = reinterpret_cast<uintptr_t>(view);
+    if (!pointer(address + 0x1ba0) && pointer(address + 0x1640))
+        reinterpret_cast<void (*)(void*)>(base + 0x189fed0)(view);
 }
 void appearanceEvent(unsigned eye, bool avatar) {
     AcquireSRWLockExclusive(&telemetry);
@@ -780,6 +795,9 @@ void maintain(void* manager) {
                                                                      main.farZ(), 90.f, config.width,
                                                                      config.height, 28, nullptr);
                 creatingEye = false;
+                // Render jobs copy views from the next frame on (1920240).
+                if (eyes[i] && (config.createViews & 16))
+                    giveOcclusion(eyes[i].load());
                 AcquireSRWLockExclusive(&telemetry);
                 InterlockedIncrement64(&SpidyStereoData.sequence);
                 if (eyes[i]) {
@@ -868,6 +886,7 @@ void maintain(void* manager) {
                 i, reinterpret_cast<ID3D12Resource*>(pointer(pointer(e.textureObject + 0x38))));
         e.updates = updates[i].load();
         read(e.view + 0x14e7c, &e.flags, 4);
+        e.occlusion = pointer(e.view + 0x1ba0) != 0;
         read(e.view + 0x14e28, &e.width, 4);
         read(e.view + 0x14e2c, &e.height, 4);
         read(e.view + 0x1f80 + 0x12bf0, &e.renderWidth, 4);
@@ -924,13 +943,15 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
         }
         config = incoming;
         // createViews bits: 1 eye views, 2 native readback, 4 display/VR path,
-        // 8 (VR path only) move the engine's active view to the head while immersive.
+        // 8 (VR path only) move the engine's active view to the head while immersive,
+        // 16 (VR path only) occlusion culling for each eye (giveOcclusion).
+        const auto views = config.createViews & ~16u;
         if (!GetModuleHandleW(L"Spider-Man.exe") || config.magic != 0x53534346 || config.version != 1 ||
             config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() || config.base != base ||
             config.durationMs > 30000 || (config.durationMs && config.durationMs < 500) ||
-            (config.createViews != 0 && config.createViews != 1 && config.createViews != 3 &&
-             config.createViews != 5 && config.createViews != 7 && config.createViews != 13) ||
-            !validEyeSize(config.width) || !validEyeSize(config.height)) {
+            (views != 0 && views != 1 && views != 3 && views != 5 && views != 7 && views != 13) ||
+            ((config.createViews & 16) && !(views & 4)) || !validEyeSize(config.width) ||
+            !validEyeSize(config.height)) {
             result = 1001;
             break;
         }
@@ -967,6 +988,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
         const unsigned char frameOffscreenBytes[] = {0xe8, 0x92, 0x57, 0x1c, 0x00};
         const unsigned char historyBytes[] = {0x48, 0x89, 0x5c, 0x24, 0x08, 0x57, 0x48, 0x83, 0xec, 0x20,
                                               0x48, 0x8b, 0xf9, 0x41, 0xb8, 0x30, 0x05, 0x00, 0x00};
+        // A view's occlusion builder, up to its test of +1ba0.
+        const unsigned char occlusionBytes[] = {0x48, 0x89, 0x5c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24,
+                                                0x18, 0x57, 0x48, 0x83, 0xec, 0x40, 0x48, 0x8b, 0xf9,
+                                                0x48, 0x83, 0xb9, 0xa0, 0x1b, 0x00, 0x00, 0x00};
         if (!entry(0x18a0bb0, maintainBytes, sizeof(maintainBytes)) ||
             !entry(0x1899ab0, submitBytes, sizeof(submitBytes)) ||
             !entry(0x164703f, cameraSubmitBytes, sizeof(cameraSubmitBytes)) ||
@@ -977,6 +1002,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
             !entry(0x18a09c0, createBytes, sizeof(createBytes)) ||
             !entry(0x189bd30, updateBytes, sizeof(updateBytes)) ||
             ((config.createViews & 2) && !entry(0x186c670, readbackBytes, sizeof(readbackBytes))) ||
+            ((config.createViews & 16) && !entry(0x189fed0, occlusionBytes, sizeof(occlusionBytes))) ||
             !entry(0x186cc00, copyFinalBytes, sizeof(copyFinalBytes)) ||
             !entry(0x1846c20, toneBytes, sizeof(toneBytes)) ||
             !entry(0x187bb00, lensBytes, sizeof(lensBytes)) ||

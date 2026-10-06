@@ -56,10 +56,17 @@ read_memory = bind('ReadProcessMemory', w.BOOL, w.HANDLE, c.c_void_p, c.c_void_p
 query_memory = bind('VirtualQueryEx', SIZE_T, w.HANDLE, c.c_void_p, c.POINTER(MemoryInfo), SIZE_T)
 query_path = bind('QueryFullProcessImageNameW', w.BOOL, w.HANDLE, w.DWORD, w.LPWSTR, c.POINTER(w.DWORD))
 
-def checked_snapshot(flags, pid):
-    handle = snapshot(flags, pid)
-    if handle == c.c_void_p(-1).value: raise c.WinError(c.get_last_error())
-    return handle
+def checked_snapshot(flags, pid, patience=2):
+    # A module snapshot of a process that is loading or unloading modules fails with
+    # ERROR_BAD_LENGTH (24), and Windows documents retrying it until it succeeds. The game loads
+    # dozens of DLLs in its first seconds, while the launcher loads Spidy's modules into it.
+    deadline = time.monotonic() + patience
+    while True:
+        handle = snapshot(flags, pid)
+        if handle != c.c_void_p(-1).value: return handle
+        error = c.get_last_error()
+        if error != 24 or time.monotonic() >= deadline: raise c.WinError(error)
+        time.sleep(.01)
 
 def find_game():
     handle = checked_snapshot(2, 0)

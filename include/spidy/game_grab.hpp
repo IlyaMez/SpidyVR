@@ -9,8 +9,9 @@
 // the way the game itself moves it:
 //
 // - Props (ThrowableHelper actors) are freed as the game's own throw frees
-//   them, and their Havok bodies take the web's velocity (native_bodies).
-//   Let go, they fly and land by physics.
+//   them, and the web's law moves their Havok bodies from their actual
+//   motion, contacts included (native_bodies). Let go, they fly, bounce,
+//   slide and come to rest by the game's physics, in real time.
 // - Bots are flung (BotStateFlung, the game's launched reaction) on the first
 //   pull, and steered through their own MoverStandard while the web holds
 //   them (native movement Drive). When the web stops steering, the flight
@@ -40,9 +41,9 @@ struct Data {
     // velocities set, instance poses Spidy set, bots flung, flights steered,
     // requests the game refused, and leases that lapsed.
     uint64_t bodySteps{}, frees{}, rebuilds{}, writes{}, follows{}, flings{}, steers{}, refused{}, expired{};
-    // The latest prop command and the velocity it started from (real m/s);
-    // the real length of the latest grab step and the physics length of the
-    // game's step.
+    // The latest commanded prop's velocity through the step in flight, and
+    // its actual velocity as that step began (real m/s); the real length of
+    // the latest grab step and the physics length of the game's step.
     Vec3 commanded{}, observed{};
     float tickDt{}, stepDt{};
 };

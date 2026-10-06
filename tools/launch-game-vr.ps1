@@ -6,15 +6,20 @@ param(
     [switch]$CaptureImages,
     [switch]$OverlayWebs,
     [switch]$NoWebGrab,
+    [switch]$NoEyeOcclusion,
     [switch]$StockMonitorView,
     [switch]$FullDesktopView,
-    [switch]$AttachOnly
+    [switch]$AttachOnly,
+    [string]$XrRuntime
 )
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path -Parent $PSScriptRoot
 if(-not $Python) {
+    # A release package carries its own Python; a development checkout uses an installed one.
+    $packagedPython=Join-Path $projectRoot 'python\python.exe'
     $bundledPython=Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
-    if(Test-Path -LiteralPath $bundledPython) { $Python=$bundledPython }
+    if(Test-Path -LiteralPath $packagedPython) { $Python=$packagedPython }
+    elseif(Test-Path -LiteralPath $bundledPython) { $Python=$bundledPython }
     else { $Python=(Get-Command python.exe -ErrorAction Stop).Source }
 }
 foreach($name in @('spidy_headset_probe.exe','spidy_bridge.dll','spidy_render_probe.dll',
@@ -24,7 +29,7 @@ foreach($name in @('spidy_headset_probe.exe','spidy_bridge.dll','spidy_render_pr
     if(-not(Test-Path -LiteralPath $requiredFile)) { throw 'Build first with tools\build.ps1 -Observer.' }
 }
 if($Seconds -eq 1 -or ($Size -gt 0 -and $Size -lt 64)) { throw 'Use 0 or 2..25 seconds and 0 or 64..4096 pixels.' }
-Write-Host 'Spidy VR - connect Quest 3 in Virtual Desktop before starting.'
+Write-Host 'Spidy VR - connect your headset (Quest 3: in Virtual Desktop) before starting.'
 if($Size) { Write-Host "Eye resolution override: $Size x $Size." }
 else { Write-Host 'Eye resolution: Virtual Desktop / Quest runtime recommendation.' }
 if($Seconds) { Write-Host "Timed test: $Seconds seconds." }
@@ -47,6 +52,10 @@ else {
     Write-Host 'A web aimed at a throwable prop or a thug catches it: trigger reels it in, a sharp pull yanks'
     Write-Host 'it to your hand, release the grip to throw (add -NoWebGrab to only swing).'
 }
+if($NoEyeOcclusion) {
+    $captureArgs+=@('--no-eye-occlusion')
+    Write-Host 'Eye occlusion off: each eye draws everything in view, hidden or not (about half the frame rate).'
+}
 if($StockMonitorView) {
     $captureArgs+=@('--stock-monitor-view')
     Write-Host 'Monitor: stock game camera. The game culls and shades for it, not your head.'
@@ -60,5 +69,6 @@ elseif(-not $AttachOnly) {
     Write-Host 'Desktop window: small while VR runs, to save GPU time (add -FullDesktopView to keep your settings).'
 }
 if(-not $AttachOnly) { $captureArgs+=@('--auto-launch') }
+if($XrRuntime) { $captureArgs+=@('--xr-runtime',$XrRuntime) }
 & $Python (Join-Path $PSScriptRoot 'run_game_vr.py') --seconds $Seconds --size $Size --swing-speed $SwingSpeed --output $report @captureArgs
 exit $LASTEXITCODE

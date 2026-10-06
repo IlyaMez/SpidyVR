@@ -1,5 +1,6 @@
 #pragma once
 #include "math.hpp"
+#include "web_grab.hpp"
 #include <cstdint>
 
 // What the web moves on the game's main thread, inside hknpWorld::preCollide
@@ -15,18 +16,29 @@
 // game's PostStep (182d230) moves an actor's instance after its body, so
 // Spidy also asks for a physics rebuild (1830930, or 1834b70 with the
 // actor's model override), which builds it again in debris mode with one.
-// Its bodies are new then; the web gives them its velocity with
-// hknpWorld::setBodyLinearVelocity (2e48b80). Until the rebuilt prop has its
-// keyframe record, Spidy sets the instance from the body itself
-// (Instance::SetMatrix 191c0e0).
+// Its bodies are new then. Until the rebuilt prop has its keyframe record,
+// Spidy sets the instance from the body itself (Instance::SetMatrix 191c0e0).
+//
+// The web. Its command (web_grab's TargetCommand) is a law, evaluated here
+// each step against the prop's actual motion, after the contacts of the step
+// before: a towed crate drags on the ground, a held one stops at a wall, a
+// yanked one that strikes a railing bounces off it. Every body of the prop
+// gets the same change of velocity (hknpWorld::setBodyLinearVelocity
+// 2e48b80) and, where the command turns it, of angular velocity
+// (setBodyAngularVelocity 2e48830, world axes; a motion keeps it in body
+// axes at +0x50, its orientation at +0x10).
 //
 // Time. The game steps Havok once a frame, by the length at 609a560, which
 // only its TimeScaleSystem changes, during its time effects; otherwise it
 // stays 1/30 s. At 240 frames a second a freed prop fell 32 m in 0.3 s:
 // physics ran 8 times faster than real time, and at a VR frame rate it runs
-// fps/30 times. The web works in real time, so velocities given to a body are
-// divided by that ratio (the physics step over the real time since the last
-// one) and velocities read from one are multiplied by it.
+// fps/30 times. Spidy keeps the props it moves in real time: their
+// velocities are real ones divided by that ratio (the physics step over the
+// real time it stands for), and Havok's gravity is replaced by real gravity
+// for the real time of the step. Contacts, friction and bounce are ratios of
+// velocities, so the game's own collision response stays right in real time.
+// A prop the web lets go of stays in real time this way, flying, bouncing
+// and sliding by the game's physics, until it comes to rest.
 //
 // An actor here is what a component record's first field points to:
 // transform at +0, handle +0x64, model override +0xb6 (s16), physics system
@@ -36,19 +48,21 @@ namespace spidy::native_bodies {
 constexpr unsigned slots = 4;
 uint32_t start(uintptr_t base);
 uint32_t stop();
-// Frees the actor (once, unless it is free already) and gives its bodies
-// `velocity` from the next step on. The slot ends with the lease: renew it
-// every step the web acts. `component` is the actor's PhysicsComponent.
-// False when no slot is free.
-bool drive(uint64_t actor, uint64_t component, Vec3 velocity, uint32_t leaseMs);
-// No more velocity for this actor; physics keeps it moving.
+// Frees the actor (once, unless it is free already) and moves its bodies by
+// the web's command from the next step on. A Rope or Follow command lasts
+// until its lease ends: renew it every step the web acts. A Launch applies
+// once; a thrown one ends the web. `component` is the actor's
+// PhysicsComponent. False when no slot is free.
+bool drive(uint64_t actor, uint64_t component, const TargetCommand& command, uint32_t leaseMs);
+// No more web on this actor (a launch not yet applied still is): it flies on
+// by physics, in real time, until it rests.
 void release(uint64_t actor);
-// Where a freed actor's primary body will be when the step in flight ends,
-// and its velocity then: from the snapshot taken before that step on the
-// main thread, carried through the step with the velocity it was given (or
-// with gravity alone). `measured`: the velocity the body ended the step
-// before with, which differs from what it was given after a collision. All
-// in real time. False until the actor is freed and seen in a step.
+// Where a freed actor's root body will be when the step in flight ends, and
+// its velocity then: from the snapshot taken before that step on the main
+// thread, carried through that step as the web or gravity moves it, contacts
+// aside. `measured`: its velocity as that step began, after the step before
+// had struck whatever it struck. All in real time. False until the actor is
+// freed and seen in a step.
 bool predicted(uint64_t actor, Vec3& centre, Vec3& velocity, Vec3& measured);
 // Bots on a web. BotStateFlung is the game's own launched reaction: the bot
 // flails through the air at a velocity, then lands. It is requested through
@@ -65,8 +79,10 @@ bool flung(uint64_t machine);
 struct Counters {
     // Physics steps seen; props freed and rebuilt; body velocities set;
     // instance poses Spidy set; bots flung and flights steered; requests the
-    // game refused, and slots whose lease lapsed.
-    uint64_t steps{}, frees{}, rebuilds{}, writes{}, follows{}, flings{}, steers{}, rejected{}, expired{};
+    // game refused, and slots whose lease lapsed; props let go that came to
+    // rest; and props flying free in real time now.
+    uint64_t steps{}, frees{}, rebuilds{}, writes{}, follows{}, flings{}, steers{}, rejected{}, expired{},
+        rested{}, flying{};
 };
 Counters counters();
 // Physics steps seen so far, and the real time the latest took (seconds).

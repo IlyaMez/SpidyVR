@@ -15,18 +15,20 @@ import signal
 import threading
 import uuid
 import zlib
+import _thread
 from collections import deque
 from capture_game_state import Game, find_game, open_process, close
 from bridge_game import ROOT, HOOKS, prepare, snapshot as bridge_snapshot
 from inspect_game import PE
 from observe_game import call_remote, call_with_payload, modules
 from probe_stereo_gpu import discover_queue, snapshot as gpu_snapshot, save_eye_images
-from probe_stereo import frame_snapshot, render_memory_snapshot
+from probe_stereo import frame_snapshot, render_memory_snapshot, snapshot as stereo_snapshot
 from probe_native_rays import snapshot as ray_snapshot
 from probe_game_swing import snapshot as swing_snapshot
 from probe_native_motion import snapshot as motion_snapshot
 from vr_launcher import LauncherLock, alive, bring_to_front, wait_for_game, enlarge_render_memory, RENDER_MEMORY_HOOKS
 import vr_display
+import xr_runtime
 
 GAME_HOOKS = (*HOOKS, 0x2e67010, 0x1fbe360, 0x1fbda50, 0xa7b3a0, 0x1f9db60,
               0x18a0bb0, 0x189bd30, 0x186cc00, 0x1846c20, 0x19223e0,
@@ -197,17 +199,43 @@ def accepted(result):
                 result.get('game_entries_restored') and result.get('xr_stop') == 0 and result.get('bridge_stop') == 0)
 
 
-def preflight():
-    manifest = pathlib.Path(r'C:\Program Files\Virtual Desktop Streamer\OpenXR\virtualdesktop-openxr.json')
+def preflight(manifest):
     probe = ROOT/'build/windows-ninja/spidy_headset_probe.exe'
-    if not manifest.is_file() or not probe.is_file():
-        raise RuntimeError('Build the headset probe and install the Virtual Desktop OpenXR runtime first')
+    if not probe.is_file():
+        raise RuntimeError('Build the headset probe first')
+    runtime = xr_runtime.name(manifest)
+    print(f'VR runtime: {runtime} ({manifest}).', flush=True)
     result = subprocess.run([str(probe)], env={**os.environ, 'XR_RUNTIME_JSON': str(manifest)},
                             capture_output=True, text=True, timeout=10)
     if result.returncode:
         raise RuntimeError((result.stderr or result.stdout).strip() +
-                           ' Connect Quest 3 in Virtual Desktop before starting the game VR test.')
+                           f' Connect your headset in {runtime} before starting Spidy VR.')
     print(result.stdout.strip(), flush=True)
+
+
+def runtime_path(manifest):
+    """The runtime manifest as the game XR worker's config carries it: UTF-16, 260 characters."""
+    encoded = str(manifest).encode('utf-16-le')
+    if len(encoded) > 518:
+        raise RuntimeError(f'The OpenXR runtime path is too long: {manifest}')
+    return encoded.ljust(520, b'\0')
+
+
+def watch_stop_event(name):
+    """Treat the named event as Ctrl+C. A launcher window without a console stops VR this way."""
+    kernel = c.WinDLL('kernel32', use_last_error=True)
+    kernel.OpenEventW.restype, kernel.OpenEventW.argtypes = wintypes.HANDLE, [wintypes.DWORD, wintypes.BOOL,
+                                                                             wintypes.LPCWSTR]
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    handle = kernel.OpenEventW(0x00100000, False, name)  # SYNCHRONIZE
+    if not handle:
+        raise c.WinError(c.get_last_error())
+
+    def wait():
+        if kernel.WaitForSingleObject(handle, 0xFFFFFFFF) == 0:
+            _thread.interrupt_main()
+    threading.Thread(target=wait, name='stop-event', daemon=True).start()
 
 
 PRESENTATIONS = {0: 'none', 1: 'immersive', 2: 'flat', 3: 'game_screen'}
@@ -483,18 +511,27 @@ def main():
     p.add_argument('--capture-images', action='store_true',help='Enable diagnostic CPU eye readback (adds overhead)')
     p.add_argument('--overlay-webs', action='store_true',help="Draw Spidy's overlay webs instead of the game's web lines")
     p.add_argument('--no-web-grab', action='store_true', help='Webs never catch props or thugs; they only swing')
+    p.add_argument('--no-eye-occlusion', action='store_true',
+                   help='Each eye draws everything in its view, hidden behind buildings or not (builds before '
+                        'October 6 did; about half the frame rate)')
     p.add_argument('--stock-monitor-view', action='store_true',
                    help="Keep the stock camera as the game's active view; culling and shadows then follow it, not the head")
     p.add_argument('--swing-speed', type=float, default=32, help='Native swing speed cap in m/s (default 32)')
     p.add_argument('--full-desktop-view', action='store_true',
                    help="Start the game with its own display settings instead of a small VR window")
     p.add_argument('--output', type=pathlib.Path, default=ROOT/'reports/game-vr.json')
+    p.add_argument('--xr-runtime', type=pathlib.Path,
+                   help="OpenXR runtime manifest; by default Virtual Desktop's if installed, else Windows' active one")
+    p.add_argument('--stop-event', help='Named event that stops VR as Ctrl+C does (for a launcher window)')
     a = p.parse_args()
     if a.stop_after and (a.seconds or not 5<=a.stop_after<=300):
         p.error('--stop-after requires --seconds 0 and a value from 5 to 300')
     if (a.seconds!=0 and not 2 <= a.seconds <= 25) or (a.size!=0 and not 64 <= a.size <= 4096) or not 1 <= a.swing_speed <= 65:
         p.error('Use 0 or 2..25 seconds, 0 or 64..4096 pixels, and 1..65 m/s')
-    preflight()
+    if a.stop_event:
+        watch_stop_event(a.stop_event)
+    manifest = xr_runtime.choose(a.xr_runtime)
+    preflight(manifest)
     announce_low_memory(commit_warning(free_commit_mb(), game_commit_mb()),
                         bool(sys.stdin and sys.stdin.isatty()))
 
@@ -563,12 +600,13 @@ def main():
         xr, xr_hash = prepare(game.pid, process, ROOT/'build/windows-ninja/spidy_stereo_probe.dll',
             ROOT/'reports/stereo-modules', ('SpidyXrStart', 'SpidyXrStop', 'SpidyXrKeepAlive', 'SpidyXrData',
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
-                                           'SpidyStereoFrames', 'SpidyXrSnapshot'))
-        config = struct.pack('<4I7Q2IfI', 0x53585243, 6, 88, game.pid, game.base, queue,
+                                           'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData'))
+        config = struct.pack('<4I7Q2IfI', 0x53585243, 7, 608, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
-                             (4 if a.stock_monitor_view else 0) | (8 if a.no_web_grab else 0))
+                             (4 if a.stock_monitor_view else 0) | (8 if a.no_web_grab else 0) |
+                             (16 if a.no_eye_occlusion else 0)) + runtime_path(manifest)
         code = call_with_payload(process, xr['SpidyXrStart'], config)
         if code:
             raise RuntimeError(f'Game XR start: {code}')
@@ -646,6 +684,9 @@ def main():
                     # Eye job copies the game dropped unrendered (reclaimed by age).
                     eye_jobs = frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs
                     sample['eye_jobs_reclaimed'] = eye_jobs['reclaimed'] if eye_jobs else None
+                    # Eyes with their own occlusion culling (0 with --no-eye-occlusion or before VR starts).
+                    views = stereo_snapshot(game, xr['SpidyStereoData'])
+                    sample['eye_occlusion'] = sum(e['occlusion'] for e in views['eyes'] if e['view']) if views else None
                     # Frames whose render memory request did not fit lose a view's work.
                     if render_data:
                         render_memory = render_memory_snapshot(game, render_data) or render_memory

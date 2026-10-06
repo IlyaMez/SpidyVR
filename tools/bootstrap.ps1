@@ -10,6 +10,16 @@ if (-not (Test-Path -LiteralPath $destination)) {
 $actual = git -c "safe.directory=$($destination.Replace('\','/'))" -C $destination rev-parse HEAD
 if ($LASTEXITCODE -or $actual -ne $commit) { throw 'OpenXR SDK revision differs from the pinned revision. Existing files were preserved.' }
 Write-Output "OpenXR SDK 1.1.49 verified: $actual"
+# The launcher window (apps/launcher) is drawn with Dear ImGui.
+$imguiDestination = Join-Path $root 'third_party\imgui'
+$imguiCommit = 'f1cc2ae15e53a861a874c3034aae6798fde194ab'
+if (-not (Test-Path -LiteralPath $imguiDestination)) {
+    git clone --depth 1 --branch v1.92.9b https://github.com/ocornut/imgui.git $imguiDestination
+    if ($LASTEXITCODE) { throw 'Dear ImGui download failed' }
+}
+$imguiActual = git -c "safe.directory=$($imguiDestination.Replace('\','/'))" -C $imguiDestination rev-parse HEAD
+if ($LASTEXITCODE -or $imguiActual -ne $imguiCommit) { throw 'Dear ImGui revision differs from the pinned revision. Existing files were preserved.' }
+Write-Output "Dear ImGui 1.92.9b verified: $imguiActual"
 if ($Observer) {
     $hookDestination = Join-Path $root 'third_party\minhook'
     $hookCommit = 'c3fcafdc10146beb5919319d0683e44e3c30d537'

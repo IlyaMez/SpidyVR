@@ -8,6 +8,7 @@ if(MSVC)
 endif()
 option(SPIDY_BUILD_XR "Build the Windows OpenXR / D3D12 swing lab" ${WIN32})
 option(SPIDY_BUILD_OBSERVER "Build the opt-in camera diagnostic DLL" OFF)
+option(SPIDY_BUILD_LAUNCHER "Build the Spidy launcher window (Dear ImGui from tools/bootstrap.ps1)" ${SPIDY_BUILD_XR})
 add_library(spidy_core src/swing.cpp src/web_grab.cpp src/lab_world.cpp src/lab_props.cpp src/game_tracking.cpp
             src/web_visual.cpp)
 target_include_directories(spidy_core PUBLIC include)
@@ -20,6 +21,9 @@ enable_testing()
 add_executable(spidy_tests tests/core_tests.cpp)
 target_link_libraries(spidy_tests PRIVATE spidy_core)
 add_test(NAME core COMMAND spidy_tests)
+add_executable(spidy_launcher_tests tests/launcher_tests.cpp)
+target_include_directories(spidy_launcher_tests PRIVATE include)
+add_test(NAME launcher COMMAND spidy_launcher_tests)
 add_executable(spidy_sim apps/sim.cpp)
 target_link_libraries(spidy_sim PRIVATE spidy_core)
 if(SPIDY_BUILD_OBSERVER)
@@ -126,4 +130,28 @@ if(SPIDY_BUILD_XR)
   foreach(target spidy_d3d12 spidy_openxr spidy_xr_lab spidy_graphics_test)
     target_compile_options(${target} PRIVATE /W4 /permissive-)
   endforeach()
+endif()
+if(SPIDY_BUILD_LAUNCHER)
+  if(NOT WIN32)
+    message(FATAL_ERROR "The Spidy launcher requires Windows")
+  endif()
+  set(SPIDY_IMGUI "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
+  if(NOT EXISTS "${SPIDY_IMGUI}/imgui.h")
+    message(FATAL_ERROR "Run tools/bootstrap.ps1 to fetch the pinned Dear ImGui")
+  endif()
+  add_executable(spidy_launcher WIN32 apps/launcher/main.cpp apps/launcher/ui.cpp apps/launcher/system.cpp
+                 apps/launcher/launcher.rc apps/launcher/launcher.manifest
+                 ${SPIDY_IMGUI}/imgui.cpp ${SPIDY_IMGUI}/imgui_draw.cpp ${SPIDY_IMGUI}/imgui_tables.cpp
+                 ${SPIDY_IMGUI}/imgui_widgets.cpp ${SPIDY_IMGUI}/backends/imgui_impl_win32.cpp
+                 ${SPIDY_IMGUI}/backends/imgui_impl_dx11.cpp)
+  target_include_directories(spidy_launcher PRIVATE include ${SPIDY_IMGUI} ${SPIDY_IMGUI}/backends)
+  target_compile_definitions(spidy_launcher PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE
+                             SPIDY_VERSION="${PROJECT_VERSION}"
+                             SPIDY_VERSION_NUMBERS=${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},0)
+  set_source_files_properties(apps/launcher/main.cpp apps/launcher/ui.cpp apps/launcher/system.cpp
+                              PROPERTIES COMPILE_OPTIONS "/W4;/permissive-")
+  target_link_libraries(spidy_launcher PRIVATE d3d11 dxgi d3dcompiler dwmapi bcrypt version urlmon wintrust crypt32
+                        shell32 ole32 uuid advapi32)
+  # Static runtime: the launcher starts on a PC that has no Visual C++ runtime yet and offers to install it.
+  set_property(TARGET spidy_launcher PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()

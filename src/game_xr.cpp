@@ -25,7 +25,7 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 6, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 7, bytes = sizeof(XrConfig), pid{};
     // record and mover are no longer used: VR starts with the game, before
     // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
@@ -33,9 +33,14 @@ struct XrConfig {
     float swingSpeed = 32;
     // bit 0: CPU eye capture; bit 1: Spidy's overlay webs instead of the game's;
     // bit 2: keep the stock camera as the game's active (monitor) view in VR;
-    // bit 3: no web grab (webs never catch props or thugs)
+    // bit 3: no web grab (webs never catch props or thugs);
+    // bit 4: no eye occlusion (each eye draws everything in its view, hidden or not)
     uint32_t options{};
+    // OpenXR runtime manifest the launcher chose; empty: Virtual Desktop's if
+    // installed, else Windows' active runtime.
+    wchar_t runtime[260]{};
 };
+static_assert(sizeof(XrConfig) == 608);
 // Why the last frame had no gameplay (XrData::gate bits).
 enum GateReason : uint32_t {
     gateNoPlayer = 1,     // no save loaded, or a level change in progress
@@ -72,7 +77,7 @@ struct XrData {
     // cameras commit each frame and the other one commits last.
     uint64_t cameraCommits{}, playerCommits{};
 };
-static_assert(sizeof(XrConfig) == 88 && sizeof(XrData) == 648);
+static_assert(sizeof(XrData) == 648);
 extern "C" {
 __declspec(dllexport) XrData SpidyXrData;
 __declspec(dllexport) XrTimingData SpidyXrTimingData;
@@ -136,7 +141,7 @@ void publishSnapshot(EyeSnapshot shot, const D3D12Renderer::Captured* pixels) {
 struct RuntimeSelection {
     std::wstring previous;
     bool present{};
-    RuntimeSelection() {
+    explicit RuntimeSelection(const wchar_t* requested) {
         const DWORD size = GetEnvironmentVariableW(L"XR_RUNTIME_JSON", nullptr, 0);
         present = size != 0;
         if (size) {
@@ -144,12 +149,16 @@ struct RuntimeSelection {
             GetEnvironmentVariableW(L"XR_RUNTIME_JSON", previous.data(), size);
             previous.resize(size - 1);
         }
-        constexpr auto manifest =
+        constexpr auto virtualDesktop =
             L"C:\\Program Files\\Virtual Desktop Streamer\\OpenXR\\virtualdesktop-openxr.json";
-        if (GetFileAttributesW(manifest) == INVALID_FILE_ATTRIBUTES)
-            throw std::runtime_error("Virtual Desktop OpenXR runtime not found");
+        const wchar_t* manifest = *requested ? requested : virtualDesktop;
+        if (GetFileAttributesW(manifest) == INVALID_FILE_ATTRIBUTES) {
+            if (*requested)
+                throw std::runtime_error("The chosen OpenXR runtime is not installed");
+            return; // no Virtual Desktop: the loader uses Windows' active runtime
+        }
         if (!SetEnvironmentVariableW(L"XR_RUNTIME_JSON", manifest))
-            throw std::runtime_error("Could not select VDXR for this process");
+            throw std::runtime_error("Could not select the OpenXR runtime for this process");
     }
     ~RuntimeSelection() {
         SetEnvironmentVariableW(L"XR_RUNTIME_JSON", present ? previous.c_str() : nullptr);
@@ -177,7 +186,7 @@ DWORD WINAPI run(void*) {
             throw std::runtime_error("Game graphics device unavailable");
         XrRuntime runtime;
         {
-            RuntimeSelection selected;
+            RuntimeSelection selected(config.runtime);
             runtime.initialize(device.Get(), queue, config.eyeSize);
         }
         D3D12Renderer overlay;
@@ -545,7 +554,10 @@ DWORD WINAPI run(void*) {
                         };
                         // Flag 8: while immersive, the game's active view follows the
                         // head, so work the game does only for that view fits the eyes.
-                        const uint32_t flags = (config.options & 4) ? 5 : 13;
+                        // Flag 16: each eye culls what its own previous frame hid, as the
+                        // game's views do; without it the render thread did 2-4 times the
+                        // work and held VR at 40-65 frames a second.
+                        const uint32_t flags = ((config.options & 4) ? 5 : 13) | ((config.options & 16) ? 0 : 16);
                         NativeConfig views{
                             0x53534346, 1, 40, config.pid, config.base, moduleDuration, flags, dimensions[0],
                             dimensions[1]};
@@ -880,10 +892,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 6 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 7 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
-        !config.motionModule || config.options > 15 ||
+        !config.motionModule || config.options > 31 ||
         !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 || config.swingSpeed > 65 ||
         (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||
         (config.eyeSize && !validEyeSize(config.eyeSize)))
@@ -911,7 +924,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     // The worker attaches each player it finds; none yet.
     native_appearance::setPlayerRecord(0);
     keepAliveDeadline = GetTickCount64() + 10000;
-    message(1, 0, "Starting Virtual Desktop OpenXR");
+    message(1, 0, "Starting OpenXR");
     worker = CreateThread(nullptr, 0, run, nullptr, 0, nullptr);
     return worker ? 0 : 1003;
 }

@@ -12,13 +12,19 @@ Vec3 smooth(Vec3 current, Vec3 sample, float seconds) {
     const float keep = std::exp(-seconds / velocitySmoothing);
     return sample + (current - sample) * keep;
 }
-// The step's command for this target so far, so a second hand's web starts
-// from what the first one did to it.
+// The step's command for this target so far, from the other hand's web.
 TargetCommand* commandFor(std::vector<TargetCommand>& out, std::size_t first, std::uint64_t id) {
     for (auto i = first; i < out.size(); ++i)
         if (out[i].id == id)
             return &out[i];
     return nullptr;
+}
+// Which of two webs on one target decides its step: a hold over a yank over
+// a tow. Two tows both pull.
+int rank(const TargetCommand& c) {
+    if (c.mode == TargetCommand::Mode::Rope)
+        return 1;
+    return c.mode == TargetCommand::Mode::Follow && c.supported ? 3 : 2;
 }
 } // namespace
 
@@ -55,24 +61,63 @@ std::optional<Vec3> aimThrow(Vec3 from, Vec3 velocity, Vec3 target, float cone, 
     const Vec3 across = flat / x;
     return (across * std::cos(angle) + Vec3{0, std::sin(angle), 0}) * speed;
 }
+Vec3 arcVelocity(Vec3 from, Vec3 to, float time, Vec3 gravity) {
+    return (to - from) / time - gravity * (time * .5f);
+}
+Vec3 advance(const TargetCommand& c, Vec3 p, Vec3 v, float dt, Vec3 gravity) {
+    switch (c.mode) {
+    case TargetCommand::Mode::Launch:
+        return c.velocity;
+    case TargetCommand::Mode::Rope: {
+        v += gravity * dt;
+        // Each web from its moving hand: where this step would leave the
+        // target beyond the web's length, take that stretch out. A web
+        // only pulls.
+        for (unsigned i = 0; i < std::min<unsigned>(c.ropeCount, 2); ++i) {
+            const auto& rope = c.ropes[i];
+            const Vec3 ahead = p + v * dt - (rope.anchor + rope.anchorVelocity * dt);
+            const float reach = length(ahead);
+            if (reach > rope.length && reach > 1e-4f) {
+                const float inward = (reach - rope.length) / dt * c.stiffness;
+                v -= ahead / reach * std::min(inward, c.maxAcceleration * dt);
+            }
+        }
+        return v;
+    }
+    case TargetCommand::Mode::Follow: {
+        const Vec3 want = c.velocity + (c.point - p) * c.response;
+        v += limited(want - v, c.maxAcceleration * dt);
+        return c.supported ? v : v + gravity * dt;
+    }
+    }
+    return v;
+}
+Vec3 advanceSpin(const TargetCommand& c, Vec3 spin, float dt) {
+    if (!c.spins)
+        return spin;
+    if (c.mode == TargetCommand::Mode::Launch)
+        return c.spin;
+    return spin + limited(c.spin - spin, c.spinAcceleration * dt);
+}
 
 WebGrab::WebGrab(GrabConfig c) : config_(c) {
     const float positive[] = {
-        c.maxRange,        c.maxMass,       c.yankSpeed,           c.yankDistance, c.yankWindow,
-        c.webAcceleration, c.holdResponse,  c.maxHoldAcceleration, c.liftMass,     c.arrivalDeceleration,
-        c.yankTimeout,     c.maxThrowSpeed, c.tetherStiffness,     c.fixedStep,    c.maxYankFlight,
-        c.throwMultiplier};
+        c.maxRange,        c.maxMass,         c.yankSpeed,           c.yankDistance,  c.yankWindow,
+        c.webAcceleration, c.holdResponse,    c.maxHoldAcceleration, c.liftMass,      c.arrivalDeceleration,
+        c.yankTimeout,     c.maxThrowSpeed,   c.tetherStiffness,     c.fixedStep,     c.maxYankFlight,
+        c.throwMultiplier, c.maxYankTime,     c.yankGuidance,        c.holdSpin};
     for (float v : positive)
         if (!std::isfinite(v) || v <= 0)
             throw std::invalid_argument("Invalid grab configuration");
     const float nonnegative[] = {c.aimCone,       c.holdDistance,   c.reelSpeed,       c.yankMultiplier,
                                  c.minYankFlight, c.catchDistance,  c.aimAssistCone,   c.aimAssistRange,
                                  c.slack,         c.minAssistSpeed, c.obstructionTime, c.breakStretch,
-                                 c.gravity};
+                                 c.gravity,       c.maxThrowSpin,   c.yankTumble};
     for (float v : nonnegative)
         if (!std::isfinite(v) || v < 0)
             throw std::invalid_argument("Invalid grab configuration");
-    if (c.tetherStiffness > 1 || c.minYankFlight > c.maxYankFlight || c.aimCone > 1 || c.fixedStep > .02f)
+    if (c.tetherStiffness > 1 || c.minYankFlight > c.maxYankFlight || c.aimCone > 1 || c.fixedStep > .02f ||
+        c.maxYankTime > 5)
         throw std::invalid_argument("Invalid grab configuration");
 }
 std::optional<GrabTarget> WebGrab::preview(Pose aim, const WorldQueries& world,
@@ -97,25 +142,34 @@ std::optional<GrabTarget> WebGrab::preview(Pose aim, const WorldQueries& world,
 float WebGrab::holdLength(int i) const {
     return config_.holdDistance + grabs_[i].radius;
 }
+Vec3 WebGrab::turning(int i) const {
+    const auto& h = hands_[i];
+    return cross(h.forward, h.forwardRate);
+}
 void WebGrab::end(int i, GrabEventKind reason, Vec3 velocity) {
     auto& g = grabs_[i];
     if (g.phase != GrabPhase::None)
         events_.push_back({reason, i, g.target, reason == GrabEventKind::Lost ? .2f : .45f, velocity});
     g = {};
     auto& h = hands_[i];
-    h.reeling = h.yankUsed = false;
-    h.pullDistance = h.pullTime = h.obstructed = h.flight = h.stalled = 0;
+    h.reeling = h.yankUsed = h.launched = false;
+    h.pullDistance = h.pullTime = h.obstructed = h.flight = h.stalled = h.flightTime = h.flown = 0;
     h.closest = std::numeric_limits<float>::infinity();
 }
-void WebGrab::letGo(int i, const TargetQueries& targets, const Body& player) {
+void WebGrab::letGo(int i, const TargetQueries& targets, const Body& player, bool otherReleasing) {
     const auto& g = grabs_[i];
     const auto target = targets.find(g.target);
     if (!target || !finite(target->velocity)) {
         end(i, GrabEventKind::Lost);
         return;
     }
-    if (g.phase == GrabPhase::Tethered) {
-        // Only the web goes; the target keeps whatever the web gave it.
+    const auto& other = grabs_[1 - i];
+    const bool stillHeld = other.phase == GrabPhase::Held && other.target == g.target && !otherReleasing;
+    if (g.phase != GrabPhase::Held || stillHeld) {
+        // Only the web goes. A towed target keeps what the web gave it; a
+        // yanked one flies on where it was going, as anything let go of
+        // does: the arm's throw belongs to what the hand holds. Nor does
+        // one hand letting go throw what the other still holds.
         end(i, GrabEventKind::Release);
         return;
     }
@@ -147,10 +201,18 @@ void WebGrab::letGo(int i, const TargetQueries& targets, const Body& player) {
         if (aimed)
             launch = *aimed;
     }
-    // Both hands letting go together throw it once.
+    // Both hands letting go together throw it once, spinning as they turned.
     if (std::none_of(pending_.begin(), pending_.end(),
-                     [&](const TargetCommand& c) { return c.id == g.target; }))
-        pending_.push_back({g.target, g.kind, launch, true});
+                     [&](const TargetCommand& c) { return c.id == g.target; })) {
+        TargetCommand thrown{g.target, g.kind, TargetCommand::Mode::Launch, true};
+        thrown.velocity = launch;
+        Vec3 spin = turning(i);
+        if (other.phase == GrabPhase::Held && other.target == g.target)
+            spin = (spin + turning(1 - i)) * .5f;
+        thrown.spins = true;
+        thrown.spin = limited(spin, config_.maxThrowSpin);
+        pending_.push_back(thrown);
+    }
     end(i, GrabEventKind::Throw, launch);
 }
 void WebGrab::releaseAll() {
@@ -173,6 +235,12 @@ Input WebGrab::claim(float seconds, const Input& in, const WorldQueries& world, 
         return swing;
     }
     events_.clear();
+    // Whether each hand lets its grab go in this sample: two hands letting
+    // go of one target together throw it.
+    std::array<bool, 2> releasing{};
+    for (int i = 0; i < 2; ++i)
+        releasing[i] = seconds > 0 && grabs_[i].phase != GrabPhase::None && in.hands[i].tracked &&
+                       !(in.hands[i].grip > .35f);
     for (int i = 0; i < 2; ++i) {
         const auto& hand = in.hands[i];
         auto& h = hands_[i];
@@ -204,7 +272,7 @@ Input WebGrab::claim(float seconds, const Input& in, const WorldQueries& world, 
                 if (!held)
                     h.owned = false;
                 if (g.phase != GrabPhase::None && !held)
-                    letGo(i, targets, player);
+                    letGo(i, targets, player, releasing[1 - i]);
                 if (g.phase == GrabPhase::None && shoot) {
                     if (const auto target = preview(hand.aim, world, targets)) {
                         g.phase = GrabPhase::Tethered;
@@ -249,7 +317,8 @@ Input WebGrab::claim(float seconds, const Input& in, const WorldQueries& world, 
                                                       config_.maxYankFlight) *
                                            strength;
                                 h.closest = std::numeric_limits<float>::infinity();
-                                h.stalled = 0;
+                                h.stalled = h.flightTime = h.flown = 0;
+                                h.launched = false;
                                 h.yankUsed = true;
                                 g.phase = GrabPhase::Yanked;
                                 events_.push_back({GrabEventKind::Yank, i, g.target, 1, {}});
@@ -273,6 +342,40 @@ Input WebGrab::forSwing(const Input& input) const {
             swing.hands[i].grip = swing.hands[i].trigger = 0;
     return swing;
 }
+float WebGrab::planYank(Vec3 from, Vec3 hold, Vec3 holdVelocity, float speed, float radius,
+                        std::uint64_t target, const WorldQueries& world, const TargetQueries& targets) const {
+    const Vec3 gravity{0, -config_.gravity, 0};
+    const float direct =
+        std::clamp(length(hold - from) / std::max(speed, 1.f), .2f, config_.maxYankTime);
+    // What a flying target strikes is mostly below it (a railing, a car, a
+    // parapet): the arc is traced along its underside, from its centre.
+    const Vec3 under{0, -.9f * std::max(radius, 0.f), 0};
+    for (const float stretch : {1.f, 1.35f, 1.8f, 2.4f}) {
+        const float time = std::min(direct * stretch, config_.maxYankTime);
+        const Vec3 launch = arcVelocity(from, hold + holdVelocity * time, time, gravity);
+        // The arc in six chords: only the fixed world blocks it, never the
+        // target's own bodies; other props it would knock aside.
+        bool clear = true;
+        Vec3 a = from;
+        constexpr int chords = 6;
+        for (int s = 1; s <= chords && clear; ++s) {
+            const float t = time * static_cast<float>(s) / chords;
+            const Vec3 b = from + launch * t + gravity * (.5f * t * t) + under;
+            const float span = length(b - a);
+            if (span > .05f && span < 140) {
+                const auto hit = world.raycast(a, (b - a) / span, span);
+                const auto own = hit ? targets.owner(hit->surface) : std::nullopt;
+                clear = !(hit && hit->fixed && !(own && *own == target));
+            }
+            a = b;
+        }
+        if (clear)
+            return time;
+        if (time >= config_.maxYankTime)
+            break;
+    }
+    return direct;
+}
 void WebGrab::step(float dt, const WorldQueries& world, const TargetQueries& targets,
                    std::vector<TargetCommand>& out) {
     if (!std::isfinite(dt) || dt <= 0 || dt > .05f)
@@ -295,7 +398,6 @@ void WebGrab::step(float dt, const WorldQueries& world, const TargetQueries& tar
         auto* existing = commandFor(out, first, g.target);
         if (existing && existing->thrown)
             continue; // the other hand threw it in this step
-        const Vec3 start = existing ? existing->velocity : target->velocity;
         // Hand samples arrive slower than physics steps. A held target follows
         // the latest one; carrying the hand on at its measured velocity
         // overshot wherever the hand stopped.
@@ -303,6 +405,7 @@ void WebGrab::step(float dt, const WorldQueries& world, const TargetQueries& tar
         const float lever = holdLength(i);
         Vec3 hold = wrist + h.forward * lever;
         Vec3 holdVelocity = h.wristVelocity + h.forwardRate * lever;
+        Vec3 turn = turning(i);
         // Both hands bringing in or holding one target: it goes between them.
         const auto& og = grabs_[1 - i];
         const auto& oh = hands_[1 - i];
@@ -311,6 +414,7 @@ void WebGrab::step(float dt, const WorldQueries& world, const TargetQueries& tar
             const float otherLever = holdLength(1 - i);
             hold = (hold + oh.wrist + oh.forward * otherLever) * .5f;
             holdVelocity = (holdVelocity + oh.wristVelocity + oh.forwardRate * otherLever) * .5f;
+            turn = (turn + turning(1 - i)) * .5f;
         }
         const Vec3 p = target->position;
         g.wrist = wrist;
@@ -338,24 +442,37 @@ void WebGrab::step(float dt, const WorldQueries& world, const TargetQueries& tar
         }
         const float mass = std::max(target->mass, 1.f);
         const float strength = std::clamp(config_.liftMass / mass, .15f, 1.f);
-        const float pickup = config_.webAcceleration * strength * dt;
-        Vec3 v = start;
+        TargetCommand c{g.target, g.kind};
+        // Holding it: it moves with its hold point and closes the gap to it,
+        // first order, so a hand that stops does not fling it past. A
+        // critically damped spring carried a target 12-18 cm beyond a hand
+        // that moved a metre in 0.2 s; this, 4-6 cm. Held up, it does not
+        // fall, and it turns as the hand turns.
+        const auto holding = [&] {
+            c.mode = TargetCommand::Mode::Follow;
+            c.velocity = holdVelocity;
+            c.point = hold;
+            c.response = config_.holdResponse;
+            c.maxAcceleration = config_.maxHoldAcceleration * strength;
+            c.supported = true;
+            c.spins = true;
+            c.spin = turn;
+            c.spinAcceleration = config_.holdSpin;
+        };
         bool acts = false;
         switch (g.phase) {
         case GrabPhase::Tethered: {
             if (h.reeling)
                 g.length = std::max(lever, g.length - config_.reelSpeed * dt);
-            v += gravity * dt;
-            // A tension-only web from the moving hand: where this step would
-            // leave the target beyond the web's length, take that stretch out.
-            const Vec3 ahead = p + v * dt - (wrist + h.wristVelocity * dt);
-            const float reach = length(ahead);
-            if (reach > g.length && reach > 1e-4f) {
-                const Vec3 n = ahead / reach;
-                const float inward = (reach - g.length) / dt * config_.tetherStiffness;
-                v -= n * std::min(inward, pickup);
-                acts = g.taut = true;
-            }
+            c.mode = TargetCommand::Mode::Rope;
+            c.ropes[0] = {wrist, h.wristVelocity, g.length};
+            c.ropeCount = 1;
+            c.stiffness = config_.tetherStiffness;
+            c.maxAcceleration = config_.webAcceleration * strength;
+            // Taut when this step would carry the target beyond the web's
+            // length; slack, it does nothing.
+            const Vec3 ahead = p + (target->velocity + gravity * dt) * dt - (wrist + h.wristVelocity * dt);
+            acts = g.taut = length(ahead) > g.length;
             if (h.reeling && g.length <= lever + .01f && distance <= lever + config_.catchDistance) {
                 g.phase = GrabPhase::Held;
                 events_.push_back({GrabEventKind::Catch, i, g.target, .4f, {}});
@@ -363,7 +480,6 @@ void WebGrab::step(float dt, const WorldQueries& world, const TargetQueries& tar
             break;
         }
         case GrabPhase::Yanked: {
-            // Straight to the hand, slowing in time to arrive with it.
             const Vec3 toHold = hold - p;
             const float left = length(toHold);
             if (left < h.closest - .25f) {
@@ -376,37 +492,67 @@ void WebGrab::step(float dt, const WorldQueries& world, const TargetQueries& tar
                 g.phase = GrabPhase::Held;
                 g.length = lever;
                 events_.push_back({GrabEventKind::Catch, i, g.target, .4f, {}});
-            } else if (h.stalled > config_.yankTimeout) {
-                // Snagged on something: keep it on the web where it is.
+                holding();
+                acts = g.taut = true;
+                break;
+            }
+            if (h.stalled > config_.yankTimeout) {
+                // It struck something and stopped short: it stays on a web
+                // where it lies, and physics has it.
                 g.phase = GrabPhase::Tethered;
                 g.length = std::max(distance, lever);
+                break;
             }
-            const float speed = std::min(h.flight, std::sqrt(2 * config_.arrivalDeceleration * left));
-            const Vec3 want = (left > 1e-4f ? toHold / left * speed : Vec3{}) + holdVelocity;
-            v += limited(want - v, pickup);
+            if (!h.launched) {
+                // The yank itself: the arc to the hand, as fast as the pull,
+                // tumbling gently as the web tips its near side over. Spin it
+                // had from being freed (30 rad/s measured, physics running 8
+                // times real time) does not survive the pull.
+                h.flightTime = planYank(p, hold, holdVelocity, h.flight, g.radius, g.target, world, targets);
+                h.flown = 0;
+                h.launched = true;
+                c.mode = TargetCommand::Mode::Launch;
+                c.velocity = arcVelocity(p, hold + holdVelocity * h.flightTime, h.flightTime, gravity);
+                c.spins = true;
+                c.spin = normalized(cross({0, 1, 0}, Vec3{c.velocity.x, 0, c.velocity.z})) * config_.yankTumble;
+                acts = g.taut = true;
+                break;
+            }
+            h.flown += dt;
+            // In flight: the arc that reaches the moving hand in the time
+            // left, steered to gently, and no faster toward the hold point
+            // than it can brake in before it.
+            const float remaining = std::max(h.flightTime - h.flown, .12f);
+            Vec3 want = arcVelocity(p, hold + holdVelocity * remaining, remaining, gravity);
+            const Vec3 along = left > 1e-4f ? toHold / left : Vec3{};
+            const float closing = dot(want - holdVelocity, along);
+            const float brake = std::sqrt(2 * config_.arrivalDeceleration * left);
+            const bool braking = closing > brake;
+            if (braking)
+                want -= along * (closing - brake);
+            want = holdVelocity + limited(want - holdVelocity, h.flight * 1.25f + 2);
+            c.mode = TargetCommand::Mode::Follow;
+            c.velocity = want;
+            c.maxAcceleration = (braking ? config_.webAcceleration : config_.yankGuidance) * strength;
             acts = g.taut = true;
             break;
         }
-        case GrabPhase::Held: {
-            // Moving with the hold point and closing the gap to it: first
-            // order, so a hand that stops does not fling the target past it.
-            // A critically damped spring carried a target 12-18 cm beyond a
-            // hand that moved a metre in 0.2 s; this, 4-6 cm. Holding it up
-            // cancels its weight.
-            const Vec3 want = holdVelocity + (hold - p) * config_.holdResponse;
-            v += limited(want - v, config_.maxHoldAcceleration * strength * dt);
+        case GrabPhase::Held:
+            holding();
             acts = g.taut = true;
             break;
-        }
         case GrabPhase::None:
             break;
         }
         if (!acts)
             continue;
-        if (existing)
-            existing->velocity = v;
-        else
-            out.push_back({g.target, g.kind, v, false});
+        if (!existing)
+            out.push_back(c);
+        else if (c.mode == TargetCommand::Mode::Rope && existing->mode == TargetCommand::Mode::Rope &&
+                 existing->ropeCount == 1)
+            existing->ropes[existing->ropeCount++] = c.ropes[0]; // two webs both pull
+        else if (rank(c) > rank(*existing))
+            *existing = c;
     }
 }
 } // namespace spidy

@@ -26,7 +26,7 @@ def snapshot(game,address):
         result['eyes']=[]
         for i in range(2):
             start=64+i*144
-            eye=dict(zip(('view','texture','texture_object','updates','flags','width','height','reserved'),
+            eye=dict(zip(('view','texture','texture_object','updates','flags','width','height','occlusion'),
                 struct.unpack_from('<4Q4I',raw,start)))
             eye['pose']=struct.unpack_from('<16f',raw,start+48)
             eye.update(zip(('readback','readback_bytes','readback_completed'),struct.unpack_from('<Q2I',raw,start+112)))

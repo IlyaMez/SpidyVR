@@ -1,6 +1,172 @@
 # Validation — 2026-10-06
 
-## Walking, jumping and web pulls through the virtual controller — current build, awaiting headset check
+## Eye occlusion culling — current build, awaiting headset check
+
+The user, after the 10:16 session (`reports/game-vr-20261006-101603.json`):
+"performance feels not to too good in vr considering that i alt tabbed and saw
+that my cpu and gpu were barely hitting 20% load, with the hard drive at 44%
+load. at these numbers i would expect 120 fps stable on headset".
+
+The session: 619 s of samples at 3072 x 3264 per eye, the headset at 90 Hz (XR
+frames 89.8 a second). New eye pairs 38.0 a second, submissions 83.1, of which
+30.0 repeated an earlier pair; the game log's minute frame rate was 41-64 in VR
+minutes. Physics step `dt`: median 20.2 ms, 5th percentile 13.1, 95th 32.4.
+Frame cost followed the per-frame render memory: 24-37 MB at 57-71 new pairs a
+second, 58-77 MB at 30-38. The render ring never overflowed (512 MB, worst two
+frames 155 MB). The texture budget was full in every VR minute (3,837-3,871 of
+3,874 MB), the source of the disk reads. The last 40 s have the gate at
+`tracking` and `no_camera_commit`: the headset not viewing and the game paused,
+as it is while its window is not in front, which fits the alt-tab. Earlier
+sessions at 120 Hz (`timing` in the 09:22 Oct 6, 09:36 Oct 5 and 18:47 Oct 4
+reports): mean XR frame 13.9-14.0 ms, `xrEndFrame` 13.4-13.5 ms of it, 71
+submissions a second. The 10:16 report has no `timing`: the game closed first,
+and that path does not read it.
+
+In the game, no headset, `tools/probe_vr_load.py` at the user's save (a rooftop
+at night), eyes 3072 x 3264 with Quest 3's lens (54 degrees outward, 44 inward,
+48 up and down), views 13 as in VR (`reports/vr-load-3072.json`):
+
+| Phase | Game fps | Busiest thread | Main thread | GPU busy | Render MB/frame |
+|---|---|---|---|---|---|
+| Game alone | 250 | 90% of a core | 65% | 43% | 3.9 |
+| VR views, looking ahead | 65 | 95% | 47% | 66% | 31.1 |
+| VR views, turning a full circle | 48 | 96% | 40% | 58% | 45.4 |
+| VR views, 60-degree lens | 94 | 95% | 45% | 77% | 18.3 |
+
+Across these, frame time is about 2.4 ms plus 0.41 ms per MB of render
+commands. The busiest thread does not log; the main thread (the one logging
+`[NxApp]`) does. 7,751 instruction-pointer samples of each
+(`reports/vr-load-3072-profile.json`): the busiest was in the game 68% of the
+time, the NVIDIA driver (`nvwgf2umx`) 19%, D3D12Core 4%, ntdll 7% (3% waiting),
+with no function above 6.5%: per-draw work spread over the render code. The
+main thread spent 57% of its samples in one wait (`ntdll+164a00`, from
+`1bbf3fa`). The busiest is the render thread, and the main thread waits on it.
+Spidy's GPU bridge made no difference (63.6 fps without it, 65.3 with).
+
+Cause, from the executable:
+
+- The offscreen view setup `186c1f0` (Spidy's buffer hook returns at its
+  `186c325`) calls `18a0020` with 1 as the sixth argument, which becomes the
+  pool initializer `189ce20`'s seventh: skip occlusion. `189ce20` sets the
+  view's `+1208` to 1 unconditionally, but creates the occlusion object at
+  `+1ba0` (0x8c0 bytes, "ViewContext::InitOcclBufferClasses" and
+  "InitOcclBufferPointers"; depth target and coverage texture through
+  `17f9310`) only when that argument is 0.
+- ModelOcclJob (`17935a0`, created in `1793f5b`) tests each instance against
+  the view's object (`17fd5b0` near, `17fdec0` far) only when `+1208` is set and
+  `+1ba0` holds an object whose `+184` is clear. A dozen other culling functions
+  read the same pair (`16b4990`, `16fad46`, `17164c0`, `173a940`, `173e890`,
+  `1795110`, `1796d20`, `191f2d0`, `19f0bf0`, `1a072a1`, `1a0f120`). Without
+  an object, every instance in the frustum within draw distance is drawn.
+- `189fed0` builds the object for a view that has none, from the view's render
+  buffers (`+1640`); it stores the pointer before constructing the object. The
+  view's display setup (`1920310`) then queues its occlusion depth sample
+  (command 0x9c), and its render job (`19206a0`) runs the occlusion update
+  `17f97c0` (`OcclReprojJob`), both guarded by `+1208`; the per-view update
+  `189bd30` calls `17f8f80` on the object every frame, on the main thread
+  during view maintenance. The engine itself sets and clears `+184` each frame
+  (`17fa880`, `17f97c0`), for example while the view's camera flags (`+438` bit
+  1) mark a discontinuity.
+
+Change: `stereo_probe.cpp` calls `189fed0` on each eye right after creating it
+in view maintenance, before any render job has copied it (view option 16,
+entry bytes checked). VR uses it unless started with `-NoEyeOcclusion` (XR
+option bit 4). The eye sample's former reserved word reports the object, and
+session reports carry `eye_occlusion` (eyes with it) in every sample.
+
+With it (`reports/vr-load-occlusion.json`, no GPU bridge, same save and spot;
+"before" from the run above):
+
+| Phase | Before | With eye occlusion | Render MB/frame | GPU busy |
+|---|---|---|---|---|
+| Looking ahead | 65 fps | 125 fps | 31.1 to 12.8 | 66% to 88% |
+| Turning a full circle | 48 | 105 | 45.4 to 14.4 | 58% to 82% |
+| 60-degree lens | 94 | 138 | 18.3 to 8.2 | 77% to 79% |
+
+In one process (`reports/vr-load-shots.json`, the GPU bridge reading every pair
+back, which costs GPU time), the probe took each eye's object pointer away (to
+null, which every reader tests) and put it back: looking ahead 88 fps with it,
+56 without. Clearing `+1208` instead stops the eye from rendering at all (0
+pairs a second): it is no occlusion switch.
+
+Images, left eye at four headings with the culling, without it, and with it
+again (`reports/vr-load-shots-eyes/`): render MB 13.2/30.8, 13.4/51.8,
+15.4/59.2 and 12.4/33.9 with/without. Pixels whose largest channel moved by
+over 48: with against without 0.003%, 0.34%, 0.17%, 0.18%; with against with
+again 0.003%, 0.29%, 0.10%, 0.18%. Mean brightness is equal within 0.4%.
+Difference maps put the changes on moving cars and people, birds, an animated
+billboard and leaves; no building, prop or light is missing.
+
+Not checked: when the eyes resume after a menu or cutscene, their first frame
+tests against the depth of the last frame before they paused. Static geometry
+still occludes correctly; something that moved meanwhile could hide an object
+for that one frame.
+
+Headset check: play as before. `eye_occlusion` should read 2 while immersive;
+compare new pairs a second with the 10:16 session (38) in similar places, and
+with `-NoEyeOcclusion`. At 120 Hz, see whether submissions reach 120 a second.
+
+Launcher: the user's first launch of this build ended with `Spidy VR
+unavailable: [WinError 24]`, before VR started and without a report.
+`CreateToolhelp32Snapshot` fails with ERROR_BAD_LENGTH while the process it
+lists is loading or unloading modules, and Windows documents retrying it; the
+game loads dozens of DLLs in its first seconds, while the launcher lists its
+modules to load Spidy's. Only finding the game and the render memory module
+retried. `capture_game_state.checked_snapshot`, which every process and module
+listing goes through, now retries that error for up to 2 s; any other error
+stays final.
+
+Offline: 120 core checks, the GPU test and 58 Python checks pass (new: the load
+probe's eye command passes the native eye check, the eye sample reports the
+object, the phase summary's arithmetic, and the module listing retrying only
+ERROR_BAD_LENGTH).
+
+## Rays through a city block, web-moved props on the game's physics — preceding build, awaiting headset check
+
+The user, after the 09:22 session (`reports/game-vr-20261006-092258.json`):
+"game exited to flatscreen mode mid session. also pulling objects with webs
+doesnt work well, they get stuck, behave unrealistically".
+
+Flat screen: the session ended with `Tracked swing input: 2002` after 138 s.
+The swing module had faulted with 2103 (`swing.error`), a world ray whose hit
+collector held 16 hits, and a faulted swing refuses input, which ends VR. The
+controller aim rays (100 m) met 10-14 bodies in their last batches, aimed
+across a street at a facade 15 m away; the batch at serial 34230 met 16. That
+was not an error: past its capacity the game's collector (vtable 3d0a948, add
+1804200) replaces its farthest hit with a nearer one (1803fd0 finds the
+farthest), so the 16 it holds are the nearest. A full collector is now
+accepted. The game log has no crash; the game was closed normally at 09:27.
+
+Props: six grabs, all on two trash cans in the street. The first was yanked,
+caught and thrown. The second, beside the subway entrance, was yanked four
+times; the first straight flight at the hand stopped after half a metre
+against the railing and lamp post, every yank after it gave up as snagged, and
+the web went on commanding 3-5 m/s at a can that did not move. Eye snapshots
+0015-0018 show it. Since the fifth build the web set each prop's velocity every step from its
+own prediction, and flew a thrown prop along Spidy's path, adopting the game's
+velocity only after a change of more than 1 m/s: friction and rotation never
+counted. Releasing a yank in flight threw the prop at 2.2 times its speed
+toward the player (55 m/s at 63.2 s).
+
+The fix, in [WEB-GRAB.md](WEB-GRAB.md): a command is a law the game's physics
+thread evaluates against the prop's actual state; Spidy keeps props it moves,
+or let go of, in real time with the game's own contacts until they rest; a yank
+is an arc, higher where the lower one is blocked; a hold turns the prop with
+the hand; only a held prop is thrown.
+
+Offline: 120 core checks (new: a yank lobbed over a railing, a yank let go in
+flight, the laws, turning with the hand, one hand of two letting go), the GPU
+test and the Python protocol tests pass.
+
+In the game, no headset, Times Square perch, a throwable prop 43 m below
+(`reports/grab-probe-physics-yank.json`): caught after 1.70 s along an arc,
+carried 0.3-2.0 m from the hand, thrown at 15.1 m/s; in the following 1.94 s it
+kept exactly the launch's horizontal velocity and fell at 10.0 m/s² with the
+game at 7.4 times real time. No web lost; hooks restored. A second run, to watch
+the landing and slide, stopped: the game cannot run in the background, and the
+user was using the PC.
+
+## Walking, jumping and web pulls through the virtual controller — October 6 second build, awaiting headset check
 
 The user, after the 08:39 session (`reports/game-vr-20261006-083949.json`, the
 first headset session with the seventh build's virtual controller): "i cant

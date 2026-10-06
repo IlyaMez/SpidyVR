@@ -1,10 +1,47 @@
 # Spidy
 
+By **Ilya Mezerowsky**. Spidy is free; if you enjoy it,
+[support it on Ko-fi](https://ko-fi.com/ilyamezerowsky).
+Players: download the release zip and start `Spidy Launcher.exe`; see
+[Share Spidy](#share-spidy-the-launcher-and-the-release-zip).
+
 An in-development VR mod project for **Marvel's Spider-Man Remastered**, targeting
 **Quest 3 + Virtual Desktop**. First milestone: 6DoF head/controller tracking,
 native stereo, and physically controlled web swinging.
 
-**Latest build (October 6, second build): walking, jumping and web pulls work
+**Latest build (October 6, fourth build): the VR frame rate about doubles.**
+You reported that VR felt slow although the CPU and GPU showed about 20% load
+and the disk 44%. In the 10:16 session the headset ran at 90 Hz, and the game
+made 38 new eye images a second (41-64 frames a second in its own log); a third
+of the headset's frames repeated an older image. Measured in the game without a
+headset, both eyes at the headset's 3072 x 3264: one game thread, the one that
+turns each frame's render commands into GPU commands, was busy 95% of the time
+while the main thread waited on it and the GPU was 58-77% busy. Task Manager
+averages the CPU over 16 threads, so one saturated thread shows as 6%; and the
+game pauses while another window is in front, so what Task Manager shows after
+an alt-tab is a paused game. That thread's work grows with what the views draw,
+and Spidy's eyes drew everything in their field of view: the engine creates
+offscreen views without the occlusion culling its own view has, so buildings
+hidden behind nearer ones were drawn anyway: a frame carried 2.3 to 3.8 times
+the render commands it carries with culled eyes. Each eye now gets the engine's
+own occlusion culling when it is created. On the rooftop of your save, looking
+ahead: 65 frames a second before, 125 now (render commands 31 MB a frame
+before, 13 MB now); turning a full circle: 48 before, 105 now. Nothing visible changed: at four headings the eye
+images with and without the culling differ only where two captures differ
+anyway (moving cars and people, birds, leaves), and their average brightness
+within 0.4%. The GPU, 80-88% busy now, is close to being the limit at this
+resolution. `-NoEyeOcclusion` turns the culling off for comparison. The disk
+load is the game streaming textures (in VR its texture budget is full, 3,868 of
+3,874 MB); it is not what held the frame rate down. At 120 Hz the earlier
+sessions sent the headset only 71 frames a second (Virtual Desktop's end of
+frame took 13.4 ms each time), while at 90 Hz it kept up; whether 120 Hz keeps
+up now needs the headset. Also fixed: a launch could end with `WinError 24`
+when the launcher listed the game's modules while the game was still loading
+its own; it now asks again, as Windows documents. 120 core checks, the GPU test
+and 58 Python checks pass; the headset session is pending. Details:
+[docs/VALIDATION.md](docs/VALIDATION.md).
+
+**Preceding build (October 6, second build): walking, jumping and web pulls work
 in VR again.** In the 08:39 session you could shoot webs but not pull yourself,
 walk or jump, while the menus worked. The player stood on the Times Square
 perch for the whole session: 25 webs attached, and every pull's takeoff jump
@@ -268,6 +305,56 @@ and web overlays, independent input timing, and a point-launch landing window
 also build and pass local checks. Physical web controls in the headset, full-speed
 collisions, skeletal IK, world occlusion, and lifecycle transitions remain open.
 
+## Share Spidy: the launcher and the release zip
+
+`Spidy Launcher.exe` (source in `apps/launcher`, built as
+`build\windows-ninja\spidy_launcher.exe`) lets other people play without the
+development setup. It is credited to Ilya Mezerowsky in its header, its About
+tab, its file properties and the zip's README, and carries a Ko-fi button. On
+start it checks the PC and shows what it finds:
+
+- **The game:** in every Steam library (Steam's registry entries, then
+  `libraryfolders.vdf` and the app manifest), else where you point it with
+  *Change...*. It compares `Spider-Man.exe` with the supported build's SHA-256
+  (read from `tools/inspect_game.py`) and explains when the copy is another
+  build or the Epic Games Store version.
+- **The VR runtime:** every registered OpenXR runtime. Virtual Desktop is
+  chosen when installed (the tested one), else Windows' active runtime. The
+  choice reaches both the headset check and the game's XR worker, which used
+  to open Virtual Desktop's runtime only (`XrConfig` version 7 carries the
+  manifest path).
+- **The headset:** *Check* runs `spidy_headset_probe.exe` against that runtime.
+- **The Visual C++ runtime:** 14.40 or newer, which the modules need. *Install*
+  downloads Microsoft's installer, runs it only if Microsoft signed it, and
+  checks again. The launcher itself is linked statically and needs nothing.
+- **Memory** Windows can still promise programs, against `VR_COMMIT_MB` in
+  `tools/run_game_vr.py`; below that, START VR asks before it starts.
+- **Spidy's own files:** the modules, Python, and a writable folder.
+
+START VR runs `tools/run_game_vr.py` with the chosen options and shows its
+output live; STOP VR (or closing the window, after a question) stops the
+session through a named event that `run_game_vr.py --stop-event` treats as
+Ctrl+C, so the hooks come out and the report is written as before. Options
+and the game's hash are remembered in `%APPDATA%\Spidy\launcher.ini`. The
+first start offers desktop and Start menu shortcuts.
+
+Make the zip with:
+
+```powershell
+.\tools\bootstrap.ps1 -Observer   # also fetches Dear ImGui for the launcher
+.\tools\build.ps1 -Observer
+.\tools\package.ps1               # dist\Spidy-<version>-win64.zip
+```
+
+It holds the launcher, the seven game modules, the Python tools a session
+imports, the Windows embeddable Python 3.12.10 (hash-pinned), the notices and
+[docs/PLAYERS.md](docs/PLAYERS.md) as `README.txt`. Players extract it anywhere
+they can write and start `Spidy Launcher.exe`. The version comes from
+`project(Spidy VERSION ...)` in `CMakeLists.txt`. The supported game build is
+one Steam build: a game update needs new addresses in Spidy before the
+launcher accepts it. Other runtimes than Virtual Desktop and other controllers
+than Quest Touch (Index bindings are also suggested) are untested.
+
 ## What's runnable
 
 - `spidy_xr_lab.exe`: an original block city in OpenXR/D3D12 with tracked hands,
@@ -316,8 +403,15 @@ collisions, skeletal IK, world occlusion, and lifecycle transitions remain open.
   test with automatic hook restoration. No headset is required.
 - `tools/probe_game_grab.py`: webs the nearest throwable prop in sight from where
   the player stands, reels (or with `--yank` yanks) it in, carries it and throws
-  it, in a freshly started game; `--bots` does the same with a bot, and
+  it, in a freshly started game; `--watch SECONDS` watches it land and come to
+  rest after the throw (3 s by default), `--bots` does the same with a bot, and
   `--fling-test` checks the game's flung reaction on the nearest bot.
+- `tools/probe_vr_load.py`: renders the VR views at the headset's resolution
+  where the player stands and reports, per phase, the game's frame rate, its
+  render commands per frame, GPU use, and the CPU time of each game thread;
+  `--profile-threads` samples where chosen threads spend their time, and
+  `--gpu capture` with the `shots` phase saves eye images with the eyes'
+  occlusion culling on and off. No headset is required.
 - `spidy_stereo_probe.dll`, `spidy_eye_capture.dll`, and `spidy_scene_trace.dll`:
   offscreen-view lifetime, synchronized GPU readback, and render scheduling
   diagnostics. A texture allocation alone is not evidence of a rendered eye.

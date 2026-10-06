@@ -3,6 +3,7 @@
 #include "spidy/native_rays.hpp"
 #include "spidy/native_query_context.hpp"
 #include <MinHook.h>
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <intrin.h>
@@ -110,9 +111,12 @@ uint32_t queryOne(void* world, const void* nativeQuery, const Ray& ray, Hit& res
     if (!read(config.base + 0x6b14b40, collector + 0x10, 16))
         return 2102;
     original(world, query, collector);
-    result.count = get<uint32_t>(collector, 0xc);
-    if (result.count >= 16)
-        return 2103;
+    // A full collector holds the nearest hits: past its capacity the game's
+    // collector (vtable 3d0a948, add 1804200) replaces its farthest hit with a
+    // nearer one (1803fd0 finds the farthest). A 100 m ray across a city block
+    // meets 10-15 bodies; treating a 16th as an error ended the October 6
+    // session in flat screen.
+    result.count = std::min(get<uint32_t>(collector, 0xc), 16u);
     for (unsigned h = 0; h < result.count; ++h) {
         const auto hit = hits + h * 0x90;
         const auto fraction = get<float>(hit, 0x20);

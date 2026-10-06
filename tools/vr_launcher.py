@@ -22,6 +22,7 @@ RENDER_RING_MB=512
 # The module's hooks: the ring's creation and its end-of-frame rollover. They are in place from the
 # game's start, so they are no sign of another session's leftovers.
 RENDER_MEMORY_HOOKS=(0x1872d90,0x1872b90)
+STEAM_APP_ID='1817070'
 _exit_code=c.WinDLL('kernel32',use_last_error=True).GetExitCodeProcess
 _exit_code.argtypes=[w.HANDLE,c.POINTER(w.DWORD)]
 _exit_code.restype=w.BOOL
@@ -99,6 +100,27 @@ class LauncherLock:
         self.file.close()
 
 
+def _registry_value(hive,key,name):
+    import winreg
+    try:
+        with winreg.OpenKey(getattr(winreg,hive),key) as opened: return winreg.QueryValueEx(opened,name)[0]
+    except OSError: return None
+
+
+def steam_executable(read=_registry_value):
+    """steam.exe where Steam's registry entries put it (any drive), else in its default folder."""
+    candidates=[]
+    for hive,key,name in (('HKEY_CURRENT_USER',r'Software\Valve\Steam','SteamExe'),
+                          ('HKEY_CURRENT_USER',r'Software\Valve\Steam','SteamPath'),
+                          ('HKEY_LOCAL_MACHINE',r'SOFTWARE\WOW6432Node\Valve\Steam','InstallPath')):
+        value=read(hive,key,name)
+        if value:
+            path=pathlib.Path(value)
+            candidates.append(path if path.suffix.lower()=='.exe' else path/'steam.exe')
+    candidates.append(pathlib.Path(os.environ.get('ProgramFiles(x86)',r'C:\Program Files (x86)'))/'Steam/steam.exe')
+    return next((path for path in candidates if path.is_file()),None)
+
+
 def ready_player(game):
     LIVE_VTABLES['hero_mover']=0x38b2c98
     candidates=game.registered_candidates()
@@ -149,11 +171,11 @@ def wait_for_game(timeout=180,prepare=None,early=None,ready=None):
         if not str(error).startswith('Spider-Man is not running.'): raise
         pid=None
     if pid is None:
-        steam=pathlib.Path(os.environ.get('ProgramFiles(x86)',r'C:\Program Files (x86)'))/'Steam/steam.exe'
-        if not steam.is_file(): raise RuntimeError('Steam was not found. Start Spider-Man and run this launcher again.')
+        steam=steam_executable()
+        if not steam: raise RuntimeError('Steam was not found. Start Spider-Man and run this launcher again.')
         if prepare: prepare()
         # -nolauncher is present in the supported Spider-Man executable.
-        subprocess.Popen([str(steam),'-applaunch','1817070','-nolauncher'])
+        subprocess.Popen([str(steam),'-applaunch',STEAM_APP_ID,'-nolauncher'])
         print('Starting Spider-Man. Select your save and Continue; VR will attach automatically.'
               if ready is ready_player else 'Starting Spider-Man.',flush=True)
     else:

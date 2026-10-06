@@ -135,11 +135,15 @@ void LabProps::step(float dt, std::span<const TargetCommand> commands, const Wor
         auto& p = props_[index];
         const TargetCommand* command{};
         for (const auto& c : commands)
-            if (c.id == p.id && finite(c.velocity))
+            if (c.id == p.id)
                 command = &c;
+        const Vec3 next =
+            command ? spidy::advance(*command, p.position, p.velocity, dt, {0, -gravity, 0}) : Vec3{};
+        if (command && !finite(next))
+            command = nullptr;
         if (command) {
             knock(p);
-            p.velocity = command->velocity;
+            p.velocity = next;
             p.still = 0;
             // A throw sets it tumbling end over end; a held one settles.
             if (command->thrown)

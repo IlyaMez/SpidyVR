@@ -42,16 +42,15 @@ struct Tracked {
     Candidate who{};
     uint64_t actor{}, mover{};
     Vec3 position{}, velocity{}; // centre, at the latest step
-    Vec3 measured{};             // a freed prop's velocity as its last step ended
     bool seen{}, gone{};
+    // Props: the web gave it a command in the latest step.
+    bool driven{};
     // Bots. steering: its mover takes the web's velocity. flingAsked: the
     // game was asked to fling it. falling: the game would not fling it, so
-    // Spidy brings it down along `flight`. Props: falling means Spidy flies
-    // it in real time, along `flight`, until it strikes something.
+    // Spidy brings it down along `flight`.
     bool steering{}, flingAsked{}, falling{};
     Vec3 flight{};
-    float airborne{}, still{};
-    uint32_t free{}; // steps since the web last gave a velocity
+    float airborne{};
 };
 uintptr_t base{};
 Call driveCall{}, drivenCall{};
@@ -61,7 +60,7 @@ std::vector<Candidate> candidates;
 std::vector<Tracked> tracked;
 std::vector<TargetCommand> commands;
 WebGrab core{GrabConfig{}};
-uint64_t driveSerial{}, stepped{};
+uint64_t driveSerial{}, stepped{}, botsLanded{};
 size_t counted{};
 SRWLOCK output = SRWLOCK_INIT;
 
@@ -277,8 +276,8 @@ void observe(float dt) {
         }
         at += Vec3{0, shape(t.who.kind).lift, 0};
         Vec3 velocity = t.seen ? (at - t.position) / dt : Vec3{};
-        Vec3 centre{}, moving{};
-        if (t.who.kind == Kind::throwable && native_bodies::predicted(t.actor, centre, moving, t.measured)) {
+        Vec3 centre{}, moving{}, measured{};
+        if (t.who.kind == Kind::throwable && native_bodies::predicted(t.actor, centre, moving, measured)) {
             // Freed, it moves by physics: its body, as the main thread saw it
             // before the step in flight, carried through that step.
             at = centre;
@@ -309,7 +308,7 @@ uint32_t game_grab::start(uintptr_t gameBase, Call drive, Call driven, uint32_t 
     core = WebGrab(GrabConfig{});
     if (offered)
         watch.start(base, offered);
-    stepped = 0;
+    stepped = botsLanded = 0;
     AcquireSRWLockExclusive(&output);
     SpidyGrabData = {};
     SpidyGrabData.status = offered ? 1 : 0;
@@ -381,6 +380,7 @@ void game_grab::step(float dt, const WorldQueries& world) {
     core.step(dt, world, targets, commands);
     count(counted);
     counted = 0;
+    const Vec3 gravity{0, -core.config().gravity, 0};
     for (auto& t : tracked) {
         if (t.gone)
             continue;
@@ -389,50 +389,34 @@ void game_grab::step(float dt, const WorldQueries& world) {
             if (c.id == t.who.record)
                 command = &c;
         if (t.who.kind == Kind::throwable) {
-            // The game's physics steps 1/30 s a frame, fps/30 times real time:
-            // a prop left to it falls that many times squared too fast (32 m
-            // in 0.3 s at 240 frames a second). So a freed prop flies in real
-            // time every step, from the web's velocity or on as a thrown body
-            // flies, until it comes to rest. Contacts stay the game's: when
-            // a step ends with a velocity other than the one it was given,
-            // the prop struck something, and flies on with what it has.
+            // The main thread moves the prop by the web's law, from its
+            // bodies' actual motion, and keeps one the web let go of flying,
+            // bouncing and sliding by the game's physics in real time until
+            // it comes to rest (native_bodies).
             if (command) {
-                native_bodies::drive(t.actor, t.who.physics, command->velocity, leaseMs);
-                t.falling = true;
-                t.flight = command->velocity;
-                t.airborne = t.still = 0;
-                t.free = 0;
-                AcquireSRWLockExclusive(&output);
-                SpidyGrabData.commanded = command->velocity;
-                SpidyGrabData.observed = t.velocity;
-                ReleaseSRWLockExclusive(&output);
-            } else if (t.falling) {
-                // A velocity reaches the body in the step after it is given:
-                // the first two free steps still show the last command's.
-                if (++t.free > 2 && length(t.measured - t.flight) > 1)
-                    t.flight = t.measured;
-                t.airborne += dt;
-                t.still = length(t.measured) < .3f ? t.still + dt : 0;
-                if (t.still > .3f || t.airborne > 8) {
-                    native_bodies::release(t.actor);
-                    t.falling = false;
+                native_bodies::drive(t.actor, t.who.physics, *command, leaseMs);
+                t.driven = true;
+                Vec3 centre{}, next{}, measured{};
+                if (native_bodies::predicted(t.actor, centre, next, measured)) {
                     AcquireSRWLockExclusive(&output);
-                    ++SpidyGrabData.landed;
+                    SpidyGrabData.commanded = next;
+                    SpidyGrabData.observed = measured;
                     ReleaseSRWLockExclusive(&output);
-                } else {
-                    t.flight.y -= core.config().gravity * dt;
-                    native_bodies::drive(t.actor, t.who.physics, t.flight, leaseMs);
                 }
+            } else if (t.driven) {
+                native_bodies::release(t.actor); // slack or let go: physics has it
+                t.driven = false;
             }
             continue;
         }
         if (command && !command->thrown) {
+            // The web's law, from the bot as the mover last moved it.
+            Vec3 v = advance(*command, t.position, t.velocity, dt, gravity);
             // The first pull flings the bot: the game plays it flying.
             if (!t.flingAsked) {
-                native_bodies::fling(t.who.machine, t.who.record, command->velocity);
+                native_bodies::fling(t.who.machine, t.who.record, v);
                 t.flingAsked = true;
             }
-            Vec3 v = command->velocity;
             guard(t, v, dt, world);
             steer(t, true, v);
             t.steering = true;
@@ -461,9 +445,7 @@ void game_grab::step(float dt, const WorldQueries& world) {
             if ((grounded && v.y <= .1f && length(Vec3{v.x, 0, v.z}) < landingSpeed + 4) || t.airborne > 6) {
                 steer(t, false, {});
                 t.falling = false;
-                AcquireSRWLockExclusive(&output);
-                ++SpidyGrabData.landed;
-                ReleaseSRWLockExclusive(&output);
+                ++botsLanded;
                 continue;
             }
             t.flight = v;
@@ -493,8 +475,10 @@ void game_grab::step(float dt, const WorldQueries& world) {
     SpidyGrabData.stepDt = SpidyGrabData.timeScale * dt;
     ++SpidyGrabData.steps;
     SpidyGrabData.commands += commands.size();
-    SpidyGrabData.flights = static_cast<uint64_t>(std::count_if(
-        tracked.begin(), tracked.end(), [](const Tracked& t) { return t.steering || t.falling; }));
+    SpidyGrabData.flights = bodies.flying + static_cast<uint64_t>(std::count_if(
+                                                tracked.begin(), tracked.end(),
+                                                [](const Tracked& t) { return t.steering || t.falling; }));
+    SpidyGrabData.landed = botsLanded + bodies.rested;
     SpidyGrabData.candidates = static_cast<uint32_t>(candidates.size());
     SpidyGrabData.bodySteps = bodies.steps;
     SpidyGrabData.frees = bodies.frees;

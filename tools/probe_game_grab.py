@@ -8,7 +8,7 @@ running game, without a headset.
 It needs a freshly started game in free roam (Spidy's ray and movement modules start once per process) and
 the game window in front, which it brings there. It plays one grab with a scripted hand next to the player:
 grip on the target, reel (or yank) until it is caught, carry it around for 2.5 s, flick and let go, then
-watch it for 3 s. It writes reports/grab-probe.json and screenshots in reports/grab-probe/.
+watch it for 3 s (--watch). It writes reports/grab-probe.json and screenshots in reports/grab-probe/.
 """
 import argparse
 import ctypes as c
@@ -245,6 +245,8 @@ def main():
     parser.add_argument('--range', type=float, default=55, help='farthest target, metres')
     parser.add_argument('--fling-test', action='store_true',
                         help='on the nearest bot at any distance: fling it, steer it, hand it back (no web)')
+    parser.add_argument('--watch', type=float, default=3,
+                        help='seconds to watch the target after the throw (its landing, slide and rest)')
     parser.add_argument('--aim-camera', action='store_true',
                         help='first turn the game camera toward the target (best effort, through the virtual pad)')
     parser.add_argument('--output', type=pathlib.Path, default=ROOT/'reports/grab-probe.json')
@@ -353,7 +355,7 @@ def main():
         grip = trigger = 0.
         caught_at = throw_at = None
         print('Arm, grab, ' + ('yank' if args.yank else 'reel') + ', carry, throw, watch.', flush=True)
-        while time.monotonic()-started < 20:
+        while time.monotonic()-started < 20+args.watch:
             now = time.monotonic()
             phase = state['phase']
             g = sample(phase)
@@ -390,7 +392,7 @@ def main():
                 if now >= state['until']:
                     grip = trigger = 0.
                     throw_at = now
-                    state = dict(phase='watch', until=now+3)
+                    state = dict(phase='watch', until=now+args.watch)
             elif phase == 'watch':
                 if 'flight' not in shots and now-throw_at > .5:
                     shots['flight'] = shot(game, 'flight')
@@ -419,7 +421,8 @@ def main():
         args.output.write_text(json.dumps(report, indent=1)+'\n')
         summary = {k: report[k] for k in ('kind', 'distance', 'caught', 'moved', 'highest', 'restored')}
         summary['counters'] = {k: final[k] for k in ('grabs', 'yanks', 'catches', 'throws', 'lost', 'frees', 'writes',
-                                                     'follows', 'flings', 'steers', 'refused', 'drive_failures')} if final else None
+                                                     'follows', 'flings', 'steers', 'refused', 'drive_failures', 'flights',
+                                                     'landed')} if final else None
         summary['last_throw'] = final['last_throw'] if final else None
         print(json.dumps(summary, indent=1))
         return 0 if report['caught'] and final and final['throws'] and restored else 1

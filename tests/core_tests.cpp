@@ -78,8 +78,8 @@ struct TwoAnchors : TestWorld {
         return in;
     }
 };
-// Grab targets on a straight-line integrator: a commanded target takes the
-// command's velocity; the others keep theirs.
+// Grab targets on a straight-line integrator: a commanded target moves as
+// the command's law gives it, under gravity; the others keep their velocity.
 struct GrabTargets : TargetQueries {
     std::vector<GrabTarget> items;
     void add(std::uint64_t id,Vec3 position,float mass=25,float radius=.4f,TargetKind kind=TargetKind::Object) {
@@ -105,7 +105,7 @@ struct GrabTargets : TargetQueries {
     }
     void apply(float dt,const std::vector<TargetCommand>& commands) {
         for(auto& t:items) {
-            for(const auto& c:commands)if(c.id==t.id)t.velocity=c.velocity;
+            for(const auto& c:commands)if(c.id==t.id)t.velocity=advance(c,t.position,t.velocity,dt,{0,-9.81f,0});
             t.position+=t.velocity*dt;
         }
     }
@@ -1838,6 +1838,128 @@ int main() {
         for(int s=0;s<360;++s){out.clear();other.step(1.f/360,world,pinned,out);} // commands ignored: it cannot move
         check(other.grabs()[0].phase==GrabPhase::Tethered,"a snagged yank never gave up");
     });
+    test("a yank flies an arc, lobbed higher over a railing the lower arc would strike", [] {
+        // October 6: a trash can behind a subway railing, flown straight at
+        // the hand, stopped against the railing on four yanks.
+        struct Railing : TestWorld {
+            Vec3 can{0,.5f,-8};
+            std::optional<RayHit> raycast(Vec3 o,Vec3 d,float distance) const override {
+                std::optional<RayHit> best;float nearest=distance;
+                // The railing, 0.8 m high, 1.7 m in front of the can.
+                const float lo[3]={-3,0,-6.3f},hi[3]={3,.8f,-6.f},from[3]={o.x,o.y,o.z},along[3]={d.x,d.y,d.z};
+                float enter=0,leave=distance;bool inside=true;
+                for(int a=0;a<3&&inside;++a){
+                    if(std::abs(along[a])<1e-6f){inside=from[a]>=lo[a]&&from[a]<=hi[a];continue;}
+                    float t0=(lo[a]-from[a])/along[a],t1=(hi[a]-from[a])/along[a];
+                    if(t0>t1)std::swap(t0,t1);
+                    enter=std::max(enter,t0);leave=std::min(leave,t1);inside=enter<=leave;
+                }
+                if(inside){nearest=enter;best=RayHit{o+d*enter,{0,0,1},3,true};}
+                // The can's own body, a static body as the game's props are.
+                const Vec3 m=o-can;const float b=dot(m,d),c=dot(m,m)-.16f,disc=b*b-c;
+                if(disc>=0&&c>0){const float t=-b-std::sqrt(disc);if(t>0&&t<nearest)best=RayHit{o+d*t,normalized(o+d*t-can),77,true};}
+                return best;
+            }
+            bool exists(std::uint64_t id) const override {return id==3||id==77;}
+        } world;
+        GrabTargets targets;targets.add(7,world.can);targets.owners.push_back({77,7});
+        WebGrab grab;Body player{{0,1,0},{},true};
+        // The hand at 1.6 m aims over the railing at the can's top.
+        const Vec3 d=normalized(Vec3{0,-.75f,-8});const float n=std::sqrt(d.y*d.y+d.x*d.x+(1-d.z)*(1-d.z));
+        Input in;in.hands[0]={{{0,1.6f,0},Quat{d.y/n,-d.x/n,0,(1-d.z)/n}},{0,0,0},true,0,1};
+        grab.claim(1.f/90,in,world,targets,player);
+        check(grab.grabs()[0].phase==GrabPhase::Tethered&&grab.grabs()[0].target==7,"the can was not webbed");
+        for(int i=1;i<=9;++i){in.hands[0].gripRelativeToHead={0,0,.033f*i};grab.claim(1.f/90,in,world,targets,player);if(events(grab,GrabEventKind::Yank))break;}
+        check(grab.grabs()[0].phase==GrabPhase::Yanked,"no yank");
+        bool caught{};float lowest=1e9f,highest=-1e9f;
+        for(int frame=0;frame<120&&!caught;++frame) {
+            grab.claim(1.f/90,in,world,targets,player);
+            std::vector<TargetCommand> out;
+            for(int s=0;s<4;++s) {
+                out.clear();grab.step(1.f/360,world,targets,out);targets.apply(1.f/360,out);
+                caught|=events(grab,GrabEventKind::Catch)>0;
+                const auto p=targets.find(7)->position;
+                if(p.z>-6.3f&&p.z<-6.f)lowest=std::min(lowest,p.y);
+                highest=std::max(highest,p.y);
+            }
+        }
+        check(caught,"the lobbed can was not caught");
+        // The can's centre, 0.4 m above its bottom, passes the railing with half a radius to spare.
+        check(lowest<1e8f&&lowest>1.f,"the yank flew the can into the railing");
+        check(highest>1.6f,"the yank did not arc");
+    });
+    test("letting go of a yank in flight lets the target fly on; only a held one is thrown", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-20});
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[0].trigger=0;
+        grab.claim(1.f/90,in,world,targets,player);
+        for(int i=1;i<=9;++i){in.hands[0].gripRelativeToHead={0,0,.033f*i};grab.claim(1.f/90,in,world,targets,player);if(events(grab,GrabEventKind::Yank))break;}
+        for(int frame=0;frame<20;++frame)settle(grab,targets,world,player,in,1.f/90);
+        check(grab.grabs()[0].phase==GrabPhase::Yanked,"the yank ended early");
+        check(length(targets.find(7)->velocity)>8,"the yank did not fly");
+        in.hands[0].grip=0;grab.claim(1.f/90,in,world,targets,player);
+        check(events(grab,GrabEventKind::Release)==1&&events(grab,GrabEventKind::Throw)==0,"letting go of a yank threw it");
+        std::vector<TargetCommand> out;grab.step(1.f/120,world,targets,out);
+        check(out.empty(),"the web kept acting after it was let go");
+    });
+    test("a web's law pulls only when taut, never pushes, and holds a target up", [] {
+        const Vec3 g{0,-9.81f,0};
+        TargetCommand rope{7,TargetKind::Object,TargetCommand::Mode::Rope};
+        rope.ropes[0]={{0,1,0},{},5};rope.ropeCount=1;rope.stiffness=.6f;rope.maxAcceleration=240;
+        // Slack, it only falls; coming toward the hand, the web does not push it back.
+        auto v=advance(rope,{0,1,-3},{},.01f,g);near(v.y,-.0981f);near(v.z,0);
+        v=advance(rope,{0,1,-4},{0,0,8},.01f,g);near(v.z,8);
+        // Stretched, it is pulled toward the hand, at most maxAcceleration.
+        v=advance(rope,{0,1,-6},{},.01f,g);near(v.z,2.4f,1e-3f);
+        auto two=rope;two.ropes[1]={{2,1,0},{},5};two.ropeCount=2;
+        check(advance(two,{1,1,-6},{},.01f,g).z>advance(rope,{1,1,-6},{},.01f,g).z+1,"the second web did not pull");
+        // Held: at its hold point it stays, held up; a flying target falls.
+        TargetCommand held{7,TargetKind::Object,TargetCommand::Mode::Follow};
+        held.point={0,1,-1.3f};held.response=20;held.maxAcceleration=420;held.supported=true;
+        near(length(advance(held,{0,1,-1.3f},{},.01f,g)),0);
+        held.supported=false;near(advance(held,{0,1,-1.3f},{},.01f,g).y,-.0981f);
+        // Turning: a hold takes up the hand's turning gradually, a launch at once, a web never.
+        held.spins=true;held.spin={0,10,0};held.spinAcceleration=60;
+        near(advanceSpin(held,{},.01f).y,.6f);
+        TargetCommand launch{7,TargetKind::Object,TargetCommand::Mode::Launch,true};
+        launch.velocity={1,2,3};launch.spins=true;launch.spin={0,5,0};
+        near(advance(launch,{},{9,9,9},.01f,g).y,2);near(advanceSpin(launch,{1,1,1},.01f).y,5);
+        check(length(advanceSpin(rope,{0,3,0},.01f)-Vec3{0,3,0})<1e-6f,"a web turned a target it only pulls");
+    });
+    test("a held target turns with the hand and leaves spinning as it turned", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-1.3f});
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
+        in.hands[0].trigger=1;
+        for(int i=0;i<30;++i)settle(grab,targets,world,player,in,1.f/90);
+        check(grab.grabs()[0].phase==GrabPhase::Held,"not held");
+        // The wrist turns about the vertical at 3 rad/s, and lets go still turning.
+        for(int i=1;i<=10;++i){in.hands[0].aim.orientation=Quat::yaw(3.f*i/90);grab.claim(1.f/90,in,world,targets,player);}
+        std::vector<TargetCommand> out;grab.step(1.f/120,world,targets,out);
+        check(out.size()==1&&out[0].spins,"the hold did not turn the target");
+        near(out[0].spin.y,3,.15f);
+        in.hands[0].aim.orientation=Quat::yaw(3.f*11/90);in.hands[0].grip=0;grab.claim(1.f/90,in,world,targets,player);
+        out.clear();grab.step(1.f/120,world,targets,out);
+        check(out.size()==1&&out[0].thrown&&out[0].spins,"the throw did not spin");
+        near(out[0].spin.y,3,.15f);
+    });
+    test("one hand letting go of a target both hold leaves it in the other", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-1.3f});
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[1]=in.hands[0];in.hands[1].aim.position.x=.2f;
+        in.hands[0].trigger=in.hands[1].trigger=0;grab.claim(1.f/90,in,world,targets,player);
+        in.hands[0].trigger=in.hands[1].trigger=1;
+        for(int i=0;i<60;++i)settle(grab,targets,world,player,in,1.f/90);
+        check(grab.grabs()[0].phase==GrabPhase::Held&&grab.grabs()[1].phase==GrabPhase::Held,"not held by both");
+        in.hands[0].grip=0;grab.claim(1.f/90,in,world,targets,player);
+        check(events(grab,GrabEventKind::Throw)==0&&events(grab,GrabEventKind::Release)==1,"one hand threw it");
+        check(grab.grabs()[1].phase==GrabPhase::Held,"the other hand lost it");
+        std::vector<TargetCommand> out;grab.step(1.f/120,world,targets,out);
+        check(out.size()==1&&!out[0].thrown&&out[0].mode==TargetCommand::Mode::Follow,"the other hand stopped holding it");
+    });
     test("a carried target follows the hand alike at any physics rate, without overshoot", [] {
         auto run=[](int hz) {
             TestWorld world;world.enabled=false;
@@ -2025,7 +2147,7 @@ int main() {
         list[1].id=2;list[1].kind=TargetKind::Character;list[1].mass=80;list[1].radius=.4f;
         list[1].position={0,LabProps::standingHeight,-6};
         LabProps props(list);
-        const TargetCommand throwIt{1,TargetKind::Object,{0,4,-14},true};
+        TargetCommand throwIt{1,TargetKind::Object,TargetCommand::Mode::Launch,true};throwIt.velocity={0,4,-14};
         props.step(1.f/120,std::span(&throwIt,1),world);
         for(int i=0;i<120;++i)props.step(1.f/120,{},world);
         check(props.knockdowns()==1&&props.props()[1].stance==LabProp::Stance::Tumbling,"the hit did not knock the thug over");

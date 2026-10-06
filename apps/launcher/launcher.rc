@@ -1,0 +1,29 @@
+#include <winres.h>
+
+1 ICON "spidy.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION SPIDY_VERSION_NUMBERS
+PRODUCTVERSION SPIDY_VERSION_NUMBERS
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Ilya Mezerowsky"
+            VALUE "FileDescription", "Spidy VR launcher"
+            VALUE "FileVersion", SPIDY_VERSION
+            VALUE "InternalName", "spidy_launcher"
+            VALUE "LegalCopyright", "Copyright 2026 Ilya Mezerowsky"
+            VALUE "OriginalFilename", "Spidy Launcher.exe"
+            VALUE "ProductName", "Spidy - VR for Marvel's Spider-Man Remastered"
+            VALUE "ProductVersion", SPIDY_VERSION
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

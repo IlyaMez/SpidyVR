@@ -166,6 +166,54 @@ class StereoProtocolTests(unittest.TestCase):
         self.assertFalse(assess(frame_summary, frame_summary)['passed'])
         self.assertFalse(assess(summarize([]), frame_summary)['passed'])
 
+    def test_load_probe_eyes_pass_the_native_eye_check_and_report_occlusion(self):
+        import math
+        from probe_vr_load import eye_rig, eye_command, summarize
+        eyes = eye_rig((100., 50., -20.), (.6, 0., .8))
+        (left, left_fov), (right, right_fov) = eyes
+        for m in (left, right):
+            right_axis, down, forward = m[0:3], m[4:7], m[8:11]
+            # Native rows are right, down, forward: right x down must give forward.
+            cross = (right_axis[1]*down[2]-right_axis[2]*down[1], right_axis[2]*down[0]-right_axis[0]*down[2],
+                     right_axis[0]*down[1]-right_axis[1]*down[0])
+            for a, b in zip(cross, forward):
+                self.assertAlmostEqual(a, b)
+            self.assertAlmostEqual(m[13], 50+1.6)
+        self.assertAlmostEqual(math.dist(left[12:15], right[12:15]), .064)
+        # native_eyes::valid: left < 0 < right, down < 0 < up, all within 1.5 rad; each eye wider outward.
+        for fov in (left_fov, right_fov):
+            self.assertTrue(fov[0] < -.01 < .01 < fov[1] and fov[2] < -.01 < .01 < fov[3])
+            self.assertTrue(all(abs(f) < 1.5 for f in fov))
+        self.assertGreater(-left_fov[0], left_fov[1])
+        self.assertGreater(right_fov[1], -right_fov[0])
+        packet = eye_command(11, eyes, (100., 50., -20.))
+        self.assertEqual(len(packet), 208)
+        self.assertEqual(struct.unpack_from('<4IQ2I', packet), (0x53455043, 2, 208, 1, 11, 250, 0))
+        self.assertEqual(struct.unpack_from('<4f', packet, 96), tuple(struct.unpack('<4f', struct.pack('<4f', *left_fov))))
+        self.assertEqual(struct.unpack_from('<3fI', packet, 192), (100, 50, -20, 1))
+        # The eye sample's last word says whether the eye has its own occlusion object.
+        raw = bytearray(payload())
+        struct.pack_into('<I', raw, 64+144+44, 1)
+        value = snapshot(Reader([bytes(raw), struct.pack('<Q', 2)]), 0)
+        self.assertEqual([e['occlusion'] for e in value['eyes']], [0, 1])
+
+        class Gpu:
+            def window(self, start, end):
+                return [(1.5, 80., 2800., 300.), (2.5, 90., 2800., 320.)]
+        samples = [dict(t=t, frames=frames, frame_mb=mb, pairs=frames, threads={7: busy, 8: busy//4},
+                        system=(idle, 16e7*t), read_bytes=t*2**21)
+                   for t, frames, mb, busy, idle in ((0, 0, 30., 0, 0), (1, 100, 30., 0, 0),
+                                                     (3, 300, 12., 2e7, 8e7))]
+        threads = type('Threads', (), {'names': {7: 'render', 8: 'worker'}})()
+        result = summarize('vr', samples, Gpu(), threads, 16, settle=1)
+        # Measured from the first sample after settling: 200 frames in 2 s, the busiest thread a full core.
+        self.assertEqual((result['seconds'], result['fps'], result['frame_ms']), (2, 100, 10))
+        self.assertEqual(result['busiest_threads'][0], dict(thread=7, name='render', percent_of_core=100))
+        self.assertEqual(result['gpu_utilization'], 85)
+        self.assertEqual(result['render_mb_per_frame'], 21)
+        self.assertEqual(result['pc_cpu_percent'], 75)
+        self.assertEqual(result['disk_read_mb_per_s'], 2)
+
     def test_torn_read_retries(self):
         value = snapshot(Reader([payload(2), struct.pack('<Q', 4), payload(4), struct.pack('<Q', 4)]), 0)
         self.assertEqual(value['sequence'], 4)

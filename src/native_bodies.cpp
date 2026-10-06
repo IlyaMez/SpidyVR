@@ -23,8 +23,8 @@ using MakeParams = void* (*)(void*);
 using StateType = void* (*)();
 constexpr uintptr_t preCollideRva = 0x2e54300, setFreebodyRva = 0x1810530, setModeRva = 0x1835780,
                     rebuildRva = 0x1830930, rebuildAssetRva = 0x1834b70, modelOverrideRva = 0x1776050,
-                    setVelocityRva = 0x2e48b80, setMatrixRva = 0x191c0e0, requestStateRva = 0x20e51c0,
-                    flungParamsRva = 0x556040, flungTypeRva = 0x300440;
+                    setVelocityRva = 0x2e48b80, setSpinRva = 0x2e48830, setMatrixRva = 0x191c0e0,
+                    requestStateRva = 0x20e51c0, flungParamsRva = 0x556040, flungTypeRva = 0x300440;
 constexpr uintptr_t worldGlobal = 0x78939e8, physicsGlobal = 0x609a570, recordTable = 0x1ea98,
                     physicsComponent = 0x3d0a460, actorTable = 0x7a436e8, actorCount = 0x7a43704,
                     registryTable = 0x7a44320, registryCount = 0x7a44340, stateMachine = 0x4f843d0,
@@ -34,6 +34,12 @@ constexpr int activate = 0;    // hknpActivationMode::ACTIVATE
 constexpr unsigned maxSystemBodies = 16;
 // A freed prop stays watched this long after the web last moved it.
 constexpr uint64_t followMs = 30000;
+// A prop let go of is kept in real time until it has lain still this long
+// (slower than restSpeed, turning slower than restSpin), or the game puts
+// it to sleep, or it has flown for maxFlight.
+constexpr float restSeconds = .3f, restSpeed = .3f, restSpin = 1, maxFlight = 20;
+// No body Spidy moves goes faster than this.
+constexpr float maxSpeed = 45;
 PreCollide original{};
 void* hook{};
 bool hooked{};
@@ -41,11 +47,13 @@ uintptr_t base{};
 std::atomic<bool> enabled{};
 std::atomic<unsigned> active{};
 SRWLOCK lifecycle = SRWLOCK_INIT, lock = SRWLOCK_INIT;
-// A velocity the web gives an actor, until its lease ends.
+// The web on an actor: a Rope or Follow command while its lease lasts, and a
+// Launch to apply once.
 struct Slot {
     uint64_t actor{}, component{};
-    Vec3 velocity{};
+    TargetCommand control{}, launch{};
     uint64_t deadline{};
+    bool controlling{}, launching{};
 };
 Slot table[slots];
 // A bot to fling, or whose flight to steer, at the next step.
@@ -55,16 +63,21 @@ struct Fling {
     bool pending{};
 };
 Fling flings[slots];
-// A prop the web freed: its primary body as the latest step found it.
+// A prop the web freed: its root body as the latest step found it.
 struct Followed {
     uint64_t actor{}, component{}, until{};
     bool freed{};
-    uint64_t step{};              // the snapshot's physics step, 0 before any
-    Vec3 centre{}, velocity{};    // before that step; velocity in physics time
-    Vec3 given{};                 // the real velocity the step was given, when `driven`
-    Vec3 gravity{};               // physics time
-    float dt{}, real{}, scale{1}; // the step's physics and real lengths, and their ratio
+    uint64_t step{};       // the snapshot's physics step, 0 before any
+    Vec3 centre{};         // before that step
+    Vec3 measured{};       // real velocity before that step
+    Vec3 next{};           // real velocity through that step, contacts aside
+    Vec3 gravity{};        // its motion's gravity, metres per second squared
+    float dt{}, real{};    // the step's physics and real lengths
     bool dynamic{}, driven{};
+    // Spidy keeps it in real time: the web moves it, or it flies free after
+    // the web, until it rests. Seconds flying free, and lying still.
+    bool owned{};
+    float flying{}, resting{};
     // Steps the rebuilt prop has rested since the game started moving its
     // instance after its body. The game takes the offset between the two
     // once, at its first sync: moved before then, the prop was drawn 5 m
@@ -74,8 +87,9 @@ struct Followed {
 Followed followed[16];
 Counters totals{};
 // Real time per physics step, smoothed over a few steps, and physics time per
-// real second (the physics step over it).
-float realStep{}, scale = 1;
+// real second (the physics step over it), for this step and the one before:
+// a body Spidy moved in that one has its velocity in that step's time.
+float realStep{}, scale = 1, previousScale = 1;
 LARGE_INTEGER lastStep{}, frequency{};
 
 bool read(uintptr_t p, void* out, size_t n) {
@@ -171,6 +185,17 @@ Vec3 gravityOf(uintptr_t world, uintptr_t motion) {
     if (entries && properties != 0xffff)
         read(entries + properties * 0x70ull + 8, &factor, sizeof(factor));
     return std::isfinite(factor) && finite(g) ? g * factor : Vec3{};
+}
+// A motion's angular velocity about world axes: it keeps it about its body's
+// axes (+0x50), turned by its orientation (+0x10, x y z w), as
+// setBodyAngularVelocity (2e48830) reads and writes it.
+Vec3 spinOf(uintptr_t motion) {
+    Quat orientation{};
+    Vec3 local{};
+    if (!read(motion + 0x10, &orientation, sizeof(orientation)) || !read(motion + 0x50, &local, sizeof(local)))
+        return {};
+    const Vec3 spin = orientation.rotate(local);
+    return finite(spin) ? spin : Vec3{};
 }
 uintptr_t records() {
     return pointer(base + physicsGlobal) + recordTable;
@@ -268,6 +293,7 @@ void apply(uintptr_t world, const void* input) {
     const auto motions = pointer(world + 0x148);
     const auto motionCount = value<uint32_t>(world + 0x150);
     const auto setVelocity = reinterpret_cast<SetVelocity>(base + setVelocityRva);
+    const auto setSpin = reinterpret_cast<SetVelocity>(base + setSpinRva);
     const auto setMatrix = reinterpret_cast<SetMatrix>(base + setMatrixRva);
     const auto bodies = pointer(world + 0x28);
     const auto now = GetTickCount64();
@@ -286,12 +312,17 @@ void apply(uintptr_t world, const void* input) {
                                 : static_cast<float>(since);
     else if (!(realStep > 0))
         realStep = dt;
+    previousScale = scale;
     scale = std::clamp(dt / realStep, .05f, 20.f);
-    for (auto& slot : table)
-        if (slot.actor && now >= slot.deadline) {
-            slot = {};
+    for (auto& slot : table) {
+        if (slot.actor && slot.controlling && now >= slot.deadline) {
+            slot.controlling = false;
             ++totals.expired;
         }
+        if (slot.actor && !slot.controlling && !slot.launching)
+            slot = {};
+    }
+    uint64_t flying{};
     for (auto& f : followed) {
         uint32_t handle{};
         if (!f.actor)
@@ -300,8 +331,8 @@ void apply(uintptr_t world, const void* input) {
             f = {};
             continue;
         }
-        const Slot* slot{};
-        for (const auto& s : table)
+        Slot* slot{};
+        for (auto& s : table)
             if (s.actor == f.actor)
                 slot = &s;
         auto primary = body(world, value<uint32_t>(f.actor + 0xe8));
@@ -332,46 +363,94 @@ void apply(uintptr_t world, const void* input) {
         // The snapshot: the body the game draws it from, before this step.
         const auto drawn = rootBody(world, f.actor, primary);
         f.dynamic = dynamic(drawn) && drawn.motion < motionCount;
-        if (f.dynamic) {
-            const auto motion = motions + drawn.motion * 0x80ull;
-            read(motion, &f.centre, sizeof(Vec3));
-            read(motion + 0x40, &f.velocity, sizeof(Vec3));
-            f.gravity = gravityOf(world, motion);
-        }
         f.driven = false;
         // Still until the game's first syncs are done, unless the game never
         // will and Spidy draws it itself.
         const bool ready = !keyframed(primary) || f.settled > 3;
-        if (slot && f.dynamic && ready) {
-            // Every body of the prop, as the game's own velocity calls do;
-            // the step adds gravity to what is written.
-            const auto system = pointer(f.actor + 0xe0);
-            const auto count = std::min(value<uint32_t>(system + 0x30), maxSystemBodies);
-            uint32_t ids[maxSystemBodies]{};
-            if (system && count && read(pointer(system + 0x28), ids, count * 4ull))
-                for (uint32_t i = 0; i < count; ++i) {
-                    const auto b = body(world, ids[i]);
-                    if (!dynamic(b) || b.motion >= motionCount)
-                        continue;
-                    // Real velocity to physics time; the step adds its gravity.
-                    const Vec3 v =
-                        slot->velocity / scale - gravityOf(world, motions + b.motion * 0x80ull) * dt;
-                    alignas(16) const float velocity[4] = {v.x, v.y, v.z, 0};
-                    setVelocity(reinterpret_cast<void*>(world), b.id, velocity, activate);
-                    ++totals.writes;
-                    f.driven = true;
+        if (f.dynamic) {
+            const auto motion = motions + drawn.motion * 0x80ull;
+            Vec3 velocity{};
+            read(motion, &f.centre, sizeof(Vec3));
+            read(motion + 0x40, &velocity, sizeof(Vec3));
+            f.gravity = gravityOf(world, motion);
+            // Its real velocity: in the time of the step that gave it.
+            f.measured = velocity * previousScale;
+            const bool web = slot && ready && (slot->controlling || slot->launching);
+            f.owned |= web;
+            const TargetCommand* law = !web ? nullptr : slot->launching ? &slot->launch : &slot->control;
+            const Vec3 next = limited(law ? advance(*law, f.centre, f.measured, realStep, f.gravity)
+                                          : f.measured + f.gravity * realStep,
+                                      maxSpeed);
+            if (f.owned && ready && finite(next) && finite(f.measured)) {
+                // What the web, or gravity alone, does to it in this step's
+                // real time, from where the step before left it. Every body
+                // of the prop changes alike; bodies sharing a motion change
+                // once, and a body at rest that no web holds stays asleep.
+                const Vec3 change = next - f.measured;
+                if (web && slot->launching)
+                    slot->launching = false;
+                const auto system = pointer(f.actor + 0xe0);
+                const auto count = std::min(value<uint32_t>(system + 0x30), maxSystemBodies);
+                uint32_t ids[maxSystemBodies]{}, moved[maxSystemBodies]{};
+                unsigned done{};
+                if (system && count && read(pointer(system + 0x28), ids, count * 4ull))
+                    for (uint32_t i = 0; i < count; ++i) {
+                        const auto b = body(world, ids[i]);
+                        if (!dynamic(b) || b.motion >= motionCount || (!web && !(b.flags & 8)) ||
+                            std::find(moved, moved + done, b.motion) != moved + done)
+                            continue;
+                        moved[done++] = b.motion;
+                        const auto m = motions + b.motion * 0x80ull;
+                        Vec3 v{};
+                        read(m + 0x40, &v, sizeof(v));
+                        // Real velocity to physics time; the step then adds
+                        // gravity in physics time, which this takes out.
+                        const Vec3 linear =
+                            limited(v * previousScale + change, maxSpeed) / scale - gravityOf(world, m) * dt;
+                        const Vec3 spin = spinOf(m);
+                        const Vec3 turned =
+                            (law ? advanceSpin(*law, spin * previousScale, realStep) : spin * previousScale) /
+                            scale;
+                        if (!finite(linear) || !finite(turned))
+                            continue;
+                        alignas(16) const float to[4] = {linear.x, linear.y, linear.z, 0};
+                        setVelocity(reinterpret_cast<void*>(world), b.id, to, activate);
+                        if (length(turned - spin) > 1e-3f) {
+                            alignas(16) const float around[4] = {turned.x, turned.y, turned.z, 0};
+                            setSpin(reinterpret_cast<void*>(world), b.id, around, activate);
+                        }
+                        ++totals.writes;
+                    }
+                f.next = next;
+                f.driven = true;
+                f.until = now + followMs;
+                if (web) {
+                    f.flying = f.resting = 0;
+                } else {
+                    ++flying;
+                    f.flying += realStep;
+                    const bool still = length(f.measured) < restSpeed &&
+                                       length(spinOf(motion) * previousScale) < restSpin;
+                    f.resting = still ? f.resting + realStep : 0;
+                    if (f.resting >= restSeconds || f.flying >= maxFlight || !(drawn.flags & 8)) {
+                        f.owned = false;
+                        f.flying = f.resting = 0;
+                        ++totals.rested;
+                    }
                 }
-            f.given = slot->velocity;
-            f.until = now + followMs;
+            } else {
+                // The game's own physics, in its own time.
+                f.next = (velocity + f.gravity * dt) * scale;
+            }
         }
         f.dt = dt;
         f.real = realStep;
-        f.scale = scale;
         f.step = totals.steps;
         // Long still and asleep: no longer watched.
-        if (now >= f.until && !(primary.flags & 8))
+        if (!f.owned && now >= f.until && !(primary.flags & 8))
             f = {};
     }
+    totals.flying = flying;
     ReleaseSRWLockExclusive(&lock);
 }
 void preCollide(void* world, const void* input) {
@@ -416,6 +495,8 @@ uint32_t native_bodies::start(uintptr_t gameBase) {
                                       0xc3, 0x48, 0x8b, 0xd1}) ||
             !entry(setVelocityRva, {0x48, 0x89, 0x5c, 0x24, 0x10, 0x48, 0x89, 0x6c, 0x24, 0x18, 0x57, 0x48,
                                     0x83, 0xec, 0x20, 0x8b}) ||
+            !entry(setSpinRva, {0x48, 0x89, 0x5c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48, 0x83,
+                                0xec, 0x40, 0x8b}) ||
             !entry(setMatrixRva, {0x40, 0x53, 0x48, 0x83, 0xec, 0x40, 0x0f, 0x10, 0x02, 0x33, 0xc0, 0x4c,
                                   0x8b, 0xca, 0x0f, 0x10}) ||
             !entry(requestStateRva, {0x40, 0x55, 0x56, 0x57, 0x48, 0x81, 0xec, 0x70, 0x02, 0x00, 0x00, 0x49,
@@ -451,7 +532,7 @@ uint32_t native_bodies::start(uintptr_t gameBase) {
             f = {};
         totals = {};
         realStep = 0;
-        scale = 1;
+        scale = previousScale = 1;
         lastStep = {};
         QueryPerformanceFrequency(&frequency);
         ReleaseSRWLockExclusive(&lock);
@@ -479,8 +560,8 @@ uint32_t native_bodies::stop() {
     ReleaseSRWLockExclusive(&lifecycle);
     return result;
 }
-bool native_bodies::drive(uint64_t actor, uint64_t component, Vec3 velocity, uint32_t leaseMs) {
-    if (!enabled || !actor || !finite(velocity))
+bool native_bodies::drive(uint64_t actor, uint64_t component, const TargetCommand& command, uint32_t leaseMs) {
+    if (!enabled || !actor)
         return false;
     AcquireSRWLockExclusive(&lock);
     const auto now = GetTickCount64();
@@ -491,8 +572,21 @@ bool native_bodies::drive(uint64_t actor, uint64_t component, Vec3 velocity, uin
     for (auto& s : table)
         if (!slot && !s.actor)
             slot = &s;
-    if (slot)
-        *slot = {actor, component, limited(velocity, 45), now + leaseMs};
+    if (slot) {
+        if (slot->actor != actor)
+            *slot = {actor, component};
+        slot->component = component;
+        if (command.mode == TargetCommand::Mode::Launch) {
+            slot->launch = command;
+            slot->launching = true;
+            if (command.thrown)
+                slot->controlling = false; // thrown: no web after it
+        } else {
+            slot->control = command;
+            slot->controlling = true;
+            slot->deadline = now + leaseMs;
+        }
+    }
     // Watched from now on: freed at the next step, and its body followed.
     Followed* f{};
     for (auto& candidate : followed)
@@ -517,8 +611,11 @@ bool native_bodies::drive(uint64_t actor, uint64_t component, Vec3 velocity, uin
 void native_bodies::release(uint64_t actor) {
     AcquireSRWLockExclusive(&lock);
     for (auto& s : table)
-        if (s.actor == actor)
-            s = {};
+        if (s.actor == actor) {
+            s.controlling = false;
+            if (!s.launching)
+                s = {};
+        }
     ReleaseSRWLockExclusive(&lock);
 }
 bool native_bodies::predicted(uint64_t actor, Vec3& centre, Vec3& velocity, Vec3& measured) {
@@ -526,12 +623,12 @@ bool native_bodies::predicted(uint64_t actor, Vec3& centre, Vec3& velocity, Vec3
     bool found{};
     for (const auto& f : followed)
         if (f.actor == actor && f.step && f.dynamic) {
-            measured = f.velocity * f.scale;
-            // Through the step in flight, in real time: with the velocity it
-            // was given, or falling freely (contacts are not foreseen).
-            velocity = f.driven ? f.given : (f.velocity + f.gravity * f.dt) * f.scale;
+            measured = f.measured;
+            // Through the step in flight, in real time, as the web or
+            // gravity moves it (contacts are not foreseen).
+            velocity = f.next;
             centre = f.centre + velocity * f.real;
-            found = finite(centre) && finite(velocity);
+            found = finite(centre) && finite(velocity) && finite(measured);
         }
     ReleaseSRWLockShared(&lock);
     return found;

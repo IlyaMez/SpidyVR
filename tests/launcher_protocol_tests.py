@@ -185,5 +185,31 @@ class LauncherTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'no modules'): launcher.enlarge_render_memory(42)
         self.assertEqual(load.call_count,2)
 
+    def test_module_snapshot_retries_a_process_that_is_loading_modules(self):
+        import ctypes
+        import capture_game_state as state
+        def answers(*codes):
+            # Each call fails with the next code, then a snapshot handle (77) comes back.
+            remaining=list(codes)
+            def snapshot(flags,pid):
+                if not remaining: return 77
+                ctypes.set_last_error(remaining.pop(0))
+                return ctypes.c_void_p(-1).value
+            return snapshot
+        # ERROR_BAD_LENGTH while the game loads its DLLs (it ended a launch on 2026-10-06): asked again.
+        with patch.object(state,'snapshot',side_effect=answers(24,24)) as taken,patch.object(state.time,'sleep') as slept:
+            self.assertEqual(state.checked_snapshot(0x18,42),77)
+        self.assertEqual((taken.call_count,slept.call_count),(3,2))
+        # Any other failure is final at once.
+        with patch.object(state,'snapshot',side_effect=answers(5)),patch.object(state.time,'sleep') as slept:
+            with self.assertRaises(OSError) as raised: state.checked_snapshot(0x18,42)
+        self.assertEqual(raised.exception.winerror,5)
+        slept.assert_not_called()
+        # A process whose modules keep changing is given up once the patience is spent.
+        with patch.object(state,'snapshot',side_effect=answers(*[24]*9)) as taken,patch.object(state.time,'sleep'), \
+             patch.object(state.time,'monotonic',side_effect=[0,1,3]):
+            with self.assertRaises(OSError) as raised: state.checked_snapshot(0x18,42)
+        self.assertEqual((raised.exception.winerror,taken.call_count),(24,2))
+
 
 if __name__=='__main__': unittest.main()
