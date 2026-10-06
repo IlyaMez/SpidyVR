@@ -29,15 +29,24 @@ std::atomic<uint32_t> keyStates[15]{};
 std::atomic<uint32_t> queriedKeys[8]{};
 std::atomic<uintptr_t> inputSelf{};
 using Commit = void (*)(void*, void*);
+// Camera2 mover update (vtable slot 21): the mover, its CameraTarget, the
+// frame's seconds and two update flags.
+using MoverUpdate = void (*)(void*, void*, float, bool, bool);
 using ClearInput = void (*)(void*, uint64_t);
 using Digital = uint32_t (*)(void*, uint32_t, uint32_t);
 using Analog = float (*)(void*, uint32_t, uint32_t);
 using SetPosition = void (*)(void*, const float*);
+// The player's cameras (Camera2 vtables, image offsets). The follow camera's
+// update ends in the commit (slot 24, 1e1d600); the combat camera's update
+// (5c2630) places its camera itself with SetTranslation and never commits, so
+// before it was hooked every fight looked like a cutscene to the VR gate.
+constexpr uintptr_t followMover = 0x3871fd8, combatMover = 0x38720d0, combatUpdateRva = 0x5c2630;
 Commit originalCommit{};
+MoverUpdate originalCombat{};
 ClearInput originalClear{};
 Digital originalDigital{};
 Analog originalAnalog{};
-std::array<void*, 4> hooks{};
+std::array<void*, 5> hooks{};
 bool created{};
 
 bool read(uintptr_t address, void* out, size_t bytes) {
@@ -84,22 +93,21 @@ bool isPlayer(uintptr_t h, uintptr_t r) {
 bool livePlayer() {
     return isPlayer(hero.load(), record.load());
 }
-void commit(void* self, void* target) {
-    const auto caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
-    originalCommit(self, target);
-    const auto mover = reinterpret_cast<uintptr_t>(self);
-    const auto targetAddress = reinterpret_cast<uintptr_t>(target);
+// A camera has placed itself for this frame (mover + 8 resolves to its
+// transform). Only the follow camera's commit takes the camera-offset
+// experiment's write; the combat camera is observed.
+void placed(uintptr_t mover, uintptr_t targetAddress, uintptr_t caller, bool writable) {
     const auto vt = pointer(mover);
     const auto camera = pointer(pointer(mover + 8));
     const auto local = record.load();
     const auto player = pointer(local);
     float before[16]{}, after[16]{}, body[16]{};
     const bool valid = livePlayer() && pointer(targetAddress + 8) == local &&
-                       (vt == base + 0x3871fd8 || vt == base + 0x38720d0) && camera != player &&
+                       (vt == base + followMover || vt == base + combatMover) && camera != player &&
                        transform(camera, before) && transform(player, body);
     const auto command = current();
     bool wrote = false;
-    if (valid && (command.modes & Mode::cameraOffset)) {
+    if (valid && writable && (command.modes & Mode::cameraOffset)) {
         float position[3]{};
         for (int i = 0; i < 3; ++i)
             position[i] = before[12 + i] + before[i] * command.offset[0] + before[4 + i] * command.offset[1] +
@@ -140,6 +148,16 @@ void commit(void* self, void* target) {
         InterlockedIncrement64(&d.sequence);
         ReleaseSRWLockExclusive(&telemetry);
     }
+}
+void commit(void* self, void* target) {
+    const auto caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    originalCommit(self, target);
+    placed(reinterpret_cast<uintptr_t>(self), reinterpret_cast<uintptr_t>(target), caller, true);
+}
+void combatUpdate(void* self, void* target, float seconds, bool update, bool force) {
+    const auto caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    originalCombat(self, target, seconds, update, force);
+    placed(reinterpret_cast<uintptr_t>(self), reinterpret_cast<uintptr_t>(target), caller, false);
 }
 void clearInput(void* self, uint64_t keepHeld) {
     originalClear(self, keepHeld);
@@ -249,11 +267,16 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
                                             0x24, 0x10, 0x57, 0x48, 0x83, 0xec, 0x20};
         const unsigned char clearBytes[] = {0x48, 0x89, 0x5c, 0x24, 0x10, 0x48, 0x89, 0x6c, 0x24, 0x18};
         const unsigned char setterBytes[] = {0x0f, 0x10, 0x51, 0x30, 0x4c, 0x8b, 0xc1, 0x8b, 0x02};
+        // test rdx, rdx; je (no target); movss [rsp+18h], xmm2; push rbp
+        const unsigned char combatBytes[] = {0x48, 0x85, 0xd2, 0x0f, 0x84, 0x48, 0x09, 0,
+                                             0,    0xf3, 0x0f, 0x11, 0x54, 0x24, 0x18, 0x55};
         if (!matches(0x1e1d600, commitBytes, sizeof(commitBytes)) ||
             !matches(0x1cdfa70, queryBytes, sizeof(queryBytes)) ||
             !matches(0x1cdf840, queryBytes, sizeof(queryBytes)) ||
             !matches(0x1ce2f40, clearBytes, sizeof(clearBytes)) ||
-            !matches(0x191c590, setterBytes, sizeof(setterBytes))) {
+            !matches(0x191c590, setterBytes, sizeof(setterBytes)) ||
+            !matches(combatUpdateRva, combatBytes, sizeof(combatBytes)) ||
+            pointer(base + combatMover + 21 * 8) != base + combatUpdateRva) {
             result = 1003;
             break;
         }
@@ -263,12 +286,14 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
                 result = 1100 + status;
                 break;
             }
-            const uintptr_t rvas[] = {0x1e1d600, 0x1ce2f40, 0x1cdfa70, 0x1cdf840};
+            const uintptr_t rvas[] = {0x1e1d600, 0x1ce2f40, 0x1cdfa70, 0x1cdf840, combatUpdateRva};
             void* detours[] = {reinterpret_cast<void*>(commit), reinterpret_cast<void*>(clearInput),
-                               reinterpret_cast<void*>(digital), reinterpret_cast<void*>(analog)};
+                               reinterpret_cast<void*>(digital), reinterpret_cast<void*>(analog),
+                               reinterpret_cast<void*>(combatUpdate)};
             void** originals[] = {
                 reinterpret_cast<void**>(&originalCommit), reinterpret_cast<void**>(&originalClear),
-                reinterpret_cast<void**>(&originalDigital), reinterpret_cast<void**>(&originalAnalog)};
+                reinterpret_cast<void**>(&originalDigital), reinterpret_cast<void**>(&originalAnalog),
+                reinterpret_cast<void**>(&originalCombat)};
             for (unsigned i = 0; i < hooks.size(); ++i) {
                 hooks[i] = reinterpret_cast<void*>(base + rvas[i]);
                 status = MH_CreateHook(hooks[i], detours[i], originals[i]);

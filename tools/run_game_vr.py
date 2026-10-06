@@ -304,8 +304,9 @@ BODY_PROBLEMS = {0: None, 1: 'no_hero', 2: 'no_rig', 3: 'unknown_rig', 4: 'bad_r
 
 def body_snapshot(game, address):
     """The player's body on the hero (native_body::Status): whether it turns the hero's joints, how far each
-    wrist and the head joint land from the controllers and the headset (metres), and how far the hero turned
-    between its pose job and the render (radians), which the body is off by while the hero turns."""
+    wrist and the head joint land from the controllers and the headset (metres), how far the hero turned
+    between its pose job and the render (radians), which the body is off by while the hero turns, and how often
+    the hero's pose jobs changed rig (the body's blend restarted at each change before October 6 evening)."""
     for _ in range(8):
         raw = game.read(address, 136)
         if len(raw) != 136:
@@ -319,8 +320,8 @@ def body_snapshot(game, address):
                     problem=BODY_PROBLEMS.get(v[8], v[8]), joints=v[9], weight=round(v[12], 3),
                     scale=round(v[13], 4), yaw=round(v[14], 4), grounded=bool(v[15]),
                     hand_error_m=[round(v[16], 4), round(v[17], 4)], head_error_m=round(v[18], 4),
-                    turn_last=round(v[19], 5), turn_max=round(v[20], 5), renders=v[22],
-                    hero_jobs_last_frame=v[23], solve_ms=round(v[25], 3))
+                    turn_last=round(v[19], 5), turn_max=round(v[20], 5), rig=hex(v[10]), rig_switches=v[21],
+                    renders=v[22], hero_jobs_last_frame=v[23], hero_jobs_max=v[24], solve_ms=round(v[25], 3))
     return None
 
 
@@ -748,9 +749,13 @@ def main():
                     body = body_snapshot(game, xr['SpidyBodyData']) or body
                     if body:
                         sample['body'] = {k: body[k] for k in ('state', 'problem', 'weight', 'hand_error_m',
-                                                               'head_error_m', 'turn_last', 'grounded', 'scale')}
+                                                               'head_error_m', 'turn_last', 'grounded', 'scale',
+                                                               'rig', 'rig_switches')}
                     landed = punch_snapshot(game, rays['SpidyPunchData'])
                     if landed:
+                        # Thugs within reach of a fist, and each fist's speed relative to the head.
+                        sample['punch'] = dict(bots=landed['bots'], punches=landed['punches'],
+                                               speed=[h['speed'] for h in landed['hands']])
                         if landed['punches'] != (punch or {}).get('punches') or \
                                 landed['dropped'] != (punch or {}).get('dropped'):
                             punch_samples.append(dict(landed, seconds=round(time.monotonic()-started, 3)))

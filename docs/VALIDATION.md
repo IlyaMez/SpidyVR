@@ -1,6 +1,104 @@
 # Validation — 2026-10-06
 
-## Your own body and punching — current build, measured without a headset
+## VR stays immersive in fights — current build, checked in the game without a headset
+
+The user, after the 16:36 session
+(`dist/Spidy-0.1.0-win64/Spidy-0.1.0/reports/game-vr-20261006-163630.json`):
+"in combat game goes to flatscreen mode for some reason".
+
+What the report shows. Its samples cover the last 622 s. Between 946 and
+1002 s the headset showed the game screen six times: 3.1, 4.3, 4.1, 17.9 and
+17.5 s, then 0.4 s without a player. Every stretch had gate `no_camera_commit`
+with the commit counters standing still, and the last committing camera was
+still `follow`. The game was not paused: 207 physics steps a second in the
+17.9 s stretch (the game's own rate once the eyes stop), and the hero moved
+76 m during it. Each stretch began 0.1-1.2 s after the user's web caught a thug
+(bot grabs at 944.7, 945.5, 950.5 and 962.9 s; no fling was asked, `flings`
+stayed 0). The last one ended with the game replacing the player (a respawn,
+then an autosave at 16:53:22). Prop grabs in the same session, and two bot
+flings at 13:36, left VR immersive. In none of the October 6 reports did
+`camera_mover` ever read `combat`.
+
+Cause, from the executable. A camera mover's per-frame update is vtable
+slot 21 (+0xa8). The camera pipeline calls it at 1e1b7c6 with the mover, its
+CameraTarget, the frame's seconds in xmm2 and two flags. FollowCameraMover,
+LookCameraMover, LookCameraMoverGame, TurretCameraMover, PerfTestCameraMover
+and PhotomodeLookCameraMover share one update (1e1cf80), and it ends by calling
+slot 24: the commit (1e1d600) that the input bridge hooks. CombatCameraMover's
+update (5c2630, used by no other class) never calls the commit. It places its
+camera itself, through SetTranslation (191c590) on the same camera
+(`[[mover+8]]`), and reads its target's +8 as the actor record, as the commit
+check does. The gate accepted the combat camera's vtable, but no commit ever
+came from it. So every fight read as no camera commit for 100 ms, the
+condition meant for pauses, loading and cutscenes, and after 250 ms the headset
+put the game's frame on the screen. The Miles Morales first-person camera
+research (`.research/miles-camera`, same engine) hooks the combat mover's
+slot 21 separately for the same reason.
+
+Change: `game_bridge.cpp` hooks the combat camera's update. At start it checks
+the update's entry bytes and that the combat vtable's slot 21 points at it
+(else 1003). After the game's own update it records the camera exactly as a
+commit, with the same validation (the player's CameraTarget, the follow or
+combat vtable, finite orthonormal transforms) and the same telemetry. Only the
+follow camera's commit takes the camera-offset experiment's write. No protocol
+change: bridge Data and XR telemetry are as before, and in a fight
+`camera_mover` should now read `combat`. `bridge_game.py` and
+`capture_movement.py` check the fifth hook entry too. The fixed bridge is copied
+into `dist/Spidy-0.1.0-win64/Spidy-0.1.0` (the old one is staged under its hash
+in that folder's `reports/bridge-modules/caea951a…`).
+
+In the game without a headset (`tools/probe_menu_pad.py` start, `pad a
+--until-player`, `player --follow`, `stop`), on the user's save (the checkpoint
+written after the 16:36 respawn):
+
+- The bridge started (0) with the combat update hooked (its entry a jump).
+- Free roam with the player handed over: gate open in 98.9% of 95 samples,
+  486 of 486 camera calls on the player, all from the follow camera. Outside a
+  fight the combat camera did not update.
+- SpidyStop returned 0, and both camera entries were restored byte for byte.
+- No bot was in the game (the crime was over), so a fight was not measured
+  under the new hook. The save files were unchanged afterwards
+  (`reports/backups/saves-20261006-combat-camera/`).
+
+143 core checks, the GPU test and 68 Python checks pass. There are no new
+tests: the hook needs the game.
+
+Headset check: start a fight (a crime with thugs). VR should stay immersive,
+with webs and punches working and no flat screen. In the report during the
+fight, `gate` should be empty, `camera_mover` `combat` and `presentation`
+immersive. If a fight still goes flat, its `gate` and `camera_mover` say
+which camera it was. Finishers and death use movers that place their camera
+from an animation (MeleeRelAnimCameraMover, DeathCameraMover); those still go
+to the game screen.
+
+## The body through the game's own moves — current build, not yet run in the game
+
+The same 16:36 session was the body's first in the headset (details:
+[BODY.md](BODY.md#the-first-headset-session-october-6-1636)). With the eye
+views on, the body was on the hero in all 10,761 samples; at full blend the
+head joint sat 0.0 m from its place in every one and each wrist within 1 cm of
+its target in 89-96% of them (at most 0.20 m, beyond the arm's reach); the
+hero turned between his pose job and the render in 21 samples, at most
+0.099 rad.
+
+The defect: for 302 samples (about 16 s, in stretches of up to 8 s) the
+body's blend fell from 1 to under 0.1 within a frame and kept starting over
+every frame or two, while the game itself moved the hero (a landing after a
+web release, ledge climbs, a jump off a roof): the hero showed mostly the
+game's animation, arms up to 1.9 m from the controllers. Only a change of rig
+in the hero's pose job started the blend over, so his jobs alternated between
+rigs. Now each rig keeps its own cache entry and the blend and yaw stay across
+them; the eyes hide the hero when his latest job is one the body could not
+turn. New telemetry: `body.rig_switches`, `body.hero_jobs_max`, the rig in each
+sample, and per-sample `punch` (bots within reach, punches, fist speeds).
+
+No punch landed in that session: its fights were on the flat game screen
+(above), where the fists get no tracked input.
+
+143 core checks, the GPU test and the Python checks pass; the fix has not run
+in the game yet.
+
+## Your own body and punching — preceding build, measured without a headset
 
 The user: "lets add spiderman actual avatar as a full body presense we control
 and allow physical punching". Design, numbers and open items:

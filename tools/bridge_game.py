@@ -23,7 +23,7 @@ from inspect_game import PE
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DLL = ROOT / 'build/windows-ninja/spidy_bridge.dll'
 STAGING = ROOT / 'reports/bridge-modules'
-HOOKS = (0x1e1d600, 0x1ce2f40, 0x1cdfa70, 0x1cdf840)
+HOOKS = (0x1e1d600, 0x1ce2f40, 0x1cdfa70, 0x1cdf840, 0x5c2630)
 
 
 def prepare(pid, process, dll=DLL, staging=STAGING,

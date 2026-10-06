@@ -190,13 +190,14 @@ class ProtocolTests(unittest.TestCase):
     def test_body_status_decodes_errors_and_turn_and_rejects_torn_reads(self):
         raw = bytearray(136)
         struct.pack_into('<4Iq3Q2I2Q3fI2ff2fIQ2Id', raw, 0, 0x53424453, 1, 136, 2, 6, 900, 300, 290, 0, 237,
-                         0x1a0, 0x2b0, 1., 1.03125, -.5, 1, .002, .003, .0005, .0125, .0375, 0, 480, 1, 0, 7.5)
+                         0x1a0, 0x2b0, 1., 1.03125, -.5, 1, .002, .003, .0005, .0125, .0375, 12, 480, 1, 2, 7.5)
         result = body_snapshot(Reader(raw, struct.pack('<q', 6)), 0)
         self.assertEqual((result['state'], result['problem'], result['joints']), ('active', None, 237))
         self.assertEqual((result['hero_jobs'], result['solved'], result['renders']), (300, 290, 480))
         self.assertEqual((result['weight'], result['scale'], result['grounded']), (1., 1.0312, True))
         self.assertEqual((result['hand_error_m'], result['head_error_m']), ([.002, .003], .0005))
         self.assertEqual((result['turn_last'], result['turn_max'], result['solve_ms']), (.0125, .0375, 7.5))
+        self.assertEqual((result['rig'], result['rig_switches'], result['hero_jobs_max']), ('0x1a0', 12, 2))
         struct.pack_into('<2I', raw, 48, 3, 237)
         self.assertEqual(body_snapshot(Reader(raw, struct.pack('<q', 6)), 0)['problem'], 'unknown_rig')
         torn = bytearray(raw)

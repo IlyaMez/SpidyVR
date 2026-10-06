@@ -76,10 +76,12 @@ struct Status {
     // The hero's turn between its latest pose job and the render that
     // followed, radians: what the body is off by while the hero turns.
     float turnLast{}, turnMax{};
-    uint32_t reserved{};
-    // Render frames seen, and pose jobs of the hero since the previous one.
+    // Hero pose jobs that named another rig than the one before.
+    uint32_t rigSwitches{};
+    // Render frames seen, and pose jobs of the hero since the previous one
+    // (and the most in one frame).
     uint64_t renders{};
-    uint32_t heroJobsLastFrame{}, reserved2{};
+    uint32_t heroJobsLastFrame{}, heroJobsMax{};
     double solveMs{}; // time spent solving, total
 };
 static_assert(sizeof(Status) == 136);

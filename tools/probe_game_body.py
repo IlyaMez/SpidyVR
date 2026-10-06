@@ -84,8 +84,8 @@ def body_status(game, address):
                 problem=PROBLEMS.get(v[8], v[8]), joints=v[9], rig=v[10], instance=v[11], weight=round(v[12], 3),
                 scale=round(v[13], 4), yaw=round(v[14], 4), grounded=v[15],
                 hand_error=[round(v[16], 4), round(v[17], 4)], head_error=round(v[18], 4),
-                turn_last=round(v[19], 5), turn_max=round(v[20], 5), renders=v[22], hero_jobs_last_frame=v[23],
-                solve_ms=round(v[25], 3))
+                turn_last=round(v[19], 5), turn_max=round(v[20], 5), rig_switches=v[21], renders=v[22],
+                hero_jobs_last_frame=v[23], hero_jobs_max=v[24], solve_ms=round(v[25], 3))
 
 
 def body_poses(game, address):

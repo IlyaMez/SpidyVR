@@ -95,7 +95,7 @@ def main():
         stop = call_remote(process, exports['SpidyStop'])
         active = stop != 0
         restored = all(game.read(game.base+rva, 16) == pe.bytes(rva, 16)
-                       for rva in (0x1e1d600, 0x1ce2f40, 0x1cdfa70, 0x1cdf840))
+                       for rva in (0x1e1d600, 0x1ce2f40, 0x1cdfa70, 0x1cdf840, 0x5c2630))
         result = dict(pid=game.pid, module_base=hex(game.base), registry_seconds=elapsed,
                       candidates=found, mover=mover, movement=hex(body), movement_vtable=hex(body_vtable),
                       movement_type=body_type, dll_hash=digest, samples=samples, stop=stop, restored=restored)

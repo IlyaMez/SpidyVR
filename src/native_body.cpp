@@ -45,17 +45,31 @@ struct Roles {
 };
 static_assert(sizeof(Roles) == 96);
 Roles roles{};
-// The hero's rig as the body uses it (solveLock).
+// The hero's rigs as the body uses them (solveLock). Pose jobs for the hero's
+// joints may name more than one rig: in a headset session (October 6) the
+// body's blend restarted from nothing every frame or two, for seconds at a
+// time, during the game's own landings, ledge climbs and jumps, and only a
+// change of rig did that. Each rig keeps an entry, read again when it names
+// other tables than when it was read (freed and reused) or the probe's roles
+// change; the body's state is the player's and stays across rigs.
 struct Cache {
-    uintptr_t rig{};
-    uint32_t joints{}, rolesSerial{};
+    uintptr_t rig{}, table{}, restTable{}; // the rig, its joints and rest pose when read
+    uint32_t count{}, rolesSerial{};
+    uint64_t used{};
+    uint32_t joints{}; // as read, 0 if it could not be
     body::Rig ik;
     std::vector<float> rest; // for the probe's capture
     uint32_t problem = native_body::noRig;
-} cache;
+};
+std::array<Cache, 4> caches;
+uint64_t cacheUses{};
 std::atomic<uint32_t> rolesSerial{1};
 body::State state;
 body::Targets lastTargets;
+// The hero's instance and rig at the previous hero job (solveLock): another
+// instance is another actor, and the body starts over on it.
+uintptr_t lastInstance{}, lastRig{};
+uint32_t rigSwitches{};
 // The hero actor's heading in the world at the last solve (solveLock): the
 // body's yaw is the model's, and turns back by as much as the actor turns.
 float actorHeading{};
@@ -70,9 +84,12 @@ std::atomic<bool> captureWanted{};
 float jobRows[9]{};
 bool jobRowsSet{};
 std::atomic<uint32_t> heroJobsThisFrame{};
-// When the body last changed the hero's joints (GetTickCount64): the eyes
-// may show the hero only while it does.
+// When the body last changed the hero's joints (GetTickCount64), and whether
+// it changed the latest hero job's: the eyes may show the hero only while it
+// does. A job it left alone (a rig it cannot use) shows the game's pose and
+// head, whatever an earlier job of the frame did.
 std::atomic<uint64_t> lastDrawn{};
+std::atomic<bool> latestSolved{};
 
 bool read(uintptr_t p, void* out, size_t n) {
     __try {
@@ -279,6 +296,43 @@ bool instanceTurn(const float* m, Quat& out) {
     out = body::fromAxes(axes[0], axes[1], axes[2]);
     return true;
 }
+// The cache entry of a rig (solveLock): found, or read into the entry the rig
+// had, an unused one, or the one used longest ago.
+Cache& rigEntry(uintptr_t rig) {
+    uint16_t count{};
+    const uintptr_t table = pointer(rig + 8), restTable = pointer(rig + 0x18);
+    read(rig + 2, &count, sizeof(count));
+    const uint32_t serial = rolesSerial.load();
+    Cache* slot = &caches[0];
+    for (auto& c : caches) {
+        if (c.rig == rig && c.table == table && c.restTable == restTable && c.count == count &&
+            c.rolesSerial == serial) {
+            c.used = ++cacheUses;
+            return c;
+        }
+        if (slot->rig != rig && (c.rig == rig || c.used < slot->used))
+            slot = &c;
+    }
+    Cache& entry = *slot;
+    entry = {};
+    entry.rig = rig;
+    entry.table = table;
+    entry.restTable = restTable;
+    entry.count = count;
+    entry.rolesSerial = serial;
+    entry.used = ++cacheUses;
+    RigData data;
+    if (!rig || !readRig(rig, data)) {
+        entry.problem = native_body::noRig;
+    } else {
+        entry.joints = static_cast<uint32_t>(data.parent.size());
+        entry.problem = identify(data, entry.ik);
+        if (!entry.problem && !body::prepare(entry.ik, data.rest))
+            entry.problem = native_body::badRest;
+        entry.rest = data.rest;
+    }
+    return entry;
+}
 void solveHero(float* out, uintptr_t job, uintptr_t instance) {
     const auto rig = pointer(job + 0x28);
     float transform[16]{};
@@ -287,23 +341,17 @@ void solveHero(float* out, uintptr_t job, uintptr_t instance) {
     QueryPerformanceCounter(&now);
     AcquireSRWLockExclusive(&solveLock);
     const auto started = now;
-    if (rig != cache.rig || rolesSerial.load() != cache.rolesSerial) {
-        cache = {};
-        cache.rig = rig;
-        cache.rolesSerial = rolesSerial.load();
-        RigData data;
-        if (!rig || !readRig(rig, data)) {
-            cache.problem = native_body::noRig;
-        } else {
-            cache.joints = static_cast<uint32_t>(data.parent.size());
-            cache.problem = identify(data, cache.ik);
-            if (!cache.problem && !body::prepare(cache.ik, data.rest))
-                cache.problem = native_body::badRest;
-            cache.rest = data.rest;
-        }
+    if (instance != lastInstance) {
         state = {};
         actorHeadingSet = trackingYawSet = false;
+        lastInstance = instance;
+        lastRig = 0;
     }
+    if (rig != lastRig) {
+        rigSwitches += lastRig != 0;
+        lastRig = rig;
+    }
+    const Cache& cache = rigEntry(rig);
     Command wanted{};
     AcquireSRWLockShared(&commandLock);
     wanted = command;
@@ -386,6 +434,8 @@ void solveHero(float* out, uintptr_t job, uintptr_t instance) {
     }
     if (result.solved && on)
         lastDrawn = GetTickCount64();
+    latestSolved = result.solved && on;
+    const uint32_t switches = rigSwitches;
     LARGE_INTEGER finished{};
     QueryPerformanceCounter(&finished);
     ReleaseSRWLockExclusive(&solveLock);
@@ -396,6 +446,7 @@ void solveHero(float* out, uintptr_t job, uintptr_t instance) {
         d.problem = problem;
         d.joints = joints;
         d.rig = rig;
+        d.rigSwitches = switches;
         d.instance = instance;
         d.state = problem ? native_body::failed : result.solved ? native_body::active : native_body::waiting;
         d.weight = result.weight;
@@ -453,10 +504,13 @@ uint32_t native_body::start(uintptr_t gameBase) {
             hooked = true;
         }
         AcquireSRWLockExclusive(&solveLock);
-        cache = {};
+        caches.fill({});
         state = {};
+        lastInstance = lastRig = 0;
+        rigSwitches = 0;
         lastSolve = {};
         ReleaseSRWLockExclusive(&solveLock);
+        latestSolved = false;
         publish([](Status& d) {
             const auto sequence = d.sequence;
             d = {};
@@ -505,6 +559,7 @@ void native_body::renderFrame() {
     publish([&](Status& d) {
         ++d.renders;
         d.heroJobsLastFrame = jobs;
+        d.heroJobsMax = std::max(d.heroJobsMax, jobs);
         if (turn >= 0) {
             d.turnLast = turn;
             d.turnMax = std::max(d.turnMax, turn);
@@ -513,8 +568,9 @@ void native_body::renderFrame() {
 }
 bool native_body::drawn() {
     // The hero's joints are rewritten every frame; a pose that stopped
-    // coming through the body (another writer, a paused job) shows the head.
-    return enabled.load(std::memory_order_relaxed) && GetTickCount64() - lastDrawn.load() < 150;
+    // coming through the body (another writer, a paused job, a rig it cannot
+    // use) shows the head.
+    return enabled.load(std::memory_order_relaxed) && latestSolved.load() && GetTickCount64() - lastDrawn.load() < 150;
 }
 native_body::Status native_body::status() {
     AcquireSRWLockShared(&statusLock);

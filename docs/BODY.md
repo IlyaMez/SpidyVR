@@ -205,16 +205,53 @@ these sessions (bots are scarce in free roam; see
 throwable trash can ignored a kMelee blow of 1000 from 95 m: props refuse melee
 damage, and punching props does nothing yet.
 
+## The first headset session (October 6, 16:36)
+
+`game-vr-20261006-163630.json` in the play folder, about 23 minutes; its
+samples cover the last 10 (737-1359 s):
+
+| | |
+|---|---|
+| The body on the hero | in every one of 10,761 samples with the eye views on |
+| At full blend (10,459 samples) | the head joint 0.0 m from its place in every one; the left wrist within 1 cm of its target in 96% of them, the right in 89%; at most 0.20 m, a controller beyond the arm's reach |
+| The hero's turn between his pose job and the render | none in all but 21 samples; at most 0.099 rad (5.7 degrees) in the session |
+| Below full blend with the eye views on | 302 samples, about 16 s: the defect below |
+| Punches | none: see below |
+
+**The blend restarted from nothing for seconds at a time** (788-796 s,
+826-830, 1135-1137, 1186-1189 and 1312): from 1 to under 0.1 within a frame,
+then again every frame or two, so the hero showed mostly the game's own
+animation: his arms away from the controllers by up to 1.9 m, his head joint
+up to 2.2 m from its place (the head itself stayed shrunk). Each time the game
+was moving the hero itself: a landing at 30 m/s after letting go of a web, a
+ledge climb, a jump off a roof from a standstill. Only a change of rig in the
+hero's pose job restarted the blend (the body read the rig again and started
+over), so the hero's pose jobs were alternating between rigs. Since that
+evening each rig keeps its own entry (four at most, read again when one names
+other joint tables) and the body's blend and yaw stay across rigs; they start
+over only on another actor. The eyes also hide the hero when his latest pose
+job is one the body could not turn (a rig without the joints it needs), whatever
+an earlier job of the frame did. The status counts the jobs that changed rig
+(`rig_switches`) and the most hero jobs in one frame (`hero_jobs_max`); each
+session sample has the rig. Not yet run in the game.
+
+**No punches:** every fight in that session showed the flat game screen (the
+combat camera never went through the camera commit Spidy follows; fixed
+separately that evening, [VALIDATION.md](VALIDATION.md)), and fists punch only
+from tracked controllers with the eye views on. The session did not record
+whether a thug came within reach while they were on; samples now carry
+`punch` (the bots within reach of a fist, the punches, each fist's speed).
+
 ## Open
 
 - A thug in a fight reacting to a punch (his hit reaction, knockdown, flight)
-  needs a crime or the headset: the bots measured were scripted.
-- The hero's turn between his pose job and the render (`body.turn_max` in the
-  session report) is measured only while he turns: the probe's perched hero
-  did not walk. If it is large, the body swings about the feet by it while he
-  turns.
+  needs a crime or the headset: the bots measured were scripted, and the first
+  headset session's fights were on the flat screen.
+- Which rigs the hero's pose jobs alternate between during the game's own
+  moves, and whether the body now stays on through them (`rig_switches`,
+  `hero_jobs_max`, the per-sample `body.weight`).
 - The wrist offset from the grip point and the hand's orientation are from the
-  OpenXR grip pose's definition; how they feel needs the headset.
+  OpenXR grip pose's definition; how they feel needs the player's word.
 - With the body in each eye's depth, the eyes' occlusion culling may hide
   something behind a fast-moving hand for a frame (compare `-NoEyeOcclusion`);
   the game's "Non Occluder" instance flag would keep the body out of it.
