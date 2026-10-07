@@ -487,6 +487,34 @@ one Steam build: a game update needs new addresses in Spidy before the
 launcher accepts it. Other runtimes than Virtual Desktop and other controllers
 than Quest Touch (Index bindings are also suggested) are untested.
 
+### Publish a release
+
+GitHub Actions builds releases on a clean machine and puts them under the
+repository's **Releases**, zip attached:
+
+```powershell
+.\tools\release.ps1 -DryRun   # the next version, and what the push takes along
+.\tools\release.ps1           # 0.1.0 -> 0.1.1; or -Bump minor, -Bump major, -Version 0.3.0
+.\tools\release.ps1 -Wait     # also follows the build and prints the release's address
+```
+
+`tools/release.ps1` raises `project(Spidy VERSION ...)` in `CMakeLists.txt`,
+commits that line alone ("Release Spidy 0.1.1"), tags the commit `v0.1.1` and
+pushes both. It stops when the checkout is not on `main`, lacks commits from
+`origin/main` or has uncommitted edits in `CMakeLists.txt`, and undoes its
+commit and tag when the push fails. Given the current version, `-Version` tags
+the current commit without a commit of its own. It builds nothing here: the tag
+starts [.github/workflows/release.yml](.github/workflows/release.yml) on
+GitHub's Windows Server 2022 image (Visual Studio 2022), which runs
+`bootstrap.ps1 -Observer`, `build.ps1 -Observer` with the C++ tests, the Python
+protocol tests and `package.ps1`, checks that the launcher carries the version,
+and publishes "Spidy 0.1.1" with the zip, its SHA-256 and the commits since the
+previous release. Only committed work is released. A failed build publishes
+nothing: re-run it when a download failed, otherwise fix the cause and release
+the next version. *Run workflow* on the Actions tab builds a branch without
+publishing (the zip stays with the run for 14 days), or publishes a given tag
+again.
+
 ## What's runnable
 
 - `spidy_xr_lab.exe`: an original block city in OpenXR/D3D12 with tracked hands,

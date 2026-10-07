@@ -1,0 +1,118 @@
+# Builds Spidy on a clean Windows machine and publishes the player zip under Releases.
+# tools/release.ps1 starts it by pushing a version tag (v1.2.3). "Run workflow" on the Actions
+# tab builds the chosen branch and keeps the zip with the run instead, or, given an existing
+# tag, builds that tag and publishes its release (again).
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version tag to build and publish (v1.2.3). Empty builds the branch without publishing.
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  release:
+    # tools/build.ps1 needs Visual Studio 2022 with its C++ CMake tools; this image has both.
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG && format('refs/tags/{0}', env.TAG) || github.ref }}
+          fetch-depth: 0 # the release notes list the commits since the previous release
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12' # the Python that tools/package.ps1 ships
+
+      - name: Check the version
+        id: version
+        run: |
+          $version = (Select-String -LiteralPath CMakeLists.txt -Pattern 'project\(Spidy VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          if ($env:TAG -and $env:TAG -ne "v$version") {
+            throw "Tag $env:TAG differs from project(Spidy VERSION $version) in CMakeLists.txt; tools/release.ps1 sets both."
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Fetch the pinned OpenXR SDK, Dear ImGui and MinHook
+        run: ./tools/bootstrap.ps1 -Observer
+
+      - name: Build and run the C++ tests
+        run: ./tools/build.ps1 -Observer
+
+      - name: Run the Python protocol tests
+        run: |
+          foreach ($suite in Get-ChildItem tests -Filter '*_protocol_tests.py') {
+            python -B $suite.FullName
+            if ($LASTEXITCODE) { throw "$($suite.Name) failed" }
+          }
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ./tools/package.ps1
+          $launcher = (Get-Item build/windows-ninja/spidy_launcher.exe).VersionInfo.ProductVersion
+          if ($launcher -ne $env:VERSION) { throw "The launcher carries version $launcher, not $env:VERSION." }
+
+      - name: Keep the zip with this run
+        if: env.TAG == ''
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/Spidy-${{ steps.version.outputs.version }}-win64.zip
+          archive: false
+          retention-days: 14
+
+      - name: Publish the release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $zip = "dist/Spidy-$env:VERSION-win64.zip"
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          # Changes since the newest published release below this one (a failed build's tag has none).
+          $version = [version]$env:VERSION
+          $previous = gh release list --limit 100 --json tagName,isDraft | ConvertFrom-Json |
+            Where-Object { -not $_.isDraft -and $_.tagName -match '^v\d+\.\d+\.\d+$' -and [version]$_.tagName.Substring(1) -lt $version } |
+            Sort-Object { [version]$_.tagName.Substring(1) } | Select-Object -Last 1 -ExpandProperty tagName
+          $range = if ($previous) { "$previous..$env:TAG" } else { $env:TAG }
+          [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+          $changes = git log --no-merges --invert-grep --grep='^Release Spidy ' --format='- %s' $range
+          @(
+            'Extract the zip anywhere you can write and start **Spidy Launcher.exe**. Its README.txt covers setup, controls and fixes.'
+            ''
+            "Needs Marvel's Spider-Man Remastered on Steam (the launcher checks the game build) and a PC VR headset with an OpenXR runtime."
+            ''
+            ('SHA-256 of Spidy-{0}-win64.zip: `{1}`' -f $env:VERSION, $hash)
+            ''
+            $(if ($previous) { "## Changes since $previous" } else { '## Changes' })
+            ''
+            $changes
+          ) | Set-Content release-notes.md -Encoding utf8
+          gh release view $env:TAG --json tagName *> $null
+          if ($LASTEXITCODE) {
+            gh release create $env:TAG $zip --verify-tag --title "Spidy $env:VERSION" --notes-file release-notes.md
+          } else {
+            gh release upload $env:TAG $zip --clobber
+            if ($LASTEXITCODE) { throw 'Uploading the zip failed.' }
+            gh release edit $env:TAG --title "Spidy $env:VERSION" --notes-file release-notes.md
+          }
+          if ($LASTEXITCODE) { throw 'Publishing the release failed.' }
