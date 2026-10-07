@@ -31,7 +31,7 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 11, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 12, bytes = sizeof(XrConfig), pid{};
     // record and mover are no longer used: VR starts with the game, before
     // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
@@ -52,8 +52,9 @@ struct XrConfig {
     wchar_t runtime[260]{};
     // The rest of the VR settings a session starts from (options bits 3 and
     // 5-9 and swingSpeed give the others): degrees per snap turn (0: none),
-    // controller vibration in percent, the game screen's size (0-2).
-    uint32_t snapTurn = 30, haptics = 100, screenSize = 1, reserved{};
+    // controller vibration in percent, the game screen's size (0-2), degrees
+    // a second of smooth turning (0: the stick snap turns).
+    uint32_t snapTurn = 30, haptics = 100, screenSize = 1, smoothTurn{};
 };
 static_assert(sizeof(XrConfig) == 624);
 // Why the last frame had no gameplay (XrData::gate bits).
@@ -65,7 +66,7 @@ enum GateReason : uint32_t {
     gateTracking = 16,    // the headset's pose or timing was not usable
 };
 struct XrData {
-    uint32_t magic = 0x53585244, version = 11, bytes = sizeof(XrData), status{};
+    uint32_t magic = 0x53585244, version = 12, bytes = sizeof(XrData), status{};
     int64_t sequence{};
     uint64_t frames{}, tracked{}, submitted{}, dropped{}, leftHands{}, rightHands{}, serial{}, generation{};
     uint32_t nativeKeys{}, error{};
@@ -107,8 +108,10 @@ struct XrData {
     uint32_t settingChanges{};
     uint64_t menuTabs{};
     uint32_t menuInstalled{}, menuStatus{};
+    // Degrees a second of smooth turning now (0: the stick snap turns).
+    uint32_t smoothTurn{}, unused{};
 };
-static_assert(sizeof(XrData) == 704);
+static_assert(sizeof(XrData) == 712);
 extern "C" {
 __declspec(dllexport) XrData SpidyXrData;
 __declspec(dllexport) XrTimingData SpidyXrTimingData;
@@ -270,6 +273,7 @@ DWORD WINAPI run(void*) {
         values.webShooter = !(config.options & 512);
         values.swingSpeed = config.swingSpeed;
         values.snapTurn = static_cast<int>(config.snapTurn);
+        values.smoothTurn = static_cast<int>(config.smoothTurn);
         values.haptics = static_cast<int>(config.haptics);
         values.screenSize = static_cast<int>(config.screenSize);
         values = vr_settings::sanitized(values);
@@ -331,6 +335,7 @@ DWORD WINAPI run(void*) {
         auto applySettings = [&] {
             runtime.hapticStrength(static_cast<float>(values.haptics) / 100);
             rig.snapTurn(static_cast<float>(values.snapTurn) * 3.14159265f / 180);
+            rig.smoothTurn(static_cast<float>(values.smoothTurn) * 3.14159265f / 180);
             if (swingStarted && swingSettings) {
                 game_swing::Settings s;
                 s.grab = values.webGrab && sampleGrab;
@@ -728,6 +733,7 @@ DWORD WINAPI run(void*) {
                         d.settings = (values.webGrab ? 1u : 0u) | (values.punch ? 2u : 0u) | (values.body ? 4u : 0u) |
                                      (values.airWebs ? 8u : 0u) | (values.webShooter ? 16u : 0u);
                         d.snapTurn = static_cast<uint32_t>(values.snapTurn);
+                        d.smoothTurn = static_cast<uint32_t>(values.smoothTurn);
                         d.haptics = static_cast<uint32_t>(values.haptics);
                         d.screenSize = static_cast<uint32_t>(values.screenSize);
                         d.swingSpeed = values.swingSpeed;
@@ -1218,12 +1224,12 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 11 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 12 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
         !config.motionModule || config.options > 1023 || config.snapTurn > 90 || config.haptics > 100 ||
-        config.screenSize > 2 || config.reserved ||
+        config.screenSize > 2 || config.smoothTurn > 360 ||
         !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 || config.swingSpeed > 65 ||
         (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||
         (config.eyeSize && !validEyeSize(config.eyeSize)))

@@ -3,7 +3,94 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 7, fifth build): no more sudden dives in midair.** You
+**Latest build (October 7, seventh build): SteamVR headsets, and the VR
+runtime found automatically.** You reported that players with SteamVR
+headsets (a Steam Frame, a PSVR2) get the flat game instead of VR, and that
+on your Quest 3 over Steam Link VR works but the game's menus can't be
+played. Two different causes.
+
+The menus. In your 23:11 Steam Link session the game found two Steam
+virtual gamepads (Valve 28de:11ff) through Windows.Gaming.Input six seconds
+after it started, logged "XInput disabled, disconnecting controller", and
+never read Spidy's controller again: 0 reads in the whole session while
+your presses reached Spidy, against 52,644 in your 22:08 Virtual Desktop
+session. Spidy gives the game the VR controllers as an XInput controller.
+The game reads a setting at startup, EnableWindowsGamingInput in its
+registry key, and its code skips Windows.Gaming.Input altogether when that
+is 0. The launcher now sets it to 0 for every game it starts and puts your
+value back when the game closes, as it does with the small desktop window;
+XInput and DualSense controllers work as before. It also turns frame
+generation off for VR sessions (yours was already off) and puts it back
+afterwards. If the game screen still ignores the controllers (a game started
+outside the launcher, or one behind another window), the launcher says so.
+
+The flat start. The Steam Frame player's reports folder (release 0.2.1)
+holds only the launcher's first steps: the saved desktop view and two
+modules, the second being the probe that finds the game's graphics queue.
+No session report and no other module, so the launcher stopped while
+looking for that queue and the game stayed flat. On your PC the same step
+under SteamVR took about a second (VR started 7 s after the game, as with
+Virtual Desktop), so something on their PC differs, and only the launcher's
+window said what. The launcher used to give up after three minutes unless
+it saw exactly one graphics queue; an overlay or capture tool drawing on a
+queue of its own from inside the game's present, or frame generation, makes
+that fail every time. Now it takes the queue the game submits on itself
+(the others sit deeper in the call stack, or take a quarter of its work or
+less) and gives up only with a list of the queues it saw; a call the game
+never answers ends the wait at once with that reason; and the search says
+what it sees every 20 seconds. Whether this was their cause is not known
+yet. So every session now also writes what the launcher's window shows to
+`reports\game-vr-<time>-console.log`, and a session that ends before VR
+starts writes a small report saying where and why, with the game's own log
+and the modules loaded into the game (overlays among them). The next
+reports folder from a Steam Frame or PSVR2 player will say what stopped it.
+
+The VR runtime. The launcher's list starts with Automatic, now the default
+for everyone. Each session asks Virtual Desktop first (asking it starts
+nothing), then SteamVR and Meta Quest Link if their service is running,
+then Windows' active runtime, and uses the first that has a headset; a
+runtime that is not running and not Windows' active one is named instead of
+started. Check shows which runtime has the headset ("Connected: ... via
+SteamVR"). Choosing a runtime from the list works as before, and session
+reports now record the runtime and headset (`xr_runtime`).
+
+162 core checks, 11 launcher checks (new: the headset check's line), 82
+Python checks (new: Windows.Gaming.Input and frame generation off and back,
+older backups restoring, the runtime order and what is never started, the
+game's queue among several, the queue wait's failures, the warning for an
+unread controller, the report of a session that ends before VR, the console
+log) and the GPU test pass. Run without a headset, a session that found no
+headset in Virtual Desktop wrote its console log and its report. Not yet
+seen: the menus over Steam Link with this build (your headset), and a Steam
+Frame or PSVR2 session. No VR protocol change: only the launcher and the
+Python tools changed.
+
+**Preceding build (October 7, sixth build): smooth turning.** You asked for a
+smooth turning option. Settings > SPIDY VR has a new row under COMFORT,
+**SMOOTH TURN**: OFF (the default, so the right stick snap turns as before),
+or 60, 90, 120, 180 or 240 degrees a second. With it on, holding the right
+stick left or right turns you steadily instead of in steps: the further you
+tilt it, the faster, up to the chosen speed from nine tenths of the way, and
+nothing inside the stick's first fifth. You turn about your head, as with a
+snap turn, and Spider-Man's body turns along with you. A game hitch does not
+stop a turn you are making, but a stick still held when you come back from a
+menu turns nothing until you let it go. The launcher's options have a
+matching "Smooth turn" list, `Launch Spidy VR.cmd` takes `-SmoothTurn 120`,
+and the next session starts with whatever you left it at in the headset.
+Turning also no longer counts as moving your arms for punches: a fist held
+out while you turn sweeps through the world at up to 2.5 m/s at 240°/s,
+faster than a punch, and it could have knocked a thug over; snap turns had
+the same flaw for one frame each. Now the punch measure turns with you and
+counts only what your arm does. 162 core checks (new: smooth turning's speed
+by tilt and its pivot at the head, a stutter going on turning and a held stick
+waiting after a break, turning with a still arm being no punch while a punch
+during a turn still is, the new row and its steps), 10 launcher checks, 72
+Python checks and the GPU test pass. How smooth turning feels, and the speeds
+being right in a headset, need the headset. This build changes the VR
+protocol (the XR config and the XR data each have a new version), so it runs
+only as a whole package. Details: [docs/VALIDATION.md](VALIDATION.md).
+
+**Preceding build (October 7, fifth build): no more sudden dives in midair.** You
 reported being pulled down fast in the air, out of nowhere, as if diving. It
 was the game's own fall: while Spidy flies you, the game's airborne state
 keeps counting the time you have been in the air, and whenever Spidy let go of

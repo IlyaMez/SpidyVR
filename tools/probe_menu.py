@@ -6,8 +6,9 @@ It needs a started game with a loaded save (tools/probe_menu_pad.py start, then 
 Settings have not been opened yet (the game reopens them on the tab last used), and the game window in front. It starts the tab's hooks with test values (SpidyMenuStart: swing speed 33 m/s, which the tab shows
 as its nearest step, 32; the web shooter off), pauses with Spidy's virtual Xbox controller, moving with its left stick
 as the Touch controllers do, opens Settings, goes Up to SPIDY VR (the list wraps) and opens it. Then it switches the aim markers off, steps the swing speed up (from 32 one step
-is 40), switches the body off and puts it back with X (RESET), steps snap turn up, and resets the whole tab with Y
-(RESET ALL, confirmed with A): Spidy's defaults, the web shooter on again. After each step it reads what the tab holds
+is 40), switches the body off and puts it back with X (RESET), steps snap turn up, switches smooth turning on (its
+first speed, 60 degrees a second), and resets the whole tab with Y (RESET ALL, confirmed with A): Spidy's defaults,
+the web shooter on again. After each step it reads what the tab holds
 (SpidyMenuSample) and saves a window capture in reports/menu-probe/. Last it backs out to the game, stops the hooks
 (SpidyMenuStop) and checks that each hooked function starts with the game's own bytes again. Writes
 reports/menu-probe.json; exits 1 when a step did not do what it should.
@@ -40,21 +41,22 @@ FLAGS = dict(web_grab=1, punch=2, body=4, air_webs=8, web_shooter=16, aim_marker
 STICK = dict(up=(0, 32767), down=(0, -32767), left=(-32767, 0), right=(32767, 0))
 
 
-def settings_payload(flags, snap_turn, haptics, screen_size, swing_speed):
-    return struct.pack('<7If', MAGIC, 1, 32, flags, snap_turn, haptics, screen_size, swing_speed)
+def settings_payload(flags, snap_turn, haptics, screen_size, swing_speed, smooth_turn=0):
+    return struct.pack('<7IfI', MAGIC, 2, 36, flags, snap_turn, haptics, screen_size, swing_speed, smooth_turn)
 
 
 def sample(game, process, exports):
-    remote = pad.call_with_output(game, process, exports['SpidyMenuSample'], b'', 56)
+    remote = pad.call_with_output(game, process, exports['SpidyMenuSample'], b'', 64)
     code, raw = remote
-    if code or len(raw) != 56:
+    if code or len(raw) != 64:
         raise RuntimeError(f'SpidyMenuSample: {code}')
-    magic, version, size, installed, tabs, changes, status, flags, snap, haptics, screen, speed = \
-        struct.unpack('<4I2Q5If', raw)
-    if (magic, version, size) != (MAGIC, 1, 56):
+    magic, version, size, installed, tabs, changes, status, flags, snap, haptics, screen, speed, smooth, _ = \
+        struct.unpack('<4I2Q5If2I', raw)
+    if (magic, version, size) != (MAGIC, 2, 64):
         raise RuntimeError('Menu protocol mismatch: rebuild and restart the game')
     values = {name: bool(flags & bit) for name, bit in FLAGS.items()}
-    values.update(snap_turn=snap, haptics=haptics, screen_size=screen, swing_speed=round(speed, 1))
+    values.update(snap_turn=snap, smooth_turn=smooth, haptics=haptics, screen_size=screen,
+                  swing_speed=round(speed, 1))
     return dict(installed=bool(installed), tabs=tabs, changes=changes, status=status, values=values)
 
 
@@ -139,11 +141,16 @@ def main():
         press('down', 'down')
         press('right', wait=.8)
         step('snap_turn_45', dict(snap_turn=45), changes=5)
+        press('down')
+        press('right', wait=.8)
+        step('smooth_turn_60', dict(smooth_turn=60, snap_turn=45), changes=6)
         press('y', wait=1.2)
         step('reset_all_asks')
         press('a', wait=1.2)
-        # Spidy's defaults: four settings changed back (aim markers, swing speed, snap turn, the web shooter).
-        step('reset_all', dict(aim_markers=True, swing_speed=32.0, snap_turn=30, web_shooter=True, body=True), changes=9)
+        # Spidy's defaults: five settings changed back (aim markers, swing speed, snap turn, smooth turn, the web
+        # shooter).
+        step('reset_all', dict(aim_markers=True, swing_speed=32.0, snap_turn=30, smooth_turn=0, web_shooter=True,
+                               body=True), changes=11)
         press('b', wait=.8)
         press('b', wait=.8)
         press('b', wait=1.5)

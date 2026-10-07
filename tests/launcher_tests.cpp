@@ -69,6 +69,25 @@ int main() {
               "Oculus");
         check(runtimeLabel(R"(C:\elsewhere\runtime.json)").empty(), "unknown");
     });
+    test("the headset check names the headset and the runtime it was found in", [] {
+        const char* probe = "Headset available: Oculus Quest3; position tracking=1; orientation tracking=1. No session "
+                            "was started.\r\nRecommended eye 0: 3072x3264\r\nRecommended eye 1: 3072x3264\r\n";
+        check(headsetSummary(probe, true) == "Connected: Oculus Quest3 - 3072x3264 per eye", "one runtime's probe");
+        const std::string detect = std::string("Looking for the headset in Virtual Desktop...\nLooking for the headset "
+                                               "in SteamVR...\nVR runtime: SteamVR (C:\\SteamVR\\steamxr_win64.json), "
+                                               "found automatically.\n") + probe;
+        check(headsetSummary(detect, true) == "Connected: Oculus Quest3 via SteamVR - 3072x3264 per eye", "detected");
+        check(headsetSummary("Headset unavailable: XR_ERROR_FORM_FACTOR_UNAVAILABLE (-35).\n", false) ==
+                  "Not found. Put the headset on and connect it (Headset unavailable: XR_ERROR_FORM_FACTOR_UNAVAILABLE "
+                  "(-35).).",
+              "the probe's reason");
+        check(headsetSummary("Looking for the headset in Virtual Desktop...\nNo headset found (Virtual Desktop: x).\n",
+                             false) == "Not found. Put the headset on and connect it (No headset found (Virtual Desktop: "
+                                       "x).).",
+              "detection's reason, not its progress");
+        check(headsetSummary("", false) == "Not found. Put the headset on and connect it.", "nothing said");
+        check(headsetSummary("", true) == "Headset available.", "found, nothing said");
+    });
     test("arguments survive Windows command-line quoting", [] {
         check(quoteArgument(L"plain") == L"plain", "plain");
         check(quoteArgument(L"") == L"\"\"", "empty");
@@ -93,30 +112,35 @@ int main() {
         check(args == changed, "every flag, speed capped at 65");
         options = {};
         options.snapTurn = 45;
+        options.smoothTurn = 120;
         options.haptics = 0;
         options.screenSize = 7;
         args = sessionArguments(options, L"r.json", L"", L"");
         const std::vector<std::wstring> settings{L"--auto-launch", L"--seconds", L"0", L"--size", L"0",
                                                  L"--swing-speed", L"32", L"--output", L"r.json", L"--snap-turn",
-                                                 L"45", L"--haptics", L"0", L"--screen-size", L"2"};
+                                                 L"45", L"--smooth-turn", L"120", L"--haptics", L"0",
+                                                 L"--screen-size", L"2"};
         check(args == settings, "the VR settings, the screen size capped at large");
     });
     test("what the VR settings were left at in the headset becomes the next session's options", [] {
         SessionOptions options;
         check(headsetSettings("VR settings from the headset: aim_markers=0 web_grab=1 air_webs=0 web_shooter=0 "
-                              "punch=0 body=1 swing_speed=48 snap_turn=45 haptics=50 screen_size=2\r",
+                              "punch=0 body=1 swing_speed=48 snap_turn=45 smooth_turn=90 haptics=50 screen_size=2\r",
                               options),
               "the line changed nothing");
         check(!options.aimMarkers && options.webGrab && !options.airWebs && !options.webShooter && !options.punch &&
-                  options.body && options.swingSpeed == 48 && options.snapTurn == 45 && options.haptics == 50 &&
-                  options.screenSize == 2,
+                  options.body && options.swingSpeed == 48 && options.snapTurn == 45 && options.smoothTurn == 90 &&
+                  options.haptics == 50 && options.screenSize == 2,
               "every value, the last one before a carriage return");
         const auto kept = options;
         check(!headsetSettings("VR settings from the headset: aim_markers=0 punch=0", options) && options == kept,
               "the same values again");
         check(!headsetSettings("Game closed. Session report: r.json", options) && options == kept, "another line");
-        check(headsetSettings("VR settings from the headset: swing_speed=99 snap_turn=x haptics=-4 colour=3", options) &&
-                  options.swingSpeed == 65 && options.snapTurn == 45 && options.haptics == 0,
+        check(headsetSettings("VR settings from the headset: swing_speed=99 snap_turn=x smooth_turn=999 haptics=-4 "
+                              "colour=3",
+                              options) &&
+                  options.swingSpeed == 65 && options.snapTurn == 45 && options.smoothTurn == 360 &&
+                  options.haptics == 0,
               "values outside their ranges, unreadable ones and unknown keys");
     });
     test("log lines are coloured by what they say", [] {

@@ -424,7 +424,7 @@ bool matches(uintptr_t at, const unsigned char* bytes, size_t count) {
     }
 }
 vr_settings::Values copyItems(const vr_settings::Values& from, vr_settings::Values to, uint32_t which) {
-    for (unsigned i = 1; i <= static_cast<unsigned>(Item::screenSize); ++i)
+    for (unsigned i = 1; i <= static_cast<unsigned>(vr_settings::lastItem); ++i)
         if (which & (1u << i))
             vr_settings::choose(static_cast<Item>(i), vr_settings::choice(static_cast<Item>(i), from), to);
     return to;
@@ -498,18 +498,20 @@ namespace {
 // The settings as XrData reports them: flags 1 web grab, 2 punch, 4 body,
 // 8 webs in open air, 16 web shooter, 32 aim markers.
 struct ProbeSettings {
-    uint32_t magic = 0x554e4d53, version = 1, bytes = sizeof(ProbeSettings), flags{};
+    uint32_t magic = 0x554e4d53, version = 2, bytes = sizeof(ProbeSettings), flags{};
     uint32_t snapTurn{}, haptics{}, screenSize{};
     float swingSpeed{};
+    uint32_t smoothTurn{};
 };
-static_assert(sizeof(ProbeSettings) == 32);
+static_assert(sizeof(ProbeSettings) == 36);
 struct ProbeSample {
-    uint32_t magic = 0x554e4d53, version = 1, bytes = sizeof(ProbeSample), installed{};
+    uint32_t magic = 0x554e4d53, version = 2, bytes = sizeof(ProbeSample), installed{};
     uint64_t tabs{}, changes{};
     uint32_t status{}, flags{}, snapTurn{}, haptics{}, screenSize{};
     float swingSpeed{};
+    uint32_t smoothTurn{}, reserved{};
 };
-static_assert(sizeof(ProbeSample) == 56);
+static_assert(sizeof(ProbeSample) == 64);
 } // namespace
 extern "C" __declspec(dllexport) DWORD WINAPI SpidyMenuStart(void* input) {
     ProbeSettings s;
@@ -531,6 +533,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMenuStart(void* input) {
     v.webShooter = s.flags & 16;
     v.aimMarkers = s.flags & 32;
     v.snapTurn = static_cast<int>(s.snapTurn);
+    v.smoothTurn = static_cast<int>(s.smoothTurn);
     v.haptics = static_cast<int>(s.haptics);
     v.screenSize = static_cast<int>(s.screenSize);
     v.swingSpeed = s.swingSpeed;
@@ -552,6 +555,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMenuSample(void* output) {
     s.flags = (v.webGrab ? 1u : 0u) | (v.punch ? 2u : 0u) | (v.body ? 4u : 0u) | (v.airWebs ? 8u : 0u) |
               (v.webShooter ? 16u : 0u) | (v.aimMarkers ? 32u : 0u);
     s.snapTurn = static_cast<uint32_t>(v.snapTurn);
+    s.smoothTurn = static_cast<uint32_t>(v.smoothTurn);
     s.haptics = static_cast<uint32_t>(v.haptics);
     s.screenSize = static_cast<uint32_t>(v.screenSize);
     s.swingSpeed = v.swingSpeed;

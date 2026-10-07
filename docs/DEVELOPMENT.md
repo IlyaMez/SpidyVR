@@ -18,12 +18,19 @@ start it checks the PC and shows what it finds:
   *Change...*. It compares `Spider-Man.exe` with the supported build's SHA-256
   (read from `tools/inspect_game.py`) and explains when the copy is another
   build or the Epic Games Store version.
-- **The VR runtime:** every registered OpenXR runtime. Virtual Desktop is
-  chosen when installed (the tested one), else Windows' active runtime. The
-  choice reaches both the headset check and the game's XR worker, which used
-  to open Virtual Desktop's runtime only (`XrConfig` version 7 carries the
-  manifest path).
-- **The headset:** *Check* runs `spidy_headset_probe.exe` against that runtime.
+- **The VR runtime:** every registered OpenXR runtime, after *Automatic* (the
+  default since October 7; `xr_runtime=auto` in `launcher.ini`, which replaced
+  `runtime=`, so every earlier install starts on Automatic). Automatic leaves
+  the choice to each session: `xr_runtime.detect` asks Virtual Desktop (asking
+  it starts nothing), then SteamVR if `vrserver.exe` runs and Meta Quest Link
+  if `OVRServer_x64.exe` runs, then Windows' active runtime, and takes the first
+  with a headset; a runtime that is not running and not active is named, never
+  started (asking SteamVR starts it). A chosen runtime reaches both the headset
+  check and the game's XR worker (`XrConfig` version 7 carries the manifest
+  path); reports record the session's in `xr_runtime`.
+- **The headset:** *Check* runs `spidy_headset_probe.exe` against the chosen
+  runtime, or on Automatic `tools\xr_runtime.py --detect`, and shows the
+  headset and the runtime that has it.
 - **The Visual C++ runtime:** 14.40 or newer, which the modules need. *Install*
   downloads Microsoft's installer, runs it only if Microsoft signed it, and
   checks again. The launcher itself is linked statically and needs nothing.
@@ -260,9 +267,13 @@ button), choose Settings, then **SPIDY VR**, after KEY MAPPING (Up from GAME
 reaches it; the list wraps). The game builds and draws it with its own option
 code, so it handles like its other tabs: switch the aim markers, web grabbing,
 webs in open air, the web shooter, your body and punching, or step the swing
-speed limit, snap turn, controller vibration and the game screen's size with
-left and right; X resets a setting, Y the whole tab (to Spidy's defaults).
-Changes apply at once; Spidy Launcher starts your next session with them.
+speed limit, snap turn, smooth turn, controller vibration and the game
+screen's size with left and right; X resets a setting, Y the whole tab (to
+Spidy's defaults). Changes apply at once; Spidy Launcher starts your next
+session with them. Smooth turn (off by default) replaces snap turning while it
+is on: the right stick turns you about your head at up to the chosen degrees a
+second, in proportion to its tilt past a 0.2 dead zone (full from 0.9)
+(`GameTrackingRig::smoothTurn`).
 `src/game_menu.cpp` adds the tab when the pause menu's Settings hand their tabs
 to Flash and answers the game's questions about its rows (setting numbers from
 0x200, past the game's 123), so the game's own settings and its settings file
@@ -315,6 +326,25 @@ back the next time it starts the game, or run `python tools\vr_display.py
 --restore` after closing the game. A game that is already running keeps its
 size. Add `-FullDesktopView` to start the game with your own settings.
 
+Whatever the window, a game the launcher starts also runs without frame
+generation (`Graphics\DLSSG` and `FrameGen` 0, where the game saved them) and
+without Windows.Gaming.Input (`Input\EnableWindowsGamingInput` 0, created if
+missing and deleted again afterwards); the backup's `session` entry holds the
+values to put back. Under SteamVR the game finds Steam's virtual gamepads
+(Valve 28de:11ff) through Windows.Gaming.Input, then turns XInput off, and
+`game_pad.cpp` serves the VR controllers through XInput: in the Steam Link
+session of October 7 the game never read it (`pad_reads` 0) and its menus did
+not move. At 0 the game skips Windows.Gaming.Input (`1d14bf0` reads the
+setting, `1d14c89` jumps past its setup). A session whose game screen ignores
+held buttons for 5 s says so (`pad_ignored`).
+
+Each session writes its console to `reports\game-vr-<time>-console.log`, and a
+session that ends before VR starts writes `game-vr-<time>.json` with the
+`stage` it reached, the `error`, `xr_runtime`, `queue_search` (why each look
+for the game's queue failed), the game's log copy and `game_modules` (overlays
+and capture tools loaded into the game). The October 7 Steam Frame player's
+folder had neither: the launcher had stopped looking for the queue.
+
 The session has no 20-second cutoff. Close the game normally, or press Ctrl+C
 in the launcher console to stop VR and restore the hooks. Keep that console
 running during play. A second launcher is rejected instead of attaching twice.
@@ -348,6 +378,7 @@ reattaching after a stopped session or a rebuilt DLL.
 |---|---|
 | `-SwingSpeed 32` | Swing speed limit in m/s (1-65) |
 | `-SnapTurn 30` | Snap turn angle in degrees; 0 turns it off |
+| `-SmoothTurn 120` | Smooth turning in degrees a second at full tilt, instead of snap turning (0-360; 0, the default, snap turns) |
 | `-Haptics 100` | Controller vibration in percent; 0 turns it off |
 | `-ScreenSize Medium` | Size of the game screen in the headset: Small, Medium or Large |
 | `-Size 2048` | Square eye resolution instead of the runtime's recommendation |
@@ -361,7 +392,7 @@ reattaching after a stopped session or a rebuilt DLL.
 | `-FullDesktopView` | Start the game with your own window settings, not the small VR window |
 | `-StockMonitorView` | Keep the stock camera on the monitor (culling and shading follow it, not your head) |
 | `-NoEyeOcclusion` | Turn off the eyes' occlusion culling, for comparison |
-| `-XrRuntime <manifest>` | Use this OpenXR runtime manifest |
+| `-XrRuntime <manifest>` | Use this OpenXR runtime manifest instead of the one the headset is connected to |
 | `-AttachOnly` | Attach to a game that is already running instead of starting it |
 | `-Seconds 20` | A timed test that stops after 2-25 seconds |
 | `-CaptureImages` | Save eye images (costs readback time) |
@@ -567,7 +598,8 @@ still requires a running game or headset.
 | `tools/inspect_game.py`, `tools/discover_render_types.py` | Offline game research |
 | `src/game_observer.cpp`, `tools/observe_game.py` | Opt-in native camera callback diagnostic |
 | `tools/game_driver.mjs` | Observed game launch, screenshots, and input workflow |
-| `tools/vr_display.py` | Small desktop window for VR launches; restores the game's window settings |
+| `tools/vr_display.py` | Small desktop window, no frame generation and no Windows.Gaming.Input for VR launches; restores the game's settings |
+| `tools/xr_runtime.py` | The OpenXR runtimes, and the one a headset is connected to (`--detect`) |
 | `docs/MILESTONE-1.md` | In-game acceptance criteria and remaining integration work |
 | `docs/REFERENCE.md` | Reference mechanics, executable evidence, source attribution |
 

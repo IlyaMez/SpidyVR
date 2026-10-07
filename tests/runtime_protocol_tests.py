@@ -65,6 +65,70 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'Virtual Desktop'):
             xr_runtime.choose(None,lambda: (None,[]),pathlib.Path(self.folder.name)/'none.json')
 
+    def asker(self,has_headset,asked):
+        """A headset probe that finds the headset only in the runtime named `has_headset`."""
+        def ask(manifest):
+            name=xr_runtime.name(manifest)
+            asked.append(name)
+            if name==has_headset:
+                return True,'Headset available: Test HMD; position tracking=1; orientation tracking=1.\nRecommended eye 0: 2528x2704'
+            return False,'Headset unavailable: XR_ERROR_FORM_FACTOR_UNAVAILABLE (-35).'
+        return ask
+
+    def test_detection_finds_the_runtime_the_headset_is_connected_to(self):
+        # Quest over Steam Link, PSVR2, Steam Frame: SteamVR runs; Virtual Desktop is asked first (it starts
+        # nothing), then the running SteamVR. Meta's service runs whenever its app is installed.
+        listing=lambda: (str(self.oculus),[str(self.steamvr),str(self.vd)])
+        asked=[]
+        manifest,said=xr_runtime.detect(listing,self.vd,self.asker('SteamVR',asked),{'vrserver.exe','ovrserver_x64.exe'})
+        self.assertEqual((manifest,asked),(self.steamvr,['Virtual Desktop','SteamVR']))
+        self.assertIn('Test HMD',said)
+        # Virtual Desktop with the headset wins over a SteamVR that also runs.
+        asked.clear()
+        self.assertEqual(xr_runtime.detect(listing,self.vd,self.asker('Virtual Desktop',asked),{'vrserver.exe'})[0],self.vd)
+        self.assertEqual(asked,['Virtual Desktop'])
+
+    def test_detection_starts_no_runtime_but_windows_active_one(self):
+        # SteamVR not running and not active: asking it would start it, so it is named instead.
+        listing=lambda: (str(self.oculus),[str(self.steamvr)])
+        asked=[]
+        with self.assertRaisesRegex(RuntimeError,r'No headset found \(Virtual Desktop: Headset unavailable.*; Meta Quest '
+                                                 r'Link: Headset unavailable.*\)\. Not asked, since they are not '
+                                                 r'running: SteamVR\.'):
+            xr_runtime.detect(listing,self.vd,self.asker(None,asked),{'ovrserver_x64.exe'})
+        self.assertEqual(asked,['Virtual Desktop','Meta Quest Link'])
+        # Windows' active runtime is asked last whether it runs or not (the PSVR2 player who has not
+        # started SteamVR yet).
+        asked.clear()
+        manifest,_=xr_runtime.detect(lambda: (str(self.steamvr),[str(self.oculus)]),self.vd,
+                                     self.asker('SteamVR',asked),set())
+        self.assertEqual((manifest,asked),(self.steamvr,['Virtual Desktop','SteamVR']))
+        # Asking it started SteamVR: its headset may show up a few seconds later.
+        asked.clear()
+        late=self.asker('SteamVR',asked)
+        answers=iter([(False,'Headset unavailable: XR_ERROR_FORM_FACTOR_UNAVAILABLE (-35).')]*2)
+        ask=lambda manifest: next(answers,None) or late(manifest) if xr_runtime.name(manifest)=='SteamVR' else late(manifest)
+        with unittest.mock.patch.object(xr_runtime.time,'sleep') as sleep:
+            manifest,_=xr_runtime.detect(lambda: (str(self.steamvr),[]),self.vd,ask,set())
+        self.assertEqual((manifest,asked,sleep.call_count),(self.steamvr,['Virtual Desktop','SteamVR'],2))
+        with self.assertRaisesRegex(RuntimeError,'Virtual Desktop'):
+            xr_runtime.detect(lambda: (None,[]),pathlib.Path(self.folder.name)/'none.json',self.asker(None,[]),set())
+        with self.assertRaisesRegex(RuntimeError,'Build the headset probe first'):
+            xr_runtime.probe(self.vd,program=pathlib.Path(self.folder.name)/'missing.exe')
+
+    def test_preflight_reports_the_runtime_it_used(self):
+        detected=(self.steamvr,'Headset available: Test HMD; position tracking=1.\nRecommended eye 0: 2528x2704')
+        with unittest.mock.patch.object(xr_runtime,'detect',return_value=detected) as detect, \
+             unittest.mock.patch('builtins.print'):
+            manifest,runtime=run_game_vr.preflight('auto')
+        detect.assert_called_once()
+        self.assertEqual((manifest,runtime),(self.steamvr,dict(name='SteamVR',manifest=str(self.steamvr),automatic=True,
+                                                              headset='Test HMD')))
+        with unittest.mock.patch.object(xr_runtime,'probe',return_value=(False,'Headset unavailable: x.')), \
+             unittest.mock.patch('builtins.print'):
+            with self.assertRaisesRegex(RuntimeError,'Headset unavailable: x. Connect your headset in Meta Quest Link'):
+                run_game_vr.preflight(str(self.oculus))
+
     def test_xr_config_v7_carries_the_manifest_null_terminated(self):
         packed=run_game_vr.runtime_path(r'C:\Program Files\Virtual Desktop Streamer\OpenXR\virtualdesktop-openxr.json')
         self.assertEqual(len(packed),520)

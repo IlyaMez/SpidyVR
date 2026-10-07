@@ -11,8 +11,9 @@ WHAT YOU NEED
 - Marvel's Spider-Man Remastered on Steam. Spidy works with the Steam version
   only; the Epic Games Store version is a different build.
 - A PC VR headset and its OpenXR runtime. Spidy has been played on a Quest 3
-  through Virtual Desktop (https://www.vrdesktop.net/). SteamVR and Meta Quest
-  Link should work too, but nobody has tested them yet.
+  through Virtual Desktop (https://www.vrdesktop.net/) and through SteamVR
+  (Steam Link). Other SteamVR headsets and Meta Quest Link should work too.
+  The launcher finds the runtime your headset is connected to.
 - About 19 GB of memory Windows can give programs (RAM plus page file). The
   launcher shows how much you have.
 
@@ -36,7 +37,7 @@ PLAY
 ----
 1. Close the game if it is running.
 2. Put on the headset and connect it to the PC (Quest 3: open Virtual Desktop
-   and connect).
+   and connect, or Steam Link; SteamVR headsets: start SteamVR).
 3. Press START VR. Steam starts the game. Its intro and menus show on a screen
    in the headset; pick your save with the VR controllers. VR takes over as
    soon as you play.
@@ -47,6 +48,11 @@ picture, click the game window once.
 
 Press STOP VR, or close the game, to end the session. Each session leaves a
 report in the "reports" folder; send it along when you report a problem.
+
+For VR the launcher starts the game with a small desktop window, without
+frame generation, and with the game's Windows.Gaming.Input off (under
+SteamVR it would take the controllers away from Spidy). Your settings come
+back when the game closes.
 
 
 CONTROLS
@@ -89,7 +95,9 @@ Your body and fists
 Moving
   Left stick ........... walk and run
   Right stick .......... flick left or right to turn (30 degrees; SPIDY VR
-                         in Settings sets how far, or turns it off)
+                         in Settings sets how far, or turns it off). With
+                         SMOOTH TURN on, hold it to turn steadily instead:
+                         the further you tilt it, the faster
   A .................... jump
   B .................... interact: the game's Y (backpacks, doors, prompts;
                          web strike in a fight)
@@ -110,9 +118,9 @@ VR settings
   Switch the aim markers, catching props and thugs, webs holding in open air
   (a web that meets nothing within 100 m holds there; off, it misses), the
   web shooter, your own body and punching on or off, or step the swing speed
-  limit, snap turn, controller vibration and the game screen's size. Changes
-  apply at once. The launcher starts your next session with them; its
-  options show them too.
+  limit, snap turn, smooth turn, controller vibration and the game screen's
+  size. Changes apply at once. The launcher starts your next session with
+  them; its options show them too.
   The title screen's Options have no SPIDY VR tab: load your save first, or
   set them in the launcher.
 
@@ -122,8 +130,16 @@ IF SOMETHING IS WRONG
 - "This game version is not supported": the game was updated, or it is not
   the Steam version. Spidy reads the game's code at fixed places, so a game
   update needs a Spidy update.
-- The headset is not found: connect it first, check the VR runtime chosen in
-  the launcher, and press Check.
+- The headset is not found: connect it first (SteamVR headsets: start
+  SteamVR), then press Check in the launcher. On Automatic it shows which VR
+  runtime has your headset; if it picks the wrong one, choose yours in the
+  list.
+- VR does not start and the game stays flat: send the whole "reports"
+  folder. The newest game-vr-...-console.log holds everything the launcher
+  showed, and the report beside it says where it stopped.
+- The game's menus ignore the VR controllers: keep the game window in front
+  on the desktop, and start the game from the launcher with the game closed
+  (the launcher turns off what lets SteamVR's virtual gamepads take over).
 - The picture breaks up: start the game from the launcher with the game
   closed. Attached to a game that is already running, Spidy cannot give it
   the larger render memory VR needs.
@@ -143,6 +159,9 @@ IF SOMETHING IS WRONG
   reeling.
 - Snap turning makes you uneasy, or the vibration is too strong: Settings >
   SPIDY VR has both.
+- You would rather turn smoothly than in steps: SMOOTH TURN in Settings >
+  SPIDY VR (or "Smooth turn" in the launcher's options). If it makes you
+  uneasy, try a slower speed, or OFF for snap turning again.
 - The menu screen is too small or too large: "Game screen size" in Settings
   > SPIDY VR.
 - The game asks for Y (Triangle) to interact: in VR that is B.

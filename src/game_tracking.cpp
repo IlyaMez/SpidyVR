@@ -62,9 +62,10 @@ Input trackedSwingInput(const XrFrame& f, const Rig& rig) {
     return input;
 }
 void GameTrackingRig::reset() {
-    const float snap = snap_;
+    const float snap = snap_, smooth = smooth_;
     *this = {};
     snap_ = snap;
+    smooth_ = smooth;
 }
 GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameForward, bool gameplay) {
     GameMotionFrame out;
@@ -101,14 +102,23 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
             rig_.preserveHead(lastHead_, f.head);
     }
     const float turn = handValid(f.hands[1]) ? f.hands[1].stickX : 0;
+    // A stick held into play turns nothing until it is let go: out of a menu,
+    // or through a stutter after a snap it already made. A smooth turn goes
+    // on through a stutter.
     if (resumed)
-        snapHeld_ = std::abs(turn) > .3f;
-    if (std::abs(turn) > .7f && !snapHeld_ && snap_ > 0) {
+        turnHeld_ = std::abs(turn) > .3f && (smooth_ <= 0 || longBreak);
+    if (smooth_ > 0) {
+        // Past the dead zone, as fast as the stick is tilted; full speed
+        // from 0.9.
+        const float tilt = std::clamp((std::abs(turn) - .2f) / .7f, 0.f, 1.f);
+        if (tilt > 0 && !turnHeld_)
+            rig_.turn(std::copysign(smooth_ * tilt * f.seconds, -turn), f.head.position);
+    } else if (std::abs(turn) > .7f && !turnHeld_ && snap_ > 0) {
         rig_.turn(turn > 0 ? -snap_ : snap_, f.head.position);
-        snapHeld_ = true;
+        turnHeld_ = true;
     }
     if (std::abs(turn) < .3f)
-        snapHeld_ = false;
+        turnHeld_ = false;
     out.active = true;
     out.releaseWebs = longBreak || pendingRecenter_;
     pendingRecenter_ = false;

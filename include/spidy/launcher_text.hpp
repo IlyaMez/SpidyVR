@@ -116,6 +116,41 @@ inline std::string runtimeLabel(std::string_view manifest) {
     return {};
 }
 
+// The headset check's line, from spidy_headset_probe.exe's output or from
+// tools/xr_runtime.py --detect's, which names the runtime it found the headset
+// in and the runtimes it asked first. `found`: the program said so (exit 0).
+inline std::string headsetSummary(std::string_view output, bool found) {
+    const auto starts = [](std::string_view line, std::string_view prefix) {
+        return line.substr(0, prefix.size()) == prefix;
+    };
+    std::string runtime, headset, eye, last;
+    while (!output.empty()) {
+        const size_t end = output.find('\n');
+        std::string_view line = output.substr(0, end);
+        output = end == std::string_view::npos ? std::string_view() : output.substr(end + 1);
+        while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back())))
+            line.remove_suffix(1);
+        while (!line.empty() && std::isspace(static_cast<unsigned char>(line.front())))
+            line.remove_prefix(1);
+        if (line.empty() || starts(line, "Looking for the headset in ") || starts(line, "Waiting for "))
+            continue;
+        if (starts(line, "VR runtime: "))
+            runtime = std::string(line.substr(12, line.find(" (") - 12));
+        else if (starts(line, "Headset available: "))
+            headset = std::string(line.substr(19, line.find(';') - 19));
+        else if (starts(line, "Recommended eye 0: "))
+            eye = std::string(line.substr(19));
+        else
+            last = std::string(line);
+    }
+    if (!found)
+        return "Not found. Put the headset on and connect it" + (last.empty() ? std::string(".") : " (" + last + ").");
+    std::string summary = headset.empty() ? "Headset available" : "Connected: " + headset;
+    if (!runtime.empty())
+        summary += " via " + runtime;
+    return eye.empty() ? summary + "." : summary + " - " + eye + " per eye";
+}
+
 // Quotes one argument so CommandLineToArgvW (and Python) read it back unchanged.
 inline std::wstring quoteArgument(std::wstring_view argument) {
     if (!argument.empty() && argument.find_first_of(L" \t\n\v\"") == std::wstring_view::npos)
@@ -156,6 +191,7 @@ struct SessionOptions {
     int snapTurn = 30;  // degrees per flick of the right stick; 0: no snap turning
     int haptics = 100;  // controller vibration, percent
     int screenSize = 1; // the game screen in the headset: 0 small, 1 medium, 2 large
+    int smoothTurn = 0; // degrees a second the right stick turns you while held over; 0: it snap turns
     bool operator==(const SessionOptions&) const = default;
 };
 
@@ -187,6 +223,7 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
     // The game's Settings offer these too (SPIDY VR); the defaults go unsaid.
     const std::pair<int, std::pair<const wchar_t*, int>> settings[] = {
         {std::clamp(options.snapTurn, 0, 90), {L"--snap-turn", 30}},
+        {std::clamp(options.smoothTurn, 0, 360), {L"--smooth-turn", 0}},
         {std::clamp(options.haptics, 0, 100), {L"--haptics", 100}},
         {std::clamp(options.screenSize, 0, 2), {L"--screen-size", 1}}};
     for (const auto& [value, flag] : settings)
@@ -247,6 +284,8 @@ inline bool headsetSettings(std::string_view line, SessionOptions& options) {
             next.swingSpeed = std::clamp(number, 10, 65);
         else if (key == "snap_turn")
             next.snapTurn = std::clamp(number, 0, 90);
+        else if (key == "smooth_turn")
+            next.smoothTurn = std::clamp(number, 0, 360);
         else if (key == "haptics")
             next.haptics = std::clamp(number, 0, 100);
         else if (key == "screen_size")

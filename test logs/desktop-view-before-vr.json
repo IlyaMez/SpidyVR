@@ -1,0 +1,14 @@
+{
+  "key": "Software\\Insomniac Games\\Marvel's Spider-Man Remastered\\Graphics",
+  "values": {
+    "Fullscreen": 1,
+    "ExclusiveFullscreen": 0,
+    "WindowMaximized": 0,
+    "WindowLeft": 320,
+    "WindowTop": 180,
+    "WindowWidth": 1920,
+    "WindowHeight": 1080,
+    "UserWindowWidth": 1920,
+    "UserWindowHeight": 1080
+  }
+}

@@ -82,6 +82,19 @@ def find_game():
     if len(matches) != 1: raise RuntimeError('More than one Spider-Man process exists; close the extra instance.')
     return matches[0]
 
+def running_programs():
+    """Lower-case file names of the processes running now (a VR runtime's service among them)."""
+    handle = checked_snapshot(2, 0)
+    entry = ProcessEntry(); entry.size = c.sizeof(entry)
+    names = set()
+    try:
+        ok = first_process(handle, c.byref(entry))
+        while ok:
+            names.add(entry.name.lower())
+            ok = next_process(handle, c.byref(entry))
+    finally: close(handle)
+    return names
+
 class Game:
     def __init__(self, pid):
         self.pid = pid

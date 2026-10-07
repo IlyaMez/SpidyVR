@@ -17,12 +17,16 @@ struct Values {
     int screenSize = 1;    // the game screen: 0 small, 1 medium, 2 large
     bool airWebs = true;   // a web that meets nothing within reach holds in open air there
     bool webShooter = true; // a free hand's trigger shoots web balls
+    // Degrees a second the right stick turns you while held over; 0: it snap
+    // turns instead.
+    int smoothTurn = 0;
     bool operator==(const Values&) const = default;
 };
 // The steps the game's Settings offer. The launcher's slider sets any swing
 // speed; the Settings show the step nearest to it.
 inline constexpr int swingSpeeds[] = {10, 15, 20, 25, 32, 40, 48, 56, 65};
 inline constexpr int snapTurns[] = {0, 15, 30, 45, 60, 90};
+inline constexpr int smoothTurns[] = {0, 60, 90, 120, 180, 240};
 inline constexpr int hapticLevels[] = {0, 25, 50, 75, 100};
 // The game screen's width for each size, metres, at screenDistance.
 inline constexpr float screenWidths[] = {2.4f, 3.2f, 4.2f};
@@ -33,7 +37,8 @@ inline float screenWidth(int size) {
 // (presentation_gate's screenAhead).
 inline constexpr float screenDistance = 2.5f;
 // The values within the session's ranges: swing speed 1-65 m/s (what
-// run_game_vr.py accepts), snap turn 0-90 degrees, vibration 0-100%.
+// run_game_vr.py accepts), snap turn 0-90 degrees, smooth turn 0-360 degrees
+// a second, vibration 0-100%.
 Values sanitized(Values);
 
 enum class Item : uint8_t {
@@ -48,7 +53,9 @@ enum class Item : uint8_t {
     snapTurn,
     haptics,
     screenSize,
+    smoothTurn,
 };
+inline constexpr Item lastItem = Item::smoothTurn;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. A setting without choices is an ON/OFF switch, the game's own;
 // one with choices steps through them. Titles are upper case, as the game's
@@ -59,7 +66,7 @@ struct Row {
     const char* help{};
     std::span<const char* const> choices{};
 };
-const std::array<Row, 13>& rows();
+const std::array<Row, 14>& rows();
 // The choice a setting shows for these values: a switch 0 (off) or 1 (on), a
 // list its step nearest to the value (a launcher value between two steps
 // shows the nearer one, the lower on a tie).

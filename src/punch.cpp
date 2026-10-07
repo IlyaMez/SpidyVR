@@ -99,6 +99,15 @@ PunchEvent Punches::blow(Vec3 direction, float speed) const {
         e.knockback = Knockback::Twitch;
     return e;
 }
+void Punches::turn(float radians) {
+    if (!std::isfinite(radians) || radians == 0)
+        return;
+    const Quat q = Quat::yaw(radians);
+    for (auto& h : hands_) {
+        h.relative = q.rotate(h.relative);
+        h.velocity = q.rotate(h.velocity);
+    }
+}
 void Punches::update(float seconds, const std::array<PunchHand, 2>& in, std::span<const PunchTarget> targets,
                      std::vector<PunchEvent>& out) {
     if (!std::isfinite(seconds) || seconds <= 0)

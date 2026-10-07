@@ -107,7 +107,8 @@ exercises the untimed worker with a bounded external stop.
 
 The launcher checks headset availability before starting the game or injecting.
 It starts the game, waits until the game draws frames (30 frames counted by the
-render memory module, then exactly one direct queue), brings the game window to
+render memory module, then the direct queue the game submits on itself,
+`probe_stereo_gpu.game_queue`), brings the game window to
 the front (the game pauses while another window is), starts the input bridge
 without a player and starts the VR worker, all within about ten seconds of the
 launch. The worker finds the player in-process (`src/game_player.cpp`) and hands
@@ -318,7 +319,8 @@ has Settings fifth): it starts the tab's hooks with test values
 controller, moving with its left stick as the Touch controllers do, opens
 Settings, goes Up to SPIDY VR and opens it, then switches the aim markers off,
 steps the swing speed to 40 m/s, switches the body off and resets it with X,
-steps snap turn to 45 degrees and resets the tab with Y and A. After each step
+steps snap turn to 45 degrees, smooth turn to 60 degrees a second, and resets
+the tab with Y and A. After each step
 it reads `SpidyMenuSample` (what the tab holds, the tabs built, the changes)
 and captures the window. It fails if a step left other values than expected or
 a hooked function does not start with the game's own bytes after

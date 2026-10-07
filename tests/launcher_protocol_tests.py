@@ -11,16 +11,21 @@ import vr_launcher as launcher
 
 
 class FakeRegistry:
-    def __init__(self,values):
+    """The game's keys: `values` is the graphics key, `keys` every key by path."""
+    def __init__(self,values,others=None):
         self.values=dict(values)
+        self.keys={display.KEY:self.values,**{key:dict(v) for key,v in (others or {}).items()}}
         self.writes=[]
 
-    def read(self):
-        return dict(self.values)
+    def read(self,names=display.NAMES,key=display.KEY):
+        return {name:value for name,value in self.keys.get(key,{}).items() if name in names}
 
-    def write(self,values):
+    def write(self,values,key=display.KEY):
         self.writes.append(dict(values))
-        self.values.update(values)
+        stored=self.keys.setdefault(key,{})
+        for name,value in values.items():
+            if value is None: stored.pop(name,None)
+            else: stored[name]=value
 
 
 USER=dict(Fullscreen=1,ExclusiveFullscreen=0,WindowMaximized=0,WindowLeft=0,WindowTop=0,
@@ -61,7 +66,37 @@ class DesktopViewTests(unittest.TestCase):
         display.shrink(registry,self.backup,(3440,1440))
         self.assertIsNone(display.prepare_launch(small=False,registry=registry,backup=self.backup))
         self.assertEqual(registry.values,USER)
+        # The window keeps the user's settings; the session's own still wait to be restored.
+        self.assertEqual(json.loads(self.backup.read_text())['values'],{})
+        self.assertTrue(display.restore(registry,self.backup))
         self.assertFalse(display.pending(self.backup))
+
+    def test_every_session_turns_off_windows_gaming_input_and_frame_generation(self):
+        # The October 7 Steam Link session: Windows.Gaming.Input found SteamVR's virtual gamepads, the game
+        # turned XInput off, and Spidy's controller (XInput) was never read again.
+        graphics={**USER,'DLSSG':1,'FrameGen':2}
+        registry=FakeRegistry(graphics,{display.INPUT_KEY:dict(EnableWindowsGamingInput=1,EnableLibScePad=1)})
+        display.prepare_launch(small=False,registry=registry,backup=self.backup)
+        self.assertEqual(registry.keys[display.INPUT_KEY],dict(EnableWindowsGamingInput=0,EnableLibScePad=1))
+        self.assertEqual((registry.values['DLSSG'],registry.values['FrameGen'],registry.values['Fullscreen']),(0,0,1))
+        self.assertTrue(display.restore(registry,self.backup))
+        self.assertEqual(registry.keys[display.INPUT_KEY],dict(EnableWindowsGamingInput=1,EnableLibScePad=1))
+        self.assertEqual(registry.values,graphics)
+        # A value the game never saved: created for the session, deleted afterwards. Frame generation the
+        # game never saved stays unsaved.
+        fresh=FakeRegistry(USER)
+        self.assertEqual(display.prepare_launch(registry=fresh,backup=self.backup,screen=(1920,1080))['WindowWidth'],960)
+        self.assertEqual(fresh.keys[display.INPUT_KEY],dict(EnableWindowsGamingInput=0))
+        self.assertNotIn('DLSSG',fresh.values)
+        self.assertTrue(display.restore(fresh,self.backup))
+        self.assertEqual((fresh.keys[display.INPUT_KEY],fresh.values),({},USER))
+
+    def test_a_backup_from_before_the_session_settings_still_restores(self):
+        self.backup.parent.mkdir(parents=True)
+        self.backup.write_text(json.dumps(dict(key=display.KEY,values=USER)))
+        registry=FakeRegistry(dict(USER,Fullscreen=0,WindowWidth=960))
+        self.assertTrue(display.restore(registry,self.backup))
+        self.assertEqual(registry.values,USER)
 
     def test_settings_the_game_never_saved_are_not_created(self):
         partial=FakeRegistry(dict(Fullscreen=1,WindowWidth=800,WindowHeight=600))
@@ -73,8 +108,12 @@ class DesktopViewTests(unittest.TestCase):
     def test_unrecognized_backup_is_never_written(self):
         self.backup.parent.mkdir(parents=True)
         registry=FakeRegistry({})
+        session=lambda key,values: dict(key=display.KEY,values={},session=[dict(key=key,values=values)])
         for saved in (dict(key='Other',values=dict(Fullscreen=1)),dict(key=display.KEY,values=dict(Fullscreen=-1)),
-                      dict(key=display.KEY,values=dict(Monitor=1)),dict(key=display.KEY,values=[1])):
+                      dict(key=display.KEY,values=dict(Monitor=1)),dict(key=display.KEY,values=[1]),
+                      session('Other',dict(EnableWindowsGamingInput=1)),session(display.INPUT_KEY,dict(Button_A_1=1)),
+                      session(display.KEY,dict(DLSSG=None)),session(display.INPUT_KEY,dict(EnableWindowsGamingInput=-1)),
+                      dict(key=display.KEY,values={},session={})):
             self.backup.write_text(json.dumps(saved))
             with self.assertRaisesRegex(RuntimeError,'Unrecognized'): display.restore(registry,self.backup)
         self.assertEqual(registry.writes,[])

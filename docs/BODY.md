@@ -20,7 +20,7 @@ The body is the game's own hero model, its joints turned every frame
 | | |
 |---|---|
 | Look down | Spider-Man's body under you: arms to your controllers, legs on the ground |
-| Turn your head | The body follows once you look more than 34 degrees away from it, and drifts after your head meanwhile; a snap turn (right stick) turns it at once |
+| Turn your head | The body follows once you look more than 34 degrees away from it, and drifts after your head meanwhile; a snap turn (right stick) turns it at once, a smooth turn along with you |
 | Crouch, lean | The knees bend and standing feet stay where they were; the torso bends a quarter of the way you pitch your head |
 | Walk around your room | The feet stay put until your hips are 15 cm from over them, then follow |
 | Swing, fall, jump | The legs keep the game's pose (a swing's tuck, a fall's flail) under your upright body |
@@ -109,9 +109,9 @@ frames may be mirrored, so no joint orientation is ever taken as a rotation):
 2. The hips stand upright in the world (the world's up in model space: a hero
    crawling on a wall still gets a standing body), facing the body's yaw. The
    yaw follows the headset past a 0.6 rad dead zone at up to 6 rad/s and
-   drifts toward it at 0.5 per second; a snap turn turns it by as much at
-   once, and a turn of the hero's actor turns it back (it stays put in the
-   world).
+   drifts toward it at 0.5 per second; a snap or smooth turn (right stick)
+   turns it by as much at once, and a turn of the hero's actor turns it back
+   (it stays put in the world).
 3. The spine bends, in equal shares over its joints, toward a torso leaning a
    quarter of the head's pitch (at most 0.5 rad).
 4. The neck takes half of the head's turn to the headset's orientation, the

@@ -4,7 +4,6 @@ import ctypes as c
 from ctypes import wintypes
 import json
 import math
-import os
 import pathlib
 import re
 import struct
@@ -201,18 +200,92 @@ def accepted(result):
                 result.get('game_entries_restored') and result.get('xr_stop') == 0 and result.get('bridge_stop') == 0)
 
 
-def preflight(manifest):
-    probe = ROOT/'build/windows-ninja/spidy_headset_probe.exe'
-    if not probe.is_file():
-        raise RuntimeError('Build the headset probe first')
-    runtime = xr_runtime.name(manifest)
-    print(f'VR runtime: {runtime} ({manifest}).', flush=True)
-    result = subprocess.run([str(probe)], env={**os.environ, 'XR_RUNTIME_JSON': str(manifest)},
-                            capture_output=True, text=True, timeout=10)
-    if result.returncode:
-        raise RuntimeError((result.stderr or result.stdout).strip() +
-                           f' Connect your headset in {runtime} before starting Spidy VR.')
-    print(result.stdout.strip(), flush=True)
+def preflight(requested):
+    """The session's OpenXR runtime, once it has a headset: the one asked for, or by default ('auto') the one
+    the headset is connected to (xr_runtime.detect). No session is started. Returns (manifest, what the
+    report says about it)."""
+    automatic = not requested or str(requested).lower() == 'auto'
+    if not automatic:
+        manifest = xr_runtime.choose(requested)
+        runtime = xr_runtime.name(manifest)
+        print(f'VR runtime: {runtime} ({manifest}).', flush=True)
+        found, said = xr_runtime.probe(manifest)
+        if not found:
+            raise RuntimeError(f'{said} Connect your headset in {runtime} before starting Spidy VR.')
+    else:
+        manifest, said = xr_runtime.detect(say=lambda line: print(line, flush=True))
+        runtime = xr_runtime.name(manifest)
+        print(f'VR runtime: {runtime} ({manifest}), found automatically.', flush=True)
+    print(said, flush=True)
+    headset = next((line[len('Headset available: '):].split(';')[0] for line in said.splitlines()
+                    if line.startswith('Headset available: ')), None)
+    return manifest, dict(name=runtime, manifest=str(manifest), automatic=automatic, headset=headset)
+
+
+class _Echo:
+    """A console stream that writes to the session's console log as well."""
+
+    def __init__(self, stream, log):
+        self.stream, self.log = stream, log
+
+    def write(self, text):
+        if self.stream:
+            self.stream.write(text)
+        try:
+            self.log.write(text)
+            self.log.flush()
+        except (OSError, ValueError):
+            pass  # a full disk must not end the session
+        return len(text)
+
+    def flush(self):
+        if self.stream:
+            self.stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
+def keep_console(report):
+    """Everything the session prints goes to <report>-console.log too. The launcher's window used to be the
+    only place it went: the October 7 Steam Frame player's reports folder said nothing about why VR never
+    started. Returns the log's path, or None when it cannot be written."""
+    path = report.with_name(report.stem+'-console.log')
+    try:
+        report.parent.mkdir(parents=True, exist_ok=True)
+        log = path.open('a', encoding='utf-8')
+    except OSError:
+        return None
+    sys.stdout, sys.stderr = _Echo(sys.stdout, log), _Echo(sys.stderr, log)
+    return path
+
+
+class Startup:
+    """How far a session got before VR started. A session that ends there writes this as its report, with the
+    game's log and the modules in the game's process (overlays and capture tools among them)."""
+
+    def __init__(self, output):
+        self.output, self.stage, self.reported, self.fields = output, 'finding the headset', False, {}
+
+    def ended(self, error, modules_of=modules):
+        if self.reported or (isinstance(error, KeyboardInterrupt) and 'game_pid' not in self.fields):
+            return  # written already, or cancelled before anything started
+        report = dict(stage=self.stage, error=str(error) or type(error).__name__,
+                      cancelled=isinstance(error, KeyboardInterrupt), vr_started=False,
+                      free_commit_mb=free_commit_mb(), **self.fields)
+        try:
+            if 'game_pid' in self.fields:
+                copy, memory = keep_game_log(self.output)
+                report.update(game_log=str(copy) if copy else None, game_memory=memory)
+                try:
+                    report['game_modules'] = sorted({m['name'] for m in modules_of(self.fields['game_pid'])})
+                except (OSError, RuntimeError, ValueError):
+                    report['game_modules'] = None  # the game has closed
+            self.output.parent.mkdir(parents=True, exist_ok=True)
+            self.output.write_text(json.dumps(report, indent=2)+'\n')
+            self.reported = True
+        except (OSError, ValueError):
+            pass
 
 
 def runtime_path(manifest):
@@ -262,7 +335,7 @@ def start_settings(a):
     return dict(aim_markers=not a.no_aim_markers, web_grab=not a.no_web_grab, air_webs=not a.no_air_webs,
                 web_shooter=not a.no_web_shooter, punch=not a.no_punch, body=not a.no_body,
                 swing_speed=round(a.swing_speed, 1),
-                snap_turn=a.snap_turn, haptics=a.haptics, screen_size=a.screen_size)
+                snap_turn=a.snap_turn, smooth_turn=a.smooth_turn, haptics=a.haptics, screen_size=a.screen_size)
 
 
 def settings_line(start, sample):
@@ -273,12 +346,33 @@ def settings_line(start, sample):
     return SETTINGS_LINE + ' '.join(f'{k}={int(round(v))}' for k, v in now.items())
 
 
+PAD_IGNORED = ("WARNING: the game is not reading the VR controllers on its screen. Keep the game window in front "
+               "on the desktop. If it is in front, close the game and start VR again from Spidy's launcher: a game "
+               "Spidy starts reads controllers through XInput only, and one started otherwise can take SteamVR's "
+               'virtual gamepads instead.')
+
+
+def pad_ignored(watch, sample, quiet=5):
+    """True once: the game screen showed and a button was held while the game had not read Spidy's controller
+    for `quiet` seconds. `watch` (reads, since, warned) carries what earlier samples showed."""
+    if watch['warned'] or not sample.get('pad_installed'):
+        return False
+    if sample.get('pad_reads') != watch['reads']:
+        watch.update(reads=sample.get('pad_reads'), since=sample['seconds'])
+        return False
+    if sample.get('presentation') == 'game_screen' and sample.get('pad_buttons', '0x0') != '0x0' and \
+            sample['seconds']-watch['since'] >= quiet:
+        watch['warned'] = True
+        return True
+    return False
+
+
 def snapshot(game, address):
     for _ in range(8):
-        raw = game.read(address, 704)
-        if len(raw) != 704:
+        raw = game.read(address, 712)
+        if len(raw) != 712:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53585244, 11, 704):
+        if struct.unpack_from('<3I', raw) != (0x53585244, 12, 712):
             raise RuntimeError('Game XR protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -319,11 +413,12 @@ def snapshot(game, address):
         # why it is missing (game_menu.hpp: 93xx-94xx not hooked, 95xx not built).
         flags, snap_turn, haptics, screen_size = struct.unpack_from('<4I', raw, 664)
         swing_speed, changes = struct.unpack_from('<fI', raw, 680)
+        smooth_turn, = struct.unpack_from('<I', raw, 704)
         result.update(vr_settings=dict(aim_markers=bool(aim_markers), web_grab=bool(flags & 1),
                                        air_webs=bool(flags & 8), web_shooter=bool(flags & 16),
                                        punch=bool(flags & 2), body=bool(flags & 4),
                                        swing_speed=round(swing_speed, 1), snap_turn=snap_turn,
-                                       haptics=haptics, screen_size=screen_size),
+                                       smooth_turn=smooth_turn, haptics=haptics, screen_size=screen_size),
                       setting_changes=changes)
         menu_tabs, menu_installed, menu_status = struct.unpack_from('<Q2I', raw, 688)
         result.update(menu_tabs=menu_tabs, menu_installed=bool(menu_installed), menu_status=menu_status)
@@ -581,14 +676,16 @@ def timing_snapshot(game, address):
     return None
 
 
-def wait_for_renderer(game, process, render_data, timeout=180):
+def wait_for_renderer(game, process, render_data, timeout=180, problems=None, tell_every=20):
     """The game's graphics queue, as soon as the game draws frames (its intro, seconds after it starts).
 
     `render_data` is the render memory module's telemetry, when that module is loaded: its frame count
-    shows the renderer running before the queue is looked for.
+    shows the renderer running before the queue is looked for. `problems` collects why each look found
+    no queue (for the session's report); the console hears the latest every `tell_every` seconds.
     """
     deadline = time.monotonic()+timeout
     problem = 'the game drew no frames'
+    told, fronted = time.monotonic(), False
     while alive(game) and time.monotonic() < deadline:
         memory = render_memory_snapshot(game, render_data) if render_data else None
         if render_data and (not memory or memory['frames'] < 30):
@@ -596,9 +693,20 @@ def wait_for_renderer(game, process, render_data, timeout=180):
             continue
         try:
             return discover_queue(game, process)
-        except RuntimeError as error:
-            # Startup can show no queue, or a second one, for a moment.
+        except TimeoutError as error:
+            # A call into the game that never returned: asking again would leave another one waiting there.
+            raise RuntimeError(f"The game did not answer Spidy's render probe: {error}") from error
+        except (OSError, RuntimeError) as error:
+            # Startup can show no queue, or a second one, for a moment; a module list can fail meanwhile.
             problem = str(error)
+            if problems is not None and problem not in problems[-1:]:
+                problems.append(problem)
+            if 'no graphics work' in problem and not fronted:
+                fronted = True  # once: it taps Alt
+                bring_to_front(game.pid)  # a minimized game may draw nothing
+            if time.monotonic()-told >= tell_every:
+                print(f"Still looking for the game's graphics queue: {problem}", flush=True)
+                told = time.monotonic()
             time.sleep(.5)
     if not alive(game):
         raise RuntimeError('The game closed while starting.')
@@ -614,15 +722,15 @@ def game_running():
 
 
 def settle_display(running):
-    """Restore display values saved for a VR launch once the game has closed."""
+    """Restore the game settings saved for a VR launch (vr_display) once the game has closed."""
     if not vr_display.pending() or getattr(settle_display, 'deferred', False):
         return
     if running:
         settle_display.deferred = True
-        print('Your display settings are restored after the game closes, the next time Spidy VR starts it '
-              r'(or run tools\vr_display.py --restore).', flush=True)
+        print('Your game settings (display, frame generation, controllers) are restored after the game closes, '
+              r'the next time Spidy VR starts it (or run tools\vr_display.py --restore).', flush=True)
     elif vr_display.restore():
-        print('Restored your desktop display settings.', flush=True)
+        print('Restored your game settings (display, frame generation, controllers).', flush=True)
 
 
 def main():
@@ -651,26 +759,42 @@ def main():
     p.add_argument('--swing-speed', type=float, default=32, help='Native swing speed cap in m/s (default 32)')
     p.add_argument('--snap-turn', type=int, default=30,
                    help='Degrees a flick of the right stick turns you (0: no snap turning; default 30)')
+    p.add_argument('--smooth-turn', type=int, default=0,
+                   help='Degrees a second the right stick turns you while held over, at full tilt '
+                        '(0: it snap turns instead; default 0)')
     p.add_argument('--haptics', type=int, default=100, help='Controller vibration in percent (default 100)')
     p.add_argument('--screen-size', type=int, choices=(0, 1, 2), default=1,
                    help='The game screen for menus, cutscenes and flat mode: 0 small, 1 medium, 2 large')
     p.add_argument('--full-desktop-view', action='store_true',
                    help="Start the game with its own display settings instead of a small VR window")
     p.add_argument('--output', type=pathlib.Path, default=ROOT/'reports/game-vr.json')
-    p.add_argument('--xr-runtime', type=pathlib.Path,
-                   help="OpenXR runtime manifest; by default Virtual Desktop's if installed, else Windows' active one")
+    p.add_argument('--xr-runtime', default='auto',
+                   help='OpenXR runtime manifest, or auto (default): the runtime the headset is connected to '
+                        "(Virtual Desktop, then one whose VR service runs, then Windows' active runtime)")
     p.add_argument('--stop-event', help='Named event that stops VR as Ctrl+C does (for a launcher window)')
     a = p.parse_args()
     if a.stop_after and (a.seconds or not 5<=a.stop_after<=300):
         p.error('--stop-after requires --seconds 0 and a value from 5 to 300')
     if (a.seconds!=0 and not 2 <= a.seconds <= 25) or (a.size!=0 and not 64 <= a.size <= 4096) or not 1 <= a.swing_speed <= 65:
         p.error('Use 0 or 2..25 seconds, 0 or 64..4096 pixels, and 1..65 m/s')
-    if not 0 <= a.snap_turn <= 90 or not 0 <= a.haptics <= 100:
-        p.error('Use 0..90 degrees of snap turn and 0..100% vibration')
+    if not 0 <= a.snap_turn <= 90 or not 0 <= a.smooth_turn <= 360 or not 0 <= a.haptics <= 100:
+        p.error('Use 0..90 degrees of snap turn, 0..360 degrees a second of smooth turn and 0..100% vibration')
+    keep_console(a.output)
+    startup = Startup(a.output)
+    try:
+        return session(a, startup)
+    except BaseException as error:
+        startup.ended(error)
+        raise
+
+
+def session(a, startup):
+    """One VR session from the headset check to the report; `startup` follows it until VR starts."""
     if a.stop_event:
         watch_stop_event(a.stop_event)
-    manifest = xr_runtime.choose(a.xr_runtime)
-    preflight(manifest)
+    manifest, runtime = preflight(a.xr_runtime)
+    startup.fields['xr_runtime'] = runtime
+    startup.stage = 'starting the game'
     announce_low_memory(commit_warning(free_commit_mb(), game_commit_mb()),
                         bool(sys.stdin and sys.stdin.isatty()))
 
@@ -679,6 +803,9 @@ def main():
         if values:
             print(f"Desktop view: {values['WindowWidth']} x {values['WindowHeight']} window to save GPU time; "
                   'your display settings return when the game closes.', flush=True)
+        print("Game settings for VR: frame generation off, controllers through XInput only (SteamVR's virtual "
+              'gamepads would take the menus from the VR controllers); they return when the game closes.',
+              flush=True)
 
     render_module = {}
 
@@ -698,6 +825,8 @@ def main():
     else:
         game = Game(find_game())
         render_memory_module(game.pid)
+    startup.fields['game_pid'] = game.pid
+    startup.stage = "looking for the game's graphics queue"
     process = bridge = xr = rays = None
     bridge_active = xr_active = False
     previous_signal=None
@@ -713,7 +842,9 @@ def main():
         if not process:
             raise c.WinError(c.get_last_error())
         render_data = render_module.get('SpidyRenderMemoryData')
-        queue = wait_for_renderer(game, process, render_data)
+        queue = wait_for_renderer(game, process, render_data, problems=startup.fields.setdefault('queue_search', []))
+        startup.fields['queue'] = hex(queue)
+        startup.stage = "loading Spidy's modules into the game"
         if not bring_to_front(game.pid):
             print('Click the game window once: the game pauses while another window is in front.', flush=True)
         bridge, bridge_hash = prepare(game.pid, process,
@@ -742,7 +873,7 @@ def main():
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
                                            'SpidyBodyData'))
-        config = struct.pack('<4I7Q2IfI', 0x53585243, 11, 624, game.pid, game.base, queue,
+        config = struct.pack('<4I7Q2IfI', 0x53585243, 12, 624, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
@@ -750,7 +881,8 @@ def main():
                              (16 if a.no_eye_occlusion else 0) | (32 if a.no_body else 0) |
                              (64 if a.no_punch else 0) | (128 if a.no_aim_markers else 0) |
                              (256 if a.no_air_webs else 0) | (512 if a.no_web_shooter else 0)) + \
-            runtime_path(manifest) + struct.pack('<4I', a.snap_turn, a.haptics, a.screen_size, 0)
+            runtime_path(manifest) + struct.pack('<4I', a.snap_turn, a.haptics, a.screen_size, a.smooth_turn)
+        startup.stage = 'starting VR'
         code = call_with_payload(process, xr['SpidyXrStart'], config)
         if code:
             raise RuntimeError(f'Game XR start: {code}')
@@ -781,6 +913,9 @@ def main():
         renewed=0
         stop_requested=False
         settings_start = start_settings(a)
+        # The game's reads of Spidy's controller: none while buttons are held on the game screen means its
+        # menus cannot be played (the October 7 Steam Link session: the game had turned XInput off).
+        pad_watch = dict(reads=None, since=0.0, warned=False)
 
         def hand_over_settings(sample):
             """Tell the launcher what the VR settings were left at, for the next session."""
@@ -791,7 +926,7 @@ def main():
         def session_report(**extra):
             """Everything sampled so far. It is written however the session ends."""
             return dict(pid=game.pid, eye_size=a.size, swing_speed=a.swing_speed, vr_settings=settings_start,
-                        motion_hash=motion_hash,
+                        xr_runtime=runtime, motion_hash=motion_hash,
                         xr_hash=xr_hash, ray_hash=ray_hash, samples=list(samples),
                         swing_samples=list(swing_samples), motion_samples=list(motion_samples),
                         grab_samples=list(grab_samples), body=body, punch=punch,
@@ -809,7 +944,7 @@ def main():
             copy, memory = keep_game_log(a.output)
             result.update(game_log=str(copy) if copy else None, game_memory=memory)
             a.output.write_text(json.dumps(result, indent=2)+'\n')
-            report_written = True
+            report_written = startup.reported = True
 
         def request_stop(_signal,_frame):
             nonlocal stop_requested
@@ -885,6 +1020,8 @@ def main():
                     if sample['free_commit_mb'] is not None:
                         lowest_commit = min(lowest_commit or sample['free_commit_mb'], sample['free_commit_mb'])
                     samples.append(sample)
+                    if pad_ignored(pad_watch, sample):
+                        print(PAD_IGNORED, flush=True)
                     if sample['eye_width'] and not printed_dimensions:
                         print(f"Rendering {sample['eye_width']} x {sample['eye_height']} pixels per eye.",flush=True)
                         printed_dimensions=True
@@ -959,7 +1096,7 @@ def main():
         result = dict(pid=game.pid, module_base=hex(game.base), bridge_hash=bridge_hash, xr_hash=xr_hash,
             eye_size=a.size,capture_images=a.capture_images,timing=timing_snapshot(game,xr['SpidyXrTimingData']),
             ray_hash=ray_hash, ray_samples=list(ray_samples), rays=ray_snapshot(game, rays['SpidyRayData']),
-            motion_hash=motion_hash, swing_speed=a.swing_speed, vr_settings=settings_start,
+            motion_hash=motion_hash, swing_speed=a.swing_speed, vr_settings=settings_start, xr_runtime=runtime,
             swing_samples=list(swing_samples),
             grab_samples=list(grab_samples), grab=grab_snapshot(game, rays['SpidyGrabData']),
             body=body_snapshot(game, xr['SpidyBodyData']) or body,

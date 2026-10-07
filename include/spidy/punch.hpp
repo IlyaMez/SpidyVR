@@ -84,6 +84,10 @@ class Punches {
     // the punches it lands.
     void update(float seconds, const std::array<PunchHand, 2>& hands, std::span<const PunchTarget> targets,
                 std::vector<PunchEvent>& out);
+    // The player was turned this far about the vertical since the last
+    // sample (the right stick's snap or smooth turning): the hands turned
+    // with him, which is no motion of the arms.
+    void turn(float radians);
     void reset();
     // A hand's speed relative to the player, metres per second.
     float speed(int hand) const {

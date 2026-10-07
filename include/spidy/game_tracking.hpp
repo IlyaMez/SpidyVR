@@ -39,6 +39,12 @@ class GameTrackingRig {
     void snapTurn(float radians) {
         snap_ = std::isfinite(radians) ? std::clamp(radians, 0.f, 3.1415927f) : .5235988f;
     }
+    // How fast the right stick turns the player while held over, radians a
+    // second at full tilt (slower tilted less); 0 until set: it snap turns
+    // instead. reset() keeps it.
+    void smoothTurn(float radiansPerSecond) {
+        smooth_ = std::isfinite(radiansPerSecond) ? std::clamp(radiansPerSecond, 0.f, 6.2831853f) : 0.f;
+    }
     void reset();
 
   private:
@@ -46,7 +52,7 @@ class GameTrackingRig {
     Pose lastHead_{};
     Vec3 lastFeet_{};
     std::int64_t lastTime_{};
-    bool initialized_{}, wasActive_{}, snapHeld_{}, pendingRecenter_{};
-    float snap_ = .5235988f;
+    bool initialized_{}, wasActive_{}, turnHeld_{}, pendingRecenter_{};
+    float snap_ = .5235988f, smooth_{};
 };
 } // namespace spidy

@@ -2882,6 +2882,35 @@ int main() {
         check(!sweepCapsule({1,1,0},{1,1,1},.1f,t,share,point),"a fist passing beside hit");
         check(!sweepCapsule({0,2.3f,0},{1,2.3f,0},.1f,t,share,point),"a fist passing overhead hit");
     });
+    test("punch: the player turning is no motion of the arm; the arm's own punch through it is", [] {
+        // A fist held out at arm's length while the right stick turns the player 240 degrees a
+        // second: it sweeps through the world at 2.5 m/s, faster than a punch.
+        const Vec3 head{0, 1.6f, 0}, arm{0, -.2f, -.6f};
+        const float step = 4.1887902f / 90;
+        Punches turned, unturned;
+        std::vector<PunchEvent> out;
+        const std::vector<PunchTarget> none;
+        const auto sample = [&](int i, Vec3 reach) {
+            const Quat toWorld = Quat::yaw(-step * static_cast<float>(i));
+            std::array<PunchHand, 2> hands{};
+            hands[1] = {true, head + toWorld.rotate(reach), toWorld.rotate(reach), false};
+            return hands;
+        };
+        for (int i = 0; i < 30; ++i) {
+            if (i)
+                turned.turn(-step);
+            turned.update(1.f / 90, sample(i, arm), none, out);
+            unturned.update(1.f / 90, sample(i, arm), none, out);
+        }
+        check(unturned.speed(1) > unturned.config().minSpeed, "the test's turn is too slow to look like a punch");
+        check(turned.speed(1) < .01f, "the turn counted as the arm's motion");
+        // Still turning, the arm punches straight ahead at 5 m/s.
+        for (int i = 30; i < 36; ++i) {
+            turned.turn(-step);
+            turned.update(1.f / 90, sample(i, arm + Vec3{0, 0, -5.f / 90 * static_cast<float>(i - 29)}), none, out);
+        }
+        near(turned.speed(1), 5, .05f);
+    });
     test("punch configuration rejects invalid tuning", [] {
         auto bad=[](auto change){PunchConfig c;change(c);try{Punches p(c);return false;}catch(const std::invalid_argument&){return true;}};
         check(bad([](PunchConfig& c){c.fullSpeed=1;}),"full strength below the punch speed accepted");
@@ -3031,11 +3060,12 @@ int main() {
         }
         check(headings == 3 && all[0].item == Item::none && all[6].item == Item::none && all[9].item == Item::none,
               "the sections: webs, body, comfort");
-        check(seen == 0x7fe, "a setting missing");
+        check(seen == (2u << static_cast<unsigned>(lastItem)) - 2, "a setting missing");
         auto choicesOf = [&](Item item) {
             return std::find_if(all.begin(), all.end(), [&](const Row& r) { return r.item == item; })->choices.size();
         };
         check(choicesOf(Item::swingSpeed) == std::size(swingSpeeds) && choicesOf(Item::snapTurn) == std::size(snapTurns) &&
+                  choicesOf(Item::smoothTurn) == std::size(smoothTurns) &&
                   choicesOf(Item::haptics) == std::size(hapticLevels) && choicesOf(Item::screenSize) == 3 &&
                   choicesOf(Item::body) == 0 && choicesOf(Item::aimMarkers) == 0,
               "lists: one choice per step; switches: the game's own ON and OFF");
@@ -3044,9 +3074,9 @@ int main() {
         using namespace vr_settings;
         const Values defaults;
         check(choice(Item::aimMarkers, defaults) == 1 && choice(Item::swingSpeed, defaults) == 4 &&
-                  choice(Item::snapTurn, defaults) == 2 && choice(Item::haptics, defaults) == 4 &&
-                  choice(Item::screenSize, defaults) == 1,
-              "the defaults as the tab shows them: ON, 32 m/s, 30 degrees, 100%, medium");
+                  choice(Item::snapTurn, defaults) == 2 && choice(Item::smoothTurn, defaults) == 0 &&
+                  choice(Item::haptics, defaults) == 4 && choice(Item::screenSize, defaults) == 1,
+              "the defaults as the tab shows them: ON, 32 m/s, 30 degrees, no smooth turning, 100%, medium");
         Values v;
         check(choose(Item::swingSpeed, 5, v) && v.swingSpeed == 40, "faster");
         check(!choose(Item::swingSpeed, 5, v), "the same choice changed something");
@@ -3059,6 +3089,11 @@ int main() {
         v.swingSpeed = 37;
         check(choice(Item::swingSpeed, v) == 5, "past halfway shows the higher step");
         check(choose(Item::snapTurn, 0, v) && v.snapTurn == 0 && choice(Item::snapTurn, v) == 0, "snap turning off");
+        check(choose(Item::smoothTurn, 3, v) && v.smoothTurn == 120 && choice(Item::smoothTurn, v) == 3 &&
+                  !choose(Item::smoothTurn, 6, v),
+              "smooth turning at 120 degrees a second; 240 is the last");
+        v.smoothTurn = 100;
+        check(choice(Item::smoothTurn, v) == 2, "a launcher speed shows the step nearest to it");
         check(choose(Item::haptics, 1, v) && v.haptics == 25, "a quarter of the vibration");
         check(choose(Item::screenSize, 2, v) && v.screenSize == 2 && !choose(Item::screenSize, 3, v),
               "the large screen is the last");
@@ -3075,6 +3110,9 @@ int main() {
         const auto clean = sanitized({true, true, true, true, 90, 120, -5, 7});
         check(clean.swingSpeed == 65 && clean.snapTurn == 90 && clean.haptics == 0 && clean.screenSize == 2,
               "values outside the ranges");
+        Values spun;
+        spun.smoothTurn = 999;
+        check(sanitized(spun).smoothTurn == 360, "smooth turning past a turn a second");
         near(screenWidth(0), 2.4f);
         near(screenWidth(7), 4.2f);
     });
@@ -3090,6 +3128,61 @@ int main() {
             const auto after = rig.update(f, {}, {0, 0, -1}, true);
             near(after.head[8] - before.head[8], snap > 0 ? 1.f : 0.f);
         }
+    });
+    test("game rig smooth turn: steady while the stick is held, as fast as it is tilted, never a snap", [] {
+        // 90 degrees a second at full tilt; a second of the stick at each tilt (negative: left).
+        const std::pair<float, float> held[] = {{1.f, 90.f}, {.55f, 45.f}, {.15f, 0.f}, {-1.f, -90.f}};
+        for (const auto& [tilt, degrees] : held) {
+            GameTrackingRig rig;
+            rig.smoothTurn(1.5707963f);
+            rig.reset();
+            auto f = trackedFrame();
+            f.head.position.x = .4f;
+            f.predictedDisplayTime = 1'000'000'000;
+            const auto before = rig.update(f, {}, {0, 0, -1}, true);
+            f.hands[1].stickX = tilt;
+            GameMotionFrame m;
+            for (int i = 0; i < 90; ++i) {
+                f.predictedDisplayTime += 11'111'111;
+                m = rig.update(f, {}, {0, 0, -1}, true);
+            }
+            // Turned about the head, which stays where it was.
+            const float turned = degrees * 3.14159265f / 180;
+            near(m.head[8], std::sin(turned), .002f);
+            near(m.head[10], -std::cos(turned), .002f);
+            for (int i = 12; i < 15; ++i)
+                near(m.head[i], before.head[i]);
+        }
+    });
+    test("game rig smooth turn goes on through a stutter; a stick held out of a break waits for release", [] {
+        constexpr std::int64_t ms = 1'000'000;
+        GameTrackingRig rig;
+        rig.smoothTurn(1.5707963f);
+        auto f = trackedFrame();
+        f.seconds = .01f;
+        f.predictedDisplayTime = 1000 * ms;
+        rig.update(f, {}, {0, 0, -1}, true);
+        const auto next = [&](bool gameplay, std::int64_t after = 10) {
+            f.predictedDisplayTime += after * ms;
+            return rig.update(f, {}, {0, 0, -1}, gameplay);
+        };
+        f.hands[1].stickX = 1;
+        const auto turning = next(true);
+        check(turning.head[8] > .01f, "the held stick did not turn");
+        // A game frame over 100 ms closes the gate for a moment; the stick stays held.
+        next(false);
+        const auto stutter = next(true);
+        check(stutter.head[8] > turning.head[8] + .01f, "a stutter stopped the turn");
+        // Back from a menu with the stick still held: no turn until it is let go.
+        next(false, 600);
+        const auto back = next(true);
+        const auto held = next(true);
+        near(back.head[8], stutter.head[8]);
+        near(held.head[8], stutter.head[8]);
+        f.hands[1].stickX = 0;
+        next(true);
+        f.hands[1].stickX = 1;
+        check(next(true).head[8] > held.head[8] + .01f, "the stick let go and held again did not turn");
     });
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;

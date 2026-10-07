@@ -8,10 +8,13 @@ namespace {
 constexpr const char* swingChoices[] = {"10 M/S", "15 M/S", "20 M/S", "25 M/S", "32 M/S",
                                         "40 M/S", "48 M/S", "56 M/S", "65 M/S"};
 constexpr const char* snapChoices[] = {"OFF", "15\xC2\xB0", "30\xC2\xB0", "45\xC2\xB0", "60\xC2\xB0", "90\xC2\xB0"};
+constexpr const char* smoothChoices[] = {"OFF",          "60\xC2\xB0/S",  "90\xC2\xB0/S",
+                                         "120\xC2\xB0/S", "180\xC2\xB0/S", "240\xC2\xB0/S"};
 constexpr const char* hapticChoices[] = {"OFF", "25%", "50%", "75%", "100%"};
 constexpr const char* screenChoices[] = {"SMALL", "MEDIUM", "LARGE"};
 constexpr int screenSizes[] = {0, 1, 2};
 static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(snapChoices) == std::size(snapTurns) &&
+              std::size(smoothChoices) == std::size(smoothTurns) &&
               std::size(hapticChoices) == std::size(hapticLevels) && std::size(screenChoices) == std::size(screenSizes));
 // A list setting's steps, or none for a switch.
 std::span<const int> steps(Item item) {
@@ -20,6 +23,8 @@ std::span<const int> steps(Item item) {
         return swingSpeeds;
     case Item::snapTurn:
         return snapTurns;
+    case Item::smoothTurn:
+        return smoothTurns;
     case Item::haptics:
         return hapticLevels;
     case Item::screenSize:
@@ -34,6 +39,8 @@ float numberOf(Item item, const Values& v) {
         return v.swingSpeed;
     case Item::snapTurn:
         return static_cast<float>(v.snapTurn);
+    case Item::smoothTurn:
+        return static_cast<float>(v.smoothTurn);
     case Item::haptics:
         return static_cast<float>(v.haptics);
     case Item::screenSize:
@@ -66,13 +73,14 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
 Values sanitized(Values v) {
     v.swingSpeed = std::isfinite(v.swingSpeed) ? std::clamp(v.swingSpeed, 1.f, 65.f) : 32.f;
     v.snapTurn = std::clamp(v.snapTurn, 0, 90);
+    v.smoothTurn = std::clamp(v.smoothTurn, 0, 360);
     v.haptics = std::clamp(v.haptics, 0, 100);
     v.screenSize = std::clamp(v.screenSize, 0, 2);
     return v;
 }
-const std::array<Row, 13>& rows() {
+const std::array<Row, 14>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 13> all{{
+    static const std::array<Row, 14> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::aimMarkers, "AIM MARKERS", "Show where each web would land. X also switches them during play.", {}},
         {Item::webGrab, "WEBS CATCH PROPS AND THUGS", "Grab, yank and throw props and thugs with your webs.", {}},
@@ -86,6 +94,8 @@ const std::array<Row, 13>& rows() {
         {Item::none, "COMFORT", nullptr, {}},
         {Item::snapTurn, "SNAP TURN", "How far a flick of the right stick turns you. Off: no snap turning.",
          snapChoices},
+        {Item::smoothTurn, "SMOOTH TURN", "Turn steadily while you hold the right stick. Off: it snap turns.",
+         smoothChoices},
         {Item::haptics, "CONTROLLER VIBRATION", "How strongly webs, grabs and punches buzz in your hands.",
          hapticChoices},
         {Item::screenSize, "GAME SCREEN SIZE", "The screen that shows menus, cutscenes and flat mode.",
@@ -124,6 +134,9 @@ bool choose(Item item, int index, Values& v) {
         break;
     case Item::snapTurn:
         v.snapTurn = s[index];
+        break;
+    case Item::smoothTurn:
+        v.smoothTurn = s[index];
         break;
     case Item::haptics:
         v.haptics = s[index];

@@ -50,8 +50,8 @@ coming. Questions, bugs, clips: come say hi on
 - 👊 **Real punches.** A fast fist into a thug lands the game's own melee hit,
   harder the faster you swing.
 - ⚙️ **VR settings in the game's menu.** A SPIDY VR tab in the game's own
-  Settings for aim markers, snap turn, vibration, swing speed, screen size and
-  more. Changes apply at once.
+  Settings for aim markers, snap or smooth turning, vibration, swing speed,
+  screen size and more. Changes apply at once.
 - 🖥️ **Menus and cutscenes on a screen.** The Touch controllers work as an
   Xbox controller there; VR resumes when play does.
 
@@ -59,9 +59,9 @@ coming. Questions, bugs, clips: come say hi on
 
 - **Marvel's Spider-Man Remastered on Steam.** The Epic Games Store version is a
   different build.
-- **A PC VR headset with an OpenXR runtime.** Tested on Quest 3 with
-  [Virtual Desktop](https://www.vrdesktop.net/); SteamVR and Quest Link should
-  work but are untested.
+- **A PC VR headset with an OpenXR runtime.** Played on Quest 3 with
+  [Virtual Desktop](https://www.vrdesktop.net/) and with SteamVR (Steam Link);
+  other SteamVR headsets and Quest Link should work.
 - **About 19 GB of memory Windows can give programs** (RAM plus page file). The
   launcher shows how much you have.
 
@@ -82,7 +82,7 @@ windows. If the headset shows a still picture, click the game window once.
 ### What the launcher does
 
 - Finds the game in your Steam libraries and checks it is the supported build.
-- Picks your OpenXR runtime (Virtual Desktop when installed) and checks the headset.
+- Finds the OpenXR runtime your headset is connected to (or the one you choose) and checks the headset.
 - Checks the Visual C++ runtime, available memory and Spidy's own files.
 - Starts the game with the larger render memory VR needs, in a small window that
   saves GPU time, and puts your window settings back afterwards.
@@ -101,7 +101,7 @@ Spidy changes nothing in the game's folder.
 | Grab a prop or thug | Grip aimed at it; trigger reels it, a sharp pull yanks it, release throws it |
 | Punch | A fast fist into a thug |
 | Walk and run / jump | **Left stick** / **A** |
-| Snap turn | **Right stick** (30°; adjustable or off in VR settings) |
+| Turn | **Right stick**: snap 30° (adjustable or off), or hold to turn smoothly with SMOOTH TURN on in VR settings |
 | Interact (the game's Y) | **B** |
 | Pause (VR settings: Settings > SPIDY VR) | **Menu** button |
 | Game menu (map, suits, skills) | **Y** |

@@ -504,8 +504,10 @@ Settings loadSettings() {
         const std::string key = line.substr(0, equals), value = line.substr(equals + 1);
         const auto number = [&] { return std::atoi(value.c_str()); };
         auto& o = settings.options;
+        // "runtime" (before October 7's automatic runtime) mostly held the launcher's own first pick,
+        // Virtual Desktop when installed: such settings start on Automatic.
         if (key == "game") settings.gameExe = widen(value);
-        else if (key == "runtime") settings.runtime = widen(value);
+        else if (key == "xr_runtime") settings.runtime = value.empty() ? kAutoRuntime : widen(value);
         else if (key == "web_grab") o.webGrab = number() != 0;
         else if (key == "overlay_webs") o.overlayWebs = number() != 0;
         else if (key == "small_window") o.smallWindow = number() != 0;
@@ -518,6 +520,7 @@ Settings loadSettings() {
         else if (key == "eye_size") o.eyeSize = number();
         else if (key == "swing_speed") o.swingSpeed = std::clamp(number(), 10, 65);
         else if (key == "snap_turn") o.snapTurn = std::clamp(number(), 0, 90);
+        else if (key == "smooth_turn") o.smoothTurn = std::clamp(number(), 0, 360);
         else if (key == "haptics") o.haptics = std::clamp(number(), 0, 100);
         else if (key == "screen_size") o.screenSize = std::clamp(number(), 0, 2);
         else if (key == "hash_path") settings.hashPath = widen(value);
@@ -537,13 +540,13 @@ void saveSettings(const Settings& settings) {
     fs::create_directories(path.parent_path(), error);
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
     const auto& o = settings.options;
-    file << "game=" << narrow(settings.gameExe) << "\nruntime=" << narrow(settings.runtime)
+    file << "game=" << narrow(settings.gameExe) << "\nxr_runtime=" << narrow(settings.runtime)
          << "\nweb_grab=" << o.webGrab << "\noverlay_webs=" << o.overlayWebs << "\nsmall_window=" << o.smallWindow
          << "\nstock_monitor_view=" << o.stockMonitorView << "\nbody=" << o.body << "\npunch=" << o.punch
          << "\naim_markers=" << o.aimMarkers << "\nair_webs=" << o.airWebs << "\nweb_shooter=" << o.webShooter
          << "\neye_size=" << o.eyeSize
-         << "\nswing_speed=" << o.swingSpeed << "\nsnap_turn=" << o.snapTurn << "\nhaptics=" << o.haptics
-         << "\nscreen_size=" << o.screenSize << "\nhash_path=" << narrow(settings.hashPath)
+         << "\nswing_speed=" << o.swingSpeed << "\nsnap_turn=" << o.snapTurn << "\nsmooth_turn=" << o.smoothTurn
+         << "\nhaptics=" << o.haptics << "\nscreen_size=" << o.screenSize << "\nhash_path=" << narrow(settings.hashPath)
          << "\nhash_size=" << settings.hashSize << "\nhash_time=" << settings.hashTime
          << "\nhash=" << settings.hashValue << "\nshortcuts_asked=" << settings.shortcutsAsked << "\n";
 }
@@ -667,41 +670,34 @@ HeadsetCheck::~HeadsetCheck() {
         worker_.join();
 }
 
-void HeadsetCheck::start(const std::wstring& root, const std::wstring& manifest) {
+void HeadsetCheck::start(const std::wstring& root, const std::wstring& manifest, const std::wstring& python) {
+    const bool automatic = manifest == kAutoRuntime;
     {
         std::lock_guard lock(mutex_);
         if (state_ == Outcome::running)
             return;
         state_ = Outcome::running;
-        summary_ = "Asking the VR runtime for a headset...";
+        summary_ = automatic ? "Asking the VR runtimes for a headset..." : "Asking the VR runtime for a headset...";
     }
     if (worker_.joinable())
         worker_.join();
-    worker_ = std::thread([this, root, manifest] {
-        const std::wstring probe = (fs::path(root) / L"build/windows-ninja/spidy_headset_probe.exe").wstring();
-        std::wstring block = environmentWith(L"XR_RUNTIME_JSON", manifest);
+    worker_ = std::thread([this, root, manifest, python, automatic] {
         std::string output;
-        const auto code = capture(text::quoteArgument(probe), root, &block, 60000, output);
-        Outcome state = code == 0u ? Outcome::ok : Outcome::error;
-        std::string summary;
-        std::istringstream lines(output);
-        std::string line, eye;
-        while (std::getline(lines, line)) {
-            line = trim(line);
-            if (line.rfind("Headset available: ", 0) == 0)
-                summary = "Connected: " + line.substr(19);
-            else if (line.rfind("Recommended eye 0: ", 0) == 0)
-                eye = line.substr(19);
-            else if (state != Outcome::ok && !line.empty() && summary.empty())
-                summary = line;
+        std::optional<DWORD> code;
+        if (automatic) {
+            // Up to three runtimes, one of which may start meanwhile (SteamVR takes up to half a minute).
+            const std::wstring script = (fs::path(root) / L"tools" / L"xr_runtime.py").wstring();
+            code = capture(text::quoteArgument(python) + L" -B -X utf8 " + text::quoteArgument(script) + L" --detect",
+                           root, nullptr, 180000, output);
+        } else {
+            const std::wstring probe = (fs::path(root) / L"build/windows-ninja/spidy_headset_probe.exe").wstring();
+            std::wstring block = environmentWith(L"XR_RUNTIME_JSON", manifest);
+            code = capture(text::quoteArgument(probe), root, &block, 60000, output);
         }
-        if (state == Outcome::ok && !eye.empty())
-            summary += " - " + eye + " per eye";
-        if (state != Outcome::ok)
-            summary = "Not found. Put the headset on and connect it" + (summary.empty() ? "." : " (" + summary + ").");
+        const bool found = code == 0u;
         std::lock_guard lock(mutex_);
-        state_ = state;
-        summary_ = summary.empty() ? "Headset available." : summary;
+        state_ = found ? Outcome::ok : Outcome::error;
+        summary_ = text::headsetSummary(output, found);
     });
 }
 

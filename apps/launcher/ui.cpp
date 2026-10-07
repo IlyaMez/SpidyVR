@@ -59,6 +59,9 @@ constexpr int kEyeValues[] = {0, 2048, 1792, 1536, 1280};
 // The steps the game's Settings offer too (SPIDY VR, vr_settings.hpp).
 constexpr const char* kSnapTurns[] = {"Off", "15\xC2\xB0", "30\xC2\xB0", "45\xC2\xB0", "60\xC2\xB0", "90\xC2\xB0"};
 constexpr int kSnapValues[] = {0, 15, 30, 45, 60, 90};
+constexpr const char* kSmoothTurns[] = {"Off",          "60\xC2\xB0/s",  "90\xC2\xB0/s",
+                                        "120\xC2\xB0/s", "180\xC2\xB0/s", "240\xC2\xB0/s"};
+constexpr int kSmoothValues[] = {0, 60, 90, 120, 180, 240};
 constexpr const char* kHaptics[] = {"Off", "25%", "50%", "75%", "100%"};
 constexpr int kHapticValues[] = {0, 25, 50, 75, 100};
 constexpr const char* kScreenSizes[] = {"Small", "Medium", "Large"};
@@ -185,14 +188,11 @@ const Runtime* App::runtime() {
     return nullptr;
 }
 
+// A chosen runtime that is no longer installed gives way to Automatic.
 void App::chooseDefaultRuntime() {
-    if (runtime() || scan_.runtimes.empty())
+    if (runtime() || settings_.runtime == kAutoRuntime || scan_.runtimes.empty())
         return;
-    const auto& runtimes = scan_.runtimes;
-    auto pick = std::find_if(runtimes.begin(), runtimes.end(), [](const Runtime& r) { return r.tested; });
-    if (pick == runtimes.end())
-        pick = std::find_if(runtimes.begin(), runtimes.end(), [](const Runtime& r) { return r.active; });
-    settings_.runtime = (pick == runtimes.end() ? runtimes.front() : *pick).manifest;
+    settings_.runtime = kAutoRuntime;
 }
 
 std::vector<std::string> App::blockers() {
@@ -705,16 +705,22 @@ void App::setupCard(float width) {
     // The VR runtime.
     {
         const Runtime* chosen = runtime();
+        const bool automatic = settings_.runtime == kAutoRuntime;
         Mark mark = scan_.done ? Mark::ok : Mark::busy;
         std::string detail = "Looking for VR runtimes...";
         if (scan_.done && scan_.runtimes.empty()) {
             mark = Mark::error;
             detail = "No OpenXR runtime is installed. Quest 3 players: install Virtual Desktop (tested). SteamVR and the "
                      "Meta Quest Link app also provide one.";
+        } else if (scan_.done && automatic) {
+            detail = "Automatic: VR starts in the runtime your headset is connected to (Virtual Desktop, else "
+                     "SteamVR or Meta Quest Link while running, else Windows' active one).";
         } else if (chosen) {
             mark = chosen->tested ? Mark::ok : Mark::info;
             detail = chosen->tested ? "Tested with Quest 3 over Virtual Desktop."
-                                    : chosen->name + " has not been tested with Spidy yet. It should work; expect rough edges.";
+                     : chosen->name == "SteamVR"
+                         ? "Played with Quest 3 over Steam Link; other SteamVR headsets should work."
+                         : chosen->name + " has not been tested with Spidy yet. It should work; expect rough edges.";
             if (chosen->active)
                 detail += " Windows' active VR runtime.";
         }
@@ -726,7 +732,14 @@ void App::setupCard(float width) {
             }
             ImGui::BeginDisabled(running);
             ImGui::PushFont(fonts_.semibold, 13.5f);
-            if (ImGui::BeginCombo("##runtime", chosen ? chosen->name.c_str() : "Choose...")) {
+            if (ImGui::BeginCombo("##runtime", automatic ? "Automatic" : chosen ? chosen->name.c_str() : "Choose...")) {
+                if (ImGui::Selectable("Automatic  (recommended)", automatic)) {
+                    settings_.runtime = kAutoRuntime;
+                    headset_.reset();
+                    save();
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                    ImGui::SetTooltip("Each session asks the runtimes for your headset and uses the one that has it.");
                 for (const auto& r : scan_.runtimes) {
                     const std::string label = r.name + (r.tested ? "  (tested)" : "") + "##" + narrow(r.manifest);
                     if (ImGui::Selectable(label.c_str(), chosen == &r)) {
@@ -747,10 +760,13 @@ void App::setupCard(float width) {
     {
         const Outcome state = headset_.state();
         const Runtime* chosen = runtime();
+        const bool automatic = settings_.runtime == kAutoRuntime;
         Mark mark = Mark::info;
         std::string detail = "Connect it to this PC, then check it here (optional: Start VR checks it too).";
         if (chosen && chosen->name == "SteamVR" && state == Outcome::idle)
             detail += " Checking starts SteamVR.";
+        else if (automatic && state == Outcome::idle)
+            detail += " Checking shows which runtime has it.";
         if (state == Outcome::running) {
             mark = Mark::busy;
             detail = headset_.summary();
@@ -762,10 +778,10 @@ void App::setupCard(float width) {
             detail = headset_.summary();
         }
         setupRow(mark, "Headset", detail, S(98), [&] {
-            ImGui::BeginDisabled(running || !chosen || state == Outcome::running || scan_.root.empty() ||
-                                 !scan_.missing.empty());
+            ImGui::BeginDisabled(running || (!chosen && !automatic) || (automatic && scan_.python.empty()) ||
+                                 state == Outcome::running || scan_.root.empty() || !scan_.missing.empty());
             if (secondaryButton("Check", S(98)))
-                headset_.start(scan_.root, chosen->manifest);
+                headset_.start(scan_.root, automatic ? std::wstring(kAutoRuntime) : chosen->manifest, scan_.python);
             ImGui::EndDisabled();
         });
     }
@@ -948,6 +964,10 @@ void App::optionsCard(ImVec2 size) {
     };
     option("Snap turn", "How far a flick of the right stick turns you.", S(150), [&] {
         stepCombo("##snap", kSnapTurns, kSnapValues, static_cast<int>(std::size(kSnapValues)), &o.snapTurn);
+    });
+    option("Smooth turn", "Turn steadily while you hold the right stick; off, it snap turns.", S(150), [&] {
+        stepCombo("##smooth", kSmoothTurns, kSmoothValues, static_cast<int>(std::size(kSmoothValues)),
+                  &o.smoothTurn);
     });
     option("Controller vibration", "How strongly webs and punches buzz.", S(150), [&] {
         stepCombo("##haptics", kHaptics, kHapticValues, static_cast<int>(std::size(kHapticValues)), &o.haptics);

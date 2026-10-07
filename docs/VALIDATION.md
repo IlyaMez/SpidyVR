@@ -1,6 +1,56 @@
 # Validation — 2026-10-07
 
-## Midair drops — current build
+## Smooth turning — current build
+
+The user, October 7: "add smooth turning option".
+
+**What it does.** `vr_settings::Values::smoothTurn`, degrees a second (0, the
+default: the right stick snap turns as before). The SPIDY VR tab has a SMOOTH
+TURN row after SNAP TURN in COMFORT (row 11, setting number 0x20b; GAME
+SCREEN SIZE moves to 0x20d) with OFF, 60, 90, 120, 180 and 240°/S;
+`Item::smoothTurn` is the last item (`vr_settings::lastItem`, which
+`game_menu.cpp`'s `copyItems` now loops to). `GameTrackingRig::smoothTurn`
+takes radians a second. While it is on, the right stick's X past a 0.2 dead
+zone turns the tracking space about the head by `speed × tilt × seconds`
+each headset frame, tilt rising linearly to full at 0.9; snap turning is off
+meanwhile. A stick held into play waits for its release (below 0.3) after a
+break over `controlHoldMs` (500 ms, a menu), as a snap turn always did, but
+not after a stutter, so a turn in progress goes on through a hitch. The body
+follows each turn through the tracking yaw it already takes
+(`native_body`, `body::turnState`).
+
+**Punches.** `game_punch` measured the fist's motion as the grip relative to
+the head turned to the world by the tracking yaw, so any change of that yaw
+counted as arm motion: a still fist 0.6 m out at 240°/s measured 2.5 m/s, over
+the 2.2 m/s punch speed; a 30° snap turn put 15-20 m/s into one sample.
+`Punches::turn` now turns each hand's last relative position and smoothed
+velocity by the yaw change since the previous sample (`std::remainder` of the
+tracking yaws), so only the arm's own motion counts.
+
+**Protocol.** XrConfig version 12, 624 bytes: the reserved word after the
+screen size is now `smoothTurn` (0-360; anything else is 1001). XrData
+version 12, 712 bytes: `smoothTurn` at 704 (then a spare word); Python
+`vr_settings.smooth_turn`, and the settings line for the launcher carries
+`smooth_turn=`. The menu probe's `ProbeSettings`/`ProbeSample` are version 2
+(36 and 64 bytes) with `smoothTurn`. Launcher: `SessionOptions::smoothTurn`,
+`--smooth-turn` (left out at 0), `smooth_turn=` in launcher.ini, a "Smooth
+turn" list; `launch-game-vr.ps1 -SmoothTurn`.
+
+**Checks.** 162 core checks pass, new: smooth turning at full, half and
+dead-zone tilt and to the left for a second at 90°/s (the head's forward
+within 0.002 of 90°, 45°, 0 and -90°, its position unchanged with the head
+0.4 m off the tracking origin); a 20 ms gap goes on turning, a 610 ms one with
+the stick held turns nothing until it is let go and held again; a still arm at
+240°/s measures over 2.2 m/s without `turn` and under 0.01 with it, and a
+5 m/s punch during the turn measures 5 ± 0.05; the tab's rows, the new steps,
+a launcher speed between steps (100 shows 90), the 0-360 range. 10 launcher
+checks (the argument, the headset line, the range), 72 Python checks (XrData
+v12 with smooth turning, the settings line) and the GPU test pass.
+`tools/probe_menu.py` steps SMOOTH TURN to 60°/S before RESET ALL and expects
+11 changes. How smooth turning feels, and the XR worker applying the tab's
+change at once, need the headset.
+
+## Midair drops — preceding build
 
 The user, October 7: "sometimes while in the air i get pulled down fast as im
 diving out of no where I think its a game mechanic lets stop it".
@@ -94,7 +144,7 @@ would show as an airborne `motion_samples` entry with status 1 right after one
 with status 2; gliding shows as status 2 steps while the XR samples' input is
 unfocused.
 
-## VR settings in the game's own Settings — preceding build
+## VR settings in the game's own Settings — earlier build
 
 The user, October 7: "can we put the ingame vr settings as actual new items in
 the ingame settings menu (not a seperately rendered drawer)?", then "build it".

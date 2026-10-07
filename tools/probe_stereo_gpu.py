@@ -36,6 +36,37 @@ def snapshot(game, address):
     return None
 
 
+def game_queue(samples, image='spider-man.exe'):
+    """The game's own direct queue among those the render probe saw in a second.
+
+    The probe keeps submissions with the game's image anywhere in their stack. The game submits on its
+    queue itself (through Streamline's wrapper at most), so its image is at the top of those stacks; an
+    overlay, a capture or frame generation submitting on a queue of its own from inside the game's
+    Present has it deeper. At equal depth the game's queue must take at least four times the others'
+    submissions. Otherwise this raises with what it saw (one direct queue was all builds before October 7
+    accepted).
+    """
+    queues = {}
+    for s in samples:
+        if s['kind'] != 2:
+            continue
+        depth = next((i for i, frame in enumerate(s['stack']) if frame.lower().startswith(image+'+')),
+                     len(s['stack']))
+        seen = queues.setdefault(int(s['object'], 16), dict(submissions=0, depth=depth, caller=None))
+        seen['submissions'] += s['count']
+        if depth <= seen['depth']:
+            seen['depth'], seen['caller'] = depth, (s['stack'] or [None])[0]
+    if not queues:
+        raise RuntimeError('the game submitted no graphics work in a second (is its window minimized?)')
+    ranked = sorted(queues.items(), key=lambda item: (item[1]['depth'], -item[1]['submissions']))
+    best = ranked[0][1]
+    if all(seen['depth'] > best['depth'] or 4*seen['submissions'] <= best['submissions'] for _, seen in ranked[1:]):
+        return ranked[0][0]
+    raise RuntimeError(f'{len(ranked)} direct queues and none clearly the game\'s: ' + '; '.join(
+        f"{queue:#x} with {seen['submissions']} submissions, {seen['depth']} calls below the game, "
+        f"called from {seen['caller']}" for queue, seen in ranked))
+
+
 def discover_queue(game, process):
     exports, _ = prepare(game.pid, process, ROOT/'build/windows-ninja/spidy_render_probe.dll',
                          ROOT/'reports/render-modules', ('SpidyStart', 'SpidyStop', 'SpidyRenderData'))
@@ -49,10 +80,7 @@ def discover_queue(game, process):
         result = call_remote(process, exports['SpidyStop'])
     if result or not data:
         raise RuntimeError('Render discovery did not stop or returned no sample')
-    queues = {int(s['object'], 16) for s in data['samples'] if s['kind'] == 2}
-    if len(queues) != 1:
-        raise RuntimeError('Exactly one direct game queue required')
-    return next(iter(queues))
+    return game_queue(data['samples'])
 
 
 def save_eye_images(game, final, output):
