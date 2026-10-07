@@ -1,4 +1,5 @@
 #include "spidy/game_tracking.hpp"
+#include "spidy/presentation_gate.hpp"
 
 namespace spidy {
 native_rays::Command controllerAimRays(const Input& input, uint64_t serial) {
@@ -80,6 +81,11 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         return out;
     }
     const bool resumed = !wasActive_;
+    // A stutter (a game frame over 100 ms closes the gameplay gate) keeps the
+    // webs; after a longer break each hand squeezes again.
+    const bool longBreak =
+        resumed && (!lastTime_ || f.predictedDisplayTime - lastTime_ >
+                                      static_cast<std::int64_t>(controlHoldMs) * 1'000'000);
     if (!initialized_) {
         const auto headForward = horizontal(f.head.orientation.rotate({0, 0, -1}));
         const float trackedYaw = length(headForward) > .9f ? std::atan2(-headForward.x, -headForward.z) : 0;
@@ -104,7 +110,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     if (std::abs(turn) < .3f)
         snapHeld_ = false;
     out.active = true;
-    out.releaseWebs = resumed || pendingRecenter_;
+    out.releaseWebs = longBreak || pendingRecenter_;
     pendingRecenter_ = false;
     out.predictedDisplayTime = f.predictedDisplayTime;
     out.anchor = feet;

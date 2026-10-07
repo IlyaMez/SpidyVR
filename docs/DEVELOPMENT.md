@@ -169,6 +169,13 @@ without a commit of its own.
   starts, its direction and speed, where it ends), shoots the nearest bot
   within 40 m if there is one, stops and starts the shooter during play, and
   checks that nothing faulted and every hook entry is restored.
+- `tools/probe_air_handoff.py`: whether the swing keeps the player it flies,
+  in a freshly started game loaded with the virtual controller: jumps, swings
+  up on a web, and in the air turns the input unfocused for 0.3 s (web held),
+  suspends the game 0.25 s, turns the input unfocused for 2 s, and suspends
+  the game 3 s like a pause; reads every step of the player's mover and fails
+  on an airborne step without Spidy's command or a jump in vertical speed.
+  `--modules DIR` runs it with another build's movement and ray modules.
 - `tools/probe_vr_load.py`: renders the VR views at the headset's resolution
   where the player stands and reports, per phase, the game's frame rate, its
   render commands per frame, GPU use, and the CPU time of each game thread;

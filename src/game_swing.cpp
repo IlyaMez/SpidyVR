@@ -29,10 +29,12 @@ Config config;
 Command command;
 Swing solver;
 InputSampleClock inputClock, grabInputClock;
+InputHold inputHold;
 InFlightStep inFlight;
 SRWLOCK lifecycle = SRWLOCK_INIT, control = SRWLOCK_INIT, output = SRWLOCK_INIT, simulation = SRWLOCK_INIT;
 std::atomic<bool> enabled{};
-bool started{}, owned{}, initialized{};
+// coasting: owned flight going on without input (coast()).
+bool started{}, owned{}, initialized{}, coasting{};
 uint64_t deadline{}, inputDeadline{}, motionSerial{}, lastStep{}, worldIdentity{};
 // Step length the last prediction assumed, and the native step it was made in.
 float predictedDt{};
@@ -65,6 +67,7 @@ void relinquishMotion() {
 // The swing alone: a perched player's webs are let go, a grab keeps its target.
 void cancelSwing() {
     relinquishMotion();
+    coasting = false;
     takeoffTransition.reset();
     solver.releaseAll();
     inputClock.reset();
@@ -84,6 +87,30 @@ void cancel() {
     game_grab::cancel();
     game_shooter::cancel();
     grabInputClock.reset();
+    inputHold.reset();
+}
+// Flight the swing owns goes on without input: its webs, grabs and shots end,
+// and the body flies on under the swing's gravity until it lands, when the
+// game has it back. Handed to the game in midair, it fell at the game's own
+// fall speed for the time spent airborne instead (InputHold). Once per stretch
+// without input.
+void coast() {
+    if (coasting)
+        return;
+    coasting = true;
+    takeoffTransition.reset();
+    solver.releaseAll();
+    inputClock.reset();
+    game_grab::cancel();
+    game_shooter::cancel();
+    grabInputClock.reset();
+    AcquireSRWLockExclusive(&output);
+    InterlockedIncrement64(&SpidySwingData.sequence);
+    SpidySwingData.takeoff = SpidySwingData.takeoffPhase = SpidySwingData.takeoffAttempts = 0;
+    for (auto& web : SpidySwingData.webs)
+        web = {};
+    InterlockedIncrement64(&SpidySwingData.sequence);
+    ReleaseSRWLockExclusive(&output);
 }
 void fault(uint32_t error) {
     cancel();
@@ -153,9 +180,9 @@ void visit(const native_rays::QueryContext& world) {
     Command c;
     AcquireSRWLockShared(&control);
     c = command;
-    if (GetTickCount64() >= inputDeadline)
-        c.focused = 0;
+    const bool live = c.focused && GetTickCount64() < inputDeadline;
     ReleaseSRWLockShared(&control);
+    const bool focused = inputHold.update(c, live, GetTickCount64());
     native_movement::Data motion;
     if (sampleMotion(&motion)) {
         fault(3001);
@@ -163,14 +190,26 @@ void visit(const native_rays::QueryContext& world) {
     }
     LARGE_INTEGER now{};
     QueryPerformanceCounter(&now);
-    const bool fresh = motion.qpc && now.QuadPart >= static_cast<int64_t>(motion.qpc) &&
-                       static_cast<double>(now.QuadPart - motion.qpc) / frequency.QuadPart < .05;
-    if (!c.focused || (worldIdentity && worldIdentity != world.identity())) {
+    // Seconds since the player's mover last stepped.
+    const double idle = motion.qpc && now.QuadPart >= static_cast<int64_t>(motion.qpc)
+                            ? static_cast<double>(now.QuadPart - motion.qpc) / frequency.QuadPart
+                            : std::numeric_limits<double>::infinity();
+    const bool fresh = idle < .05;
+    if (worldIdentity && worldIdentity != world.identity()) {
         cancel();
         worldIdentity = world.identity();
         return;
     }
-    const auto in = input(c);
+    if (!focused && !owned) {
+        cancel();
+        worldIdentity = world.identity();
+        return;
+    }
+    if (focused)
+        coasting = false;
+    else
+        coast();
+    const auto in = focused ? input(c) : Input{};
     // The player for picks, throws and aim previews: where it stands, and its
     // speed when moving.
     uintptr_t transform{};
@@ -184,8 +223,8 @@ void visit(const native_rays::QueryContext& world) {
     // a grip press before the grab has had it, and steps with the game's
     // physics: a perched or standing player's mover does not step, and
     // webbing a thug from a perch must work all the same.
-    const float sampleSeconds = grabInputClock.consume(c);
-    {
+    const float sampleSeconds = focused ? grabInputClock.consume(c) : 0.f;
+    if (focused) {
         game_grab::claim(sampleSeconds, in, world, player);
         float grabDt{};
         if (game_grab::due(grabDt))
@@ -217,7 +256,10 @@ void visit(const native_rays::QueryContext& world) {
         const native_rays::QueryContext& world;
         float seconds;
         Vec3 feet;
+        bool focused;
         ~Previews() {
+            if (!focused)
+                return;
             if (enabled && !world.error() && game_shooter::running()) {
                 const auto grab = game_grab::data();
                 uint32_t busy{};
@@ -229,21 +271,25 @@ void visit(const native_rays::QueryContext& world) {
             if (enabled && !world.error())
                 previewAims(c, in, player, world);
         }
-    } previews{c, in, player, world, sampleSeconds, at};
-    if (!fresh || (motion.status != 1 && motion.status != 2) || motion.moverFlags & 0x80000000u) {
+    } previews{c, in, player, world, sampleSeconds, at, focused};
+    if ((motion.status != 1 && motion.status != 2) || motion.moverFlags & 0x80000000u) {
         cancelSwing();
         worldIdentity = world.identity();
         return;
     }
-    if (motion.steps == lastStep)
-        return;
-    // A skipped observation would otherwise apply several missing physics steps
-    // using one collision sample. Relinquish control instead of extrapolating.
-    if (owned && lastStep && motion.steps > lastStep + 2) {
-        cancel();
-        lastStep = motion.steps;
+    // No step for 50 ms: a long frame, or a paused game. The next step goes on
+    // from here; letting go dropped the player into the game's fall (InputHold).
+    // With live input and no step for longer than a stutter, the game moves
+    // the player some other way (a perch): the swing lets go.
+    if (!fresh) {
+        if (live && idle * 1000 > controlHoldMs)
+            cancelSwing();
         return;
     }
+    if (motion.steps == lastStep)
+        return;
+    // Steps that ran between two visits repeated the command before them,
+    // within its lease; the prediction goes on from where they left the body.
     lastStep = motion.steps;
     worldIdentity = world.identity();
     // The actor transform is at the feet. Rope constraints/visibility need a
@@ -263,11 +309,11 @@ void visit(const native_rays::QueryContext& world) {
         solver.settleStep(predictedDt, motion.dt * static_cast<float>(motion.steps - predictedStep));
     predictedDt = motion.dt;
     predictedStep = motion.steps;
-    const float inputSeconds = inputClock.consume(c);
+    const float inputSeconds = focused ? inputClock.consume(c) : 0.f;
     // A press aimed at something a web can catch belongs to the grab: the
     // swing gets the input without that hand's grip.
-    const auto predicted =
-        solver.predictNativeStep(motion.dt, game_grab::forSwing(in), world, body, inputSeconds);
+    const auto predicted = solver.predictNativeStep(motion.dt, focused ? game_grab::forSwing(in) : in, world,
+                                                    body, inputSeconds);
     if (world.error()) {
         fault(world.error());
         return;
@@ -301,7 +347,7 @@ void visit(const native_rays::QueryContext& world) {
     bool overhead{};
     for (const auto& web : solver.webs())
         overhead |= web.attached && web.anchor.y > body.position.y + .5f;
-    const bool wantsLift = requested.y > .25f || (newAttachment && overhead) || c.jump || pointLaunched;
+    const bool wantsLift = requested.y > .25f || (newAttachment && overhead) || in.jump || pointLaunched;
     // Takeoff follows the native jump's measured progress.
     const auto transition =
         takeoffTransition.update(GetTickCount64(), attached, body.grounded, collidable, wantsLift,

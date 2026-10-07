@@ -3,7 +3,44 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 7, fourth build): VR settings in the game's own
+**Latest build (October 7, fifth build): no more sudden dives in midair.** You
+reported being pulled down fast in the air, out of nowhere, as if diving. It
+was the game's own fall: while Spidy flies you, the game's airborne state
+keeps counting the time you have been in the air, and whenever Spidy let go of
+you in midair the game took over at the fall speed that time gives, 36 to 48
+m/s down from one frame to the next, and your webs were gone. Your last six
+session reports have 14 such handoffs in about 45 minutes of retained play,
+half of them straight to 36-48 m/s down. In the 14:13 session there were
+three: two during game frames of about a tenth of a second (a frame over 100
+ms closes the gate that tells Spidy you are playing, and Spidy took it for a
+menu and let go), and one when you resumed from the pause menu in midair.
+Now Spidy keeps the player it flies. A hitch keeps your input and your webs
+for up to half a second, as if the frame were just late. A longer break
+without input (a menu that does not pause the game, lost tracking, the switch
+to the flat screen) lets go of the webs, and you glide on under Spidy's own
+gravity until you land, where the game takes over as it always did. A
+physics step that comes late (a long frame, the end of a pause) still gets
+Spidy's last command. And nothing else hands you over in midair any more: a
+physics step Spidy did not see, or a gap in the controller samples, used to.
+Measured in the game without the headset, on your save, by a new probe that
+jumps off your perch, swings up on a web, reels, lets go and then forces each
+case. With the build in your play folder, 0.3 s without input while reeling
+upward at 11.6 m/s ended the swing: 138 physics steps ran on the game's fall,
+Spider-Man went down at 46.9 m/s, and the web was gone. With this build he
+went on reeling with the web held, then flew on through a 0.25 s freeze of
+the game, 2 s without input and a 3 s freeze like a pause: every physics step
+in the air under Spidy's control, the vertical speed changing by at most 0.09
+m/s from one step to the next, falling under Spidy's 6 m/s² while gliding.
+Your save files were unchanged. 159 core checks (new: a stutter keeps the
+input and a longer loss does not, the webs survive a stutter but not a longer
+break, the first controller sample after a gap is no yank and keeps the web,
+a movement command reaches a late step), 10 launcher checks, 72 Python checks
+and the GPU test pass. How gliding after a long break feels, and the drops
+being gone in a real session, need the headset; the session report shows them
+as physics steps under Spidy's control while the input is unfocused. Details:
+[docs/VALIDATION.md](VALIDATION.md).
+
+**Preceding build (October 7, fourth build): VR settings in the game's own
 Settings.** You asked for the in-game VR settings as real items in the game's
 settings menu, not a separately drawn drawer. They are now a tab of the game's
 own Settings: pause with the menu button, choose Settings, and **SPIDY VR** is

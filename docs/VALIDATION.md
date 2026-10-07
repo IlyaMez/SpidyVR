@@ -1,6 +1,100 @@
 # Validation — 2026-10-07
 
-## VR settings in the game's own Settings — current build
+## Midair drops — current build
+
+The user, October 7: "sometimes while in the air i get pulled down fast as im
+diving out of no where I think its a game mechanic lets stop it".
+
+**What the reports show.** Every place in the recent session reports where a
+step of the player's mover driven by Spidy in the air was followed by one the
+game ran itself (`motion_samples`, status 2 then 1, contact 2): 14:13 session
+(play folder `dist\Spidy-0.1.1`), 3 in 11 minutes of retained samples; 14:09,
+1; 10:43, 2; October 6 19:22, 2; 16:36, 2; 14:50, 4. In 7 of those 14 the
+game's airborne vertical speed (`air_vertical`) went in one step from Spidy's
+(+6 to -8 m/s) to -36 to -48 m/s, and on from there toward about -50; in 3 to
+about -20 m/s. The 14:13 session's three, by the XR samples' `seconds`: 508 s
+(-1.2 to -42.5 m/s, both webs held, two steps in 128 ms), 583 s (+3.0 to
+-36.3, released flight, one step in 107 ms) and 786 s (-8.2 to -42.4 on the
+first step after 13.3 s in the pause menu, which the menu button had opened in
+midair). The game's air state (event handler
+`0xa7b3a0`, vtables `0x38c1340`, `0x38c9090`) keeps its own fall going through
+Spidy's flight, from the time airborne; the displacement override Spidy gives
+its airborne event while driving does not reach that, so any step it runs
+itself in midair starts at that fall speed. Each place was a let-go by the
+swing: `relinquishMotion` (enabled 0) or a lease that ran out.
+
+**Why the swing let go.** In `game_swing.cpp`, any of these in midair cancelled
+the swing (webs released, flight handed to the game): the input unfocused or
+its 100 ms lease lapsed (the XR worker's gameplay gate closes when the game
+camera has not committed for 100 ms, so a frame of over 100 ms closes it, and
+the first active headset frame after any break marked both hands untracked);
+no step of the mover for 50 ms (a long frame); a step the visits missed; a
+controller sample more than 0.1 s after the previous one. And a step that came
+more than 150 ms after Spidy's command ran without it (the pause).
+
+**Changes.**
+
+- `game_swing::InputHold` (`include/spidy/game_swing.hpp`): a focused input
+  sample stays in use for `controlHoldMs` (500 ms, the XR worker's existing
+  stutter allowance) after input stops or turns unfocused, as a sample that
+  is simply not new (same serial: no new presses, yanks, shots or punches).
+- `game_swing.cpp`: past the hold, flight the swing owns coasts (`coast()`,
+  once per stretch): webs, grabs and shots end, the input clocks start over,
+  and the body flies on with no input under the swing's gravity until it
+  lands; the game has it on landing, as before. Without owned flight, the
+  swing cancels as before. No step for 50 ms: wait for the next one (the swing
+  still lets go when input is live and no step came for 500 ms, as on a
+  perch). A step the visits missed: carry on from the observation. The world
+  identity, the mover's 0x80000000 flag, the movement module stopping and an
+  invalid prediction still cancel.
+- `GameTrackingRig` (`src/game_tracking.cpp`): the first active frame after a
+  break shorter than `controlHoldMs` keeps the hands tracked; after a longer
+  one, a recenter or the first activation, each hand must squeeze again, as
+  before.
+- `Swing::predictNativeStep` (`src/swing.cpp`): a controller sample more than
+  0.1 s after the previous one starts each hand's motion afresh (no yank from
+  the gap) instead of releasing the webs.
+- `native_movement` (`commandApplies`): a command governs the first step of
+  the player's mover after it arrives, however late that step comes, then
+  every step within its 150 ms lease as before. No protocol changed.
+
+**Measured in the game without a headset** (`tools/probe_air_handoff.py`, the
+user's save perched above a rooftop, loaded with the virtual controller; the
+same probe and save for both builds, a fresh game each): it jumps with A,
+shoots a web 60 degrees up the most open direction, reels from 0.5 s, and at
+1.6 s turns the input unfocused for 0.3 s with the grip and trigger held
+(`hold`), releases at 2.7 s, suspends the game process for 0.25 s (`hitch`),
+turns the input unfocused for 2 s (`coast`), then unfocused 0.15 s, the game
+suspended 3 s and unfocused 0.3 s more (`pause`), reading every step of the
+player's mover. Reports: `reports/air-handoff-before.json` (the play folder's
+movement and ray modules, `dist\Spidy-0.1.1`) and `reports/air-handoff-after.json`.
+
+| | play folder's build | this build |
+|---|---|---|
+| `hold`: airborne steps without Spidy's command | 138 | 0 |
+| `hold`: vertical speed, start → end | +11.6 → -46.9 m/s | +11.6 → +11.3 m/s (reeling) |
+| `hold`: largest change between two steps | 26.8 m/s | 0.01 m/s |
+| web still held after `hold` | no | yes |
+| `hitch`, `coast`, `pause` | not reached: the player had landed | 0 steps without command; at most 0.09 m/s a step |
+| `coast`: vertical speed over 2.3 s | | +5.9 → -8.1 m/s (6 m/s²) |
+| `pause`: first steps after the 3 s freeze | | driven; -8.0 → -15.0 m/s over the window |
+
+Swing samples showed the flight owned throughout `coast` (398 samples, webs
+released) and the web held through `hold` (63 samples). Both modules stopped
+with 0, every hook entry was restored, and the save files were byte-identical
+to the copy taken before the runs. 159 core checks (new: the input hold, the
+rig keeping webs through a stutter, the first sample after a gap, a late step
+taking its command), 10 launcher checks, 72 Python checks and the GPU test
+pass.
+
+Not checked: a real session's hitches and pause menu (the probe stands in
+with process suspension and unfocused input commands), and how gliding under
+Spidy's gravity after a long break feels. In the next headset report, a drop
+would show as an airborne `motion_samples` entry with status 1 right after one
+with status 2; gliding shows as status 2 steps while the XR samples' input is
+unfocused.
+
+## VR settings in the game's own Settings — preceding build
 
 The user, October 7: "can we put the ingame vr settings as actual new items in
 the ingame settings menu (not a seperately rendered drawer)?", then "build it".
@@ -68,7 +162,7 @@ applied, XrData telemetry) runs only in an OpenXR session; how the tab reads on
 the headset's game screen. The title screen's Options keep their own lists and
 show no SPIDY VR tab.
 
-## The web shooter — preceding build
+## The web shooter — earlier build
 
 The user, October 7: "Lets add the ability to shoot the web projectiles
 spiderman has normally (not the regular webs, the web bullets)".

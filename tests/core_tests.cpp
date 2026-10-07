@@ -329,6 +329,16 @@ int main() {
         check(native_movement::collisionEnabled(0x2060010),"airborne cannot sweep");
         check(!native_movement::collisionEnabled(0x2060001),"perch bypass accepted");
     });
+    test("a movement command reaches the next step however late that step comes", [] {
+        using native_movement::commandApplies;
+        check(commandApplies(100,150,7,7),"a command was refused within its lease");
+        check(commandApplies(149,150,9,7),"a lease ended early");
+        check(!commandApplies(150,150,9,7),"a lease outlasted itself");
+        // A paused game, or a long frame: the first step after the command
+        // still takes it; one after that within no lease does not.
+        check(commandApplies(60000,150,7,7),"the step after a pause ran without its command");
+        check(!commandApplies(60000,150,8,7),"an expired command governed a second step");
+    });
     test("web takeoff waits for real clearance and retains a yank across landing", [] {
         SwingTakeoff t;
         auto r=t.update(1000,true,true,true,true,true,{0,1,0},{},{0,9,0});
@@ -459,6 +469,22 @@ int main() {
         const auto after=rig.update(f,{10,20,30},{0,0,-1},true);
         check(after.active&&after.releaseWebs,"recenter event lost");
         for(int i=0;i<16;++i)near(after.head[i],before.head[i]);
+    });
+    test("game rig keeps the webs through a stutter but not a longer break", [] {
+        constexpr std::int64_t ms=1'000'000;
+        GameTrackingRig rig;auto f=trackedFrame();
+        f.predictedDisplayTime=1000*ms;rig.update(f,{},{0,0,-1},true);
+        // A game frame of over 100 ms closes the gameplay gate for a moment.
+        f.predictedDisplayTime+=11*ms;
+        check(!rig.update(f,{},{0,0,-1},false).active,"a closed gate kept the rig active");
+        f.predictedDisplayTime+=150*ms;
+        auto out=rig.update(f,{},{0,0,-1},true);
+        check(out.active&&!out.releaseWebs&&out.swing.hands[0].tracked&&out.swing.hands[1].tracked,
+              "a stutter released the webs");
+        f.predictedDisplayTime+=11*ms;rig.update(f,{},{0,0,-1},false);
+        f.predictedDisplayTime+=static_cast<std::int64_t>(controlHoldMs)*ms;
+        out=rig.update(f,{},{0,0,-1},true);
+        check(out.active&&out.releaseWebs&&!out.swing.hands[0].tracked,"a long break kept the webs");
     });
     test("artificial player movement does not become a hand yank", [] {
         GameTrackingRig rig;auto f=trackedFrame();rig.update(f,{},{0,0,-1},true);
@@ -1598,6 +1624,32 @@ int main() {
         in.focused=false;
         check(!swing.predictNativeStep(.01f,in,world,actual).valid,"unfocused native frame accepted");
     });
+    test("native input after a gap keeps the webs and makes no yank of the gap", [] {
+        TestWorld world;
+        Swing swing(inert());
+        Body actual{{0,0,0},{},false};
+        auto in=aimed();
+        auto request=swing.predictNativeStep(.01f,in,world,actual,.01f);
+        check(request.valid&&swing.webs()[0].attached,"no web to keep");
+        actual.position=request.target;actual.velocity=request.velocity;
+        // The hand came down half a metre while no input arrived: fast
+        // enough for a yank over 0.2 s, but nothing measured it.
+        in.hands[0].gripRelativeToHead.y-=.5f;
+        request=swing.predictNativeStep(.01f,in,world,actual,.2f);
+        check(request.valid&&swing.webs()[0].attached,"a gap in input let go of the web");
+        for(const auto& event:swing.events())check(event.kind!=EventKind::Zip,"travel across the gap yanked");
+        near(length(request.velocity),0);
+        // The next samples measure the hand again.
+        actual.position=request.target;actual.velocity=request.velocity;
+        unsigned zips{};
+        for(int i=0;i<3;++i) {
+            in.hands[0].gripRelativeToHead.y-=.06f;
+            request=swing.predictNativeStep(.01f,in,world,actual,.02f);
+            for(const auto& event:swing.events())zips+=event.kind==EventKind::Zip;
+            actual.position=request.target;actual.velocity=request.velocity;
+        }
+        check(zips==1,"a yank after the gap was missed");
+    });
     test("input clock handles repeated and skipped controller frames", [] {
         game_swing::InputSampleClock clock;
         game_swing::Command c; c.serial=1; c.sampleTimeNs=1000000000; c.sampleSeconds=.01f;
@@ -1609,6 +1661,23 @@ int main() {
         check(!std::isfinite(clock.consume(c)),"backdated pose accepted");
         clock.reset();
         near(clock.consume(c),.01f);
+    });
+    test("a stutter keeps the last focused input; a longer loss of it does not", [] {
+        game_swing::InputHold hold;
+        game_swing::Command c;c.serial=7;c.focused=1;c.hands[0].grip=1;
+        check(hold.update(c,true,1000)&&c.serial==7,"live input refused");
+        game_swing::Command lost;lost.serial=8;lost.focused=0;
+        auto x=lost;
+        check(hold.update(x,false,1000+controlHoldMs)&&x.serial==7&&x.focused&&x.hands[0].grip==1,
+              "a stutter dropped the input");
+        x=lost;
+        check(!hold.update(x,false,1001+controlHoldMs),"held input outlived the stutter");
+        x=lost;
+        check(!hold.update(x,false,1002+controlHoldMs),"lost input came back without a live sample");
+        c.serial=9;
+        check(hold.update(c,true,5000)&&c.serial==9,"live input refused after a loss");
+        hold.reset();x=lost;
+        check(!hold.update(x,false,5001),"a cancelled swing kept its old input");
     });
     test("native yanks use the controller clock across repeated physics samples", [] {
         for (unsigned physicsHz : {120u,240u}) {

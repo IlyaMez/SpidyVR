@@ -326,6 +326,26 @@ a hooked function does not start with the game's own bytes after
 `reports/menu-probe/`. Settings must not have been opened in that game yet:
 the game reopens them on the tab last used, and the probe counts from GAME.
 
+### Midair handoffs
+
+`python tools/probe_air_handoff.py` after `tools/probe_menu_pad.py start` and
+`pad a --until-player` (a loaded save in free roam, perched or standing in the
+open; it jumps with the virtual controller's A, so the save must not have been
+loaded with the keyboard's Enter). It starts the movement and ray modules as a
+session does (32 m/s, gravity 6, no grabbing), finds the most open of eight
+directions, jumps, shoots a web 60 degrees up that way, reels, then in the
+air: 0.3 s of unfocused input with the grip and trigger held (`hold`), the web
+released, the game process suspended 0.25 s (`hitch`), 2 s of unfocused input
+(`coast`), and unfocused input around a 3 s suspension (`pause`). It reads
+`SpidyMotionData` every few milliseconds and, per test, counts airborne steps
+the game ran without Spidy's command and the largest change of vertical speed
+between steps. It fails if a test did not start airborne, a step ran without
+the command, the vertical speed jumped by 5 m/s or more in a step, the web did
+not survive `hold`, a module did not stop, or a hook entry was not restored.
+`--modules DIR` takes `spidy_movement_bridge.dll` and `spidy_ray_bridge.dll`
+from another folder (a play folder's build) for a before-and-after. Report:
+`reports/air-handoff.json` (`--output`).
+
 ## Performance comparison
 
 The initial successful headset test was `game-vr-20261004-131244.json`: 509 pairs

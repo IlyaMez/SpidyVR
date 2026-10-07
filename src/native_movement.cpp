@@ -37,7 +37,10 @@ std::atomic<bool> enabled{};
 std::atomic<bool> restarted{};
 std::atomic<unsigned> active{};
 std::atomic<uint64_t> corrections{};
-uint64_t deadline{}, commandDeadline{};
+// Steps of the player's mover so far, and how many had run when the command
+// arrived (commandApplies).
+std::atomic<uint64_t> playerSteps{};
+uint64_t deadline{}, commandDeadline{}, commandStep{};
 SRWLOCK lifecycle = SRWLOCK_INIT, control = SRWLOCK_INIT, telemetry = SRWLOCK_INIT;
 // Other actors' movers on a web (driveLock); their telemetry is under `telemetry`.
 Drive drives[driveSlots]{};
@@ -103,7 +106,7 @@ Command leased() {
     Command c{};
     AcquireSRWLockShared(&control);
     const auto now = GetTickCount64();
-    if (enabled && now < deadline && now < commandDeadline)
+    if (enabled && now < deadline && commandApplies(now, commandDeadline, playerSteps, commandStep))
         c = command;
     ReleaseSRWLockShared(&control);
     return c;
@@ -262,6 +265,7 @@ uintptr_t query(void* self) {
     }
     const auto result = prequery(self);
     current = previous;
+    ++playerSteps;
     Vec3 requested{};
     read(config.mover + 0x11c, &requested, 12);
     LARGE_INTEGER qpc{};
@@ -433,6 +437,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionSubmit(void* input) {
     else {
         command = c;
         commandDeadline = GetTickCount64() + c.leaseMs;
+        commandStep = playerSteps;
     }
     ReleaseSRWLockExclusive(&control);
     return result;

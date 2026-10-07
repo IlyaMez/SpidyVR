@@ -29,6 +29,14 @@ struct Data {
     float airVertical{}, airGravity{}, airDt{};
     uint32_t grounded{}, contact{};
 };
+// A movement command governs the first step of the player's mover after it
+// arrives, however late that step comes (a paused game, a long frame), and
+// every step within its lease. A step without one runs on the game's own
+// airborne state, which kept counting the time airborne through Spidy's
+// flight: in midair it started at 36-48 m/s down.
+inline bool commandApplies(uint64_t nowMs, uint64_t leaseEndMs, uint64_t steps, uint64_t stepsAtCommand) {
+    return nowMs < leaseEndMs || steps == stepsAtCommand;
+}
 // MoverStandard::prequery selects its non-sweeping request at 1fbe575
 // when any of these bits are set. They do not describe ground contact.
 inline bool collisionEnabled(uint32_t flags) {

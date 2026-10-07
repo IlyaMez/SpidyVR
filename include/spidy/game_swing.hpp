@@ -1,4 +1,5 @@
 #pragma once
+#include "presentation_gate.hpp"
 #include "swing.hpp"
 #include "swing_takeoff.hpp"
 #include <cstdint>
@@ -202,6 +203,39 @@ class InputSampleClock {
 
   private:
     uint64_t serial_{}, time_{};
+};
+// The input the swing acts on. A focused sample stays in use for
+// controlHoldMs after input stops coming or turns unfocused, as if no new
+// sample had arrived: a game frame of over 100 ms closes the XR worker's
+// gameplay gate. Letting go there handed a swinging player to the game's own
+// fall, which counts the time airborne through Spidy's flight and starts at
+// 36-48 m/s down (October 6-7 headset reports).
+class InputHold {
+  public:
+    // `live`: c is focused and within its lease. Whether c, replaced by the
+    // held sample while holding, is input to act on.
+    bool update(Command& c, bool live, uint64_t nowMs) {
+        if (live) {
+            held_ = c;
+            heldMs_ = nowMs;
+            holding_ = true;
+            return true;
+        }
+        if (holding_ && nowMs >= heldMs_ && nowMs - heldMs_ <= controlHoldMs) {
+            c = held_;
+            return true;
+        }
+        holding_ = false;
+        return false;
+    }
+    void reset() {
+        holding_ = false;
+    }
+
+  private:
+    Command held_{};
+    uint64_t heldMs_{};
+    bool holding_{};
 };
 inline Input input(const Command& c) {
     Input out;

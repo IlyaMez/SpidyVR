@@ -396,7 +396,7 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     events_.clear();
     accumulator_ = 0;
     if (!std::isfinite(seconds) || seconds <= 0 || seconds > .05f || !input.focused ||
-        !std::isfinite(inputSeconds) || inputSeconds < 0 || inputSeconds > .1f || !finite(actual.position) ||
+        !std::isfinite(inputSeconds) || inputSeconds < 0 || !finite(actual.position) ||
         !finite(actual.velocity) || length(actual.velocity) > config_.maxSpeed * 2) {
         releaseAll();
         return {};
@@ -405,8 +405,15 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
         sinceLanding_ = 0;
     body_ = actual;
     body_.velocity = limited(body_.velocity, config_.maxSpeed);
-    if (inputSeconds > 0)
+    if (inputSeconds > 0) {
+        // The first sample after a gap in input (a long frame, a moment
+        // without focus) starts each hand's motion afresh: travel across the
+        // gap is no yank. Releasing the webs there dropped the player.
+        if (inputSeconds > .1f)
+            for (auto& hand : hands_)
+                hand.sample = false;
         inputs(inputSeconds, input, world);
+    }
     const auto count = static_cast<unsigned>(std::ceil(seconds / config_.fixedStep));
     const float dt = seconds / count;
     for (unsigned i = 0; i < count; ++i)
