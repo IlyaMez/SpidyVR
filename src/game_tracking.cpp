@@ -61,7 +61,9 @@ Input trackedSwingInput(const XrFrame& f, const Rig& rig) {
     return input;
 }
 void GameTrackingRig::reset() {
+    const float snap = snap_;
     *this = {};
+    snap_ = snap;
 }
 GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameForward, bool gameplay) {
     GameMotionFrame out;
@@ -95,8 +97,8 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     const float turn = handValid(f.hands[1]) ? f.hands[1].stickX : 0;
     if (resumed)
         snapHeld_ = std::abs(turn) > .3f;
-    if (std::abs(turn) > .7f && !snapHeld_) {
-        rig_.turn(turn > 0 ? -.5235988f : .5235988f, f.head.position);
+    if (std::abs(turn) > .7f && !snapHeld_ && snap_ > 0) {
+        rig_.turn(turn > 0 ? -snap_ : snap_, f.head.position);
         snapHeld_ = true;
     }
     if (std::abs(turn) < .3f)

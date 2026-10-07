@@ -75,4 +75,26 @@ class WebTimeline {
 inline Vec3 webWrist(Pose hand) {
     return hand.position + hand.orientation.rotate({0, -.025f, .03f});
 }
+// Aim markers: where a grip press would send a hand's web now, drawn over the
+// eye images facing the viewer, the same size on screen at any distance.
+enum class AimMark : std::uint8_t {
+    anchor,  // the web attaches here: a white ring around a dot
+    air,     // nothing within reach: the web attaches in the air, a faint dashed ring
+    blocked, // the web misses here: a red cross
+    target,  // the web catches what is here: amber corners around it
+};
+struct AimMarker {
+    AimMark kind = AimMark::anchor;
+    Vec3 point{};    // where the web goes; a target's centre
+    float radius{};  // a target's radius, metres
+    float squeeze{}; // the hand's grip, 0..1: the marker tightens as it closes
+};
+// pixelAngle as for appendWeb.
+void appendAimMarker(std::vector<Vertex>& out, const AimMarker& marker, Vec3 viewer, float pixelAngle);
+// Where the marker for a surface the aim ray met at `point` (facing `normal`)
+// goes on an aim ray from `origin` along unit `direction`: where that ray
+// crosses the surface's plane, so the marker stays on the line the hand
+// points along until the next preview arrives. `point` itself when the ray
+// runs nearly along the plane or crosses it far from `point`.
+Vec3 onAimLine(Vec3 point, Vec3 normal, Vec3 origin, Vec3 direction);
 } // namespace spidy

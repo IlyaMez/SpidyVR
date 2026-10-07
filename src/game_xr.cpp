@@ -16,8 +16,11 @@
 #include "spidy/native_eye_history.hpp"
 #include "spidy/native_webs.hpp"
 #include "spidy/presentation_gate.hpp"
+#include "spidy/vr_settings.hpp"
+#include "spidy/vr_settings_canvas.hpp"
 #include "spidy/vr_shortcut.hpp"
 #include "spidy/xr_session.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -27,7 +30,7 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 7, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 8, bytes = sizeof(XrConfig), pid{};
     // record and mover are no longer used: VR starts with the game, before
     // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
@@ -38,13 +41,18 @@ struct XrConfig {
     // bit 3: no web grab (webs never catch props or thugs);
     // bit 4: no eye occlusion (each eye draws everything in its view, hidden or not);
     // bit 5: no body (the hero stays hidden in VR, the overlay draws gloves);
-    // bit 6: no punching (fists pass through thugs)
+    // bit 6: no punching (fists pass through thugs);
+    // bit 7: aim markers start hidden (X shows them in VR)
     uint32_t options{};
     // OpenXR runtime manifest the launcher chose; empty: Virtual Desktop's if
     // installed, else Windows' active runtime.
     wchar_t runtime[260]{};
+    // The rest of what the VR settings panel starts from (options bits 3 and
+    // 5-7 and swingSpeed give the others): degrees per snap turn (0: none),
+    // controller vibration in percent, the game screen's size (0-2).
+    uint32_t snapTurn = 30, haptics = 100, screenSize = 1, reserved{};
 };
-static_assert(sizeof(XrConfig) == 608);
+static_assert(sizeof(XrConfig) == 624);
 // Why the last frame had no gameplay (XrData::gate bits).
 enum GateReason : uint32_t {
     gateNoPlayer = 1,     // no save loaded, or a level change in progress
@@ -54,7 +62,7 @@ enum GateReason : uint32_t {
     gateTracking = 16,    // the headset's pose or timing was not usable
 };
 struct XrData {
-    uint32_t magic = 0x53585244, version = 6, bytes = sizeof(XrData), status{};
+    uint32_t magic = 0x53585244, version = 8, bytes = sizeof(XrData), status{};
     int64_t sequence{};
     uint64_t frames{}, tracked{}, submitted{}, dropped{}, leftHands{}, rightHands{}, serial{}, generation{};
     uint32_t nativeKeys{}, error{};
@@ -80,8 +88,21 @@ struct XrData {
     // accepted camera. Both rising while the gate says other_camera: two
     // cameras commit each frame and the other one commits last.
     uint64_t cameraCommits{}, playerCommits{};
+    // B presses that reached the game as its Y (interact, web strike); whether
+    // the aim markers show now (X switches them in VR); markers drawn so far,
+    // one per hand per headset frame that shows one.
+    uint32_t interacts{}, aimMarkers{};
+    uint64_t markers{};
+    // The VR settings now: the settings panel beside the game screen changes
+    // them during play (X the aim markers, too). settings bits: 1 web grab,
+    // 2 punch, 4 body. Then the panel's changes so far, and the headset
+    // frames that showed it open, or folded to its tab.
+    uint32_t settings{}, snapTurn{}, haptics{}, screenSize{};
+    float swingSpeed{};
+    uint32_t settingChanges{};
+    uint64_t panelFrames{}, tabFrames{};
 };
-static_assert(sizeof(XrData) == 648);
+static_assert(sizeof(XrData) == 704);
 extern "C" {
 __declspec(dllexport) XrData SpidyXrData;
 __declspec(dllexport) XrTimingData SpidyXrTimingData;
@@ -96,8 +117,8 @@ using BridgeCall = DWORD(WINAPI*)(void*);
 XrConfig config;
 BridgeCall submitInput{}, sampleBridge{}, stopBridge{}, retargetBridge{};
 BridgeCall startRays{}, submitRays{}, stopRays{};
-BridgeCall startSwing{}, submitSwing{}, sampleSwing{}, stopSwing{}, retargetSwing{}, sampleGrab{};
-BridgeCall startPunch{}, samplePunch{};
+BridgeCall startSwing{}, submitSwing{}, sampleSwing{}, stopSwing{}, retargetSwing{}, sampleGrab{}, sampleAim{};
+BridgeCall startPunch{}, samplePunch{}, stopPunch{}, swingSettings{};
 std::mutex lifecycle, telemetry;
 HANDLE worker{};
 std::atomic<bool> stopRequested{};
@@ -217,6 +238,40 @@ DWORD WINAPI run(void*) {
         // The last frame showed the game screen; A held from there (Resume,
         // Continue) is not a jump once gameplay is back.
         bool wasScreen{}, jumpFromScreen{};
+        // Where B went down: on the game screen it is Back, in VR the game's Y
+        // (interact). Held across a switch it stays what it was until let go:
+        // Back held into play is no interact, and an interact held into a menu
+        // or scene the game opened is no Back there.
+        enum class Origin { none, screen, play } interactOrigin{};
+        bool interacting{};
+        uint32_t interacts{};
+        // The VR settings: the launch options, then the settings panel beside
+        // the game screen (and X for the aim markers) during play.
+        vr_settings::Values values;
+        values.aimMarkers = !(config.options & 128);
+        values.webGrab = !(config.options & 8);
+        values.body = !(config.options & 32);
+        values.punch = !(config.options & 64);
+        values.swingSpeed = config.swingSpeed;
+        values.snapTurn = static_cast<int>(config.snapTurn);
+        values.haptics = static_cast<int>(config.haptics);
+        values.screenSize = static_cast<int>(config.screenSize);
+        values = vr_settings::sanitized(values);
+        // The panel, its painting (redone when what it shows changes), and the
+        // pause that opens it: the menu button pressed in play, shortly before
+        // the game screen came up. A panel that cannot draw is left out.
+        vr_settings::Panel panel;
+        vr_settings::Canvas canvas;
+        vr_settings::Panel::Look paintedLook{};
+        vr_settings::Values paintedValues{};
+        bool painted{}, panelScreen{}, panelFailed{}, menuHeld{};
+        uint64_t pausedAtMs{}, panelFrames{}, tabFrames{};
+        uint32_t settingChanges{};
+        // X switches the aim markers in immersive VR; it must be released
+        // between switches. aims are each hand's latest preview.
+        bool aimSwitchHeld = true;
+        uint64_t markersDrawn{};
+        game_swing::AimData aims{};
         GameTrackingRig rig;
         GameMotionFrame motion;
         NativeEyeHistory history;
@@ -260,6 +315,37 @@ DWORD WINAPI run(void*) {
         bool gripsSeen[2]{};
         LARGE_INTEGER frequency{};
         QueryPerformanceFrequency(&frequency);
+        // Puts the settings into effect: at once, or when the module they
+        // belong to starts (each start reads `values`).
+        auto applySettings = [&] {
+            runtime.hapticStrength(static_cast<float>(values.haptics) / 100);
+            rig.snapTurn(static_cast<float>(values.snapTurn) * 3.14159265f / 180);
+            if (swingStarted && swingSettings) {
+                game_swing::Settings s;
+                s.grab = values.webGrab && sampleGrab;
+                s.maxSpeed = values.swingSpeed;
+                if (const auto code = swingSettings(&s)) {
+                    const auto text = "VR settings: the swing did not take them (" + std::to_string(code) + ")";
+                    message(3, 0, text.c_str());
+                }
+            }
+            if (swingStarted && startPunch && samplePunch) {
+                if (values.punch && !punchStarted) {
+                    game_punch::Config punch;
+                    punch.pid = config.pid;
+                    punch.base = config.base;
+                    punchStarted = !startPunch(&punch);
+                } else if (!values.punch && punchStarted && stopPunch) {
+                    stopPunch(nullptr);
+                    punchStarted = false;
+                }
+            }
+            // Turned off, the body blends back to the game's pose (Command
+            // flags); it is started only once.
+            if (nativeStarted && values.body && !bodyStarted)
+                bodyStarted = !native_body::start(config.base);
+        };
+        applySettings();
         auto controls = [&](uint32_t keys) {
             bridge::Control c;
             c.modes = bridge::Mode::input;
@@ -375,18 +461,72 @@ DWORD WINAPI run(void*) {
                     else
                         gameScreen.reset();
                     wasScreen = screen;
+                    if (!(frame.buttons & buttonB))
+                        interactOrigin = Origin::none;
+                    else if (interactOrigin == Origin::none)
+                        interactOrigin = screen ? Origin::screen : Origin::play;
                     // On the screen the controllers are the game's Xbox
                     // controller; in VR it gets Start (menu), Back (Y) and
                     // the native walking and jumping (submitted below).
                     const auto mapping = !viewing ? game_pad::Mapping::none
                                          : screen ? game_pad::Mapping::menus
                                                   : game_pad::Mapping::gameplay;
+                    // X shows or hides the aim markers in immersive VR. On the
+                    // game screen it is the game's X; held from there, it waits
+                    // for a release.
+                    const bool aimSwitch = (frame.buttons & buttonX) != 0;
+                    if (aimSwitch && !aimSwitchHeld && mapping == game_pad::Mapping::gameplay && motion.active &&
+                        !flatScreen) {
+                        values.aimMarkers = !values.aimMarkers;
+                        runtime.haptic(0, .25f);
+                        message(3, 0,
+                                values.aimMarkers ? "Aim markers on - X hides them"
+                                                  : "Aim markers off - X shows them");
+                    }
+                    aimSwitchHeld = aimSwitch;
+                    // The menu button pauses the game from play: the game screen
+                    // that comes up next is its pause menu, and the settings open beside it.
+                    const bool menu = (frame.buttons & buttonMenu) != 0;
+                    if (menu && !menuHeld && mapping == game_pad::Mapping::gameplay)
+                        pausedAtMs = GetTickCount64();
+                    menuHeld = menu;
                     const uint32_t gate =
                         (player.hero ? 0 : gateNoPlayer) | (bridgeRunning ? 0 : gateBridge) |
                         (committed ? 0 : gateNoCommit) | (followsPlayer ? 0 : gateOtherCamera) |
                         (gameplay && !motion.active ? gateTracking : 0);
                     if ((gameScreen.entered() && !flatScreen) || ((flatScreen || screen) && frame.recentered))
-                        screenPose = screenAhead(frame.head);
+                        screenPose = screenAhead(frame.head, vr_settings::screenDistance);
+                    // The VR settings beside the game screen. A hand pointing at them
+                    // gives its trigger to them instead of the game.
+                    uint32_t panelPointing{};
+                    if (screen != panelScreen) {
+                        if (screen)
+                            panel.shown(pausedAtMs && GetTickCount64() - pausedAtMs < 2000);
+                        else
+                            panel.hidden();
+                        panelScreen = screen;
+                    }
+                    if (screen && !panelFailed) {
+                        std::array<vr_settings::Pointer, 2> pointers{};
+                        for (unsigned i = 0; i < 2; ++i) {
+                            const auto& hand = frame.hands[i];
+                            pointers[i] = {hand.valid && validTrackedPose(hand.aim), hand.aim, hand.trigger};
+                        }
+                        const auto result =
+                            panel.update(pointers, screenPose, vr_settings::screenWidth(values.screenSize), values);
+                        panelPointing = result.pointing;
+                        if (result.changed) {
+                            ++settingChanges;
+                            applySettings();
+                        }
+                        for (unsigned i = 0; i < 2; ++i)
+                            if (result.clicked & (1u << i))
+                                runtime.haptic(i, .3f);
+                    }
+                    XrFrame padFrame = frame;
+                    for (unsigned i = 0; i < 2; ++i)
+                        if (panelPointing & (1u << i))
+                            padFrame.hands[i].trigger = 0;
                     // An image keeps the tracking-space poses it was rendered
                     // for, valid until the tracking space itself changes.
                     if (!viewing || frame.recentered)
@@ -425,17 +565,13 @@ DWORD WINAPI run(void*) {
                         swing.mover = player.mover;
                         swing.motionModule = config.motionModule;
                         swing.durationMs = moduleDuration;
-                        swing.maxSpeed = config.swingSpeed;
-                        swing.grabKinds = (config.options & 8) || !sampleGrab ? 0 : game_grab::movableKinds;
+                        swing.maxSpeed = values.swingSpeed;
+                        swing.grabKinds = !values.webGrab || !sampleGrab ? 0 : game_grab::movableKinds;
                         check(startSwing(&swing), "Start native swinging");
                         swingStarted = true;
-                        // Fists take the swing's input samples; punching is optional.
-                        if (startPunch && samplePunch && !(config.options & 64)) {
-                            game_punch::Config punch;
-                            punch.pid = config.pid;
-                            punch.base = config.base;
-                            punchStarted = !startPunch(&punch);
-                        }
+                        // Fists take the swing's input samples; punching is optional
+                        // and, like the grab, can be switched on later.
+                        applySettings();
                     }
                     if (swingStarted) {
                         game_swing::Command input;
@@ -459,6 +595,16 @@ DWORD WINAPI run(void*) {
                         check(swingState.error, "Native swinging");
                         if (!sampleGrab || sampleGrab(&grabState))
                             grabState = {};
+                        // What each free hand's grip press would do: the aim markers.
+                        aims = {};
+                        if (values.aimMarkers && sampleAim && input.focused) {
+                            game_swing::AimData sample;
+                            const game_swing::AimData expected;
+                            if (!sampleAim(&sample) && sample.magic == expected.magic &&
+                                sample.version == expected.version && sample.bytes == expected.bytes &&
+                                sample.status == 2)
+                                aims = sample;
+                        }
                         bool trails[2]{};
                         Vec3 trailEnds[2]{};
                         for (unsigned i = 0; i < 2; ++i) {
@@ -541,9 +687,17 @@ DWORD WINAPI run(void*) {
                         if (steering && !swingState.owned) {
                             walk.right = motion.walkRight;
                             walk.forward = motion.walkForward;
+                            // B is the game's Y: interact, or web strike in a fight.
+                            // Not while a web carries the player.
+                            walk.interact = interactOrigin == Origin::play;
                         }
                         walk.jump = (keys & swingJumpKey) != 0;
-                        game_pad::submit(game_pad::fromControllers(frame, mapping, walk), 200);
+                        auto pad = game_pad::fromControllers(padFrame, mapping, walk);
+                        if (interactOrigin == Origin::play)
+                            pad.buttons = static_cast<uint16_t>(pad.buttons & ~game_pad::b);
+                        game_pad::submit(pad, 200);
+                        interacts += walk.interact && !interacting;
+                        interacting = walk.interact;
                     }
                     {
                         std::lock_guard lock(telemetry);
@@ -566,6 +720,14 @@ DWORD WINAPI run(void*) {
                         d.padReads = pad.reads;
                         d.cameraCommits = game.cameraCalls;
                         d.playerCommits = game.matched;
+                        d.interacts = interacts;
+                        d.aimMarkers = values.aimMarkers;
+                        d.settings = (values.webGrab ? 1u : 0u) | (values.punch ? 2u : 0u) | (values.body ? 4u : 0u);
+                        d.snapTurn = static_cast<uint32_t>(values.snapTurn);
+                        d.haptics = static_cast<uint32_t>(values.haptics);
+                        d.screenSize = static_cast<uint32_t>(values.screenSize);
+                        d.swingSpeed = values.swingSpeed;
+                        d.settingChanges = settingChanges;
                         std::memcpy(d.head, motion.head.data(), 64);
                         const Mat4 basis = {1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1};
                         for (unsigned i = 0; i < 2; ++i) {
@@ -623,7 +785,7 @@ DWORD WINAPI run(void*) {
                         websStarted = !(config.options & 2) && !native_webs::start(config.base, player.record);
                         // The player's body is optional too: without it the hero stays
                         // hidden and the overlay draws gloves, as before.
-                        bodyStarted = !(config.options & 32) && !native_body::start(config.base);
+                        bodyStarted = values.body && !native_body::start(config.base);
                         firstImageDeadline = GetTickCount64() + 3000;
                         message(3, 0, "Gameplay found; waiting for the first eye images");
                         return false; // initialization can exceed one predicted display interval
@@ -638,7 +800,7 @@ DWORD WINAPI run(void*) {
                         // placed from the same feet as the eyes.
                         native_body::Command pose;
                         pose.serial = serial;
-                        pose.flags = (flatScreen ? 0u : native_body::bodyOn) | native_body::hideHead |
+                        pose.flags = (flatScreen || !values.body ? 0u : native_body::bodyOn) | native_body::hideHead |
                                      native_body::handTurn | (swingState.owned ? native_body::airborne : 0u);
                         pose.eyes = Vec3{(motion.eyes[0][12] + motion.eyes[1][12]) / 2,
                                          (motion.eyes[0][13] + motion.eyes[1][13]) / 2,
@@ -691,6 +853,7 @@ DWORD WINAPI run(void*) {
                     for (unsigned i = 0; i < 2; ++i) {
                         saved.webs[i] = swingState.webs[i];
                         saved.webTimes[i] = webTimes[i];
+                        saved.aims[i] = aims.hands[i];
                     }
                     history.remember(saved);
                     const auto code = SpidySetEyes(&eyes);
@@ -710,7 +873,39 @@ DWORD WINAPI run(void*) {
                                                                            copyStart)
                                      .count();
                         runtime.presentation(true, screenPose,
-                                             static_cast<float>(image.width) / static_cast<float>(image.height));
+                                             static_cast<float>(image.width) / static_cast<float>(image.height),
+                                             vr_settings::screenWidth(values.screenSize));
+                        // The settings panel, or its tab, in the right eye's image (the
+                        // screen uses the left one): painted again only when what it shows
+                        // changed, drawn into each frame's image.
+                        if (!panelFailed) {
+                            try {
+                                const auto& right = targets[1];
+                                const auto& look = panel.look();
+                                const float scale =
+                                    std::min({1.5f, static_cast<float>(right.width) / vr_settings::panelPoints[0],
+                                              static_cast<float>(right.height) / vr_settings::panelPoints[1]});
+                                const bool repaint = !painted || !(look == paintedLook) || !(values == paintedValues);
+                                if (repaint) {
+                                    canvas.draw(look, values, scale);
+                                    paintedLook = look;
+                                    paintedValues = values;
+                                    painted = true;
+                                }
+                                overlay.blitPixels(repaint ? canvas.pixels() : nullptr, canvas.width(),
+                                                   canvas.height(), canvas.rowPitch(),
+                                                   {right.texture, right.format, canvas.width(), canvas.height(), {}});
+                                runtime.panel(panel.pose(), panel.metresWide(), panel.metresHigh(), canvas.width(),
+                                              canvas.height());
+                                ++(look.open ? panelFrames : tabFrames);
+                            } catch (const std::exception& e) {
+                                // The game screen goes on without it.
+                                panelFailed = true;
+                                painted = false;
+                                const std::string text = std::string("VR settings panel unavailable: ") + e.what();
+                                message(3, 0, text.c_str());
+                            }
+                        }
                         drawn = Presentation::gameScreen;
                         D3D12Renderer::Captured pixels;
                         if (snapshotTicket && overlay.captured(snapshotTicket, pixels)) {
@@ -725,6 +920,8 @@ DWORD WINAPI run(void*) {
                         std::lock_guard lock(telemetry);
                         InterlockedIncrement64(&SpidyXrData.sequence);
                         SpidyXrData.serial = SpidyXrData.generation = 0;
+                        SpidyXrData.panelFrames = panelFrames;
+                        SpidyXrData.tabFrames = tabFrames;
                         InterlockedIncrement64(&SpidyXrData.sequence);
                         return true;
                     }
@@ -739,7 +936,8 @@ DWORD WINAPI run(void*) {
                                  .count();
                     if (copied) {
                         drawn = saved->flatScreen ? Presentation::flat : Presentation::immersive;
-                        runtime.presentation(saved->flatScreen, saved->screenPose, saved->screenAspect);
+                        runtime.presentation(saved->flatScreen, saved->screenPose, saved->screenAspect,
+                                             vr_settings::screenWidth(values.screenSize));
                         const auto& rendered = saved->motion;
                         for (unsigned eye = 0; eye < 2; ++eye) {
                             const auto& pose = saved->trackingEyes[eye].pose;
@@ -813,6 +1011,52 @@ DWORD WINAPI run(void*) {
                                 appendWeb(vertices, line, viewer, pixelAngle);
                             }
                         }
+                        // Aim markers: where each free hand's grip press would send its
+                        // web, on the line that hand points along in this image.
+                        for (unsigned hand = 0; !saved->flatScreen && hand < 2; ++hand) {
+                            const auto& aim = saved->aims[hand];
+                            const auto& input = rendered.swing.hands[hand];
+                            const auto kind = static_cast<game_swing::AimKind>(aim.kind);
+                            if (kind == game_swing::AimKind::none || kind > game_swing::AimKind::character ||
+                                !input.tracked || saved->webs[hand].attached)
+                                continue;
+                            // The hand moved with the player to this image, as its glove does.
+                            const Vec3 origin = input.aim.position + travel;
+                            const Vec3 direction = normalized(input.aim.orientation.rotate({0, 0, -1}));
+                            const float reach = length(aim.point - input.aim.position);
+                            AimMarker marker;
+                            marker.squeeze = input.grip;
+                            switch (kind) {
+                            case game_swing::AimKind::prop:
+                            case game_swing::AimKind::character:
+                                marker.kind = AimMark::target;
+                                marker.point = aim.point;
+                                marker.radius = aim.radius;
+                                break;
+                            case game_swing::AimKind::anchor:
+                                marker.point = onAimLine(aim.point, aim.normal, origin, direction);
+                                break;
+                            case game_swing::AimKind::air:
+                                marker.kind = AimMark::air;
+                                marker.point = origin + direction * reach;
+                                break;
+                            default:
+                                marker.kind = AimMark::blocked;
+                                marker.point = length(aim.normal) > .5f
+                                                   ? onAimLine(aim.point, aim.normal, origin, direction)
+                                                   : origin + direction * reach;
+                                break;
+                            }
+                            // Not on the floor a lowered hand points at, by the player's feet.
+                            const float away = length(marker.point - origin);
+                            const float nearest = marker.kind == AimMark::target    ? .5f
+                                                  : marker.kind == AimMark::blocked ? 3.f
+                                                                                    : 2.f;
+                            if (!(away >= nearest))
+                                continue;
+                            appendAimMarker(vertices, marker, viewer, pixelAngle);
+                            ++markersDrawn;
+                        }
                         std::array<D3D12Renderer::ViewTarget, 2> overlayViews;
                         for (unsigned eye = 0; eye < 2; ++eye) {
                             const auto& target = targets[eye];
@@ -870,18 +1114,19 @@ DWORD WINAPI run(void*) {
                     d.dropped += !copied;
                     d.serial = imageSerial;
                     d.generation = imageGeneration;
+                    d.markers = markersDrawn;
                     InterlockedIncrement64(&d.sequence);
                     return copied;
                 });
             const auto& timing = runtime.lastFrameTiming();
             if (submittedFrames >= 30 && timing.period > 0) {
-                const double values[] = {timing.total,   timing.wait,  timing.tracking, timing.prepare,
+                const double stages[] = {timing.total,   timing.wait,  timing.tracking, timing.prepare,
                                          timing.acquire, copyMs,       overlayMs,       timing.release,
                                          timing.end,     timing.period};
                 std::lock_guard lock(telemetry);
                 InterlockedIncrement64(&SpidyXrTimingData.sequence);
                 for (unsigned i = 0; i < 10; ++i)
-                    SpidyXrTimingData.stages[i].add(values[i]);
+                    SpidyXrTimingData.stages[i].add(stages[i]);
                 InterlockedIncrement64(&SpidyXrTimingData.sequence);
             }
             // Count only a successful xrEndFrame containing a projection layer.
@@ -896,11 +1141,11 @@ DWORD WINAPI run(void*) {
                     message(3, 0,
                             drawn == Presentation::gameScreen
                                 ? "Game screen (menus, loading, cutscenes): the controllers work as an Xbox "
-                                  "controller - VR resumes with gameplay"
+                                  "controller, VR settings hang beside it - VR resumes with gameplay"
                             : drawn == Presentation::flat
                                 ? "Flat screen - click both thumbsticks for VR"
-                                : "VR active - menu button pauses, Y opens the game menu; click both "
-                                  "thumbsticks for flat screen");
+                                : "VR active - B interacts, Y opens the game menu, the menu button pauses, "
+                                  "X shows or hides aim markers; click both thumbsticks for flat screen");
                 }
             }
             {
@@ -997,11 +1242,12 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 7 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 8 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
-        !config.motionModule || config.options > 127 ||
+        !config.motionModule || config.options > 255 || config.snapTurn > 90 || config.haptics > 100 ||
+        config.screenSize > 2 || config.reserved ||
         !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 || config.swingSpeed > 65 ||
         (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||
         (config.eyeSize && !validEyeSize(config.eyeSize)))
@@ -1020,10 +1266,15 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     sampleSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingSample"));
     stopSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingStop"));
     retargetSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingRetarget"));
-    // Optional: an older ray module has no web grab, nor punching.
+    // Optional: an older ray module has no web grab, nor punching, nor aim previews.
     sampleGrab = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyGrabSample"));
+    sampleAim = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyAimSample"));
     startPunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchStart"));
     samplePunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchSample"));
+    // Optional too: without them the settings panel's grab, speed and punch
+    // switches take effect only at the next session.
+    stopPunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchStop"));
+    swingSettings = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingSettings"));
     if (!submitInput || !sampleBridge || !stopBridge || !retargetBridge || !startRays || !submitRays ||
         !stopRays || !startSwing || !submitSwing || !sampleSwing || !stopSwing || !retargetSwing)
         return 1002;

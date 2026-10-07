@@ -83,13 +83,39 @@ int main() {
                                                  L"32", L"--output", L"r.json", L"--xr-runtime", L"vd.json",
                                                  L"--stop-event", L"Local\\Stop"};
         check(args == defaults, "defaults");
-        options = {false, true, false, true, 2048, 90, false, false};
+        options = {false, true, false, true, 2048, 90, false, false, false};
         args = sessionArguments(options, L"r.json", L"", L"");
         const std::vector<std::wstring> changed{L"--auto-launch", L"--seconds", L"0", L"--size", L"2048",
                                                 L"--swing-speed", L"65", L"--output", L"r.json", L"--overlay-webs",
                                                 L"--no-web-grab", L"--full-desktop-view", L"--stock-monitor-view",
-                                                L"--no-body", L"--no-punch"};
+                                                L"--no-body", L"--no-punch", L"--no-aim-markers"};
         check(args == changed, "every flag, speed capped at 65");
+        options = {};
+        options.snapTurn = 45;
+        options.haptics = 0;
+        options.screenSize = 7;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        const std::vector<std::wstring> settings{L"--auto-launch", L"--seconds", L"0", L"--size", L"0",
+                                                 L"--swing-speed", L"32", L"--output", L"r.json", L"--snap-turn",
+                                                 L"45", L"--haptics", L"0", L"--screen-size", L"2"};
+        check(args == settings, "the headset panel's settings, the screen size capped at large");
+    });
+    test("what the headset's settings panel left becomes the next session's options", [] {
+        SessionOptions options;
+        check(headsetSettings("VR settings from the headset: aim_markers=0 web_grab=1 punch=0 body=1 swing_speed=48 "
+                              "snap_turn=45 haptics=50 screen_size=2\r",
+                              options),
+              "the line changed nothing");
+        check(!options.aimMarkers && options.webGrab && !options.punch && options.body && options.swingSpeed == 48 &&
+                  options.snapTurn == 45 && options.haptics == 50 && options.screenSize == 2,
+              "every value, the last one before a carriage return");
+        const auto kept = options;
+        check(!headsetSettings("VR settings from the headset: aim_markers=0 punch=0", options) && options == kept,
+              "the same values again");
+        check(!headsetSettings("Game closed. Session report: r.json", options) && options == kept, "another line");
+        check(headsetSettings("VR settings from the headset: swing_speed=99 snap_turn=x haptics=-4 colour=3", options) &&
+                  options.swingSpeed == 65 && options.snapTurn == 45 && options.haptics == 0,
+              "values outside their ranges, unreadable ones and unknown keys");
     });
     test("log lines are coloured by what they say", [] {
         check(classifyLine("WARNING: render memory module unavailable") == LineKind::warning, "warning");

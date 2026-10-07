@@ -512,8 +512,12 @@ Settings loadSettings() {
         else if (key == "stock_monitor_view") o.stockMonitorView = number() != 0;
         else if (key == "body") o.body = number() != 0;
         else if (key == "punch") o.punch = number() != 0;
+        else if (key == "aim_markers") o.aimMarkers = number() != 0;
         else if (key == "eye_size") o.eyeSize = number();
         else if (key == "swing_speed") o.swingSpeed = std::clamp(number(), 10, 65);
+        else if (key == "snap_turn") o.snapTurn = std::clamp(number(), 0, 90);
+        else if (key == "haptics") o.haptics = std::clamp(number(), 0, 100);
+        else if (key == "screen_size") o.screenSize = std::clamp(number(), 0, 2);
         else if (key == "hash_path") settings.hashPath = widen(value);
         else if (key == "hash_size") settings.hashSize = std::strtoull(value.c_str(), nullptr, 10);
         else if (key == "hash_time") settings.hashTime = std::strtoull(value.c_str(), nullptr, 10);
@@ -534,8 +538,9 @@ void saveSettings(const Settings& settings) {
     file << "game=" << narrow(settings.gameExe) << "\nruntime=" << narrow(settings.runtime)
          << "\nweb_grab=" << o.webGrab << "\noverlay_webs=" << o.overlayWebs << "\nsmall_window=" << o.smallWindow
          << "\nstock_monitor_view=" << o.stockMonitorView << "\nbody=" << o.body << "\npunch=" << o.punch
-         << "\neye_size=" << o.eyeSize
-         << "\nswing_speed=" << o.swingSpeed << "\nhash_path=" << narrow(settings.hashPath)
+         << "\naim_markers=" << o.aimMarkers << "\neye_size=" << o.eyeSize
+         << "\nswing_speed=" << o.swingSpeed << "\nsnap_turn=" << o.snapTurn << "\nhaptics=" << o.haptics
+         << "\nscreen_size=" << o.screenSize << "\nhash_path=" << narrow(settings.hashPath)
          << "\nhash_size=" << settings.hashSize << "\nhash_time=" << settings.hashTime
          << "\nhash=" << settings.hashValue << "\nshortcuts_asked=" << settings.shortcutsAsked << "\n";
 }

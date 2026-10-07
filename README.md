@@ -9,7 +9,74 @@ An in-development VR mod project for **Marvel's Spider-Man Remastered**, targeti
 **Quest 3 + Virtual Desktop**. First milestone: 6DoF head/controller tracking,
 native stereo, and physically controlled web swinging.
 
-**Latest build (October 6, sixth build): Spider-Man's body is yours, and
+**Latest build (October 7): VR settings beside the game's menus.** You asked
+for a VR settings section in the in-game menu. The game draws its menus itself
+and Spidy draws nothing into them, so the section is Spidy's own panel,
+hanging beside them in the headset. Pause with the menu button and **VR
+SETTINGS** opens to the right of the pause menu, turned toward you; on every
+other game screen (the game menu, the main menu, loading, cutscenes) a small
+VR SETTINGS tab hangs there instead, and opens it. Point a controller at a
+setting and pull the trigger: switch the aim markers, webs catching props and
+thugs, your own body and punching on or off, or step the swing speed limit
+(10 to 65 m/s), the snap turn (off, or 15 to 90 degrees; until now always 30),
+controller vibration (off, or 25 to 100%) and the size of the game screen
+itself (small, medium as before, or large; the flat-mode screen too). Every
+change applies at once, in the same session: switching web grabbing off lets
+go of what a web holds, switching your body off hides the hero and draws
+gloves, a new speed limit holds from the next swing. A dot shows where each
+controller points, the line under it lights up, and a click ticks in that
+hand. While a hand points at the panel its trigger goes to the panel, not the
+game; every other control keeps working the game's menu. The X in the
+panel's corner folds it to its tab for the rest of the session, until you open
+it again. When the session ends, the launcher keeps what you set for the next
+one (X for the markers counts too); its options card has the three new
+settings, and `Launch Spidy VR.cmd` takes `-SnapTurn`, `-Haptics` and
+`-ScreenSize`. Measured without the headset: 152 core checks (the panel's
+layout, hit testing, placement and aim rays, one click per pull, a held or
+off-panel pull ignored, the tab, snap turn angles), 10 launcher checks, 71
+Python checks, and the GPU test, which paints the panel at your headset's
+3072 x 3264 eye size (840 x 1212 pixels for a panel 0.9 m wide) and draws it
+into the corner of the right eye's image with every pixel unchanged and the
+rest of the image untouched. In the game, on your save: with web grabbing
+started off, then switched on, off and on again during the session, a hand
+aimed at a prop 51 m away would anchor its web there, catch the prop, anchor,
+catch it again; punching switched on and off twice; no fault, every hook
+restored, your save files unchanged. How the panel looks and handles in
+the headset is pending. Details: [docs/VALIDATION.md](docs/VALIDATION.md).
+
+**Preceding build (October 6, evening): an interact button, and markers that
+show where each web will land.** You asked for an interaction button in VR
+and an optional crosshair for better aim. The game puts its context actions
+(picking up a backpack, opening a door, working a console, the prompts it
+shows) and, in a fight, its web strike on one button: Triangle on
+PlayStation, Y on Xbox. In VR that button was out of reach, because the
+controllers' Y opens the game menu. Now **B** gives the game its Y while you
+stand, walk, climb or fight; not while a web carries you. A press keeps the
+meaning it started with until you let go: B still held from a menu, where it
+means Back, does not interact, and an interact held into a menu or scene it
+opened does not go Back there. Each free hand also shows an
+aim marker where a squeeze of its grip would send its web, worked out in the
+game with the same rays and target picks the squeeze itself uses: a white
+ring with a dot where the web would hold; a faint dashed ring where nothing
+is in reach and the web would hold in open air at 100 m; a red cross where it
+would miss (a car, or a wall between you and that point); amber corners
+around a prop or thug it would catch instead. A marker faces you, keeps its
+size on screen at any distance, has a dark outline so it reads against the
+sky and lit walls, and tightens as you squeeze the grip. A hand whose web is
+attached shows none, nor does a hand pointing at the floor by your feet.
+**X** hides or shows the markers in VR; the launcher's "Aim markers" switch
+(or `Launch Spidy VR.cmd -NoAimMarkers`) sets how a session starts. Webs
+still shoot exactly as before: the squeeze and the marker now run the same
+code. Measured in the game without a headset, on your save (perched on a lamp
+post beside a building): a scripted hand aimed 15 ways got the building
+beside you at 11-16 m, facades across the street at 36 and 60 m, the ground
+below, open air at the sky and down the open street, a miss at the lamp
+under your feet, and a catch on a throwable prop 51 m away, with no fault
+and every hook restored. 146 core checks, the GPU test (which now draws
+every marker) and 69 Python checks pass; the headset session is pending.
+Details: [docs/VALIDATION.md](docs/VALIDATION.md).
+
+**Preceding build (October 6, sixth build): Spider-Man's body is yours, and
 your fists hit.** You asked for Spider-Man's actual avatar as a full-body
 presence you control, and for physical punching. In VR you are now the game's
 own hero model: look down and you see his torso, legs and arms; his hands are
@@ -397,7 +464,10 @@ START VR runs `tools/run_game_vr.py` with the chosen options and shows its
 output live; STOP VR (or closing the window, after a question) stops the
 session through a named event that `run_game_vr.py --stop-event` treats as
 Ctrl+C, so the hooks come out and the report is written as before. Options
-and the game's hash are remembered in `%APPDATA%\Spidy\launcher.ini`. The
+and the game's hash are remembered in `%APPDATA%\Spidy\launcher.ini`. A session
+that ends with other VR settings than it began with (the headset's settings
+panel, or X for the aim markers) prints them on its last line, "VR settings
+from the headset: ...", and the launcher saves them as its options. The
 first start offers desktop and Start menu shortcuts.
 
 Make the zip with:
@@ -475,6 +545,11 @@ than Quest Touch (Index bindings are also suggested) are untested.
   at the body (`eyes`), drives a scripted fist through the nearest thug as a
   controller would (`fist`), and sends one blow straight to the game's damage
   system (`punch`; `--punch-hero` also staggers the hero).
+- `tools/probe_aim.py`: what a grip press would do with a scripted hand aimed
+  at the sky, around the horizon, at the floor and at the nearest prop, read
+  from the swing module's aim previews (what the headset's aim markers show),
+  in a freshly started game; checks that nothing faulted and every hook entry
+  is restored.
 - `tools/probe_vr_load.py`: renders the VR views at the headset's resolution
   where the player stands and reports, per phase, the game's frame rate, its
   render commands per frame, GPU use, and the CPU time of each game thread;
@@ -535,6 +610,20 @@ pull.
 `Launch Spidy VR.cmd -NoWebGrab` keeps webs for swinging only. See
 [docs/WEB-GRAB.md](docs/WEB-GRAB.md).
 
+Each hand without a web shows an aim marker where its grip would send the
+web now: a white ring where the web would hold, a faint dashed ring where it
+would hold in open air, a red cross where it would miss, amber corners around
+a prop or thug it would catch. It tightens as you squeeze. **X** hides or
+shows the markers; `Launch Spidy VR.cmd -NoAimMarkers` starts with them hidden.
+
+**VR settings** hang beside the game screen: they open with the pause menu
+(the menu button), and on every other game screen a VR SETTINGS tab at the
+screen's right edge opens them. Point a controller and pull the trigger to
+switch the aim markers, web grabbing, your body and punching, or to step the
+swing speed limit, snap turn, controller vibration and the game screen's size.
+Changes apply at once; Spidy Launcher starts your next session with them.
+A hand pointing at the panel keeps its trigger from the game.
+
 You are Spider-Man's body: look down to see it, your arms and hands follow the
 controllers, and the body turns with you once you look far enough to the side.
 A squeezed grip, or a hand moving fast, closes into a fist. Punch a thug with a
@@ -551,9 +640,11 @@ X and Y are the game's X and Y, the grips are the bumpers (menu tabs), the
 triggers are the triggers, the right thumbstick and the stick clicks are the
 same on both, and the menu button is Start. The game shows Xbox prompts, which
 sit where the Touch controller buttons are. In immersive VR the menu button
-pauses the game and Y opens the game menu (map, suits, skills); every other
-control stays with VR, which walks and jumps through the same virtual
-controller. A held from the screen (Resume, Continue) does not jump. A real
+pauses the game, Y opens the game menu (map, suits, skills), and B is the
+game's Y, its interact button (backpacks, doors, consoles, prompts; web strike
+in a fight), except while a web carries you. Every other control stays with
+VR, which walks and jumps through the same virtual controller. A held from the
+screen (Resume, Continue) does not jump, nor B held from it interact. A real
 gamepad keeps working. The keyboard does not: once the virtual controller has
 pressed a button, the game ignores the keyboard for the player. The screen has the size of the
 game's desktop window, small when the launcher starts the game;

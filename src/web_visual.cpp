@@ -35,6 +35,35 @@ void glob(std::vector<Vertex>& out, Vec3 center, Vec3 viewer, float radius, Vec3
         out.insert(out.end(), {{center, color}, {p0, color * .8f}, {p1, color * .8f}});
     }
 }
+// A flat ring around c in the plane of unit axes a and b; with dashes, that
+// many dashes with gaps between them.
+void ring(std::vector<Vertex>& out, Vec3 c, Vec3 a, Vec3 b, float inner, float outer, Vec3 color, int dashes = 0) {
+    constexpr int segments = 32;
+    for (int i = 0; i < segments; ++i) {
+        if (dashes && (i * dashes * 2 / segments) % 2)
+            continue;
+        const float t0 = 2 * pi * i / segments, t1 = 2 * pi * (i + 1) / segments;
+        const Vec3 d0 = a * std::cos(t0) + b * std::sin(t0), d1 = a * std::cos(t1) + b * std::sin(t1);
+        quad(out, {c + d0 * inner, color}, {c + d0 * outer, color}, {c + d1 * outer, color},
+             {c + d1 * inner, color});
+    }
+}
+void disc(std::vector<Vertex>& out, Vec3 c, Vec3 a, Vec3 b, float radius, Vec3 color) {
+    constexpr int sides = 12;
+    for (int i = 0; i < sides; ++i) {
+        const float t0 = 2 * pi * i / sides, t1 = 2 * pi * (i + 1) / sides;
+        out.insert(out.end(), {{c, color},
+                               {c + (a * std::cos(t0) + b * std::sin(t0)) * radius, color},
+                               {c + (a * std::cos(t1) + b * std::sin(t1)) * radius, color}});
+    }
+}
+// A flat bar from p to q across the line of sight `view`, its ends squared
+// off half its width beyond them so two bars close a corner.
+void bar(std::vector<Vertex>& out, Vec3 p, Vec3 q, Vec3 view, float halfWidth, Vec3 color) {
+    const Vec3 along = normalized(q - p) * halfWidth, side = normalized(cross(q - p, view)) * halfWidth;
+    quad(out, {p - along - side, color}, {q + along - side, color}, {q + along + side, color},
+         {p - along + side, color});
+}
 // Tapered camera-facing strand for the impact splat.
 void strand(std::vector<Vertex>& out, Vec3 from, Vec3 to, Vec3 viewer, float pixelAngle, const WebLook& look,
             float rootRadius) {
@@ -123,5 +152,82 @@ void appendWeb(std::vector<Vertex>& out, const WebLine& web, Vec3 viewer, float 
         strand(out, center, center + direction * reach + curl, viewer, pixelAngle, look, .0055f);
     }
     glob(out, center + normal * .002f, viewer, halfWidth(look, viewer, center, pixelAngle, .026f), look.core);
+}
+void appendAimMarker(std::vector<Vertex>& out, const AimMarker& marker, Vec3 viewer, float pixelAngle) {
+    const float distance = length(viewer - marker.point);
+    if (!finite(marker.point) || !finite(viewer) || !std::isfinite(pixelAngle) || pixelAngle <= 0 ||
+        !(distance >= .3f && distance <= 1000))
+        return;
+    // Level and upright across the line of sight, so the marker never rolls.
+    const Vec3 view = (viewer - marker.point) / distance;
+    Vec3 right = cross(Vec3{0, 1, 0}, view);
+    right = length(right) > .1f ? normalized(right) : perpendicular(view);
+    const Vec3 up = cross(view, right);
+    // Metres per pixel at the marker, and how far the grip has closed toward a shot.
+    const float px = pixelAngle * distance;
+    const float squeeze = std::isfinite(marker.squeeze) ? std::clamp(marker.squeeze / .65f, 0.f, 1.f) : 0.f;
+    // Each shape twice: a dark outline behind, wider by `grow`, keeps it
+    // readable on the sky and on a lit wall; the colour in front.
+    const Vec3 front = marker.point + view * (distance * .002f), back = marker.point - view * (distance * .002f);
+    const auto layers = [&](const auto& shape, Vec3 color) {
+        shape(back, 1.5f * px, Vec3{.01f, .012f, .018f});
+        shape(front, 0.f, color);
+    };
+    switch (marker.kind) {
+    case AimMark::anchor: {
+        const float r = 13 * px * (1 - .35f * squeeze);
+        layers(
+            [&](Vec3 c, float grow, Vec3 color) {
+                ring(out, c, right, up, r - 3 * px - grow, r + grow, color);
+                disc(out, c, right, up, 2 * px + grow, color);
+            },
+            {.9f, .93f, 1});
+        break;
+    }
+    case AimMark::air: {
+        const float r = 9 * px * (1 - .35f * squeeze);
+        layers([&](Vec3 c, float grow, Vec3 color) { ring(out, c, right, up, r - 2.2f * px - grow, r + grow, color, 8); },
+               {.42f, .46f, .52f});
+        break;
+    }
+    case AimMark::blocked: {
+        const Vec3 rising = (right + up) * (7 * px * .7071f), falling = (right - up) * (7 * px * .7071f);
+        layers(
+            [&](Vec3 c, float grow, Vec3 color) {
+                bar(out, c - rising, c + rising, view, 1.6f * px + grow, color);
+                bar(out, c - falling, c + falling, view, 1.6f * px + grow, color);
+            },
+            {.85f, .06f, .04f});
+        break;
+    }
+    case AimMark::target: {
+        const float size = std::isfinite(marker.radius) ? marker.radius * 1.25f : 0.f;
+        const float half = std::max(size, 12 * px) * (1 - .3f * squeeze), arm = half * .45f;
+        layers(
+            [&](Vec3 c, float grow, Vec3 color) {
+                for (const float sx : {-1.f, 1.f})
+                    for (const float sy : {-1.f, 1.f}) {
+                        const Vec3 corner = c + right * (sx * half) + up * (sy * half);
+                        bar(out, corner, corner - right * (sx * arm), view, 1.6f * px + grow, color);
+                        bar(out, corner, corner - up * (sy * arm), view, 1.6f * px + grow, color);
+                    }
+                disc(out, c, right, up, 2 * px + grow, color);
+            },
+            {1, .62f, .08f});
+        break;
+    }
+    }
+}
+Vec3 onAimLine(Vec3 point, Vec3 normal, Vec3 origin, Vec3 direction) {
+    const Vec3 n = normalized(normal);
+    const float facing = dot(direction, n);
+    if (!finite(point) || !finite(origin) || !finite(direction) || !finite(n) || length(n) < .5f ||
+        !(std::abs(facing) >= .2f))
+        return point;
+    const float along = dot(point - origin, n) / facing;
+    const Vec3 crossing = origin + direction * along;
+    return along > 0 && finite(crossing) && length(crossing - point) <= .25f * length(point - origin) + .25f
+               ? crossing
+               : point;
 }
 } // namespace spidy

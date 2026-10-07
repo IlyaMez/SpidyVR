@@ -1,6 +1,192 @@
-# Validation — 2026-10-06
+# Validation — 2026-10-07
 
-## VR stays immersive in fights — current build, checked in the game without a headset
+## VR settings beside the game's menus — current build
+
+The user, October 7: "can you add a vr settings section to ingame menu?"
+
+The game draws its menus itself; what the headset shows of them is the
+game's presented frame on a virtual screen (October 5, sixth build), and Spidy
+draws nothing into the game's UI. The section is therefore Spidy's own panel,
+hung beside that screen whenever the headset shows it.
+
+**Where and when.** The panel is a second OpenXR quad layer, 0.9 m wide,
+starting 8 cm past the game screen's right edge and square to the viewer's
+line of sight there, centred on the screen's height
+(`vr_settings::placement`). It opens when the game screen comes up within 2 s
+of the menu button pressed in play (the pause menu); on any other screen (the
+game menu, the main menu, loading, cutscenes) it is folded to a 0.42 m tab
+level with the panel's top. Its X folds it for the rest of the session; the
+tab opens it again.
+
+**Input.** Each controller's OpenXR aim pose (the space the screen is placed
+in) is intersected with the panel's quad (`aimAt`; a ray along the face or
+from behind misses). A pull past 0.75, released below 0.35, acts on what the
+ray points at: a switch's whole line switches it, a stepper's left or right
+half steps it. A pull already held when the screen came up, or begun off the
+panel, does nothing. The virtual Xbox controller gets a copy of the frame in
+which the trigger of a hand pointing at the panel, or holding a pull the
+panel took, is 0; every other control stays the game's. A click ticks that
+hand (0.3, times the vibration setting).
+
+**Drawing.** `vr_settings::Canvas` paints text with GDI (Segoe UI, grayscale
+antialiasing) into a 32-bit DIB and the switches, buttons and pointer dots as
+signed-distance shapes, 1.5 pixels a point (840 x 1212 for the panel), less
+when the eye images are smaller. It repaints only when what it shows changes
+(hover, a pointer's whole-point position, a value, open or folded).
+`D3D12Renderer::blitPixels` uploads the pixels (B8G8R8A8, one copy) and draws
+them with the game screen's blit into the top-left of the right eye's
+swapchain image, which the game screen leaves unused; `XrRuntime::panel`
+submits that rectangle as the second quad. Every frame's swapchain image gets
+it drawn; only a repaint uploads. A panel that fails to paint or upload is
+dropped for the session with a status message, and the game screen goes on.
+
+**The settings, live.**
+- Aim markers: the worker's switch, as X switches it.
+- Webs catch props and thugs: `SpidySwingSettings` (new ray-module export,
+  Settings version 1, 24 bytes) calls `game_grab::allow`. Off, the grab lets
+  go of what it holds or trails at the next input sample (`cancel()`: props
+  back to their physics, bots to the game's flight), and previews and presses
+  go to the swing. A swing started without the grab (`-NoWebGrab`) starts it
+  there, its hooks installed under the swing's simulation lock.
+- Swing speed limit: the same export sets the swing's cap and the solver's
+  (`Swing::limitSpeed`). The movement module is now always started with
+  65 m/s, the panel's highest step: it only rejects faster requests.
+- Punch thugs: `SpidyPunchStart` and `SpidyPunchStop` from the worker.
+- Your own body: the body command's `bodyOn` flag. Off, `native_body::drawn()`
+  is false at once, so the eyes hide the hero and the overlay draws gloves; a
+  session started with `-NoBody` starts the body module when switched on.
+- Snap turn: `GameTrackingRig::snapTurn`, off or 15-90 degrees (30 until now,
+  always); `reset()` keeps it.
+- Controller vibration: `XrRuntime::hapticStrength` scales every pulse; off
+  sends none.
+- Game screen size: 2.4, 3.2 (as before) or 4.2 m wide at 2.5 m, the game
+  screen and the flat-mode screen alike.
+
+**The next session.** XrData reports the settings. When a session ends with
+other values than it began with (the panel, or X), `run_game_vr.py` prints
+"VR settings from the headset: aim_markers=... screen_size=..." and the
+launcher saves them as its options (`headsetSettings`). The launcher's
+options card, `run_game_vr.py` (`--snap-turn`, `--haptics`, `--screen-size`)
+and `Launch Spidy VR.cmd` (`-SnapTurn`, `-Haptics`, `-ScreenSize`) start a
+session with the three new ones.
+
+Protocol: XrConfig version 8, 624 bytes (snapTurn, haptics, screenSize and a
+reserved word after the runtime path); XrData version 8, 704 bytes (settings
+bits 1 web grab, 2 punch, 4 body; snapTurn, haptics, screenSize, swingSpeed,
+settingChanges, panelFrames, tabFrames). `run_game_vr.py` and the DLLs must
+come from one build: an older runner against these DLLs fails with "Game XR
+start: 1001", this runner against older DLLs with "Game XR protocol
+mismatch".
+
+Checks without the game: 152 core checks (new: the layout fits and each
+control hits its own setting; steppers stop at their ends and step a value
+between steps to the next one; the panel hangs past the screen's edge, square
+to the viewer, for all three sizes, and aim rays meet it at its centre but
+not from behind or from the screen; one click per pull, a held pull, a pull
+begun off the panel and a trigger held as the screen came up click nothing,
+a press keeps its trigger from the game until released; the tab opens it,
+close folds it for the session; snap turn off and 90 degrees), 10 launcher
+checks (the new arguments; the headset's line applied, clamped, ignored when
+unchanged), 71 Python checks (XrData v8 fields; the line printed only for
+changes), and the GPU test: the panel painted at the headset's 3072 x 3264
+eye size (840 x 1212 pixels), drawn into the corner of a typeless sRGB eye
+image within 0 levels with the rest of the image untouched, drawn again
+without new pixels, the tab uploaded at its new size, and the D3D12 debug
+layer clean (`vr-settings.bmp`, `vr-settings-tab.bmp`).
+
+In the game, without the headset (`tools/probe_aim.py --settings`, the user's
+save, perched on the lamp post): the swing started without the grab, as a
+`-NoWebGrab` session does, and a hand aimed at the throwable prop 51.3 m away
+previewed an anchor at 51.0 m, on the prop's surface; `SpidySwingSettings` with the grab on and 48 m/s
+returned 0 and the same aim previewed the prop; off at 10 m/s, the anchor
+again; on at 32 m/s, the prop. A 70 m/s limit was refused (2001). Punching
+started, stopped, started and stopped (all 0). No swing fault in 19 aims,
+both modules stopped with 0, every hook entry restored, and the save files
+byte-identical to the backup taken before.
+
+Not checked: anything only the headset shows. The panel is drawn by the XR
+worker alone, which needs an OpenXR session: its size and sharpness in the
+Quest, pointing and clicking with real controllers, the pause detection with
+the game's real pause timing, and the quad layer on Virtual Desktop.
+
+## Interact button and aim markers — preceding build
+
+The user, October 6 evening: "lets add an interaction button in vr and maybe
+some nice optional indicator\crosshairs for better aim".
+
+**Interact.** The game's context actions and its web strike share one button:
+Triangle, Xbox Y, keyboard F (the game's registry binds `Button_Y_1 = 33`,
+scancode F, and lists no separate interact key). A GameFAQs walkthrough:
+"Press Triangle to open the elevator doors", "press Triangle to interact with
+the computer", backpacks likewise. In immersive VR the virtual Xbox controller
+passed only Start (menu button), Back (Touch Y), A (the swing's jump) and the
+left stick, so nothing could press the game's Y. Now Touch B gives the game's
+Y (`game_pad::Walk::interact`) while VR steers and the swing does not own the
+player. A press keeps the meaning it started with until it is let go: B held
+from the game screen, where it is Back, is no interact (as A from the screen
+is no jump), and an interact still held when it opens a menu or a scene (the
+screen comes up 250 ms after play stops) is no Back there. XR telemetry
+counts the presses (`interacts`).
+
+**Aim markers.** What a grip press would do is worked out in the swing
+module, inside the game's world-query callback, with the rays and picks the
+press itself uses, for each free hand: first the grab's pick
+(`WebGrab::preview`, against a read-only view of the targets: the press's own
+pick starts following its target, the preview's does not), then the swing's
+shot (`Swing::shot`, which the press now calls too, so the two cannot
+disagree). The result per hand is anchor, air (no surface within 100 m: an air
+anchor), blocked (what the ray meets cannot hold a web, the anchor is nearer
+than the shortest rope, or a wall stands between body and anchor), prop or
+character, with its point and normal. Previews run once per input command,
+only while sampled (`SpidyAimSample`, 250 ms lease: with the markers off they
+cost nothing), and after the swing's step in each callback: an error from a
+preview ray is never read, so it cannot fault the swing. The headset overlay
+draws one marker per free hand: a white ring and dot (anchor), a faint dashed
+ring (air), a red cross (blocked), amber corners around the target (prop,
+character); facing the viewer, a fixed size on screen (13 pixels of radius at
+the eye image's pixel angle), a dark outline behind the colour, tightening as
+the grip closes. A surface marker is placed where the image's own aim line
+crosses the surface's plane (`onAimLine`), so it stays on the line the
+hand points along while the next preview arrives. None for a hand whose web
+is attached or holds something, none nearer than 2 m to the hand (a blocked
+one 3 m: a lowered hand points at the floor by the feet). X switches them in
+immersive VR (a short pulse on the left hand); `-NoAimMarkers`, the launcher's
+"Aim markers" switch, or XrConfig option bit 128 starts with them hidden.
+
+Protocol: XrData version 7, 664 bytes (`interacts`, `aimMarkers`, `markers`
+drawn); XrConfig options up to 255; the ray module exports `SpidyAimSample`
+and `SpidyAimData` (AimData version 1, 96 bytes). An older ray module without
+them leaves the markers off.
+
+Checks without the game: 146 core checks (new: a shot preview attaches where
+the press attaches, and names what it met when it would miss; marker size on
+screen at 5 and 50 m within 2%, outline behind the colour, squeeze tightens,
+invalid input draws nothing; the aim-line crossing and its fallbacks; B is the
+game's Y only through the swing's leave in VR and stays B on the screen), 9
+launcher checks (`--no-aim-markers`), 69 Python checks (XrData v7 fields), and
+the GPU test, which now draws every marker kind with the overlay renderer over
+the lab scene in a 1536 x 1536 sRGB eye image and finds each one's colour and
+outline (`aim-markers.bmp` beside its other images).
+
+In the game without a headset (`tools/probe_aim.py` after `probe_menu_pad.py
+start` and `pad a --until-player`, the user's save: free roam, Spider-Man
+perched on a lamp post beside a building; `reports/aim-probe.json`): a
+scripted hand 1.2 m above his feet got a preview for each of its 15 aims, the
+swing never faulted, both modules stopped with 0 and every hook entry was
+restored. Sky and the open street: air at 100 m. The building beside him:
+anchors at 11.4-16.1 m; facades across the street at 36 and 60 m. Thirty
+degrees down: the ground and the building at 5.3-12.4 m. Straight down:
+blocked at 1.2 m, the lamp under his feet nearer than the shortest rope.
+Aimed at the nearest throwable prop, 51.3 m away: prop. The save files were
+byte for byte unchanged afterwards.
+
+Not yet seen: the headset session (how the markers look and feel; B on a real
+interact prompt). Whether the game's own interact prompt appears in the eye
+images is unknown: its world markers, such as enemy reticles, do not (see
+"Game screen for menus, hint cards and cutscenes" below), so a prompt may
+show only on the monitor and the game screen.
+
+## VR stays immersive in fights — checked in the game without a headset
 
 The user, after the 16:36 session
 (`dist/Spidy-0.1.0-win64/Spidy-0.1.0/reports/game-vr-20261006-163630.json`):

@@ -55,6 +55,8 @@ struct Tracked {
 uintptr_t base{};
 Call driveCall{}, drivenCall{};
 uint32_t offered{};
+// The settings panel's switch (allow()); offered stays as started.
+bool allowed = true;
 game_targets::Watch watch;
 std::vector<Candidate> candidates;
 std::vector<Tracked> tracked;
@@ -123,36 +125,44 @@ Tracked* follow(const Candidate& c, Vec3 centre) {
     tracked.push_back(fresh);
     return &tracked.back();
 }
+// The candidate a web along the ray takes (TargetQueries::pick), and its centre.
+const Candidate* nearest(Vec3 origin, Vec3 direction, float distance, float cone, Vec3& centre) {
+    const Candidate* best{};
+    float bestMiss = cone, bestDistance = 1e9f;
+    for (const auto& c : candidates) {
+        if (!offers(c.kind))
+            continue;
+        Vec3 at{};
+        if (!game_targets::position(c, at))
+            continue;
+        const auto s = shape(c.kind);
+        at += Vec3{0, s.lift, 0};
+        // A standing person is a tall target: its sphere covers head to knees.
+        const float radius = s.core == TargetKind::Character ? s.radius * 2 : s.radius;
+        const float miss = rayMiss(origin, direction, distance, at, radius);
+        const float away = length(at - origin);
+        if (miss > bestMiss + 1e-4f || (miss > bestMiss - 1e-4f && away >= bestDistance) || !movable(c))
+            continue;
+        best = &c;
+        centre = at;
+        bestMiss = miss;
+        bestDistance = away;
+    }
+    return best && game_targets::live(base, *best) ? best : nullptr;
+}
+GrabTarget described(const Candidate& c, Vec3 centre, Vec3 velocity) {
+    const auto s = shape(c.kind);
+    return GrabTarget{c.record, s.core, centre, velocity, s.mass, s.radius};
+}
 class Targets final : public TargetQueries {
   public:
     std::optional<GrabTarget> pick(Vec3 origin, Vec3 direction, float distance, float cone) const override {
-        const Candidate* best{};
-        Vec3 bestCentre{};
-        float bestMiss = cone, bestDistance = 1e9f;
-        for (const auto& c : candidates) {
-            if (!offers(c.kind))
-                continue;
-            Vec3 at{};
-            if (!game_targets::position(c, at))
-                continue;
-            const auto s = shape(c.kind);
-            at += Vec3{0, s.lift, 0};
-            // A standing person is a tall target: its sphere covers head to knees.
-            const float radius = s.core == TargetKind::Character ? s.radius * 2 : s.radius;
-            const float miss = rayMiss(origin, direction, distance, at, radius);
-            const float away = length(at - origin);
-            if (miss > bestMiss + 1e-4f || (miss > bestMiss - 1e-4f && away >= bestDistance) || !movable(c))
-                continue;
-            best = &c;
-            bestCentre = at;
-            bestMiss = miss;
-            bestDistance = away;
-        }
-        if (!best || !game_targets::live(base, *best))
+        Vec3 centre{};
+        const auto* best = nearest(origin, direction, distance, cone, centre);
+        if (!best)
             return {};
-        const auto* t = follow(*best, bestCentre);
-        const auto s = shape(best->kind);
-        return GrabTarget{best->record, s.core, t->position, t->velocity, s.mass, s.radius};
+        const auto* t = follow(*best, centre);
+        return described(*best, t->position, t->velocity);
     }
     std::optional<GrabTarget> find(std::uint64_t id) const override {
         const auto* t = track(id);
@@ -199,6 +209,33 @@ class Targets final : public TargetQueries {
         }
     }
 } targets;
+// The same targets for the aim markers: what a press would take, without
+// taking it up. Only a press starts following its target.
+class Glance final : public TargetQueries {
+  public:
+    std::optional<GrabTarget> pick(Vec3 origin, Vec3 direction, float distance, float cone) const override {
+        Vec3 centre{};
+        const auto* best = nearest(origin, direction, distance, cone, centre);
+        if (!best)
+            return {};
+        const auto* t = track(best->record);
+        return t && t->seen && !t->gone ? described(*best, t->position, t->velocity) : described(*best, centre, {});
+    }
+    std::optional<GrabTarget> find(std::uint64_t id) const override {
+        if (const auto* t = track(id))
+            return t->seen && !t->gone ? std::optional{described(t->who, t->position, t->velocity)} : std::nullopt;
+        for (const auto& c : candidates) {
+            Vec3 at{};
+            if (c.record == id && offers(c.kind) && movable(c) && game_targets::live(base, c) &&
+                game_targets::position(c, at))
+                return described(c, at + Vec3{0, shape(c.kind).lift, 0}, {});
+        }
+        return {};
+    }
+    std::optional<std::uint64_t> owner(std::uint64_t surface) const override {
+        return targets.owner(surface);
+    }
+} glance;
 
 // Rays stand in for the collision a non-sweeping mover skips: the velocity
 // loses what goes into a wall ahead, and the centre stays its lift above the
@@ -367,9 +404,21 @@ void game_grab::cancel() {
         hand = {};
     ReleaseSRWLockExclusive(&output);
 }
+bool game_grab::offering() {
+    return offered != 0;
+}
+void game_grab::allow(bool on) {
+    allowed = on;
+}
 Input game_grab::claim(float inputSeconds, const Input& in, const WorldQueries& world, const Body& player) {
     if (!offered)
         return in;
+    if (!allowed) {
+        // Switched off: what the webs hold or still trail goes back to the game.
+        if (holds(0) || holds(1) || !tracked.empty())
+            cancel();
+        return in;
+    }
     // Picks and owners look the targets up in this copy of the watch's list.
     if (inputSeconds > 0)
         watch.current(candidates);
@@ -393,7 +442,15 @@ bool game_grab::due(float& dt) {
     return passed && std::isfinite(dt) && dt > 0 && dt <= .05f;
 }
 Input game_grab::forSwing(const Input& in) {
-    return offered ? core.forSwing(in) : in;
+    return offered && allowed ? core.forSwing(in) : in;
+}
+std::optional<GrabTarget> game_grab::preview(unsigned hand, Pose aim, const WorldQueries& world) {
+    if (!offered || !allowed || hand > 1 || holds(hand))
+        return {};
+    return core.preview(aim, world, glance);
+}
+bool game_grab::holds(unsigned hand) {
+    return hand < 2 && core.grabs()[hand].phase != GrabPhase::None;
 }
 void game_grab::step(float dt, const WorldQueries& world) {
     if (!offered || !std::isfinite(dt) || dt <= 0 || dt > .05f)

@@ -13,6 +13,8 @@ using namespace spidy;
 using namespace spidy::game_swing;
 extern "C" {
 __declspec(dllexport) Data SpidySwingData;
+// The aim markers' previews (SpidyAimSample); odd `sequence` while it changes.
+__declspec(dllexport) AimData SpidyAimData;
 }
 namespace {
 using Call = DWORD(WINAPI*)(void*);
@@ -36,6 +38,10 @@ float predictedDt{};
 uint64_t predictedStep{};
 SwingTakeoff takeoffTransition;
 LARGE_INTEGER frequency{};
+// Aim previews are made while sampled before this tick, once per input
+// command; the latest was made at aimMadeMs.
+std::atomic<uint64_t> aimDeadline{};
+uint64_t aimSerial{}, aimMadeMs{};
 bool copy(void* destination, const void* source, size_t bytes) {
     __try {
         if (reinterpret_cast<uintptr_t>(source) < 0x10000 ||
@@ -88,6 +94,45 @@ void fault(uint32_t error) {
     InterlockedIncrement64(&SpidySwingData.sequence);
     ReleaseSRWLockExclusive(&output);
 }
+// What a grip press would do now with each free hand (AimData): the grab's
+// pick first, as a press makes it, then the swing's shot from where the
+// player stands. Once per input command, while sampled.
+void previewAims(const Command& c, const Input& in, const Body& player, const WorldQueries& world) {
+    if (GetTickCount64() >= aimDeadline || c.serial == aimSerial)
+        return;
+    aimSerial = c.serial;
+    Aim hands[2]{};
+    for (unsigned i = 0; i < 2; ++i) {
+        const auto& h = in.hands[i];
+        if (!h.tracked || solver.webs()[i].attached || game_grab::holds(i))
+            continue;
+        auto& aim = hands[i];
+        if (const auto target = game_grab::preview(i, h.aim, world)) {
+            const auto kind = target->kind == TargetKind::Character ? AimKind::character : AimKind::prop;
+            aim = {static_cast<uint32_t>(kind), target->radius, target->position, {}};
+            continue;
+        }
+        const auto shot = solver.shot(h.aim, player.position, world);
+        const auto& physics = solver.config();
+        if (shot.web)
+            aim = {static_cast<uint32_t>(shot.web->airAnchor ? AimKind::air : AimKind::anchor), 0, shot.web->anchor,
+                   shot.hit ? shot.hit->normal : Vec3{}};
+        else if (shot.hit)
+            aim = {static_cast<uint32_t>(AimKind::blocked), 0, shot.hit->point, shot.hit->normal};
+        else if (physics.airAnchors) // the body has no clear line to the air anchor
+            aim = {static_cast<uint32_t>(AimKind::blocked), 0,
+                   h.aim.position + normalized(h.aim.orientation.rotate({0, 0, -1})) * physics.maxRange, {}};
+    }
+    AcquireSRWLockExclusive(&output);
+    InterlockedIncrement64(&SpidyAimData.sequence);
+    SpidyAimData.status = 2;
+    SpidyAimData.serial = c.serial;
+    for (unsigned i = 0; i < 2; ++i)
+        SpidyAimData.hands[i] = hands[i];
+    aimMadeMs = GetTickCount64();
+    InterlockedIncrement64(&SpidyAimData.sequence);
+    ReleaseSRWLockExclusive(&output);
+}
 void visit(const native_rays::QueryContext& world) {
     // Stop waits for this lock before stopping the movement module.
     AcquireSRWLockExclusive(&simulation);
@@ -124,20 +169,20 @@ void visit(const native_rays::QueryContext& world) {
         return;
     }
     const auto in = input(c);
+    // The player for picks, throws and aim previews: where it stands, and its
+    // speed when moving.
+    uintptr_t transform{};
+    float feet[16]{};
+    Vec3 at = motion.position;
+    if (copy(&transform, reinterpret_cast<const void*>(config.record), sizeof(transform)) &&
+        copy(feet, reinterpret_cast<const void*>(transform), sizeof(feet)) && finite({feet[12], feet[13], feet[14]}))
+        at = {feet[12], feet[13], feet[14]};
+    const Body player{at + Vec3{0, 1, 0}, fresh ? motion.achievedVelocity : Vec3{}, motion.grounded != 0};
     // The grab takes every input sample as it comes, so the swing never sees
     // a grip press before the grab has had it, and steps with the game's
     // physics: a perched or standing player's mover does not step, and
     // webbing a thug from a perch must work all the same.
     {
-        // The player for picks and throws: where it stands, and its speed when moving.
-        uintptr_t transform{};
-        float feet[16]{};
-        Vec3 at = motion.position;
-        if (copy(&transform, reinterpret_cast<const void*>(config.record), sizeof(transform)) &&
-            copy(feet, reinterpret_cast<const void*>(transform), sizeof(feet)) &&
-            finite({feet[12], feet[13], feet[14]}))
-            at = {feet[12], feet[13], feet[14]};
-        const Body player{at + Vec3{0, 1, 0}, fresh ? motion.achievedVelocity : Vec3{}, motion.grounded != 0};
         const float sampleSeconds = grabInputClock.consume(c);
         game_grab::claim(sampleSeconds, in, world, player);
         float grabDt{};
@@ -158,6 +203,19 @@ void visit(const native_rays::QueryContext& world) {
             return;
         }
     }
+    // The aim previews come last, however the swing's step below ends, so a
+    // ray they make never faults the swing: no one reads the world's error
+    // after this visit.
+    struct Previews {
+        const Command& c;
+        const Input& in;
+        const Body& player;
+        const native_rays::QueryContext& world;
+        ~Previews() {
+            if (enabled && !world.error())
+                previewAims(c, in, player, world);
+        }
+    } previews{c, in, player, world};
     if (!fresh || (motion.status != 1 && motion.status != 2) || motion.moverFlags & 0x80000000u) {
         cancelSwing();
         worldIdentity = world.identity();
@@ -340,7 +398,9 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStart(void* input) {
         motion.record = config.record;
         motion.mover = config.mover;
         motion.durationMs = config.durationMs;
-        motion.maxSpeed = config.maxSpeed;
+        // The swing caps its own requests at config.maxSpeed, which can rise
+        // during play (SpidySwingSettings); the module only rejects faster ones.
+        motion.maxSpeed = motionSpeedLimit;
         motion.syncAirVelocity = 1;
         if ((result = startMotion(&motion)))
             break;
@@ -381,12 +441,39 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingRetarget(void* input) {
         motion.record = next.record;
         motion.mover = next.mover;
         motion.durationMs = config.durationMs;
-        motion.maxSpeed = config.maxSpeed;
+        motion.maxSpeed = motionSpeedLimit;
         motion.syncAirVelocity = 1;
         if (!(result = retargetMotion(&motion))) {
             config.record = next.record;
             config.mover = next.mover;
         }
+        ReleaseSRWLockExclusive(&simulation);
+    }
+    ReleaseSRWLockExclusive(&lifecycle);
+    return result;
+}
+// The headset's settings panel: the speed limit, and whether webs catch props
+// and thugs. Both apply from the next step; the visit holds `simulation`.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
+    Settings s;
+    if (!copy(&s, input, sizeof(s)) || s.magic != 0x53575354 || s.version != 1 || s.bytes != sizeof(s) ||
+        s.grab > 1 || !std::isfinite(s.maxSpeed) || s.maxSpeed <= 0 || s.maxSpeed > motionSpeedLimit || s.reserved)
+        return 2001;
+    AcquireSRWLockExclusive(&lifecycle);
+    DWORD result{};
+    if (!started) {
+        result = 1004;
+    } else {
+        AcquireSRWLockExclusive(&simulation);
+        config.maxSpeed = s.maxSpeed;
+        solver.limitSpeed(s.maxSpeed);
+        // A swing started without the grab (-NoWebGrab) offers it from now on.
+        if (s.grab && !game_grab::offering() && driveMotion && sampleDriven) {
+            config.grabKinds = game_grab::movableKinds;
+            result = game_grab::start(config.base, reinterpret_cast<game_grab::Call>(driveMotion),
+                                      reinterpret_cast<game_grab::Call>(sampleDriven), config.grabKinds);
+        }
+        game_grab::allow(s.grab != 0);
         ReleaseSRWLockExclusive(&simulation);
     }
     ReleaseSRWLockExclusive(&lifecycle);
@@ -421,6 +508,24 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSample(void* out) {
         sample.takeoffPhase = sample.takeoffAttempts = 0;
         for (auto& web : sample.webs)
             web = {};
+    }
+    ReleaseSRWLockShared(&control);
+    return copy(out, &sample, sizeof(sample)) ? 0 : 2201;
+}
+// What each hand's grip press would do now (AimData), for the aim markers.
+// Sampling keeps the previews coming for aimLeaseMs; none older than 150 ms.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyAimSample(void* out) {
+    aimDeadline = GetTickCount64() + aimLeaseMs;
+    AcquireSRWLockShared(&control);
+    AcquireSRWLockShared(&output);
+    auto sample = SpidyAimData;
+    const auto made = aimMadeMs;
+    ReleaseSRWLockShared(&output);
+    const auto now = GetTickCount64();
+    if (!enabled || now >= deadline || now >= inputDeadline || !command.focused || now - made > 150) {
+        sample.status = 0;
+        for (auto& hand : sample.hands)
+            hand = {};
     }
     ReleaseSRWLockShared(&control);
     return copy(out, &sample, sizeof(sample)) ? 0 : 2201;

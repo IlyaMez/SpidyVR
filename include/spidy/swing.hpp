@@ -64,6 +64,13 @@ struct Web {
     float length{}, tension{};
     bool airAnchor{};
 };
+// What a web shot along an aim would do (Swing::shot): the web it would
+// attach, or nothing when it would miss; and the first surface its ray met,
+// held by a web or not (nothing: the ray was clear to maximum reach).
+struct WebShot {
+    std::optional<Web> web;
+    std::optional<RayHit> hit;
+};
 enum class EventKind { Attach, Miss, Release, Zip, PointLaunch, TrackingLost, Obstructed };
 struct Event {
     EventKind kind;
@@ -90,6 +97,12 @@ class Swing {
     void settleStep(float predictedSeconds, float actualSeconds);
     void reset(Body body = {});
     void releaseAll();
+    // A new speed limit during play (the headset's settings panel). A body
+    // faster than it slows to it in the next step.
+    void limitSpeed(float maxSpeed);
+    // A web shot now along `aim` (world space, -Z forward) with the body at
+    // `from`, without shooting it: the same test a grip press makes.
+    WebShot shot(Pose aim, Vec3 from, const WorldQueries&) const;
     bool pointLaunchReady() const {
         return body_.grounded && sinceLanding_ <= config_.pointLaunchWindow &&
                sinceZip_ <= config_.zipLandingWindow;

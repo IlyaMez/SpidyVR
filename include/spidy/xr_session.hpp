@@ -2,6 +2,8 @@
 #include "d3d12_renderer.hpp"
 #include "tracking.hpp"
 #include "xr_timing.hpp"
+#include <algorithm>
+#include <cmath>
 #include <functional>
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
@@ -37,13 +39,32 @@ class XrRuntime {
         return frameTiming_;
     }
     void haptic(int hand, float strength);
+    // Scales every haptic pulse: 0 none, 1 as asked (the settings panel's vibration).
+    void hapticStrength(float scale) {
+        hapticScale_ = std::isfinite(scale) ? std::clamp(scale, 0.f, 1.f) : 1.f;
+    }
     std::array<unsigned, 2> eyeDimensions() const {
         return {eyes_[0].width, eyes_[0].height};
     }
-    void presentation(bool flat, Pose screenPose = {}, float aspect = 16.f / 9) {
+    // width: the screen's width in metres.
+    void presentation(bool flat, Pose screenPose = {}, float aspect = 16.f / 9, float width = 3.2f) {
         flatScreen_ = flat;
         screenPose_ = screenPose;
         screenAspect_ = std::isfinite(aspect) && aspect > .2f && aspect < 5 ? aspect : 16.f / 9;
+        screenWidth_ = std::isfinite(width) && width > .5f && width < 10 ? width : 3.2f;
+    }
+    // A second quad beside the screen this frame: the top-left `pixelsWide` x
+    // `pixelsHigh` of the right eye's image (unused while the screen shows),
+    // `width` x `height` metres at `pose`. Only with a flat presentation, and
+    // only in the frame whose draw calls it.
+    void panel(Pose pose, float width, float height, unsigned pixelsWide, unsigned pixelsHigh) {
+        panelShown_ = std::isfinite(width) && std::isfinite(height) && width > 0 && height > 0 && pixelsWide &&
+                      pixelsHigh && pixelsWide <= eyes_[1].width && pixelsHigh <= eyes_[1].height;
+        panelPose_ = pose;
+        panelSize_[0] = width;
+        panelSize_[1] = height;
+        panelPixels_[0] = pixelsWide;
+        panelPixels_[1] = pixelsHigh;
     }
 
   private:
@@ -82,7 +103,12 @@ class XrRuntime {
     bool lastFrameSubmitted_{};
     bool flatScreen_{};
     Pose screenPose_{};
-    float screenAspect_ = 16.f / 9;
+    float screenAspect_ = 16.f / 9, screenWidth_ = 3.2f;
+    bool panelShown_{};
+    Pose panelPose_{};
+    float panelSize_[2]{};
+    unsigned panelPixels_[2]{};
+    float hapticScale_ = 1;
     XrFrameTiming frameTiming_{};
     XrTime referenceChangeTime_{};
     XrReferenceSpaceType referenceType_ = XR_REFERENCE_SPACE_TYPE_STAGE;

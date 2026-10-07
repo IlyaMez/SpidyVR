@@ -39,7 +39,8 @@ enum class Mapping {
     none,
     // VR gameplay: the controllers swing, walk and jump. The menu button
     // (Start: pause) and Y (Back: map, suits, skills) reach the game as
-    // buttons; walking and jumping reach it as the swing leaves them (Walk).
+    // buttons; walking, jumping and B (the game's Y) reach it as the swing
+    // leaves them (Walk).
     gameplay,
     // The game screen: every control as on an Xbox controller. A, B, X and Y
     // sit where Xbox has them; grips are the bumpers.
@@ -51,9 +52,12 @@ enum class Mapping {
 // played with it), the game plays the player with it and ignores the
 // keyboard, the input bridge's W/A/S/D/Space included: on October 6 those
 // moved the player 0 m while this controller's A jumped him 2.9 m.
+// interact: the game's Y, held. The game interacts with it (a backpack, a
+// door, an on-screen prompt) and web-strikes with it in a fight; the VR
+// controllers' B gives it, since their Y opens the game menu.
 struct Walk {
     float right{}, forward{};
-    bool jump{};
+    bool jump{}, interact{};
 };
 inline State fromControllers(const XrFrame& frame, Mapping mapping, const Walk& walk = {}) {
     State s;
@@ -71,6 +75,8 @@ inline State fromControllers(const XrFrame& frame, Mapping mapping, const Walk& 
             s.buttons |= back;
         if (walk.jump)
             s.buttons |= a;
+        if (walk.interact)
+            s.buttons |= y;
         s.thumbLX = stick(walk.right);
         s.thumbLY = stick(walk.forward);
         return s;

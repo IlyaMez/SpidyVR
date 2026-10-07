@@ -5,9 +5,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <utility>
 #include <vector>
 
 namespace spidy::launcher {
@@ -147,6 +150,11 @@ struct SessionOptions {
     int swingSpeed = 32;
     bool body = true;  // your own body (Spider-Man's) instead of gloves
     bool punch = true; // fists punch thugs
+    bool aimMarkers = true; // markers where each hand's web would land (X switches them in VR)
+    int snapTurn = 30;  // degrees per flick of the right stick; 0: no snap turning
+    int haptics = 100;  // controller vibration, percent
+    int screenSize = 1; // the game screen in the headset: 0 small, 1 medium, 2 large
+    bool operator==(const SessionOptions&) const = default;
 };
 
 // Arguments after the script for tools/run_game_vr.py, for an untimed session
@@ -168,6 +176,18 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
         args.emplace_back(L"--no-body");
     if (!options.punch)
         args.emplace_back(L"--no-punch");
+    if (!options.aimMarkers)
+        args.emplace_back(L"--no-aim-markers");
+    // The headset's settings panel offers these too; the defaults go unsaid.
+    const std::pair<int, std::pair<const wchar_t*, int>> settings[] = {
+        {std::clamp(options.snapTurn, 0, 90), {L"--snap-turn", 30}},
+        {std::clamp(options.haptics, 0, 100), {L"--haptics", 100}},
+        {std::clamp(options.screenSize, 0, 2), {L"--screen-size", 1}}};
+    for (const auto& [value, flag] : settings)
+        if (value != flag.second) {
+            args.emplace_back(flag.first);
+            args.emplace_back(std::to_wstring(value));
+        }
     if (!runtime.empty()) {
         args.emplace_back(L"--xr-runtime");
         args.emplace_back(runtime);
@@ -177,6 +197,54 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
         args.emplace_back(stopEvent);
     }
     return args;
+}
+
+// The line tools/run_game_vr.py prints when a session ends with other VR
+// settings than it began with (the headset's settings panel beside the
+// game's menus, or X for the aim markers):
+//   VR settings from the headset: aim_markers=1 web_grab=0 punch=1 ...
+// Applies them to `options` for the next session; false when the line is
+// another one, or changes nothing.
+inline bool headsetSettings(std::string_view line, SessionOptions& options) {
+    constexpr std::string_view prefix = "VR settings from the headset: ";
+    if (line.substr(0, prefix.size()) != prefix)
+        return false;
+    line.remove_prefix(prefix.size());
+    while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' '))
+        line.remove_suffix(1);
+    SessionOptions next = options;
+    while (!line.empty()) {
+        const size_t space = line.find(' ');
+        const std::string_view pair = line.substr(0, space);
+        line = space == std::string_view::npos ? std::string_view() : line.substr(space + 1);
+        const size_t equals = pair.find('=');
+        if (equals == std::string_view::npos)
+            continue;
+        const std::string_view key = pair.substr(0, equals), value = pair.substr(equals + 1);
+        int number{};
+        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), number);
+        if (error != std::errc() || end != value.data() + value.size())
+            continue;
+        if (key == "aim_markers")
+            next.aimMarkers = number != 0;
+        else if (key == "web_grab")
+            next.webGrab = number != 0;
+        else if (key == "punch")
+            next.punch = number != 0;
+        else if (key == "body")
+            next.body = number != 0;
+        else if (key == "swing_speed")
+            next.swingSpeed = std::clamp(number, 10, 65);
+        else if (key == "snap_turn")
+            next.snapTurn = std::clamp(number, 0, 90);
+        else if (key == "haptics")
+            next.haptics = std::clamp(number, 0, 100);
+        else if (key == "screen_size")
+            next.screenSize = std::clamp(number, 0, 2);
+    }
+    const bool changed = !(next == options);
+    options = next;
+    return changed;
 }
 
 enum class LineKind { normal, good, warning, error };

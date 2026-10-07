@@ -123,7 +123,45 @@ struct Data {
     uint32_t takeoffPhase{}, takeoffAttempts{}, takeoffTimeouts{}, nativeContact{};
 };
 static_assert(sizeof(Config) == 64 && sizeof(Hand) == 52 && sizeof(Command) == 168);
+// SpidySwingSettings: what the headset's settings panel changes during play.
+// grab: webs catch props and thugs (a swing started without them starts
+// them here); off lets go of what they hold. maxSpeed: the speed limit, up to
+// 65 m/s, which the movement module is started with for that reason.
+struct Settings {
+    uint32_t magic = 0x53575354, version = 1, bytes = sizeof(Settings), grab = 1;
+    float maxSpeed = 32;
+    uint32_t reserved{};
+};
+static_assert(sizeof(Settings) == 24);
+// The movement module's own limit: every speed the panel offers.
+constexpr float motionSpeedLimit = 65;
 static_assert(sizeof(WebState) == 28 && sizeof(Data) == 240);
+// What a grip press would do now with each hand (SpidyAimSample), for the
+// headset's aim markers: worked out in the world-query callback with the rays
+// and target picks the press itself uses, from the latest input. It costs a
+// few rays a step, so only while someone samples it within aimLeaseMs.
+enum class AimKind : uint32_t {
+    none,      // the hand is untracked, or its web holds something already
+    anchor,    // the web attaches to this surface
+    air,       // nothing within reach: the web attaches in the air at maximum reach
+    blocked,   // the web misses: what the ray meets cannot hold it, or the body has no clear line
+    prop,      // the web catches this prop
+    character, // the web catches this character
+};
+struct Aim {
+    uint32_t kind{}; // AimKind
+    float radius{};  // a target's radius
+    Vec3 point{};    // where the web goes: the surface or air point, or the target's centre
+    Vec3 normal{};   // the surface's normal (anchor, blocked); zero for none
+};
+struct AimData {
+    uint32_t magic = 0x5357414d, version = 1, bytes = sizeof(AimData), status{};
+    int64_t sequence{};
+    uint64_t serial{}; // the input command the aims were worked out from
+    Aim hands[2];
+};
+static_assert(sizeof(Aim) == 32 && sizeof(AimData) == 96);
+constexpr uint32_t aimLeaseMs = 250;
 inline bool valid(const Command& c) {
     if (c.magic != 0x5357434d || c.version != 2 || c.bytes != sizeof(c) || !c.serial || c.focused > 1 ||
         c.jump > 1 || c.leaseMs > 250 || (c.focused && !c.leaseMs) || !finite(c.move) ||

@@ -52,6 +52,11 @@ Swing::Swing(SwingConfig c) : config_(c) {
     if (c.minRope > c.maxRange || c.fixedStep > .02f)
         throw std::invalid_argument("Invalid rope range or fixed timestep");
 }
+void Swing::limitSpeed(float maxSpeed) {
+    if (!std::isfinite(maxSpeed) || maxSpeed <= 0)
+        throw std::invalid_argument("Invalid swing speed limit");
+    config_.maxSpeed = maxSpeed;
+}
 void Swing::reset(Body b) {
     if (!finite(b.position) || !finite(b.velocity))
         throw std::invalid_argument("Invalid body");
@@ -113,6 +118,29 @@ float Swing::follow(int i, Vec3 radial) const {
     const float cosHalfAngle = std::sqrt(std::max(0.f, (1 + dot(radial, delta / dist)) / 2));
     return std::min(1.f, cosHalfAngle * 1.4142135f);
 }
+WebShot Swing::shot(Pose aim, Vec3 from, const WorldQueries& world) const {
+    WebShot out;
+    const Vec3 forward = aim.orientation.rotate({0, 0, -1});
+    if (!finite(aim.position) || !finite(from) || !finite(forward) || length(forward) < .9f || length(forward) > 1.1f)
+        return out;
+    const Vec3 direction = normalized(forward);
+    out.hit = world.raycast(aim.position, direction, config_.maxRange);
+    const bool airAnchor = !out.hit && config_.airAnchors;
+    if (!out.hit && !airAnchor)
+        return out;
+    const RayHit anchor = airAnchor ? RayHit{aim.position + direction * config_.maxRange, {}, 0, true} : *out.hit;
+    // Confirm the body has a clear line to the same anchor. Hands cannot
+    // shoot through a wall while the body remains on its other side.
+    if (anchor.fixed && (airAnchor || world.exists(anchor.surface)) && finite(anchor.point)) {
+        const Vec3 delta = anchor.point - from;
+        const float dist = length(delta);
+        const auto obstacle = world.raycast(from, normalized(delta), std::max(0.0f, dist - .08f));
+        if (length(anchor.point - aim.position) <= config_.maxRange + .01f && dist >= config_.minRope &&
+            !(obstacle && blocks(*obstacle, from, anchor.point)))
+            out.web = Web{true, anchor.point, anchor.surface, dist, 0, airAnchor};
+    }
+    return out;
+}
 void Swing::releaseAll() {
     for (int i = 0; i < 2; ++i) {
         release(i);
@@ -148,28 +176,16 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
         if (w.attached && (!held || (!w.airAnchor && !world.exists(w.surface))))
             release(i);
         if (!w.attached && shoot) {
-            auto hit = world.raycast(h.aim.position, normalized(forward), config_.maxRange);
-            const bool airAnchor = !hit && config_.airAnchors;
-            if (airAnchor)
-                hit = RayHit{h.aim.position + normalized(forward) * config_.maxRange, {}, 0, true};
-            // Confirm the body has a clear line to the same anchor. Hands cannot
-            // shoot through a wall while the body remains on its other side.
-            if (hit && hit->fixed && (airAnchor || world.exists(hit->surface)) && finite(hit->point)) {
-                const Vec3 delta = hit->point - body_.position;
-                const float dist = length(delta);
-                auto obstacle = world.raycast(body_.position, normalized(delta), std::max(0.0f, dist - .08f));
-                if (length(hit->point - h.aim.position) <= config_.maxRange + .01f &&
-                    dist >= config_.minRope && !(obstacle && blocks(*obstacle, body_.position, hit->point))) {
-                    w = {true, hit->point, hit->surface, dist, 0, airAnchor};
-                    s.triggerReleased = false;
-                    s.reeling = false;
-                    s.zipUsed = false;
-                    s.pullDistance = s.pullTime = s.obstructed = 0;
-                    events_.push_back({EventKind::Attach, i, .65f});
-                }
-            }
-            if (!w.attached)
+            if (const auto fired = shot(h.aim, body_.position, world); fired.web) {
+                w = *fired.web;
+                s.triggerReleased = false;
+                s.reeling = false;
+                s.zipUsed = false;
+                s.pullDistance = s.pullTime = s.obstructed = 0;
+                events_.push_back({EventKind::Attach, i, .65f});
+            } else {
                 events_.push_back({EventKind::Miss, i, .15f});
+            }
         }
         if (w.attached) {
             if (h.trigger < .35f)

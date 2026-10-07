@@ -62,6 +62,14 @@ Grabbing
   Trigger / sharp pull ........... reel it in / yank it to your hand
   Release the grip ............... throw it (swing harder to throw faster)
 
+Aim markers (where each hand's web would go if you squeezed its grip now)
+  White ring ........... the web holds there
+  Faint dashed ring .... nothing in reach: it holds in open air
+  Red cross ............ it would miss (a car, or a wall in your way)
+  Amber corners ........ it catches that prop or thug
+  X .................... hide or show the markers (VR SETTINGS has the
+                         same switch; the next session starts as you left it)
+
 Your body and fists
   Look down ............ you are Spider-Man: his body under you, his arms
                          and hands where your controllers are
@@ -71,7 +79,11 @@ Your body and fists
 
 Moving
   Left stick ........... walk and run
+  Right stick .......... flick left or right to turn (30 degrees; VR
+                         SETTINGS sets how far, or turns it off)
   A .................... jump
+  B .................... interact: the game's Y (backpacks, doors, prompts;
+                         web strike in a fight)
   Menu button .......... pause
   Y .................... game menu (map, suits, skills)
   Click both sticks .... switch between VR and a flat game screen
@@ -79,6 +91,20 @@ Moving
 Menus and cutscenes show on a screen in the headset. There the controllers act
 as an Xbox controller: left stick moves, A selects, B goes back, grips switch
 tabs, the menu button is Start.
+
+VR settings
+  Pause with the menu button and VR SETTINGS opens beside the pause menu. On
+  every other game screen (the game menu, loading, cutscenes) a small VR
+  SETTINGS tab hangs at the screen's right edge; point at it and pull the
+  trigger to open it.
+  Point a controller at a setting and pull the trigger: switch the aim
+  markers, catching props and thugs, your own body and punching on or off,
+  or step the swing speed limit, snap turn, controller vibration and the
+  game screen's size. Changes apply at once. The launcher starts your next
+  session with them; its options show them too.
+  A hand pointing at the panel keeps its trigger from the game; every other
+  control still works the game's menu. The X in the corner folds the panel
+  to its tab until you open it again.
 
 
 IF SOMETHING IS WRONG
@@ -93,8 +119,16 @@ IF SOMETHING IS WRONG
   the larger render memory VR needs.
 - Low frame rate: lower "Eye resolution" in the launcher's options, or your
   streaming quality in Virtual Desktop.
-- Your body looks wrong or gets in the way: switch "Your own body" off in the
-  launcher's options; you get gloves instead, as in earlier versions.
+- Your body looks wrong or gets in the way: switch "Your own body" off in VR
+  SETTINGS or the launcher's options; you get gloves instead, as in earlier
+  versions.
+- The aim markers distract you: press X in VR to hide them, or switch "Aim
+  markers" off in VR SETTINGS.
+- Snap turning makes you uneasy, or the vibration is too strong: VR SETTINGS
+  has both.
+- The menu screen is too small or too large: "Game screen size" in VR
+  SETTINGS.
+- The game asks for Y (Triangle) to interact: in VR that is B.
 
 
 SHARING

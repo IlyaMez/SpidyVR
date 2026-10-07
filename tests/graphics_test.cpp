@@ -1,7 +1,10 @@
 #include "spidy/copy_eye_texture.hpp"
 #include "spidy/d3d12_renderer.hpp"
 #include "spidy/lab_world.hpp"
+#include "spidy/vr_settings_canvas.hpp"
 #include "spidy/web_visual.hpp"
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <d3d12sdklayers.h>
 #include <filesystem>
@@ -299,6 +302,57 @@ int main(int argc, char** argv) {
             std::cout << "PASS game-style web overlay: " << drawn << " pixels, " << white << " bright.\n";
         }
         {
+            // Aim markers over the left eye, on sky and on walls: each shows its
+            // colour inside a dark outline. Saved for visual inspection.
+            const Pose camera{{-.032f, 19.7f, 19}, {}};
+            const auto vp = multiply(projection(-.8f, .8f, -.65f, .65f), viewMatrix(camera));
+            const float pixelAngle = 2 * std::tan(.8f) / width;
+            struct Expected {
+                AimMarker marker;
+                bool (*colour)(const unsigned char*);
+                const char* name;
+            };
+            const Expected expected[] = {
+                {{AimMark::anchor, {-6, 22, 0}}, [](const unsigned char* p) { return p[0] > 220 && p[1] > 220 && p[2] > 230; },
+                 "anchor"},
+                {{AimMark::anchor, {-2, 18.5f, 8}, 0, .5f}, [](const unsigned char* p) { return p[0] > 220 && p[1] > 220 && p[2] > 230; },
+                 "squeezed anchor"},
+                {{AimMark::air, {8, 40, -79}}, [](const unsigned char* p) { return p[0] > 140 && p[0] < 205 && p[2] > p[0]; },
+                 "open air"},
+                {{AimMark::blocked, {4, 18, 4}}, [](const unsigned char* p) { return p[0] > 200 && p[1] < 110 && p[2] < 110; },
+                 "miss"},
+                {{AimMark::target, {.8f, 18.6f, 11}, .45f}, [](const unsigned char* p) { return p[0] > 230 && p[1] > 170 && p[1] < 235 && p[2] < 130; },
+                 "catch"},
+            };
+            std::vector<Vertex> marks;
+            for (const auto& e : expected)
+                appendAimMarker(marks, e.marker, camera.position, pixelAngle);
+            overlay.render(copied[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, width, height, vp, marks, true);
+            const auto image = overlay.readback(copied[0].Get());
+            for (const auto& e : expected) {
+                const auto& p = e.marker.point;
+                const float clip[4] = {vp[0] * p.x + vp[1] * p.y + vp[2] * p.z + vp[3],
+                                       vp[4] * p.x + vp[5] * p.y + vp[6] * p.z + vp[7], 0,
+                                       vp[12] * p.x + vp[13] * p.y + vp[14] * p.z + vp[15]};
+                const int cx = static_cast<int>((clip[0] / clip[3] * .5f + .5f) * width);
+                const int cy = static_cast<int>((.5f - clip[1] / clip[3] * .5f) * height);
+                size_t coloured{}, dark{};
+                const int reach = 40 * static_cast<int>(width) / 1536 + 30;
+                for (int y = std::max(cy - reach, 0); y < std::min(cy + reach, static_cast<int>(height)); ++y)
+                    for (int x = std::max(cx - reach, 0); x < std::min(cx + reach, static_cast<int>(width)); ++x) {
+                        const auto* pixel = image.data() + (static_cast<size_t>(y) * width + x) * 4;
+                        coloured += e.colour(pixel);
+                        dark += pixel[0] < 45 && pixel[1] < 45 && pixel[2] < 50;
+                    }
+                if (coloured < 20 || dark < 20)
+                    throw std::runtime_error(std::string("Aim marker missing its colour or outline: ") + e.name);
+            }
+            if (argc >= 2)
+                saveBmp(std::filesystem::path(argv[1]) / "aim-markers.bmp", image, width, height);
+            std::cout << "PASS aim markers: anchor, squeezed anchor, open air, miss and catch drawn in colour "
+                         "inside a dark outline.\n";
+        }
+        {
             // The game screen: the game's presented frame drawn into an eye
             // image. Display-encoded back buffers keep their stored values in
             // the sRGB (VDXR typeless) target; light values are encoded.
@@ -362,6 +416,122 @@ int main(int argc, char** argv) {
                                          std::to_string(errors[2]) + " levels)");
             std::cout << "PASS game screen blit into the sRGB eye image: 8-bit, 10-bit and float frames within "
                       << std::max({errors[0], errors[1], errors[2]}) << " level.\n";
+        }
+        {
+            // The VR settings panel beside the game screen: painted on the CPU,
+            // uploaded, drawn into the top-left of the right eye's (VDXR typeless
+            // sRGB) image with its values unchanged; the rest of that image is
+            // left alone. Drawn again without new pixels, as each later frame's
+            // image is. Saved for inspection.
+            using namespace vr_settings;
+            vr_settings::Canvas canvas;
+            Panel::Look look;
+            look.open = true;
+            const auto& speed = lines()[3];
+            look.hover[1] = {Item::swingSpeed, 1};
+            look.cursor[1] = look.held[1] = true;
+            look.x[1] = controlBox(speed).x + 160;
+            look.y[1] = speed.box.y + 33;
+            Values values;
+            values.punch = false;
+            const float scale = std::min({1.5f, static_cast<float>(width) / panelPoints[0],
+                                          static_cast<float>(height) / panelPoints[1]});
+            canvas.draw(look, values, scale);
+            if (canvas.width() != static_cast<unsigned>(std::lround(panelPoints[0] * scale)) ||
+                canvas.height() != static_cast<unsigned>(std::lround(panelPoints[1] * scale)))
+                throw std::runtime_error("Settings panel painted at the wrong size");
+            const auto painted = [&](float x, float y) {
+                const uint32_t p = canvas.pixels()[static_cast<size_t>(y * scale) * canvas.width() +
+                                                   static_cast<size_t>(x * scale)];
+                return std::array<int, 3>{static_cast<int>(p >> 16 & 0xff), static_cast<int>(p >> 8 & 0xff),
+                                          static_cast<int>(p & 0xff)};
+            };
+            const auto is = [](std::array<int, 3> p, int r, int g, int b) {
+                return std::abs(p[0] - r) <= 2 && std::abs(p[1] - g) <= 2 && std::abs(p[2] - b) <= 2;
+            };
+            const auto markers = controlBox(lines()[1]), punch = controlBox(lines()[6]);
+            if (!is(painted(100, 2), 227, 38, 47) || !is(painted(300, 85), 21, 25, 34) ||
+                !is(painted(markers.x + 8, markers.y + markers.h / 2), 59, 130, 246) ||
+                !is(painted(punch.x + 30, punch.y + 4), 44, 50, 66) ||
+                !is(painted(look.x[1], look.y[1]), 59, 130, 246))
+                throw std::runtime_error("Settings panel colours: accent, panel, switches or cursor wrong");
+            size_t bright{};
+            for (float y = 22; y < 56; y += 1 / scale)
+                for (float x = 28; x < 300; x += 1 / scale)
+                    bright += painted(x, y)[0] > 200;
+            if (bright < 200)
+                throw std::runtime_error("Settings panel title not drawn");
+            auto texture = td;
+            texture.Format = DXGI_FORMAT_R8G8B8A8_TYPELESS;
+            std::array<ComPtr<ID3D12Resource>, 2> eyes;
+            for (auto& e : eyes)
+                require(renderer.device()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &texture,
+                                                                   D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr,
+                                                                   IID_PPV_ARGS(&e)));
+            const auto scene = multiply(projection(-.8f, .8f, -.65f, .65f), viewMatrix({{0, 19.7f, 19}, {}}));
+            std::array<std::vector<unsigned char>, 2> before;
+            for (unsigned i = 0; i < 2; ++i) {
+                renderer.render(eyes[i].Get(), DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, width, height, scene, vertices);
+                before[i] = renderer.readback(eyes[i].Get());
+            }
+            const unsigned cw = canvas.width(), ch = canvas.height();
+            int worst{};
+            for (unsigned i = 0; i < 2; ++i) {
+                renderer.blitPixels(i ? nullptr : canvas.pixels(), cw, ch, canvas.rowPitch(),
+                                    {eyes[i].Get(), DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, cw, ch, {}});
+                const auto after = renderer.readback(eyes[i].Get());
+                for (unsigned y = 0; y < height; ++y)
+                    for (unsigned x = 0; x < width; ++x) {
+                        const size_t at = (static_cast<size_t>(y) * width + x) * 4;
+                        if (x >= cw || y >= ch) {
+                            if (std::memcmp(&after[at], &before[i][at], 4))
+                                throw std::runtime_error("Settings panel drew outside its corner");
+                            continue;
+                        }
+                        const uint32_t p = canvas.pixels()[static_cast<size_t>(y) * cw + x];
+                        const int expected[] = {static_cast<int>(p >> 16 & 0xff), static_cast<int>(p >> 8 & 0xff),
+                                                static_cast<int>(p & 0xff)};
+                        for (int c = 0; c < 3; ++c)
+                            worst = std::max(worst, std::abs(int(after[at + c]) - expected[c]));
+                    }
+            }
+            if (worst > 1)
+                throw std::runtime_error("Settings panel changed its pixels by " + std::to_string(worst) + " levels");
+            auto rgba = [](const vr_settings::Canvas& c) {
+                std::vector<unsigned char> out(static_cast<size_t>(c.width()) * c.height() * 4);
+                for (size_t i = 0; i < out.size() / 4; ++i) {
+                    const uint32_t p = c.pixels()[i];
+                    out[i * 4] = static_cast<unsigned char>(p >> 16);
+                    out[i * 4 + 1] = static_cast<unsigned char>(p >> 8);
+                    out[i * 4 + 2] = static_cast<unsigned char>(p);
+                    out[i * 4 + 3] = 255;
+                }
+                return out;
+            };
+            if (argc >= 2)
+                saveBmp(std::filesystem::path(argv[1]) / "vr-settings.bmp", rgba(canvas), cw, ch);
+            // Folded to its tab: a new size, uploaded again.
+            Panel::Look tab;
+            tab.hover[0] = {Item::tab};
+            tab.cursor[0] = true;
+            tab.x[0] = 150;
+            tab.y[0] = 30;
+            canvas.draw(tab, values, scale);
+            if (canvas.width() != static_cast<unsigned>(std::lround(tabPoints[0] * scale)) ||
+                !is(painted(2, 30), 227, 38, 47))
+                throw std::runtime_error("Settings tab painted wrong");
+            renderer.blitPixels(canvas.pixels(), canvas.width(), canvas.height(), canvas.rowPitch(),
+                                {eyes[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, canvas.width(), canvas.height(), {}});
+            const auto folded = renderer.readback(eyes[0].Get());
+            const uint32_t corner = canvas.pixels()[static_cast<size_t>(canvas.height() / 2) * canvas.width() + 1];
+            if (std::abs(int(folded[(static_cast<size_t>(canvas.height() / 2) * width + 1) * 4]) - int(corner >> 16 & 0xff)) > 1)
+                throw std::runtime_error("Settings tab not drawn into the eye image");
+            if (argc >= 2)
+                saveBmp(std::filesystem::path(argv[1]) / "vr-settings-tab.bmp", rgba(canvas), canvas.width(),
+                        canvas.height());
+            std::cout << "PASS VR settings panel: painted " << cw << 'x' << ch
+                      << ", drawn into the eye image's corner within " << worst
+                      << " level, the rest untouched; drawn again without new pixels; the tab re-uploaded.\n";
         }
         if (argc >= 2) {
             std::filesystem::path folder = argv[1];

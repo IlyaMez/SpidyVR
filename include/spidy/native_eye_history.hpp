@@ -11,6 +11,9 @@ struct NativeEyeFrame {
     std::array<TrackedEye, 2> trackingEyes;
     std::array<game_swing::WebState, 2> webs;
     std::array<WebTimeline::Hand, 2> webTimes{};
+    // What each hand's grip press would do (game_swing::AimKind none while
+    // the aim markers are off).
+    std::array<game_swing::Aim, 2> aims{};
     bool flatScreen{};
     Pose screenPose{};
     float screenAspect = 16.f / 9;

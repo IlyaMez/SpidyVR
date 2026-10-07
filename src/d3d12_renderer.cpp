@@ -414,10 +414,7 @@ bool srgb(DXGI_FORMAT format) {
            format == DXGI_FORMAT_B8G8R8X8_UNORM_SRGB;
 }
 } // namespace
-void D3D12Renderer::blit(ID3D12Resource* source, DXGI_FORMAT sourceView, bool linearSource, const ViewTarget& target) {
-    if (!source || !target.texture || !target.width || !target.height)
-        throw std::runtime_error("Blit requires a source and a target");
-    waitForSubmission();
+void D3D12Renderer::prepareBlit(DXGI_FORMAT targetFormat) {
     if (!blitRoot_) {
         D3D12_DESCRIPTOR_RANGE range{D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, 0};
         D3D12_ROOT_PARAMETER parameters[2]{};
@@ -445,7 +442,7 @@ void D3D12Renderer::blit(ID3D12Resource* source, DXGI_FORMAT sourceView, bool li
         heap.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         hr(device_->CreateDescriptorHeap(&heap, IID_PPV_ARGS(&srv_)), "Create blit descriptor heap");
     }
-    if (!blitPipeline_ || blitFormat_ != target.format) {
+    if (!blitPipeline_ || blitFormat_ != targetFormat) {
         // An sRGB target encodes what the pixel shader returns, so display-
         // encoded input is decoded first and stored values come out unchanged.
         const char* shader = R"(
@@ -483,7 +480,7 @@ float4 ps(Out i) : SV_TARGET {
         p.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
         p.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         p.NumRenderTargets = 1;
-        p.RTVFormats[0] = target.format;
+        p.RTVFormats[0] = targetFormat;
         p.SampleDesc.Count = 1;
         p.SampleMask = UINT_MAX;
         p.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
@@ -497,8 +494,11 @@ float4 ps(Out i) : SV_TARGET {
         blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
         blitPipeline_.Reset();
         hr(device_->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&blitPipeline_)), "Create blit pipeline");
-        blitFormat_ = target.format;
+        blitFormat_ = targetFormat;
     }
+}
+void D3D12Renderer::recordBlit(ID3D12Resource* source, DXGI_FORMAT sourceView, bool linearSource,
+                               const ViewTarget& target) {
     D3D12_SHADER_RESOURCE_VIEW_DESC sv{};
     sv.Format = sourceView;
     sv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -510,8 +510,7 @@ float4 ps(Out i) : SV_TARGET {
     rv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
     const auto rtv = rtv_->GetCPUDescriptorHandleForHeapStart();
     device_->CreateRenderTargetView(target.texture, &rv, rtv);
-    hr(allocator_->Reset(), "Reset blit allocator");
-    hr(list_->Reset(allocator_.Get(), blitPipeline_.Get()), "Reset blit list");
+    list_->SetPipelineState(blitPipeline_.Get());
     list_->SetGraphicsRootSignature(blitRoot_.Get());
     ID3D12DescriptorHeap* heaps[] = {srv_.Get()};
     list_->SetDescriptorHeaps(1, heaps);
@@ -525,10 +524,103 @@ float4 ps(Out i) : SV_TARGET {
     list_->RSSetScissorRects(1, &rect);
     list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     list_->DrawInstanced(3, 1, 0, 0);
+}
+void D3D12Renderer::blit(ID3D12Resource* source, DXGI_FORMAT sourceView, bool linearSource, const ViewTarget& target) {
+    if (!source || !target.texture || !target.width || !target.height)
+        throw std::runtime_error("Blit requires a source and a target");
+    waitForSubmission();
+    prepareBlit(target.format);
+    hr(allocator_->Reset(), "Reset blit allocator");
+    hr(list_->Reset(allocator_.Get(), blitPipeline_.Get()), "Reset blit list");
+    recordBlit(source, sourceView, linearSource, target);
     hr(list_->Close(), "Close blit list");
     ID3D12CommandList* lists[] = {list_.Get()};
     queue_->ExecuteCommandLists(1, lists);
     hr(queue_->Signal(fence_.Get(), ++fenceValue_), "Signal blit completion");
+}
+void D3D12Renderer::blitPixels(const void* pixels, unsigned width, unsigned height, unsigned rowPitch,
+                               const ViewTarget& target) {
+    if (!width || !height || !target.texture || !target.width || !target.height ||
+        (pixels && rowPitch < width * 4))
+        throw std::runtime_error("Pixel blit requires pixels and a target");
+    // The last submission read the upload buffer and the texture; both are free now.
+    waitForSubmission();
+    if (!pixelTexture_ || width != pixelWidth_ || height != pixelHeight_) {
+        if (!pixels)
+            throw std::runtime_error("Pixel blit has no pixels to draw again");
+        pixelTexture_.Reset();
+        pixelUpload_.Reset();
+        pixelMapped_ = nullptr;
+        pixelWidth_ = pixelHeight_ = 0;
+        D3D12_RESOURCE_DESC d{};
+        d.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        d.Width = width;
+        d.Height = height;
+        d.DepthOrArraySize = 1;
+        d.MipLevels = 1;
+        d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        d.SampleDesc.Count = 1;
+        auto texture = heap(D3D12_HEAP_TYPE_DEFAULT);
+        hr(device_->CreateCommittedResource(&texture, D3D12_HEAP_FLAG_NONE, &d, D3D12_RESOURCE_STATE_COPY_DEST,
+                                            nullptr, IID_PPV_ARGS(&pixelTexture_)),
+           "Create pixel texture");
+        UINT rows{};
+        UINT64 rowBytes{}, total{};
+        device_->GetCopyableFootprints(&d, 0, 1, 0, &pixelFootprint_, &rows, &rowBytes, &total);
+        D3D12_RESOURCE_DESC b{};
+        b.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        b.Width = total;
+        b.Height = 1;
+        b.DepthOrArraySize = 1;
+        b.MipLevels = 1;
+        b.SampleDesc.Count = 1;
+        b.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        auto upload = heap(D3D12_HEAP_TYPE_UPLOAD);
+        hr(device_->CreateCommittedResource(&upload, D3D12_HEAP_FLAG_NONE, &b, D3D12_RESOURCE_STATE_GENERIC_READ,
+                                            nullptr, IID_PPV_ARGS(&pixelUpload_)),
+           "Create pixel upload buffer");
+        D3D12_RANGE none{0, 0};
+        void* mapped{};
+        hr(pixelUpload_->Map(0, &none, &mapped), "Map pixel upload buffer");
+        pixelMapped_ = static_cast<unsigned char*>(mapped);
+        pixelWidth_ = width;
+        pixelHeight_ = height;
+        pixelsReadable_ = false;
+    }
+    prepareBlit(target.format);
+    hr(allocator_->Reset(), "Reset pixel blit allocator");
+    hr(list_->Reset(allocator_.Get(), blitPipeline_.Get()), "Reset pixel blit list");
+    if (pixels) {
+        const auto* rows = static_cast<const unsigned char*>(pixels);
+        for (unsigned y = 0; y < height; ++y)
+            std::memcpy(pixelMapped_ + pixelFootprint_.Offset + static_cast<size_t>(y) * pixelFootprint_.Footprint.RowPitch,
+                        rows + static_cast<size_t>(y) * rowPitch, static_cast<size_t>(width) * 4);
+        D3D12_RESOURCE_BARRIER barrier{};
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        if (pixelsReadable_) {
+            barrier.Transition = {pixelTexture_.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                                  D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST};
+            list_->ResourceBarrier(1, &barrier);
+        }
+        D3D12_TEXTURE_COPY_LOCATION to{};
+        to.pResource = pixelTexture_.Get();
+        to.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+        to.SubresourceIndex = 0;
+        D3D12_TEXTURE_COPY_LOCATION from{};
+        from.pResource = pixelUpload_.Get();
+        from.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+        from.PlacedFootprint = pixelFootprint_;
+        list_->CopyTextureRegion(&to, 0, 0, 0, &from, nullptr);
+        barrier.Transition = {pixelTexture_.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                              D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE};
+        list_->ResourceBarrier(1, &barrier);
+        pixelsReadable_ = true;
+    }
+    recordBlit(pixelTexture_.Get(), DXGI_FORMAT_B8G8R8A8_UNORM, false, target);
+    hr(list_->Close(), "Close pixel blit list");
+    ID3D12CommandList* lists[] = {list_.Get()};
+    queue_->ExecuteCommandLists(1, lists);
+    hr(queue_->Signal(fence_.Get(), ++fenceValue_), "Signal pixel blit completion");
 }
 void addBox(std::vector<Vertex>& out, Vec3 lo, Vec3 hi, Vec3 color) {
     Vec3 p[] = {{lo.x, lo.y, lo.z}, {hi.x, lo.y, lo.z}, {hi.x, hi.y, lo.z}, {lo.x, hi.y, lo.z},

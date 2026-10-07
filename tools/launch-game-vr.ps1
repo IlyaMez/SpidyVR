@@ -2,12 +2,16 @@ param(
     [ValidateRange(0,25)][int]$Seconds=0,
     [ValidateRange(0,4096)][int]$Size=0,
     [ValidateRange(1,65)][float]$SwingSpeed=32,
+    [ValidateRange(0,90)][int]$SnapTurn=30,
+    [ValidateRange(0,100)][int]$Haptics=100,
+    [ValidateSet('Small','Medium','Large')][string]$ScreenSize='Medium',
     [string]$Python,
     [switch]$CaptureImages,
     [switch]$OverlayWebs,
     [switch]$NoWebGrab,
     [switch]$NoBody,
     [switch]$NoPunch,
+    [switch]$NoAimMarkers,
     [switch]$NoEyeOcclusion,
     [switch]$StockMonitorView,
     [switch]$FullDesktopView,
@@ -39,8 +43,12 @@ else { Write-Host 'VR stays active until you close the game or press Ctrl+C here
 Write-Host 'VR starts with the game: its intro, menus, loading and cutscenes show on a screen in the headset.'
 Write-Host 'There the controllers are an Xbox controller: thumbstick moves, A selects, B goes back, grips switch tabs.'
 Write-Host 'In VR the menu button pauses and Y opens the game menu (map, suits, skills).'
+Write-Host "In VR B is the game's interact button (its Y: backpacks, doors, prompts; web strike in a fight)."
 Write-Host 'Keep the game window in front on the desktop: the game pauses while another window is.'
 Write-Host 'Click both thumbsticks to switch between immersive VR and a flat game screen in the headset.'
+Write-Host 'VR SETTINGS hang beside the game screen (they open with the pause menu): point a controller and pull'
+Write-Host 'the trigger to change the aim markers, web grab, swing speed, body, punching, snap turn, vibration'
+Write-Host 'and screen size during play.'
 Write-Host "Squeeze a grip to shoot that hand's web. Keep it held to swing; release it to let go."
 Write-Host "Swing speed cap: $SwingSpeed m/s. Pull the trigger while a web is attached to reel in."
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -61,6 +69,11 @@ if($NoBody) {
 else { Write-Host "Your body: Spider-Man's, following your head and hands (add -NoBody for gloves)." }
 if($NoPunch) { $captureArgs+=@('--no-punch'); Write-Host 'Punching off: fists pass through thugs.' }
 else { Write-Host 'Punch a thug: a fist that hits him fast enough knocks him back (add -NoPunch to turn it off).' }
+if($NoAimMarkers) {
+    $captureArgs+=@('--no-aim-markers')
+    Write-Host "Aim markers hidden at the start: X shows where each hand's web would land."
+}
+else { Write-Host "Aim markers show where each hand's web would land; X hides them (add -NoAimMarkers to start hidden)." }
 if($NoEyeOcclusion) {
     $captureArgs+=@('--no-eye-occlusion')
     Write-Host 'Eye occlusion off: each eye draws everything in view, hidden or not (about half the frame rate).'
@@ -79,5 +92,9 @@ elseif(-not $AttachOnly) {
 }
 if(-not $AttachOnly) { $captureArgs+=@('--auto-launch') }
 if($XrRuntime) { $captureArgs+=@('--xr-runtime',$XrRuntime) }
+if($SnapTurn -ne 30) { Write-Host "Snap turn: $SnapTurn degrees (0: off)." }
+if($Haptics -ne 100) { Write-Host "Controller vibration: $Haptics%." }
+$screenIndex=@{Small=0;Medium=1;Large=2}[$ScreenSize]
+$captureArgs+=@('--snap-turn',$SnapTurn,'--haptics',$Haptics,'--screen-size',$screenIndex)
 & $Python (Join-Path $PSScriptRoot 'run_game_vr.py') --seconds $Seconds --size $Size --swing-speed $SwingSpeed --output $report @captureArgs
 exit $LASTEXITCODE

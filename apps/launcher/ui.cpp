@@ -56,6 +56,12 @@ void handCursor() {
 
 constexpr const char* kEyeSizes[] = {"Headset default", "2048 x 2048", "1792 x 1792", "1536 x 1536", "1280 x 1280"};
 constexpr int kEyeValues[] = {0, 2048, 1792, 1536, 1280};
+// The steps the headset's settings panel offers too (vr_settings.hpp).
+constexpr const char* kSnapTurns[] = {"Off", "15\xC2\xB0", "30\xC2\xB0", "45\xC2\xB0", "60\xC2\xB0", "90\xC2\xB0"};
+constexpr int kSnapValues[] = {0, 15, 30, 45, 60, 90};
+constexpr const char* kHaptics[] = {"Off", "25%", "50%", "75%", "100%"};
+constexpr int kHapticValues[] = {0, 25, 50, 75, 100};
+constexpr const char* kScreenSizes[] = {"Small", "Medium", "Large"};
 
 } // namespace
 
@@ -148,6 +154,10 @@ void App::poll() {
     logCount_ = session_.lines(logCount_, log_);
     if (log_.size() != before)
         scrollLog_ = true;
+    // What the headset's settings panel left becomes the next session's options.
+    for (size_t i = before; i < log_.size(); ++i)
+        if (spidy::launcher::headsetSettings(log_[i].text, settings_.options))
+            save();
     const Outcome install = vcInstall_.state();
     if (lastInstall_ == Outcome::running && install != Outcome::running)
         rescan();
@@ -892,6 +902,8 @@ void App::optionsCard(ImVec2 size) {
            [&] { changed |= toggle("##body", &o.body); });
     option("Punch thugs", "A fist that hits a thug hard enough knocks him back.", S(40),
            [&] { changed |= toggle("##punch", &o.punch); });
+    option("Aim markers", "Show where each hand's web would land; X switches them in VR.", S(40),
+           [&] { changed |= toggle("##aim", &o.aimMarkers); });
     option("Webs drawn by", "Spidy's own strands, if the game's look off.", S(150), [&] {
         static constexpr const char* labels[] = {"Game", "Spidy"};
         int value = o.overlayWebs ? 1 : 0;
@@ -917,6 +929,29 @@ void App::optionsCard(ImVec2 size) {
         changed |= ImGui::SliderInt("##speed", &o.swingSpeed, 10, 65, "%d m/s");
         ImGui::PopFont();
     });
+    // A value the list does not have shows as the nearest one.
+    const auto stepCombo = [&](const char* id, const char* const* labels, const int* values, int count, int* value) {
+        int index = 0;
+        for (int i = 1; i < count; ++i)
+            if (std::abs(values[i] - *value) < std::abs(values[index] - *value))
+                index = i;
+        ImGui::PushFont(fonts_.semibold, 13.5f);
+        if (ImGui::Combo(id, &index, labels, count)) {
+            *value = values[index];
+            changed = true;
+        }
+        ImGui::PopFont();
+    };
+    option("Snap turn", "How far a flick of the right stick turns you.", S(150), [&] {
+        stepCombo("##snap", kSnapTurns, kSnapValues, static_cast<int>(std::size(kSnapValues)), &o.snapTurn);
+    });
+    option("Controller vibration", "How strongly webs and punches buzz.", S(150), [&] {
+        stepCombo("##haptics", kHaptics, kHapticValues, static_cast<int>(std::size(kHapticValues)), &o.haptics);
+    });
+    option("Game screen size", "The headset's screen for menus, cutscenes and flat mode.", S(150), [&] {
+        static constexpr int sizes[] = {0, 1, 2};
+        stepCombo("##screen", kScreenSizes, sizes, 3, &o.screenSize);
+    });
     option("Small game window", "Saves GPU time while you play in VR.", S(40),
            [&] { changed |= toggle("##small", &o.smallWindow); });
     option("Normal camera on the monitor", "Off: the monitor shows your head's view.", S(40),
@@ -929,7 +964,8 @@ void App::optionsCard(ImVec2 size) {
     if (running) {
         ImGui::Dummy(ImVec2(0, S(6)));
         ImGui::PushStyleColor(ImGuiCol_Text, vec(kFaint));
-        ImGui::TextWrapped("Options apply when VR starts.");
+        ImGui::TextWrapped("Options apply when VR starts. In the headset, VR SETTINGS beside the game's menus "
+                           "change them during play, and the next session starts with them.");
         ImGui::PopStyleColor();
     }
     if (changed)
@@ -1107,7 +1143,8 @@ void App::controls(ImVec2 origin, ImVec2 size) {
          {{"Squeeze a grip", "Shoot that hand's web where the controller points; hold to swing"},
           {"Release the grip", "Let go"},
           {"Trigger", "Reel in while the web is attached"},
-          {"Pull the hand sharply", "Zip toward the web's anchor"}}},
+          {"Pull the hand sharply", "Zip toward the web's anchor"},
+          {"X", "Show or hide the aim markers: where each hand's web would land"}}},
         {"GRABBING",
          {{"Grip, aimed at a prop or thug", "Catch it with your web"},
           {"Trigger", "Reel it in"},
@@ -1116,6 +1153,7 @@ void App::controls(ImVec2 origin, ImVec2 size) {
         {"MOVING",
          {{"Left stick", "Walk and run"},
           {"A", "Jump"},
+          {"B", "Interact: the game's Y (backpacks, doors, prompts); web strike in a fight"},
           {"Menu button", "Pause"},
           {"Y", "Game menu: map, suits, skills"},
           {"Click both sticks", "Switch between VR and a flat game screen"}}},
@@ -1178,6 +1216,10 @@ void App::controls(ImVec2 origin, ImVec2 size) {
         ImGui::Dummy(ImVec2(0, S(10)));
         ImGui::TextUnformatted("The keyboard does not move the player once the VR controllers have pressed a button; a "
                                "real gamepad keeps working.");
+        ImGui::Dummy(ImVec2(0, S(10)));
+        ImGui::TextUnformatted("Aim markers: a white ring where a web would hold, a faint dashed ring where it would "
+                               "hold in open air, a red cross where it would miss, and amber corners around a prop or "
+                               "thug it would catch. The marker tightens as you squeeze the grip.");
         ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
     }

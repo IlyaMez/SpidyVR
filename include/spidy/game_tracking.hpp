@@ -3,6 +3,8 @@
 #include "native_view.hpp"
 #include "swing.hpp"
 #include "tracking.hpp"
+#include <algorithm>
+#include <cmath>
 
 namespace spidy {
 Input trackedSwingInput(const XrFrame& frame, const Rig& rig);
@@ -32,6 +34,11 @@ struct GameMotionFrame {
 class GameTrackingRig {
   public:
     GameMotionFrame update(const XrFrame&, Vec3 playerFeet, Vec3 gameForward, bool gameplay);
+    // How far a flick of the right stick turns the player (0: it does not);
+    // 30 degrees until set. reset() keeps it.
+    void snapTurn(float radians) {
+        snap_ = std::isfinite(radians) ? std::clamp(radians, 0.f, 3.1415927f) : .5235988f;
+    }
     void reset();
 
   private:
@@ -40,5 +47,6 @@ class GameTrackingRig {
     Vec3 lastFeet_{};
     std::int64_t lastTime_{};
     bool initialized_{}, wasActive_{}, snapHeld_{}, pendingRecenter_{};
+    float snap_ = .5235988f;
 };
 } // namespace spidy

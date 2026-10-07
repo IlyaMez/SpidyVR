@@ -249,12 +249,33 @@ CAMERA_MOVERS = {0x3871fd8: 'follow', 0x38720d0: 'combat', 0x38727f0: 'death', 0
                  0x4f76d90: 'photo_mode'}
 
 
+# What the headset's VR settings panel (beside the game screen) changes, as XrData reports it. A session
+# that ends with other values than it started with prints them on one line, from which the launcher
+# starts the next session (launcher_text.hpp, headsetSettings).
+SETTINGS_LINE = 'VR settings from the headset: '
+
+
+def start_settings(a):
+    """The VR settings a session starts with, as its samples' vr_settings report them."""
+    return dict(aim_markers=not a.no_aim_markers, web_grab=not a.no_web_grab, punch=not a.no_punch,
+                body=not a.no_body, swing_speed=round(a.swing_speed, 1), snap_turn=a.snap_turn,
+                haptics=a.haptics, screen_size=a.screen_size)
+
+
+def settings_line(start, sample):
+    """The line for the launcher, or None while the settings are as the session started."""
+    now = (sample or {}).get('vr_settings')
+    if not now or now == start:
+        return None
+    return SETTINGS_LINE + ' '.join(f'{k}={int(round(v))}' for k, v in now.items())
+
+
 def snapshot(game, address):
     for _ in range(8):
-        raw = game.read(address, 648)
-        if len(raw) != 648:
+        raw = game.read(address, 704)
+        if len(raw) != 704:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53585244, 6, 648):
+        if struct.unpack_from('<3I', raw) != (0x53585244, 8, 704):
             raise RuntimeError('Game XR protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -285,6 +306,21 @@ def snapshot(game, address):
         # Camera commits, and those on the player by the follow or combat camera. Both rising while
         # the gate says other_camera: another camera commits after the player's every frame.
         result.update(zip(('camera_commits', 'player_commits'), struct.unpack_from('<2Q', raw, 632)))
+        # B presses the game got as its Y (interact, web strike), whether the aim markers show (X
+        # switches them in VR), and the markers drawn so far (one per hand per headset frame).
+        interacts, aim_markers = struct.unpack_from('<2I', raw, 648)
+        result.update(interacts=interacts, aim_markers=bool(aim_markers),
+                      markers=struct.unpack_from('<Q', raw, 656)[0])
+        # The VR settings now (the settings panel beside the game screen changes them, X the aim
+        # markers), the panel's changes, and headset frames that showed it open or folded to its tab.
+        flags, snap_turn, haptics, screen_size = struct.unpack_from('<4I', raw, 664)
+        swing_speed, changes = struct.unpack_from('<fI', raw, 680)
+        result.update(vr_settings=dict(aim_markers=bool(aim_markers), web_grab=bool(flags & 1),
+                                       punch=bool(flags & 2), body=bool(flags & 4),
+                                       swing_speed=round(swing_speed, 1), snap_turn=snap_turn,
+                                       haptics=haptics, screen_size=screen_size),
+                      setting_changes=changes)
+        result.update(zip(('panel_frames', 'tab_frames'), struct.unpack_from('<2Q', raw, 688)))
         return result
     return None
 
@@ -569,12 +605,19 @@ def main():
     p.add_argument('--no-body', action='store_true',
                    help="Keep the hero hidden in VR (gloves drawn over the image) instead of your own body")
     p.add_argument('--no-punch', action='store_true', help='Fists pass through thugs instead of punching them')
+    p.add_argument('--no-aim-markers', action='store_true',
+                   help="Start with the aim markers (where each hand's web would land) hidden; X shows them in VR")
     p.add_argument('--no-eye-occlusion', action='store_true',
                    help='Each eye draws everything in its view, hidden behind buildings or not (builds before '
                         'October 6 did; about half the frame rate)')
     p.add_argument('--stock-monitor-view', action='store_true',
                    help="Keep the stock camera as the game's active view; culling and shadows then follow it, not the head")
     p.add_argument('--swing-speed', type=float, default=32, help='Native swing speed cap in m/s (default 32)')
+    p.add_argument('--snap-turn', type=int, default=30,
+                   help='Degrees a flick of the right stick turns you (0: no snap turning; default 30)')
+    p.add_argument('--haptics', type=int, default=100, help='Controller vibration in percent (default 100)')
+    p.add_argument('--screen-size', type=int, choices=(0, 1, 2), default=1,
+                   help='The game screen for menus, cutscenes and flat mode: 0 small, 1 medium, 2 large')
     p.add_argument('--full-desktop-view', action='store_true',
                    help="Start the game with its own display settings instead of a small VR window")
     p.add_argument('--output', type=pathlib.Path, default=ROOT/'reports/game-vr.json')
@@ -586,6 +629,8 @@ def main():
         p.error('--stop-after requires --seconds 0 and a value from 5 to 300')
     if (a.seconds!=0 and not 2 <= a.seconds <= 25) or (a.size!=0 and not 64 <= a.size <= 4096) or not 1 <= a.swing_speed <= 65:
         p.error('Use 0 or 2..25 seconds, 0 or 64..4096 pixels, and 1..65 m/s')
+    if not 0 <= a.snap_turn <= 90 or not 0 <= a.haptics <= 100:
+        p.error('Use 0..90 degrees of snap turn and 0..100% vibration')
     if a.stop_event:
         watch_stop_event(a.stop_event)
     manifest = xr_runtime.choose(a.xr_runtime)
@@ -661,13 +706,14 @@ def main():
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
                                            'SpidyBodyData'))
-        config = struct.pack('<4I7Q2IfI', 0x53585243, 7, 608, game.pid, game.base, queue,
+        config = struct.pack('<4I7Q2IfI', 0x53585243, 8, 624, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
                              (4 if a.stock_monitor_view else 0) | (8 if a.no_web_grab else 0) |
                              (16 if a.no_eye_occlusion else 0) | (32 if a.no_body else 0) |
-                             (64 if a.no_punch else 0)) + runtime_path(manifest)
+                             (64 if a.no_punch else 0) | (128 if a.no_aim_markers else 0)) + \
+            runtime_path(manifest) + struct.pack('<4I', a.snap_turn, a.haptics, a.screen_size, 0)
         code = call_with_payload(process, xr['SpidyXrStart'], config)
         if code:
             raise RuntimeError(f'Game XR start: {code}')
@@ -694,10 +740,18 @@ def main():
         printed_dimensions=False
         renewed=0
         stop_requested=False
+        settings_start = start_settings(a)
+
+        def hand_over_settings(sample):
+            """Tell the launcher what the headset's settings panel left, for the next session."""
+            line = settings_line(settings_start, sample)
+            if line:
+                print(line, flush=True)
 
         def session_report(**extra):
             """Everything sampled so far. It is written however the session ends."""
-            return dict(pid=game.pid, eye_size=a.size, swing_speed=a.swing_speed, motion_hash=motion_hash,
+            return dict(pid=game.pid, eye_size=a.size, swing_speed=a.swing_speed, vr_settings=settings_start,
+                        motion_hash=motion_hash,
                         xr_hash=xr_hash, ray_hash=ray_hash, samples=list(samples),
                         swing_samples=list(swing_samples), motion_samples=list(motion_samples),
                         grab_samples=list(grab_samples), body=body, punch=punch,
@@ -842,10 +896,12 @@ def main():
         if not alive(game):
             xr_active=bridge_active=False
             write_report(session_report(game_exited=True, error=str(loop_error) if loop_error else None))
+            hand_over_settings(samples[-1] if samples else None)
             print(f'Game closed. Session report: {a.output.resolve()}',flush=True)
             return 0
         if loop_error is not None:
             write_report(session_report(game_exited=False, error=str(loop_error)))
+            hand_over_settings(samples[-1] if samples else None)
             print(f'Session report: {a.output.resolve()}',flush=True)
             raise loop_error
         xr_stop = call_remote(process, xr['SpidyXrStop'])
@@ -857,7 +913,8 @@ def main():
         result = dict(pid=game.pid, module_base=hex(game.base), bridge_hash=bridge_hash, xr_hash=xr_hash,
             eye_size=a.size,capture_images=a.capture_images,timing=timing_snapshot(game,xr['SpidyXrTimingData']),
             ray_hash=ray_hash, ray_samples=list(ray_samples), rays=ray_snapshot(game, rays['SpidyRayData']),
-            motion_hash=motion_hash, swing_speed=a.swing_speed, swing_samples=list(swing_samples),
+            motion_hash=motion_hash, swing_speed=a.swing_speed, vr_settings=settings_start,
+            swing_samples=list(swing_samples),
             grab_samples=list(grab_samples), grab=grab_snapshot(game, rays['SpidyGrabData']),
             body=body_snapshot(game, xr['SpidyBodyData']) or body,
             punch=punch_snapshot(game, rays['SpidyPunchData']) or punch, punch_samples=list(punch_samples),
@@ -880,6 +937,7 @@ def main():
             result['image_capture_error'] = str(error)
         result['passed'] = accepted(result)
         write_report(result)
+        hand_over_settings(result['final'] or (samples[-1] if samples else None))
         final = result['final']
         print(json.dumps(dict(final=final, gpu=result['gpu'], appearance=result['appearance'],
                               xr_stop=xr_stop, bridge_stop=bridge_stop), indent=2))

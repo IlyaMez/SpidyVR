@@ -276,6 +276,18 @@ VR launcher's way: `probe_menu_pad.py start`, then `pad a --until-player`):
   game each time (a second start returns 1000).
 - Reports: `reports/body-probe*.json`, images in `reports/body-probe/`.
 
+### Aim markers' previews
+
+`python tools/probe_aim.py` in a freshly started game in free roam: a scripted
+hand 1.2 m above the player's feet, grip open, aims at the sky, eight compass
+points level and 30 degrees down, straight down and the nearest throwable prop
+within 55 m. For each aim it renews the previews' lease (`SpidyAimSample`) and
+reads `SpidyAimData`: anchor, air, blocked, prop or character, the point and its
+distance from the hand. It fails if an aim got no preview, the swing faulted,
+a module did not stop, or a hook entry was not restored. Report:
+`reports/aim-probe.json`. The markers themselves are drawn only by the VR
+worker; the GPU test draws every kind with the same renderer.
+
 ## Performance comparison
 
 The initial successful headset test was `game-vr-20261004-131244.json`: 509 pairs
