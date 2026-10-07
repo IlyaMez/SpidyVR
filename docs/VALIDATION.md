@@ -1,6 +1,106 @@
 # Validation — 2026-10-07
 
-## Webs in open air as a setting — current build
+## The web shooter — current build
+
+The user, October 7: "Lets add the ability to shoot the web projectiles
+spiderman has normally (not the regular webs, the web bullets)".
+
+**What a pull does.** The trigger of a hand whose web is neither attached nor
+holding a target shoots one web ball (`Shooter`, engine independent). A pull is
+the trigger past 0.65 after it was below 0.35, the swing's reel thresholds; one
+hand shoots at most every 0.12 s. A trigger already pulled when the shooter
+starts, when its hand was busy, or through a tracking or focus loss (a menu,
+the flat screen) is no pull until released. The ball leaves 8 cm ahead of the
+aim pose. A bot whose chest (feet + 1.15 m) is within 0.12 rad of the hand's
+line, or within his 0.45 m radius of it, nearer than 45 m and with no surface
+between, takes it (the one nearest the line, as a share of what he may be off
+it); otherwise the aim point is 0.4 m past the first surface the line meets
+within 60 m, else open air at 60 m.
+
+**How the game fires it.** Traced on October 7 with a research DLL hooking the
+weapon path while the virtual pad's RB fired the equipped gadget (the Impact
+Web: RB fires the gadget wheel's selection, and the web shooter was not it):
+the hero's weapon state hands the weapon a fire event on the main thread
+(`WeaponGame` vtable +0x108, 0xe3bd80), which stores the event's aim and fires
+(0x2150460); `SpawnShot` (+0x110, 0x2150830) asks the muzzle (+0x160,
+0x2150c40, the emitter component of that index) and spawns the shot actor
+(+0x2f8, 0x215c190). The hero's `WeaponWebShooter` (vtable 391c950) is a
+component of its own weapon actor, 0.5 m from the hero, not of the hero's
+record. Fire events injected from the camera manager's update (0x897d30) with
+an overridden muzzle spawned a `ShotWebShooter` at the scripted point that
+flew straight to the event's aim point (+0x20) at 53-61 m/s and ended there,
+or at the first surface; its matrix rows did not change its course. The event
+layout, the shot ids (0x215f040 allocates from the game's own counter; 0x215f840
+registers one, despawning what an older shot left in its ring slot) and the
+target reference (0x1f7b8e0) are in `game_shooter.hpp`. A pedestrian has no
+reference (0x1f7b8e0 gives 0), so the aim assist offers bots only.
+
+**The module.** `game_shooter` in the ray bridge: the swing's input callback
+updates it with each sample (after the swing's step, beside the aim previews,
+so its rays never fault the swing); pulls are queued with the player's actor
+and position, and the camera manager's update fires them on the main thread:
+the web shooter fills its own part of the event (+0x100), Spidy sets the
+emitter (right wrist 0, left 1), a new shot id, the target's reference (with
++0x39, so the game's own target point replaces the aim point when it
+resolves), the aim point and the level facing, and the weapon's fire event
+runs with the muzzle hook returning the hand (moved with the player since the
+sample). The gadget is found by a registry scan on its own thread (nearest the
+player, within 10 m); a fire checks that it is still registered and that the
+two things the game reads without a check exist (its setup at +0x48, the
+actor at +0x5b0). Signatures of all seven functions and four vtable slots are
+checked before the hooks go in. Shots take no gadget ammo.
+
+Protocol: XrConfig version 10 (options bit 512: no web shooter, up to 1023),
+XrData version 10 (settings bit 16), both sizes unchanged; ray module exports
+`SpidyShooterStart`/`Stop`/`Sample`/`Test` and `SpidyShooterData`
+(`game_shooter::Data`, 160 bytes). The runner's report has `shooter` and
+`shooter_samples`, and each sample `shooter` (fired, dropped, bots on offer).
+The VR settings panel has "Web shooter" under WEBS: 13 lines, 560 x 940
+points, 840 x 1410 pixels.
+
+Checks without the game: 158 core checks (new: one shot per pull, a held or
+half-released trigger never again, repeated samples nothing, both hands
+together; pulls closer than the interval shoot once; a busy hand, a trigger
+held after its web let go, through a tracking loss or a reset shoot nothing;
+the aim assist takes the thug 3 degrees off the line, not one 14 degrees off,
+behind a wall, behind the hand or 50 m away, one beside the hand within his
+width, not one clear of it, and none behind a pillar, whose surface the shot
+goes to instead; sky and wall aims; invalid tuning refused), 10 launcher checks
+(`--no-web-shooter`; `web_shooter=0` from the headset's line), 72 Python checks
+(the shooter's telemetry and torn reads, XrData v10 settings bit 16, the start
+values and the line with `web_shooter`), and the GPU test at 1536 x 1536 and
+3072 x 3264: the panel painted at 840 x 1410 pixels with the new switch on.
+
+In the game, without the headset (`tools/probe_shooter.py` in a fresh game on
+the user's save, perched on the Times Square lamp post, the player 35 s after
+launch), the scripted left hand 1.2 m above the feet pulling its trigger
+through `SpidySwingSubmit`:
+
+| Aim | Shots | Flight | Off the aim | Start from the hand | End |
+|---|---:|---|---:|---:|---|
+| Level, along the camera | 1 | 60.2 m at 60.2 m/s | 0.00° | 0.00 m | 60 m out (1 s), surface 73 m |
+| 30° down | 1 | 6.5 m at 51.7 m/s | 0.01° | 0.00 m | the pavement (0.4 m from the aim point) |
+| Sky | 1 | 60.2 m at 60.2 m/s | 0.00° | 0.00 m | 60 m out, open air |
+| 60° left | 1 | 10.4 m at 55.7 m/s | 0.01° | 0.00 m | a wall (0.4 m from the aim point) |
+| 60° right | 1 | 60.0 m at 59.1 m/s | 0.00° | 0.00 m | 60 m out |
+
+A trigger held for a second shot once; three pulls 0.2 s apart shot three
+times; the shooter stopped and started again during play (0, 0) and shot
+again. 10 pulls requested, 10 fired, none dropped; the main-thread hook ran
+1,692 times; no swing fault; swing and rays stopped with 0, every hook entry
+restored, and the save files byte-identical to the backup. Window captures at
+the game's frame rate while a test shot crossed the street 5 m ahead show the
+ball as a white motion-blurred streak, frame by frame. That run used a range of
+80 m; a shot ends after one second (about 60 m) anyway, so the build sets 60 m
+and nothing else changed.
+
+Not checked: a ball reaching a thug and the game taking the thug as its target
+(no bot was within 40 m in free roam; the report's `shooter.targeted` and
+`resolved` count them in a fight), the sound, how the tick and the pull feel in
+the headset, and the XR worker's start, stop and haptics, which run only in an
+OpenXR session.
+
+## Webs in open air as a setting — preceding build
 
 The user, October 7: "lets make the ability to hook webs on max distance
 without hitting an object (webs on nowhere) as an optional setting (on by
@@ -58,7 +158,7 @@ Not checked: what only the headset shows: the new row in the Quest, a click
 on it, and the XR worker handing the launch option and the panel's switch to
 the swing (`applySettings`), which runs only in an OpenXR session.
 
-## VR settings beside the game's menus — preceding build
+## VR settings beside the game's menus — earlier build
 
 The user, October 7: "can you add a vr settings section to ingame menu?"
 

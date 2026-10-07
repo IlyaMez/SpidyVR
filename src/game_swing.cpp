@@ -3,6 +3,7 @@
 #include "spidy/game_swing.hpp"
 #include "spidy/game_grab.hpp"
 #include "spidy/game_punch.hpp"
+#include "spidy/game_shooter.hpp"
 #include "spidy/native_bodies.hpp"
 #include "spidy/native_movement.hpp"
 #include "spidy/native_query_context.hpp"
@@ -81,6 +82,7 @@ void cancelSwing() {
 void cancel() {
     cancelSwing();
     game_grab::cancel();
+    game_shooter::cancel();
     grabInputClock.reset();
 }
 void fault(uint32_t error) {
@@ -182,8 +184,8 @@ void visit(const native_rays::QueryContext& world) {
     // a grip press before the grab has had it, and steps with the game's
     // physics: a perched or standing player's mover does not step, and
     // webbing a thug from a perch must work all the same.
+    const float sampleSeconds = grabInputClock.consume(c);
     {
-        const float sampleSeconds = grabInputClock.consume(c);
         game_grab::claim(sampleSeconds, in, world, player);
         float grabDt{};
         if (game_grab::due(grabDt))
@@ -203,19 +205,31 @@ void visit(const native_rays::QueryContext& world) {
             return;
         }
     }
-    // The aim previews come last, however the swing's step below ends, so a
-    // ray they make never faults the swing: no one reads the world's error
-    // after this visit.
+    // The web shooter and the aim previews come last, however the swing's
+    // step below ends, so a ray they make never faults the swing: no one
+    // reads the world's error after this visit. A trigger shoots from a hand
+    // whose web neither holds a target nor swings the player after this step;
+    // on one that does, it reels.
     struct Previews {
         const Command& c;
         const Input& in;
         const Body& player;
         const native_rays::QueryContext& world;
+        float seconds;
+        Vec3 feet;
         ~Previews() {
+            if (enabled && !world.error() && game_shooter::running()) {
+                const auto grab = game_grab::data();
+                uint32_t busy{};
+                for (unsigned i = 0; i < 2; ++i)
+                    if (grab.hands[i].phase || solver.webs()[i].attached)
+                        busy |= 1u << i;
+                game_shooter::update(seconds, in, busy, config.record, feet, world);
+            }
             if (enabled && !world.error())
                 previewAims(c, in, player, world);
         }
-    } previews{c, in, player, world};
+    } previews{c, in, player, world, sampleSeconds, at};
     if (!fresh || (motion.status != 1 && motion.status != 2) || motion.moverFlags & 0x80000000u) {
         cancelSwing();
         worldIdentity = world.identity();
@@ -572,6 +586,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStop(void*) {
     game_grab::stop();
     // Punches started the main-thread damage hook when the grab did not.
     game_punch::stop();
+    game_shooter::stop();
     native_bodies::stop();
     ReleaseSRWLockExclusive(&simulation);
     const DWORD result = started ? stopMotion(nullptr) : 0;

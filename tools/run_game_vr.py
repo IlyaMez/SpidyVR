@@ -32,7 +32,9 @@ import xr_runtime
 
 GAME_HOOKS = (*HOOKS, 0x2e67010, 0x1fbe360, 0x1fbda50, 0xa7b3a0, 0x1f9db60,
               0x18a0bb0, 0x189bd30, 0x186cc00, 0x1846c20, 0x19223e0,
-              0x189e310, 0x189e3a0, 0x1873470, 0x17991a0, 0x1920310, 0x676dd0, 0x1920240)
+              0x189e310, 0x189e3a0, 0x1873470, 0x17991a0, 0x1920310, 0x676dd0, 0x1920240,
+              # The web shooter: the camera's update (shots go out on the main thread) and the weapons' muzzle.
+              0x897d30, 0x2150c40)
 # What the game process commits in a VR session at 3072 x 3264 per eye (16.7-17.1 GB on October 5),
 # with Spidy's render memory ring and some room to grow.
 VR_COMMIT_MB = 19000
@@ -258,7 +260,8 @@ SETTINGS_LINE = 'VR settings from the headset: '
 def start_settings(a):
     """The VR settings a session starts with, as its samples' vr_settings report them."""
     return dict(aim_markers=not a.no_aim_markers, web_grab=not a.no_web_grab, air_webs=not a.no_air_webs,
-                punch=not a.no_punch, body=not a.no_body, swing_speed=round(a.swing_speed, 1),
+                web_shooter=not a.no_web_shooter, punch=not a.no_punch, body=not a.no_body,
+                swing_speed=round(a.swing_speed, 1),
                 snap_turn=a.snap_turn, haptics=a.haptics, screen_size=a.screen_size)
 
 
@@ -275,7 +278,7 @@ def snapshot(game, address):
         raw = game.read(address, 704)
         if len(raw) != 704:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53585244, 9, 704):
+        if struct.unpack_from('<3I', raw) != (0x53585244, 10, 704):
             raise RuntimeError('Game XR protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -316,7 +319,8 @@ def snapshot(game, address):
         flags, snap_turn, haptics, screen_size = struct.unpack_from('<4I', raw, 664)
         swing_speed, changes = struct.unpack_from('<fI', raw, 680)
         result.update(vr_settings=dict(aim_markers=bool(aim_markers), web_grab=bool(flags & 1),
-                                       air_webs=bool(flags & 8), punch=bool(flags & 2), body=bool(flags & 4),
+                                       air_webs=bool(flags & 8), web_shooter=bool(flags & 16),
+                                       punch=bool(flags & 2), body=bool(flags & 4),
                                        swing_speed=round(swing_speed, 1), snap_turn=snap_turn,
                                        haptics=haptics, screen_size=screen_size),
                       setting_changes=changes)
@@ -386,6 +390,32 @@ def punch_snapshot(game, address):
                     error=error, hands=hands, last_point=[round(x, 3) for x in point],
                     last_direction=[round(x, 3) for x in direction], last_damage=round(damage, 1),
                     last_speed=round(speed, 2))
+    return None
+
+
+def shooter_snapshot(game, address):
+    """Web-shooter shots (game_shooter::Data): pulls that asked for a shot, shots the game fired and requests it
+    dropped, those aimed at a thug and those whose target the game took, the hero's gadget, the main-thread frames
+    the module saw, shots per hand, and the latest shot."""
+    for _ in range(8):
+        raw = game.read(address, 160)
+        if len(raw) != 160:
+            return None
+        if struct.unpack_from('<3I', raw) != (0x53484f44, 1, 160):
+            raise RuntimeError('Shooter protocol mismatch')
+        if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
+            continue
+        status = struct.unpack_from('<I', raw, 12)[0]
+        samples, requested, fired, dropped, targeted, resolved, weapon, frames = struct.unpack_from('<8Q', raw, 24)
+        bots, error = struct.unpack_from('<2I', raw, 88)
+        hands = [dict(shots=shots, last_target=hex(target))
+                 for shots, target in (struct.unpack_from('<2Q', raw, 96+i*16) for i in range(2))]
+        origin, aim_point = struct.unpack_from('<3f', raw, 128), struct.unpack_from('<3f', raw, 140)
+        return dict(status=status, samples=samples, requested=requested, fired=fired, dropped=dropped,
+                    targeted=targeted, resolved=resolved, weapon=hex(weapon), frames=frames, bots=bots, error=error,
+                    hands=hands, last_origin=[round(x, 3) for x in origin],
+                    last_aim_point=[round(x, 3) for x in aim_point],
+                    last_shot=hex(struct.unpack_from('<Q', raw, 152)[0]))
     return None
 
 
@@ -607,6 +637,8 @@ def main():
     p.add_argument('--no-body', action='store_true',
                    help="Keep the hero hidden in VR (gloves drawn over the image) instead of your own body")
     p.add_argument('--no-punch', action='store_true', help='Fists pass through thugs instead of punching them')
+    p.add_argument('--no-web-shooter', action='store_true',
+                   help="A free hand's trigger shoots nothing, instead of the game's web-shooter web balls")
     p.add_argument('--no-aim-markers', action='store_true',
                    help="Start with the aim markers (where each hand's web would land) hidden; X shows them in VR")
     p.add_argument('--no-eye-occlusion', action='store_true',
@@ -695,7 +727,7 @@ def main():
         rays, ray_hash = prepare(game.pid, process, ROOT/'build/windows-ninja/spidy_ray_bridge.dll',
             ROOT/'reports/ray-modules', ('SpidyRayStart', 'SpidyRaySubmit', 'SpidyRayStop',
                                        'SpidyRaySample', 'SpidyRayData', 'SpidySwingData', 'SpidyGrabData',
-                                       'SpidyPunchData'))
+                                       'SpidyPunchData', 'SpidyShooterData'))
         # Imported here: probe_game_grab imports from this module.
         from probe_game_grab import grab_snapshot
         ray_module = next(m['base'] for m in modules(game.pid) if m['name'].lower() == 'spidy_ray_bridge.dll')
@@ -708,14 +740,14 @@ def main():
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
                                            'SpidyBodyData'))
-        config = struct.pack('<4I7Q2IfI', 0x53585243, 9, 624, game.pid, game.base, queue,
+        config = struct.pack('<4I7Q2IfI', 0x53585243, 10, 624, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
                              (4 if a.stock_monitor_view else 0) | (8 if a.no_web_grab else 0) |
                              (16 if a.no_eye_occlusion else 0) | (32 if a.no_body else 0) |
                              (64 if a.no_punch else 0) | (128 if a.no_aim_markers else 0) |
-                             (256 if a.no_air_webs else 0)) + \
+                             (256 if a.no_air_webs else 0) | (512 if a.no_web_shooter else 0)) + \
             runtime_path(manifest) + struct.pack('<4I', a.snap_turn, a.haptics, a.screen_size, 0)
         code = call_with_payload(process, xr['SpidyXrStart'], config)
         if code:
@@ -735,6 +767,9 @@ def main():
         # The player's body and fists: the latest of each, and a sample when punches land.
         body = punch = None
         punch_samples = deque(maxlen=2000)
+        # The web shooter: the latest, and a sample when a shot is asked for, fired or dropped.
+        shooter = None
+        shooter_samples = deque(maxlen=2000)
         eye_jobs = None
         render_memory = None
         lowest_commit = start_commit = free_commit_mb()
@@ -758,7 +793,7 @@ def main():
                         xr_hash=xr_hash, ray_hash=ray_hash, samples=list(samples),
                         swing_samples=list(swing_samples), motion_samples=list(motion_samples),
                         grab_samples=list(grab_samples), body=body, punch=punch,
-                        punch_samples=list(punch_samples),
+                        punch_samples=list(punch_samples), shooter=shooter, shooter_samples=list(shooter_samples),
                         ray_samples=list(ray_samples), appearance=appearance, eye_jobs=eye_jobs,
                         render_memory=render_memory,
                         free_commit_mb=dict(start=start_commit, lowest=lowest_commit),
@@ -817,6 +852,12 @@ def main():
                                 landed['dropped'] != (punch or {}).get('dropped'):
                             punch_samples.append(dict(landed, seconds=round(time.monotonic()-started, 3)))
                         punch = landed
+                    shots = shooter_snapshot(game, rays['SpidyShooterData'])
+                    if shots:
+                        sample['shooter'] = {k: shots[k] for k in ('status', 'fired', 'dropped', 'bots')}
+                        if any(shots[k] != (shooter or {}).get(k) for k in ('requested', 'fired', 'dropped', 'error')):
+                            shooter_samples.append(dict(shots, seconds=round(time.monotonic()-started, 3)))
+                        shooter = shots
                     # Eye job copies the game dropped unrendered (reclaimed by age).
                     eye_jobs = frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs
                     sample['eye_jobs_reclaimed'] = eye_jobs['reclaimed'] if eye_jobs else None
@@ -921,6 +962,8 @@ def main():
             grab_samples=list(grab_samples), grab=grab_snapshot(game, rays['SpidyGrabData']),
             body=body_snapshot(game, xr['SpidyBodyData']) or body,
             punch=punch_snapshot(game, rays['SpidyPunchData']) or punch, punch_samples=list(punch_samples),
+            shooter=shooter_snapshot(game, rays['SpidyShooterData']) or shooter,
+            shooter_samples=list(shooter_samples),
             motion_samples=list(motion_samples), appearance=appearance_snapshot(game,xr['SpidyAppearanceData']),
             eye_jobs=frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs,
             render_memory=final_render_memory or render_memory, render_stop=render_stop,

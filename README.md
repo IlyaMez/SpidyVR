@@ -9,7 +9,47 @@ An in-development VR mod project for **Marvel's Spider-Man Remastered**, targeti
 **Quest 3 + Virtual Desktop**. First milestone: 6DoF head/controller tracking,
 native stereo, and physically controlled web swinging.
 
-**Latest build (October 7, second build): webs in open air are a setting.**
+**Latest build (October 7, third build): the web shooter.** You asked for the
+web projectiles Spider-Man shoots in the game, the web balls of his gadget
+button, not the swinging webs. Pull the **trigger** of a hand whose web is not
+attached and that hand shoots one: the game's own web-shooter shot, leaving
+from your wrist where the controller points. Aimed close to a thug (within 7
+degrees, or within his own width when he is near) with nothing in between,
+the ball goes to him and the game takes him as its target; otherwise it flies
+to the first thing on the hand's line and splats there, or on through open air
+until it ends, about 60 m out. One ball per pull: a held trigger shoots once,
+and pulls can follow each other every 0.12 s. A short tick in that hand tells
+you it left. The trigger still reels in whenever that hand's web is attached,
+so the other hand can shoot while one hand swings; a trigger held from a reel,
+a menu or a tracking loss shoots nothing until you let go. It is **Web
+shooter** under WEBS in the headset's VR settings and in the launcher's
+options, on by default; `Launch Spidy VR.cmd -NoWebShooter` starts without
+it. Spidy hands each pull to the hero's own web-shooter gadget on the game's
+main thread, with the hand's position and the aim it worked out, the way the
+gamepad's gadget button hands it a fire event: the game makes the shot, its
+look and trail, and what it does to whatever it hits. Spidy's shots take no
+gadget ammo and play no arm animation, since the arm is yours. Measured in the
+game without a headset, on your save (perched on a lamp post in Times
+Square): a scripted hand pulled its trigger 12 times through the same input
+as your controllers; each pull fired exactly one shot, from exactly the hand
+(0.00 m), within 0.01 degrees of its aim, at 52-60 m/s; aimed 30 degrees down
+it struck the pavement 6.5 m away, sideways a wall 10 m away, level and at the
+sky it flew 60 m in one second and ended; a trigger held for a second shot
+once, three pulls 0.2 s apart three times; switched off and on again during
+play it went on shooting; no fault, every hook restored, your save files
+unchanged. Captured from the game window, the ball crosses the street as a
+white streak. No thug was in free roam, so a ball hitting a thug, and the game
+taking the thug you aimed at as its target, await a fight in the headset (the
+session report counts both). 158 core checks (new: one shot per pull, none
+from a hand whose web is busy or from a trigger held through it, the
+interval, the aim assist taking the thug nearest the line but none behind a
+wall, surface and open-air aims), 10 launcher checks, 72 Python checks and the
+GPU test (the panel one row taller again: 840 x 1410 pixels) pass. This build
+changes the VR protocol (the XR config and the XR data each have a new
+version), so it runs only as a whole package. Details:
+[docs/VALIDATION.md](docs/VALIDATION.md).
+
+**Preceding build (October 7, second build): webs in open air are a setting.**
 You asked to make hooking a web at maximum distance without hitting anything
 (webs on nowhere) an optional setting, on by default. It is **Webs hold in
 open air**, under WEBS in the headset's VR settings and in the launcher's
@@ -616,6 +656,13 @@ without a commit of its own.
   from the swing module's aim previews (what the headset's aim markers show),
   in a freshly started game; checks that nothing faulted and every hook entry
   is restored.
+- `tools/probe_shooter.py`: the web shooter in a freshly started game, no
+  headset: a scripted hand pulls its trigger aimed level, down, at the sky and
+  to either side, holds it, and pulls three times quickly, through the swing's
+  input commands; follows each ShotWebShooter the game spawns (where it
+  starts, its direction and speed, where it ends), shoots the nearest bot
+  within 40 m if there is one, stops and starts the shooter during play, and
+  checks that nothing faulted and every hook entry is restored.
 - `tools/probe_vr_load.py`: renders the VR views at the headset's resolution
   where the player stands and reports, per phase, the game's frame rate, its
   render commands per frame, GPU use, and the CPU time of each game thread;
@@ -686,12 +733,21 @@ a red cross where it would miss, amber corners around
 a prop or thug it would catch. It tightens as you squeeze. **X** hides or
 shows the markers; `Launch Spidy VR.cmd -NoAimMarkers` starts with them hidden.
 
+Pull the **trigger** of a hand whose web is not attached to shoot a web ball
+from that wrist where the controller points: the game's own web-shooter shot.
+Aimed within about 7 degrees of a thug, with nothing in between, it goes to
+him; otherwise it splats on the first thing in its way, or ends in open air
+about 60 m out. One ball per pull; the hand ticks as it leaves. A trigger held
+from a reel or a menu shoots only after a release. Switch **Web shooter** off
+(VR settings, the launcher's options) or start with
+`Launch Spidy VR.cmd -NoWebShooter` to keep the trigger for reeling only.
+
 **VR settings** hang beside the game screen: they open with the pause menu
 (the menu button), and on every other game screen a VR SETTINGS tab at the
 screen's right edge opens them. Point a controller and pull the trigger to
-switch the aim markers, web grabbing, webs in open air, your body and punching,
-or to step the swing speed limit, snap turn, controller vibration and the game
-screen's size.
+switch the aim markers, web grabbing, webs in open air, the web shooter, your
+body and punching, or to step the swing speed limit, snap turn, controller
+vibration and the game screen's size.
 Changes apply at once; Spidy Launcher starts your next session with them.
 A hand pointing at the panel keeps its trigger from the game.
 
@@ -956,6 +1012,7 @@ still requires a running game or headset.
 | `src/web_grab.cpp`, `src/lab_props.cpp` | Web grab: catching, yanking, carrying and throwing props and characters; the lab's props |
 | `src/body_ik.cpp`, `src/native_body.cpp` | The player's body: the solver, and the hero's joints turned after the game's pose writer |
 | `src/punch.cpp`, `src/game_punch.cpp` | Punching: fists against characters, and the game's own melee damage for each punch |
+| `src/shooter.cpp`, `src/game_shooter.cpp` | The web shooter: trigger pulls and their aim, and the game's own web-shooter shot fired from the hand |
 | `src/game_grab.cpp`, `src/native_bodies.cpp`, `src/game_targets.cpp` | Web grab in the game: candidates, freed Havok props, flung bots |
 | `src/native_render_memory.cpp`, `tools/vr_launcher.py` | A larger per-frame render memory ring, installed while the game starts |
 | `src/web_visual.cpp` | Fallback game-style web strands for the headset overlay and lab |

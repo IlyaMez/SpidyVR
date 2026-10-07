@@ -69,6 +69,25 @@ ArkWeb's `mirror.h` was the lead for the pose writer and the hero's joint
 array at the instance's `+0xd8`; Spidy reads the joint tree and names from the
 rig itself and shares no code with it.
 
+For the web shooter (October 7; `include/spidy/game_shooter.hpp`), found from
+RTTI and traced in the running game with a research DLL while the game fired
+its own gadget, then fired by Spidy:
+
+| Fact | RVA | Verification |
+|---|---:|---|
+| `WeaponWebShooter` (0x6b8 bytes), a component of the hero's weapon actor | vtable `0x391c950` | One registered in free roam, 0.5 m from the hero |
+| Fire event (weapon, event): stores its aim at +0x670, fires | `0xe3bd80` (vtable +0x108) | Called on the main thread by `HeroWeaponStateFiringLocal`; Spidy's events through it spawned shots |
+| The web shooter's own part of an event (+0x3c, +0x40) | `0xe55310` (vtable +0x100) | Disassembly; fills from +0x6ac, +0x6a8 |
+| Fire handler, index +0xa, kind +0xb | `0x2150460` | Disassembly; kind 1 calls SpawnShot |
+| SpawnShot (weapon, index, event) | `0x2150830` (vtable +0x110) | Traced; spawns through +0x2f8 (`0x215c190`), shot handle at +0x518 + 4 * index |
+| Muzzle (weapon, out matrix, index): emitter at +0x1b8 + 0x38 * index | `0x2150c40` (vtable +0x160) | Index 0 the right wrist, 1 the left; overridden, the shot started at the given point |
+| New shot id from the shot table at `0x656d9f0` | `0x215f040` | Disassembly; the id indexes a ring of 1024 slots a player |
+| Register a shot id, despawning an older slot's shots | `0x215f840` | Disassembly |
+| Actor reference from an actor record | `0x1f7b8e0` | Disassembly; 0 for a pedestrian, measured |
+| Actor handle to record (actor table `[7a44380]`, 0xc0 a record) | `0x15a0560` | Disassembly |
+| Camera manager's update, once a frame on the main thread | `0x897d30` | Spidy fires its shots after it; 1,692 calls during the probe |
+| `ShotWebShooter`, the shot | vtable `0x3907d30` | Flew 52-61 m/s to its aim point, ended there, at a surface or after 1 s |
+
 The camera-related entry was temporarily hooked by the independently written
 Spidy observer. Local disassembly showed RCX as the object, XMM1 as the float
 delta, and the low bytes of R8/R9 as flags. A live 30-second test produced 3,362

@@ -12,6 +12,7 @@ param(
     [switch]$NoAirWebs,
     [switch]$NoBody,
     [switch]$NoPunch,
+    [switch]$NoWebShooter,
     [switch]$NoAimMarkers,
     [switch]$NoEyeOcclusion,
     [switch]$StockMonitorView,
@@ -48,8 +49,8 @@ Write-Host "In VR B is the game's interact button (its Y: backpacks, doors, prom
 Write-Host 'Keep the game window in front on the desktop: the game pauses while another window is.'
 Write-Host 'Click both thumbsticks to switch between immersive VR and a flat game screen in the headset.'
 Write-Host 'VR SETTINGS hang beside the game screen (they open with the pause menu): point a controller and pull'
-Write-Host 'the trigger to change the aim markers, web grab, webs in open air, swing speed, body, punching,'
-Write-Host 'snap turn, vibration and screen size during play.'
+Write-Host 'the trigger to change the aim markers, web grab, webs in open air, the web shooter, swing speed,'
+Write-Host 'body, punching, snap turn, vibration and screen size during play.'
 Write-Host "Squeeze a grip to shoot that hand's web. Keep it held to swing; release it to let go."
 Write-Host "Swing speed cap: $SwingSpeed m/s. Pull the trigger while a web is attached to reel in."
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -75,6 +76,11 @@ if($NoBody) {
 else { Write-Host "Your body: Spider-Man's, following your head and hands (add -NoBody for gloves)." }
 if($NoPunch) { $captureArgs+=@('--no-punch'); Write-Host 'Punching off: fists pass through thugs.' }
 else { Write-Host 'Punch a thug: a fist that hits him fast enough knocks him back (add -NoPunch to turn it off).' }
+if($NoWebShooter) { $captureArgs+=@('--no-web-shooter'); Write-Host 'Web shooter off: the trigger of a free hand shoots nothing.' }
+else {
+    Write-Host "Pull the trigger of a hand without a web to shoot the game's web balls where it points; a thug"
+    Write-Host 'near that line takes it (add -NoWebShooter to turn it off).'
+}
 if($NoAimMarkers) {
     $captureArgs+=@('--no-aim-markers')
     Write-Host "Aim markers hidden at the start: X shows where each hand's web would land."

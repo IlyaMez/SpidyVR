@@ -83,13 +83,13 @@ int main() {
                                                  L"32", L"--output", L"r.json", L"--xr-runtime", L"vd.json",
                                                  L"--stop-event", L"Local\\Stop"};
         check(args == defaults, "defaults");
-        options = {false, true, false, true, 2048, 90, false, false, false, false};
+        options = {false, true, false, true, 2048, 90, false, false, false, false, false};
         args = sessionArguments(options, L"r.json", L"", L"");
         const std::vector<std::wstring> changed{L"--auto-launch", L"--seconds", L"0", L"--size", L"2048",
                                                 L"--swing-speed", L"65", L"--output", L"r.json", L"--overlay-webs",
                                                 L"--no-web-grab", L"--full-desktop-view", L"--stock-monitor-view",
                                                 L"--no-body", L"--no-punch", L"--no-aim-markers",
-                                                L"--no-air-webs"};
+                                                L"--no-air-webs", L"--no-web-shooter"};
         check(args == changed, "every flag, speed capped at 65");
         options = {};
         options.snapTurn = 45;
@@ -103,12 +103,12 @@ int main() {
     });
     test("what the headset's settings panel left becomes the next session's options", [] {
         SessionOptions options;
-        check(headsetSettings("VR settings from the headset: aim_markers=0 web_grab=1 air_webs=0 punch=0 body=1 "
-                              "swing_speed=48 snap_turn=45 haptics=50 screen_size=2\r",
+        check(headsetSettings("VR settings from the headset: aim_markers=0 web_grab=1 air_webs=0 web_shooter=0 "
+                              "punch=0 body=1 swing_speed=48 snap_turn=45 haptics=50 screen_size=2\r",
                               options),
               "the line changed nothing");
-        check(!options.aimMarkers && options.webGrab && !options.airWebs && !options.punch && options.body &&
-                  options.swingSpeed == 48 && options.snapTurn == 45 && options.haptics == 50 &&
+        check(!options.aimMarkers && options.webGrab && !options.airWebs && !options.webShooter && !options.punch &&
+                  options.body && options.swingSpeed == 48 && options.snapTurn == 45 && options.haptics == 50 &&
                   options.screenSize == 2,
               "every value, the last one before a carriage return");
         const auto kept = options;

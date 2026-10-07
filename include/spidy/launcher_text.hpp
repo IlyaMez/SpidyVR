@@ -152,6 +152,7 @@ struct SessionOptions {
     bool punch = true; // fists punch thugs
     bool aimMarkers = true; // markers where each hand's web would land (X switches them in VR)
     bool airWebs = true;    // a web that meets nothing within reach holds in open air there
+    bool webShooter = true; // a free hand's trigger shoots web balls
     int snapTurn = 30;  // degrees per flick of the right stick; 0: no snap turning
     int haptics = 100;  // controller vibration, percent
     int screenSize = 1; // the game screen in the headset: 0 small, 1 medium, 2 large
@@ -181,6 +182,8 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
         args.emplace_back(L"--no-aim-markers");
     if (!options.airWebs)
         args.emplace_back(L"--no-air-webs");
+    if (!options.webShooter)
+        args.emplace_back(L"--no-web-shooter");
     // The headset's settings panel offers these too; the defaults go unsaid.
     const std::pair<int, std::pair<const wchar_t*, int>> settings[] = {
         {std::clamp(options.snapTurn, 0, 90), {L"--snap-turn", 30}},
@@ -234,6 +237,8 @@ inline bool headsetSettings(std::string_view line, SessionOptions& options) {
             next.webGrab = number != 0;
         else if (key == "air_webs")
             next.airWebs = number != 0;
+        else if (key == "web_shooter")
+            next.webShooter = number != 0;
         else if (key == "punch")
             next.punch = number != 0;
         else if (key == "body")

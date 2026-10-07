@@ -288,6 +288,27 @@ a module did not stop, or a hook entry was not restored. Report:
 `reports/aim-probe.json`. The markers themselves are drawn only by the VR
 worker; the GPU test draws every kind with the same renderer.
 
+### The web shooter
+
+`python tools/probe_shooter.py` in a freshly started game in free roam: the
+swing and the web shooter started as a session starts them, a scripted left
+hand 1.2 m above the player's feet pulls its trigger (open 0.15 s, pulled
+0.25 s, open again) aimed level along the game camera, 30 degrees down, at the
+sky and 60 degrees to either side. A thread watches `SpidyShooterData` and
+follows the `ShotWebShooter` each shot spawned (its record's transform every
+5 ms) the moment it is reported: a shot at the ground nearby lives only 50 ms.
+Then a trigger held a second (one shot), three pulls 0.2 s apart (three), the
+nearest bot within 40 m through `SpidyShooterTest` (aimed at his actor: the
+game's target taken, `resolved`), and the shooter stopped and started again.
+It fails if a pull shot other than once, a shot was not followed, the swing
+faulted, a module did not stop, or a hook entry (the rays' and the shooter's
+camera-update and muzzle hooks) was not restored. Report:
+`reports/shooter-probe.json`, screenshots in `reports/grab-probe/`.
+
+RB on the virtual pad fires the gadget the game's gadget wheel has selected,
+which need not be the web shooter (the user's save had the Impact Web), and a
+perched hero fires it too; Spidy's shots always use the web shooter.
+
 ## Performance comparison
 
 The initial successful headset test was `game-vr-20261004-131244.json`: 509 pairs

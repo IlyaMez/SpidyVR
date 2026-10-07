@@ -62,6 +62,13 @@ Grabbing
   Trigger / sharp pull ........... reel it in / yank it to your hand
   Release the grip ............... throw it (swing harder to throw faster)
 
+Web shooter
+  Trigger of a hand ...... shoot a web ball where that hand points: the
+  without a web            game's own, from your wrist. Aimed close to a
+                           thug, it goes to him; otherwise it splats on the
+                           first thing in its way. One ball per pull; the
+                           other hand can shoot while one hand swings.
+
 Aim markers (where each hand's web would go if you squeezed its grip now)
   White ring ........... the web holds there
   Faint dashed ring .... nothing in reach: it holds in open air (with "Webs
@@ -100,9 +107,10 @@ VR settings
   trigger to open it.
   Point a controller at a setting and pull the trigger: switch the aim
   markers, catching props and thugs, webs holding in open air (a web that
-  meets nothing within 100 m holds there; off, it misses), your own body and
-  punching on or off, or step the swing speed limit, snap turn, controller
-  vibration and the game screen's size. Changes apply at once. The launcher
+  meets nothing within 100 m holds there; off, it misses), the web shooter,
+  your own body and punching on or off, or step the swing speed limit, snap
+  turn, controller vibration and the game screen's size. Changes apply at
+  once. The launcher
   starts your next session with them; its options show them too.
   A hand pointing at the panel keeps its trigger from the game; every other
   control still works the game's menu. The X in the corner folds the panel
@@ -129,6 +137,9 @@ IF SOMETHING IS WRONG
 - Webs shot at the sky hold somewhere you can't see: switch "Webs hold in
   open air" off in VR SETTINGS or the launcher's options; a web then needs
   something within 100 m to hold on to.
+- Web balls fly when you only meant to reel in: the trigger reels only while
+  that hand's web is attached; otherwise it shoots. Switch "Web shooter" off
+  in VR SETTINGS or the launcher's options to keep the trigger for reeling.
 - Snap turning makes you uneasy, or the vibration is too strong: VR SETTINGS
   has both.
 - The menu screen is too small or too large: "Game screen size" in VR

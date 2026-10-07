@@ -9,6 +9,7 @@
 #include "spidy/game_pad.hpp"
 #include "spidy/game_player.hpp"
 #include "spidy/game_punch.hpp"
+#include "spidy/game_shooter.hpp"
 #include "spidy/game_swing.hpp"
 #include "spidy/game_tracking.hpp"
 #include "spidy/native_eye_frame.hpp"
@@ -30,7 +31,7 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 9, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 10, bytes = sizeof(XrConfig), pid{};
     // record and mover are no longer used: VR starts with the game, before
     // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
@@ -43,13 +44,14 @@ struct XrConfig {
     // bit 5: no body (the hero stays hidden in VR, the overlay draws gloves);
     // bit 6: no punching (fists pass through thugs);
     // bit 7: aim markers start hidden (X shows them in VR);
-    // bit 8: no webs in open air (a web that meets nothing within reach misses)
+    // bit 8: no webs in open air (a web that meets nothing within reach misses);
+    // bit 9: no web shooter (a free hand's trigger shoots nothing)
     uint32_t options{};
     // OpenXR runtime manifest the launcher chose; empty: Virtual Desktop's if
     // installed, else Windows' active runtime.
     wchar_t runtime[260]{};
     // The rest of what the VR settings panel starts from (options bits 3 and
-    // 5-8 and swingSpeed give the others): degrees per snap turn (0: none),
+    // 5-9 and swingSpeed give the others): degrees per snap turn (0: none),
     // controller vibration in percent, the game screen's size (0-2).
     uint32_t snapTurn = 30, haptics = 100, screenSize = 1, reserved{};
 };
@@ -63,7 +65,7 @@ enum GateReason : uint32_t {
     gateTracking = 16,    // the headset's pose or timing was not usable
 };
 struct XrData {
-    uint32_t magic = 0x53585244, version = 9, bytes = sizeof(XrData), status{};
+    uint32_t magic = 0x53585244, version = 10, bytes = sizeof(XrData), status{};
     int64_t sequence{};
     uint64_t frames{}, tracked{}, submitted{}, dropped{}, leftHands{}, rightHands{}, serial{}, generation{};
     uint32_t nativeKeys{}, error{};
@@ -96,8 +98,9 @@ struct XrData {
     uint64_t markers{};
     // The VR settings now: the settings panel beside the game screen changes
     // them during play (X the aim markers, too). settings bits: 1 web grab,
-    // 2 punch, 4 body, 8 webs in open air. Then the panel's changes so far,
-    // and the headset frames that showed it open, or folded to its tab.
+    // 2 punch, 4 body, 8 webs in open air, 16 web shooter. Then the panel's
+    // changes so far, and the headset frames that showed it open, or folded
+    // to its tab.
     uint32_t settings{}, snapTurn{}, haptics{}, screenSize{};
     float swingSpeed{};
     uint32_t settingChanges{};
@@ -120,6 +123,7 @@ BridgeCall submitInput{}, sampleBridge{}, stopBridge{}, retargetBridge{};
 BridgeCall startRays{}, submitRays{}, stopRays{};
 BridgeCall startSwing{}, submitSwing{}, sampleSwing{}, stopSwing{}, retargetSwing{}, sampleGrab{}, sampleAim{};
 BridgeCall startPunch{}, samplePunch{}, stopPunch{}, swingSettings{};
+BridgeCall startShooter{}, sampleShooter{}, stopShooter{};
 std::mutex lifecycle, telemetry;
 HANDLE worker{};
 std::atomic<bool> stopRequested{};
@@ -254,6 +258,7 @@ DWORD WINAPI run(void*) {
         values.body = !(config.options & 32);
         values.punch = !(config.options & 64);
         values.airWebs = !(config.options & 256);
+        values.webShooter = !(config.options & 512);
         values.swingSpeed = config.swingSpeed;
         values.snapTurn = static_cast<int>(config.snapTurn);
         values.haptics = static_cast<int>(config.haptics);
@@ -303,6 +308,9 @@ DWORD WINAPI run(void*) {
         // Punches each hand had landed by the previous frame.
         bool punchStarted{};
         uint64_t punchesBefore[2]{};
+        // Web-shooter shots each hand had fired by the previous frame.
+        bool shooterStarted{};
+        uint64_t shotsBefore[2]{};
         uint64_t submittedFrames{};
         uint64_t previousPresentedGeneration{};
         // The player's standing eye height above the floor: it rises at once
@@ -341,6 +349,17 @@ DWORD WINAPI run(void*) {
                 } else if (!values.punch && punchStarted && stopPunch) {
                     stopPunch(nullptr);
                     punchStarted = false;
+                }
+            }
+            if (swingStarted && startShooter && sampleShooter && stopShooter) {
+                if (values.webShooter && !shooterStarted) {
+                    game_shooter::Config shooter;
+                    shooter.pid = config.pid;
+                    shooter.base = config.base;
+                    shooterStarted = !startShooter(&shooter);
+                } else if (!values.webShooter && shooterStarted) {
+                    stopShooter(nullptr);
+                    shooterStarted = false;
                 }
             }
             // Turned off, the body blends back to the game's pose (Command
@@ -572,8 +591,8 @@ DWORD WINAPI run(void*) {
                         swing.grabKinds = !values.webGrab || !sampleGrab ? 0 : game_grab::movableKinds;
                         check(startSwing(&swing), "Start native swinging");
                         swingStarted = true;
-                        // Fists take the swing's input samples; punching is optional
-                        // and, like the grab, can be switched on later.
+                        // Fists and the web shooter take the swing's input samples;
+                        // both are optional and, like the grab, can be switched on later.
                         applySettings();
                     }
                     if (swingStarted) {
@@ -660,6 +679,16 @@ DWORD WINAPI run(void*) {
                                 }
                                 punchesBefore[i] = punch.hands[i].punches;
                             }
+                        game_shooter::Data shots{};
+                        if (shooterStarted && !sampleShooter(&shots))
+                            for (unsigned i = 0; i < 2; ++i) {
+                                // A web ball leaving the wrist: a short, crisp tick.
+                                if (shots.hands[i].shots > shotsBefore[i] && input.focused) {
+                                    runtime.haptic(i, .35f);
+                                    pulseUntil[i] = frame.predictedDisplayTime + 25'000'000;
+                                }
+                                shotsBefore[i] = shots.hands[i].shots;
+                            }
                         if (websStarted && motion.active && !flatScreen) {
                             // The game draws these webs from the tracked wrists.
                             native_webs::Request webs;
@@ -726,7 +755,7 @@ DWORD WINAPI run(void*) {
                         d.interacts = interacts;
                         d.aimMarkers = values.aimMarkers;
                         d.settings = (values.webGrab ? 1u : 0u) | (values.punch ? 2u : 0u) | (values.body ? 4u : 0u) |
-                                     (values.airWebs ? 8u : 0u);
+                                     (values.airWebs ? 8u : 0u) | (values.webShooter ? 16u : 0u);
                         d.snapTurn = static_cast<uint32_t>(values.snapTurn);
                         d.haptics = static_cast<uint32_t>(values.haptics);
                         d.screenSize = static_cast<uint32_t>(values.screenSize);
@@ -1246,11 +1275,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 9 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 10 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
-        !config.motionModule || config.options > 511 || config.snapTurn > 90 || config.haptics > 100 ||
+        !config.motionModule || config.options > 1023 || config.snapTurn > 90 || config.haptics > 100 ||
         config.screenSize > 2 || config.reserved ||
         !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 || config.swingSpeed > 65 ||
         (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||
@@ -1279,6 +1308,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     // switches take effect only at the next session.
     stopPunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchStop"));
     swingSettings = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingSettings"));
+    // Optional: an older ray module has no web shooter.
+    startShooter = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyShooterStart"));
+    sampleShooter = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyShooterSample"));
+    stopShooter = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyShooterStop"));
     if (!submitInput || !sampleBridge || !stopBridge || !retargetBridge || !startRays || !submitRays ||
         !stopRays || !startSwing || !submitSwing || !sampleSwing || !stopSwing || !retargetSwing)
         return 1002;

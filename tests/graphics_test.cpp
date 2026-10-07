@@ -454,10 +454,11 @@ int main(int argc, char** argv) {
             };
             // Punching off, the other switches on: each shows its own value.
             const auto markers = controlBox(line(Item::aimMarkers)), air = controlBox(line(Item::airWebs)),
-                       punch = controlBox(line(Item::punch));
+                       shooter = controlBox(line(Item::webShooter)), punch = controlBox(line(Item::punch));
             if (!is(painted(100, 2), 227, 38, 47) || !is(painted(300, 85), 21, 25, 34) ||
                 !is(painted(markers.x + 8, markers.y + markers.h / 2), 59, 130, 246) ||
                 !is(painted(air.x + 8, air.y + air.h / 2), 59, 130, 246) ||
+                !is(painted(shooter.x + 8, shooter.y + shooter.h / 2), 59, 130, 246) ||
                 !is(painted(punch.x + 30, punch.y + 4), 44, 50, 66) ||
                 !is(painted(look.x[1], look.y[1]), 59, 130, 246))
                 throw std::runtime_error("Settings panel colours: accent, panel, switches or cursor wrong");

@@ -900,6 +900,8 @@ void App::optionsCard(ImVec2 size) {
            [&] { changed |= toggle("##grab", &o.webGrab); });
     option("Webs hold in open air", "With nothing in reach, a web still holds 100 m out; off, it misses.", S(40),
            [&] { changed |= toggle("##air", &o.airWebs); });
+    option("Web shooter", "The trigger of a hand without a web shoots web balls at thugs.", S(40),
+           [&] { changed |= toggle("##shooter", &o.webShooter); });
     option("Your own body", "See Spider-Man's body and hands as yours; off draws gloves.", S(40),
            [&] { changed |= toggle("##body", &o.body); });
     option("Punch thugs", "A fist that hits a thug hard enough knocks him back.", S(40),

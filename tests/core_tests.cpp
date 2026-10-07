@@ -20,6 +20,7 @@
 #include "spidy/lab_props.hpp"
 #include "spidy/body_ik.hpp"
 #include "spidy/punch.hpp"
+#include "spidy/shooter.hpp"
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -2816,6 +2817,126 @@ int main() {
         check(bad([](PunchConfig& c){c.maxDamage=1;}),"less damage at full strength accepted");
         check(bad([](PunchConfig& c){c.minSpeed=std::numeric_limits<float>::quiet_NaN();}),"NaN speed accepted");
         check(!bad([](PunchConfig&){}),"defaults rejected");
+    });
+    // The right hand at eye height, aimed along -z (an identity aim pose), its trigger at `trigger`.
+    const auto shooterHands = [](float trigger, bool busy = false, bool tracked = true) {
+        std::array<ShooterHand, 2> hands{};
+        hands[1] = {tracked, {{0, 1.5f, 0}, {}}, trigger, busy};
+        return hands;
+    };
+    test("web shooter: a pull shoots once, a held trigger never again, a fresh pull again", [=] {
+        Shooter s;
+        const float dt = 1.f / 90;
+        check(s.update(dt, shooterHands(0)) == 0, "an open trigger shot");
+        check(s.update(dt, shooterHands(1)) == 2, "a pull did not shoot from the right hand");
+        for (int i = 0; i < 30; ++i)
+            check(s.update(dt, shooterHands(1)) == 0, "a held trigger shot again");
+        check(s.update(dt, shooterHands(.5f)) == 0 && s.update(dt, shooterHands(.9f)) == 0,
+              "easing the trigger halfway counted as a release");
+        check(s.update(dt, shooterHands(.2f)) == 0 && s.update(dt, shooterHands(.7f)) == 2, "a fresh pull did not shoot");
+        check(s.update(dt, shooterHands(0)) == 0 && s.update(0, shooterHands(1)) == 0,
+              "the same sample again shot");
+        auto open = shooterHands(0), both = shooterHands(1);
+        open[0] = open[1];
+        both[0] = both[1];
+        s.update(.2f, open);
+        check(s.update(dt, both) == 3, "both hands pulled together did not both shoot");
+    });
+    test("web shooter: pulls closer than its interval shoot once", [=] {
+        Shooter s;
+        s.update(.03f, shooterHands(0));
+        check(s.update(.03f, shooterHands(1)) == 2, "the first pull");
+        s.update(.03f, shooterHands(0));
+        check(s.update(.03f, shooterHands(1)) == 0, "a pull 60 ms later shot");
+        s.update(.05f, shooterHands(0));
+        check(s.update(.05f, shooterHands(1)) == 2, "a pull 160 ms after the shot did not shoot");
+    });
+    test("web shooter: a busy hand reels, and a trigger held from then or through a tracking loss is no pull", [=] {
+        Shooter s;
+        const float dt = 1.f / 90;
+        check(s.update(dt, shooterHands(1)) == 0, "a trigger already pulled at the start shot");
+        s.update(dt, shooterHands(0));
+        check(s.update(dt, shooterHands(1, true)) == 0, "a hand whose web holds something shot");
+        check(s.update(dt, shooterHands(1)) == 0, "a trigger held after its web let go shot");
+        s.update(dt, shooterHands(0));
+        s.update(dt, shooterHands(1, false, false));
+        check(s.update(dt, shooterHands(1)) == 0, "a trigger held through a tracking loss shot");
+        s.update(dt, shooterHands(0));
+        check(s.update(dt, shooterHands(1)) == 2, "a fresh pull after all that did not shoot");
+        s.reset();
+        check(s.update(dt, shooterHands(1)) == 0, "a trigger held through a reset shot");
+    });
+    test("web shooter aims at a thug near its line, never through a wall, else at the surface or open air", [] {
+        // A wall across the line 30 m ahead, and a pillar 10 m ahead that can stand right of the line.
+        struct Range : WorldQueries {
+            bool pillar{};
+            std::optional<RayHit> raycast(Vec3 o, Vec3 d, float distance) const override {
+                if (d.z >= 0)
+                    return {};
+                std::optional<RayHit> hit;
+                const float pillarAt = (o.z + 10) / -d.z;
+                const Vec3 p = o + d * pillarAt;
+                if (pillar && pillarAt > 0 && pillarAt <= distance && p.x > .5f && p.x < 1.5f)
+                    return RayHit{p, {0, 0, 1}, 2, true};
+                const float wallAt = (o.z + 30) / -d.z;
+                if (wallAt > 0 && wallAt <= distance)
+                    hit = RayHit{o + d * wallAt, {0, 0, 1}, 1, true};
+                return hit;
+            }
+            bool exists(std::uint64_t) const override {
+                return true;
+            }
+        } world;
+        Shooter s;
+        const Pose hand{{0, 1.5f, 0}, {}};
+        auto shot = s.aim(1, hand, {}, world);
+        near(shot.origin.z, -.08f);
+        check(!shot.target && shot.surface && shot.hand == 1, "no thug: the wall");
+        near(shot.aimPoint.z, -30.4f);
+        near(shot.aimPoint.y, 1.5f);
+        const float up = 1.5707964f;
+        shot = s.aim(1, {{0, 1.5f, 0}, {std::sin(up / 2), 0, 0, std::cos(up / 2)}}, {}, world);
+        check(!shot.surface && !shot.target, "the sky is open air");
+        near(shot.aimPoint.y, 1.5f + .08f + 60, .01f);
+        // A thug 2.9 degrees off the line, one 14 degrees off, one nearly on it but behind the wall, one
+        // behind the hand and one beyond the assist's range.
+        const ShooterTarget near1{11, {1, 1.5f, -20}}, wide{12, {5, 1.5f, -20}}, walled{13, {-.5f, 1.5f, -40}},
+            behind{14, {0, 1.5f, 5}}, far{15, {0, 1.5f, -50}};
+        const ShooterTarget all[] = {wide, walled, behind, far, near1};
+        shot = s.aim(1, hand, all, world);
+        check(shot.target == 11, "the thug near the line was not the one");
+        near(shot.aimPoint.x, 1);
+        near(length(shot.direction - normalized(near1.centre - shot.origin)), 0);
+        const ShooterTarget others[] = {wide, walled, behind, far};
+        check(!s.aim(1, hand, others, world).target, "a thug off the line, behind a wall, behind or too far was taken");
+        // Close by, a thug is taken anywhere within his own width of the line.
+        const ShooterTarget close[] = {{16, {.4f, 1.5f, -2}}};
+        check(s.aim(1, hand, close, world).target == 16, "a thug beside the hand was not taken");
+        const ShooterTarget beside[] = {{17, {.8f, 1.5f, -2}}};
+        check(!s.aim(1, hand, beside, world).target, "a thug clear of the line was taken");
+        // A pillar between the hand and the thug takes the ball first.
+        world.pillar = true;
+        const ShooterTarget hidden[] = {{18, {2, 1.5f, -20}}};
+        auto blocked = s.aim(1, {{0, 1.5f, 0}, Quat::yaw(-std::atan2(2.f, 19.92f))}, hidden, world);
+        check(!blocked.target && blocked.surface, "a thug behind the pillar was taken");
+        near(blocked.aimPoint.z, -10.4f, .05f);
+    });
+    test("web shooter configuration rejects invalid tuning", [] {
+        auto bad = [](auto change) {
+            ShooterConfig c;
+            change(c);
+            try {
+                Shooter s(c);
+                return false;
+            } catch (const std::invalid_argument&) {
+                return true;
+            }
+        };
+        check(bad([](ShooterConfig& c) { c.release = c.press; }), "a release no lower than the pull accepted");
+        check(bad([](ShooterConfig& c) { c.range = 0; }), "no range accepted");
+        check(bad([](ShooterConfig& c) { c.assistAngle = std::numeric_limits<float>::quiet_NaN(); }),
+              "NaN assist accepted");
+        check(!bad([](ShooterConfig&) {}), "defaults rejected");
     });
     // A controller at `from` aimed at a point of the panel (or its tab), given in points.
     auto aimedAt = [](const vr_settings::Panel& panel, float x, float y, Vec3 from = {0, 1.6f, 0}) {

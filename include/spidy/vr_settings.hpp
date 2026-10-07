@@ -22,6 +22,7 @@ struct Values {
     int haptics = 100;     // controller vibration, percent
     int screenSize = 1;    // the game screen: 0 small, 1 medium, 2 large
     bool airWebs = true;   // a web that meets nothing within reach holds in open air there
+    bool webShooter = true; // a free hand's trigger shoots web balls
     bool operator==(const Values&) const = default;
 };
 // The steps the panel offers. A value between two steps (the launcher's
@@ -45,6 +46,7 @@ enum class Item : uint8_t {
     aimMarkers,
     webGrab,
     airWebs,
+    webShooter,
     swingSpeed,
     body,
     punch,
@@ -61,7 +63,7 @@ struct Box {
     }
 };
 // The open panel's and the tab's size in points.
-inline constexpr float panelPoints[2] = {560, 874}, tabPoints[2] = {280, 64};
+inline constexpr float panelPoints[2] = {560, 940}, tabPoints[2] = {280, 64};
 // One line of the panel below its header: a section's heading (item none)
 // or a setting.
 struct Line {
@@ -71,7 +73,7 @@ struct Line {
     bool stepper{};     // a value with arrows to either side; else an on/off switch
     Box box{};
 };
-const std::array<Line, 12>& lines();
+const std::array<Line, 13>& lines();
 // The close button in the header, and the footer's text.
 Box closeBox();
 Box footerBox();
