@@ -127,10 +127,12 @@ static_assert(sizeof(Config) == 64 && sizeof(Hand) == 52 && sizeof(Command) == 1
 // grab: webs catch props and thugs (a swing started without them starts
 // them here); off lets go of what they hold. maxSpeed: the speed limit, up to
 // 65 m/s, which the movement module is started with for that reason.
+// airWebs: a web that meets nothing within reach holds in open air there;
+// off, it misses (Swing::allowAirAnchors).
 struct Settings {
-    uint32_t magic = 0x53575354, version = 1, bytes = sizeof(Settings), grab = 1;
+    uint32_t magic = 0x53575354, version = 2, bytes = sizeof(Settings), grab = 1;
     float maxSpeed = 32;
-    uint32_t reserved{};
+    uint32_t airWebs = 1;
 };
 static_assert(sizeof(Settings) == 24);
 // The movement module's own limit: every speed the panel offers.
@@ -141,7 +143,8 @@ static_assert(sizeof(WebState) == 28 && sizeof(Data) == 240);
 // and target picks the press itself uses, from the latest input. It costs a
 // few rays a step, so only while someone samples it within aimLeaseMs.
 enum class AimKind : uint32_t {
-    none,      // the hand is untracked, or its web holds something already
+    none,      // the hand is untracked, or its web holds something already; or nothing is
+               // within reach and webs do not hold in open air (Settings::airWebs)
     anchor,    // the web attaches to this surface
     air,       // nothing within reach: the web attaches in the air at maximum reach
     blocked,   // the web misses: what the ray meets cannot hold it, or the body has no clear line

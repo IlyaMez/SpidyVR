@@ -30,7 +30,7 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 8, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 9, bytes = sizeof(XrConfig), pid{};
     // record and mover are no longer used: VR starts with the game, before
     // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
@@ -42,13 +42,14 @@ struct XrConfig {
     // bit 4: no eye occlusion (each eye draws everything in its view, hidden or not);
     // bit 5: no body (the hero stays hidden in VR, the overlay draws gloves);
     // bit 6: no punching (fists pass through thugs);
-    // bit 7: aim markers start hidden (X shows them in VR)
+    // bit 7: aim markers start hidden (X shows them in VR);
+    // bit 8: no webs in open air (a web that meets nothing within reach misses)
     uint32_t options{};
     // OpenXR runtime manifest the launcher chose; empty: Virtual Desktop's if
     // installed, else Windows' active runtime.
     wchar_t runtime[260]{};
     // The rest of what the VR settings panel starts from (options bits 3 and
-    // 5-7 and swingSpeed give the others): degrees per snap turn (0: none),
+    // 5-8 and swingSpeed give the others): degrees per snap turn (0: none),
     // controller vibration in percent, the game screen's size (0-2).
     uint32_t snapTurn = 30, haptics = 100, screenSize = 1, reserved{};
 };
@@ -62,7 +63,7 @@ enum GateReason : uint32_t {
     gateTracking = 16,    // the headset's pose or timing was not usable
 };
 struct XrData {
-    uint32_t magic = 0x53585244, version = 8, bytes = sizeof(XrData), status{};
+    uint32_t magic = 0x53585244, version = 9, bytes = sizeof(XrData), status{};
     int64_t sequence{};
     uint64_t frames{}, tracked{}, submitted{}, dropped{}, leftHands{}, rightHands{}, serial{}, generation{};
     uint32_t nativeKeys{}, error{};
@@ -95,8 +96,8 @@ struct XrData {
     uint64_t markers{};
     // The VR settings now: the settings panel beside the game screen changes
     // them during play (X the aim markers, too). settings bits: 1 web grab,
-    // 2 punch, 4 body. Then the panel's changes so far, and the headset
-    // frames that showed it open, or folded to its tab.
+    // 2 punch, 4 body, 8 webs in open air. Then the panel's changes so far,
+    // and the headset frames that showed it open, or folded to its tab.
     uint32_t settings{}, snapTurn{}, haptics{}, screenSize{};
     float swingSpeed{};
     uint32_t settingChanges{};
@@ -252,6 +253,7 @@ DWORD WINAPI run(void*) {
         values.webGrab = !(config.options & 8);
         values.body = !(config.options & 32);
         values.punch = !(config.options & 64);
+        values.airWebs = !(config.options & 256);
         values.swingSpeed = config.swingSpeed;
         values.snapTurn = static_cast<int>(config.snapTurn);
         values.haptics = static_cast<int>(config.haptics);
@@ -324,6 +326,7 @@ DWORD WINAPI run(void*) {
                 game_swing::Settings s;
                 s.grab = values.webGrab && sampleGrab;
                 s.maxSpeed = values.swingSpeed;
+                s.airWebs = values.airWebs;
                 if (const auto code = swingSettings(&s)) {
                     const auto text = "VR settings: the swing did not take them (" + std::to_string(code) + ")";
                     message(3, 0, text.c_str());
@@ -722,7 +725,8 @@ DWORD WINAPI run(void*) {
                         d.playerCommits = game.matched;
                         d.interacts = interacts;
                         d.aimMarkers = values.aimMarkers;
-                        d.settings = (values.webGrab ? 1u : 0u) | (values.punch ? 2u : 0u) | (values.body ? 4u : 0u);
+                        d.settings = (values.webGrab ? 1u : 0u) | (values.punch ? 2u : 0u) | (values.body ? 4u : 0u) |
+                                     (values.airWebs ? 8u : 0u);
                         d.snapTurn = static_cast<uint32_t>(values.snapTurn);
                         d.haptics = static_cast<uint32_t>(values.haptics);
                         d.screenSize = static_cast<uint32_t>(values.screenSize);
@@ -1242,11 +1246,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 8 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 9 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
-        !config.motionModule || config.options > 255 || config.snapTurn > 90 || config.haptics > 100 ||
+        !config.motionModule || config.options > 511 || config.snapTurn > 90 || config.haptics > 100 ||
         config.screenSize > 2 || config.reserved ||
         !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 || config.swingSpeed > 65 ||
         (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||

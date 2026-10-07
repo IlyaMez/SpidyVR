@@ -57,6 +57,9 @@ void Swing::limitSpeed(float maxSpeed) {
         throw std::invalid_argument("Invalid swing speed limit");
     config_.maxSpeed = maxSpeed;
 }
+void Swing::allowAirAnchors(bool allowed) {
+    config_.airAnchors = allowed;
+}
 void Swing::reset(Body b) {
     if (!finite(b.position) || !finite(b.velocity))
         throw std::invalid_argument("Invalid body");

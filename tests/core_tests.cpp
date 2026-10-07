@@ -533,6 +533,28 @@ int main() {
         s.update(.01f,aimed(),w);
         check(!s.webs()[0].attached,"disabled sky attachment accepted");
     });
+    test("webs in open air switch off and on during play; a held web keeps its anchor", [] {
+        TestWorld w;w.enabled=false;
+        Swing s(inert());s.reset({{0,0,0},{},false});
+        const auto in=aimed();auto open=in;open.hands[0].grip=0;
+        s.update(.01f,in,w);
+        check(s.webs()[0].attached&&s.webs()[0].airAnchor,"open air did not hold the web");
+        const Vec3 anchor=s.webs()[0].anchor;
+        s.allowAirAnchors(false);
+        check(!s.config().airAnchors,"the switch did not reach the configuration");
+        const auto preview=s.shot(in.hands[0].aim,s.body().position,w);
+        check(!preview.web&&!preview.hit,"switched off, open air still previewed a web");
+        s.update(.01f,in,w);
+        check(s.webs()[0].attached&&length(s.webs()[0].anchor-anchor)<1e-4f,"switching off let go of a held web");
+        s.update(.01f,open,w);s.update(.01f,in,w);
+        check(!s.webs()[0].attached,"switched off, a press still held in open air");
+        w.enabled=true;
+        s.update(.01f,open,w);s.update(.01f,in,w);
+        check(s.webs()[0].attached&&!s.webs()[0].airAnchor,"switched off, a surface no longer held the web");
+        w.enabled=false;s.allowAirAnchors(true);
+        s.update(.01f,open,w);s.update(.01f,in,w);
+        check(s.webs()[0].attached&&s.webs()[0].airAnchor,"switched on again, open air did not hold the web");
+    });
     test("sky anchors respect body occlusion and later world obstruction", [] {
         struct Occluded : TestWorld {
             mutable unsigned queries{};
@@ -2852,6 +2874,8 @@ int main() {
         check(press({Item::screenSize, 1}, v) && valueText(Item::screenSize, v) == "Large" &&
                   !press({Item::screenSize, 1}, v), "the large screen is the top");
         check(press({Item::body}, v) && !v.body && press({Item::body}, v) && v.body, "a switch switches back");
+        check(press({Item::airWebs}, v) && !v.airWebs && press({Item::airWebs}, v) && v.airWebs,
+              "webs in open air switch back");
         check(!press({Item::close}, v) && !press({Item::tab}, v), "close and the tab change no value");
         const auto clean = sanitized({true, true, true, true, 90, 120, -5, 7});
         check(clean.swingSpeed == 65 && clean.snapTurn == 90 && clean.haptics == 0 && clean.screenSize == 2,

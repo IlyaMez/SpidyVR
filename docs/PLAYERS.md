@@ -64,7 +64,8 @@ Grabbing
 
 Aim markers (where each hand's web would go if you squeezed its grip now)
   White ring ........... the web holds there
-  Faint dashed ring .... nothing in reach: it holds in open air
+  Faint dashed ring .... nothing in reach: it holds in open air (with "Webs
+                         hold in open air" off it would miss: no marker)
   Red cross ............ it would miss (a car, or a wall in your way)
   Amber corners ........ it catches that prop or thug
   X .................... hide or show the markers (VR SETTINGS has the
@@ -98,10 +99,11 @@ VR settings
   SETTINGS tab hangs at the screen's right edge; point at it and pull the
   trigger to open it.
   Point a controller at a setting and pull the trigger: switch the aim
-  markers, catching props and thugs, your own body and punching on or off,
-  or step the swing speed limit, snap turn, controller vibration and the
-  game screen's size. Changes apply at once. The launcher starts your next
-  session with them; its options show them too.
+  markers, catching props and thugs, webs holding in open air (a web that
+  meets nothing within 100 m holds there; off, it misses), your own body and
+  punching on or off, or step the swing speed limit, snap turn, controller
+  vibration and the game screen's size. Changes apply at once. The launcher
+  starts your next session with them; its options show them too.
   A hand pointing at the panel keeps its trigger from the game; every other
   control still works the game's menu. The X in the corner folds the panel
   to its tab until you open it again.
@@ -124,6 +126,9 @@ IF SOMETHING IS WRONG
   versions.
 - The aim markers distract you: press X in VR to hide them, or switch "Aim
   markers" off in VR SETTINGS.
+- Webs shot at the sky hold somewhere you can't see: switch "Webs hold in
+  open air" off in VR SETTINGS or the launcher's options; a web then needs
+  something within 100 m to hold on to.
 - Snap turning makes you uneasy, or the vibration is too strong: VR SETTINGS
   has both.
 - The menu screen is too small or too large: "Game screen size" in VR

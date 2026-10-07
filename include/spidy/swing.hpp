@@ -100,6 +100,10 @@ class Swing {
     // A new speed limit during play (the headset's settings panel). A body
     // faster than it slows to it in the next step.
     void limitSpeed(float maxSpeed);
+    // Whether a clear shot attaches in the air at maximum reach from now on
+    // (the headset's settings panel); off, it misses. Webs already attached
+    // keep their anchors.
+    void allowAirAnchors(bool allowed);
     // A web shot now along `aim` (world space, -Z forward) with the body at
     // `from`, without shooting it: the same test a grip press makes.
     WebShot shot(Pose aim, Vec3 from, const WorldQueries&) const;

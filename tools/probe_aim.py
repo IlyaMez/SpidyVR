@@ -15,6 +15,7 @@ reports/aim-probe.json.
 also switches web grabbing and the speed limit as the headset's VR settings panel does (SpidySwingSettings): the
 swing starts without the grab, as a -NoWebGrab session does, and the prop aim is held again with the grab started
 during play, switched off and on again; punching is started and stopped twice (SpidyPunchStart, SpidyPunchStop).
+The sky aim is held again with webs in open air switched off (nothing to preview: a press would miss) and on.
 """
 import argparse
 import ctypes as c
@@ -177,8 +178,8 @@ def main():
             # The VR settings panel during play: the prop aim with the grab off (as started), switched on (the
             # grab starts now, its hooks under the swing's lock), off (presses swing), on again; each with
             # another speed limit. A limit above 65 m/s is refused.
-            def settings(grab, speed):
-                return struct.pack('<4IfI', 0x53575354, 1, 24, grab, speed, 0)
+            def settings(grab, speed, air=1):
+                return struct.pack('<4IfI', 0x53575354, 2, 24, grab, speed, air)
             report['refused_settings'] = call_with_payload(process, rays['SpidySwingSettings'], settings(1, 70.))
             report['settings'] = []
             if props:
@@ -199,7 +200,18 @@ def main():
                                      call_with_payload(process, rays['SpidyPunchStart'], punch),
                                      call_remote(process, rays['SpidyPunchStop'])]
             print(f"punching started, stopped, started, stopped: codes {report['punch_codes']}", flush=True)
-            report['aims'] += [dict(aim='settings', kind='-', swing=e['swing']) for e in report['settings']]
+            # Webs in open air: the sky aim with them off (no web and nothing met: no preview), then on again.
+            report['air_webs'] = []
+            for air in (0, 1):
+                code = call_with_payload(process, rays['SpidySwingSettings'], settings(1, 32., air))
+                last = hold((0, 1, 0))
+                entry = dict(air=air, code=code, kind=last['hands'][0]['kind'] if last else None,
+                             swing=swing_health(game, rays['SpidySwingData']))
+                report['air_webs'].append(entry)
+                print(f"webs in open air {'on' if air else 'off'}: code {code}, the sky aim previews {entry['kind']}",
+                      flush=True)
+            report['aims'] += [dict(aim='settings', kind='-', swing=e['swing'])
+                               for e in report['settings'] + report['air_webs']]
         report['faults'] = [a for a in report['aims'] if a['swing']['status'] == 4 or a['swing']['error']]
         report['previewed'] = sum(1 for a in report['aims'] if a['kind'])
     finally:
@@ -221,10 +233,11 @@ def main():
         report.get('entries_restored') is True and not report.get('swing_stop') and not report.get('ray_stop')
     if args.settings:
         kinds = [e['kind'] for e in report.get('settings', [])]
-        print(json.dumps({k: report.get(k) for k in ('settings', 'refused_settings', 'punch_codes')}))
+        print(json.dumps({k: report.get(k) for k in ('settings', 'refused_settings', 'punch_codes', 'air_webs')}))
         ok = ok and report.get('refused_settings') == 2001 and report.get('punch_codes') == [0, 0, 0, 0] and \
             len(kinds) == 4 and kinds[1] == kinds[3] == 'prop' and 'prop' not in (kinds[0], kinds[2]) and \
-            all(e['code'] in (None, 0) for e in report['settings'])
+            all(e['code'] in (None, 0) for e in report['settings']) and \
+            [(e['code'], e['kind']) for e in report.get('air_webs', [])] == [(0, 'none'), (0, 'air')]
     return 0 if ok else 1
 
 

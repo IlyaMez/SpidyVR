@@ -452,12 +452,14 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingRetarget(void* input) {
     ReleaseSRWLockExclusive(&lifecycle);
     return result;
 }
-// The headset's settings panel: the speed limit, and whether webs catch props
-// and thugs. Both apply from the next step; the visit holds `simulation`.
+// The headset's settings panel: the speed limit, whether webs catch props and
+// thugs, and whether they hold in open air. All apply from the next step; the
+// visit holds `simulation`.
 extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
     Settings s;
-    if (!copy(&s, input, sizeof(s)) || s.magic != 0x53575354 || s.version != 1 || s.bytes != sizeof(s) ||
-        s.grab > 1 || !std::isfinite(s.maxSpeed) || s.maxSpeed <= 0 || s.maxSpeed > motionSpeedLimit || s.reserved)
+    if (!copy(&s, input, sizeof(s)) || s.magic != 0x53575354 || s.version != 2 || s.bytes != sizeof(s) ||
+        s.grab > 1 || !std::isfinite(s.maxSpeed) || s.maxSpeed <= 0 || s.maxSpeed > motionSpeedLimit ||
+        s.airWebs > 1)
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
     DWORD result{};
@@ -467,6 +469,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         AcquireSRWLockExclusive(&simulation);
         config.maxSpeed = s.maxSpeed;
         solver.limitSpeed(s.maxSpeed);
+        solver.allowAirAnchors(s.airWebs != 0);
         // A swing started without the grab (-NoWebGrab) offers it from now on.
         if (s.grab && !game_grab::offering() && driveMotion && sampleDriven) {
             config.grabKinds = game_grab::movableKinds;

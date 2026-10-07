@@ -9,7 +9,32 @@ An in-development VR mod project for **Marvel's Spider-Man Remastered**, targeti
 **Quest 3 + Virtual Desktop**. First milestone: 6DoF head/controller tracking,
 native stereo, and physically controlled web swinging.
 
-**Latest build (October 7): VR settings beside the game's menus.** You asked
+**Latest build (October 7, second build): webs in open air are a setting.**
+You asked to make hooking a web at maximum distance without hitting anything
+(webs on nowhere) an optional setting, on by default. It is **Webs hold in
+open air**, under WEBS in the headset's VR settings and in the launcher's
+options, and it starts on. On, webs work as before: a squeeze whose ray meets
+nothing within 100 m holds the web in open air there, and the aim marker is
+the faint dashed ring. Off, that squeeze misses, as one aimed at a car does,
+and a hand aimed into open air shows no marker; webs on buildings, the ground
+and props are unchanged. Switched in the headset it applies from the next
+squeeze (a web already holding keeps its anchor), and the launcher starts
+your next session as you left it; `Launch Spidy VR.cmd -NoAirWebs` starts
+with it off. The panel is one row taller (0.9 x 1.4 m). Measured without the
+headset: 153 core checks (new: switched off during play, a squeeze into open
+air misses and its preview shows nothing, a web already holding keeps its
+anchor, a surface still holds, and switched on again open air holds), 10
+launcher checks, 71 Python checks, and the GPU test (the panel painted at
+840 x 1311 pixels, the new switch showing its own value). In the game, on
+your save: a hand aimed at the sky would hold in open air at 100 m; with the
+switch off the same aim had nothing to hold (a squeeze would miss), and
+switched on again open air at 100 m; no fault, every hook restored, your save
+files unchanged. How the new row looks and clicks in the headset is pending.
+This build changes the VR protocol (the settings call, the XR config and the
+XR data each have a new version), so it runs only as a whole package.
+Details: [docs/VALIDATION.md](docs/VALIDATION.md).
+
+**Preceding build (October 7, first build): VR settings beside the game's menus.** You asked
 for a VR settings section in the in-game menu. The game draws its menus itself
 and Spidy draws nothing into them, so the section is Spidy's own panel,
 hanging beside them in the headset. Pause with the menu button and **VR
@@ -623,7 +648,10 @@ Squeeze a **grip** to shoot that hand's web where the controller points, and
 keep squeezing to swing; release it to let go. Pull the **trigger** while a web
 is attached to reel in; if it was already held when the web attached, release it
 first. Pull a hand sharply away from its anchor to zip. A web that breaks
-mid-swing stays released until you squeeze that grip again.
+mid-swing stays released until you squeeze that grip again. A web that meets
+nothing within 100 m holds in open air there; switch **Webs hold in open air**
+off (VR settings, the launcher's options) or start with
+`Launch Spidy VR.cmd -NoAirWebs`, and it misses instead.
 
 Webs are drawn by the game's own web-line system. If they look wrong in the
 eyes, start with `Launch Spidy VR.cmd -OverlayWebs` for Spidy's overlay strands.
@@ -640,15 +668,17 @@ pull.
 
 Each hand without a web shows an aim marker where its grip would send the
 web now: a white ring where the web would hold, a faint dashed ring where it
-would hold in open air, a red cross where it would miss, amber corners around
+would hold in open air (no marker there with webs in open air switched off),
+a red cross where it would miss, amber corners around
 a prop or thug it would catch. It tightens as you squeeze. **X** hides or
 shows the markers; `Launch Spidy VR.cmd -NoAimMarkers` starts with them hidden.
 
 **VR settings** hang beside the game screen: they open with the pause menu
 (the menu button), and on every other game screen a VR SETTINGS tab at the
 screen's right edge opens them. Point a controller and pull the trigger to
-switch the aim markers, web grabbing, your body and punching, or to step the
-swing speed limit, snap turn, controller vibration and the game screen's size.
+switch the aim markers, web grabbing, webs in open air, your body and punching,
+or to step the swing speed limit, snap turn, controller vibration and the game
+screen's size.
 Changes apply at once; Spidy Launcher starts your next session with them.
 A hand pointing at the panel keeps its trigger from the game.
 

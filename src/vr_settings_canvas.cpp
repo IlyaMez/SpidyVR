@@ -213,6 +213,7 @@ void Canvas::draw(const Panel::Look& look, const Values& values, float scale) {
             if (!line.stepper) {
                 const bool on = line.item == Item::aimMarkers ? values.aimMarkers
                                 : line.item == Item::webGrab  ? values.webGrab
+                                : line.item == Item::airWebs  ? values.airWebs
                                 : line.item == Item::body     ? values.body
                                                               : values.punch;
                 paint.roundRect(c, c.h / 2, on ? blue : hovered(line.item) ? trackHover : trackOff);

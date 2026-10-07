@@ -257,9 +257,9 @@ SETTINGS_LINE = 'VR settings from the headset: '
 
 def start_settings(a):
     """The VR settings a session starts with, as its samples' vr_settings report them."""
-    return dict(aim_markers=not a.no_aim_markers, web_grab=not a.no_web_grab, punch=not a.no_punch,
-                body=not a.no_body, swing_speed=round(a.swing_speed, 1), snap_turn=a.snap_turn,
-                haptics=a.haptics, screen_size=a.screen_size)
+    return dict(aim_markers=not a.no_aim_markers, web_grab=not a.no_web_grab, air_webs=not a.no_air_webs,
+                punch=not a.no_punch, body=not a.no_body, swing_speed=round(a.swing_speed, 1),
+                snap_turn=a.snap_turn, haptics=a.haptics, screen_size=a.screen_size)
 
 
 def settings_line(start, sample):
@@ -275,7 +275,7 @@ def snapshot(game, address):
         raw = game.read(address, 704)
         if len(raw) != 704:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53585244, 8, 704):
+        if struct.unpack_from('<3I', raw) != (0x53585244, 9, 704):
             raise RuntimeError('Game XR protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -316,7 +316,7 @@ def snapshot(game, address):
         flags, snap_turn, haptics, screen_size = struct.unpack_from('<4I', raw, 664)
         swing_speed, changes = struct.unpack_from('<fI', raw, 680)
         result.update(vr_settings=dict(aim_markers=bool(aim_markers), web_grab=bool(flags & 1),
-                                       punch=bool(flags & 2), body=bool(flags & 4),
+                                       air_webs=bool(flags & 8), punch=bool(flags & 2), body=bool(flags & 4),
                                        swing_speed=round(swing_speed, 1), snap_turn=snap_turn,
                                        haptics=haptics, screen_size=screen_size),
                       setting_changes=changes)
@@ -602,6 +602,8 @@ def main():
     p.add_argument('--capture-images', action='store_true',help='Enable diagnostic CPU eye readback (adds overhead)')
     p.add_argument('--overlay-webs', action='store_true',help="Draw Spidy's overlay webs instead of the game's web lines")
     p.add_argument('--no-web-grab', action='store_true', help='Webs never catch props or thugs; they only swing')
+    p.add_argument('--no-air-webs', action='store_true',
+                   help='A web that meets nothing within reach misses, instead of holding in open air 100 m out')
     p.add_argument('--no-body', action='store_true',
                    help="Keep the hero hidden in VR (gloves drawn over the image) instead of your own body")
     p.add_argument('--no-punch', action='store_true', help='Fists pass through thugs instead of punching them')
@@ -706,13 +708,14 @@ def main():
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
                                            'SpidyBodyData'))
-        config = struct.pack('<4I7Q2IfI', 0x53585243, 8, 624, game.pid, game.base, queue,
+        config = struct.pack('<4I7Q2IfI', 0x53585243, 9, 624, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
                              (4 if a.stock_monitor_view else 0) | (8 if a.no_web_grab else 0) |
                              (16 if a.no_eye_occlusion else 0) | (32 if a.no_body else 0) |
-                             (64 if a.no_punch else 0) | (128 if a.no_aim_markers else 0)) + \
+                             (64 if a.no_punch else 0) | (128 if a.no_aim_markers else 0) |
+                             (256 if a.no_air_webs else 0)) + \
             runtime_path(manifest) + struct.pack('<4I', a.snap_turn, a.haptics, a.screen_size, 0)
         code = call_with_payload(process, xr['SpidyXrStart'], config)
         if code:

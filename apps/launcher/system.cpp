@@ -513,6 +513,7 @@ Settings loadSettings() {
         else if (key == "body") o.body = number() != 0;
         else if (key == "punch") o.punch = number() != 0;
         else if (key == "aim_markers") o.aimMarkers = number() != 0;
+        else if (key == "air_webs") o.airWebs = number() != 0;
         else if (key == "eye_size") o.eyeSize = number();
         else if (key == "swing_speed") o.swingSpeed = std::clamp(number(), 10, 65);
         else if (key == "snap_turn") o.snapTurn = std::clamp(number(), 0, 90);
@@ -538,7 +539,7 @@ void saveSettings(const Settings& settings) {
     file << "game=" << narrow(settings.gameExe) << "\nruntime=" << narrow(settings.runtime)
          << "\nweb_grab=" << o.webGrab << "\noverlay_webs=" << o.overlayWebs << "\nsmall_window=" << o.smallWindow
          << "\nstock_monitor_view=" << o.stockMonitorView << "\nbody=" << o.body << "\npunch=" << o.punch
-         << "\naim_markers=" << o.aimMarkers << "\neye_size=" << o.eyeSize
+         << "\naim_markers=" << o.aimMarkers << "\nair_webs=" << o.airWebs << "\neye_size=" << o.eyeSize
          << "\nswing_speed=" << o.swingSpeed << "\nsnap_turn=" << o.snapTurn << "\nhaptics=" << o.haptics
          << "\nscreen_size=" << o.screenSize << "\nhash_path=" << narrow(settings.hashPath)
          << "\nhash_size=" << settings.hashSize << "\nhash_time=" << settings.hashTime

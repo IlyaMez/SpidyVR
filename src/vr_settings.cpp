@@ -7,7 +7,7 @@
 namespace spidy::vr_settings {
 namespace {
 constexpr float margin = 28, headerHeight = 92, headingHeight = 36, rowHeight = 66, footerHeight = 80;
-std::array<Line, 11> layout() {
+std::array<Line, 12> layout() {
     struct Entry {
         Item item;
         const char* title;
@@ -19,6 +19,7 @@ std::array<Line, 11> layout() {
         {Item::none, "WEBS", nullptr, false},
         {Item::aimMarkers, "Aim markers", "Where each web would land. X also switches them.", false},
         {Item::webGrab, "Webs catch props and thugs", "Grab, yank and throw them with your webs.", false},
+        {Item::airWebs, "Webs hold in open air", "With nothing in reach, a web still holds 100 m out.", false},
         {Item::swingSpeed, "Swing speed limit", "How fast a swing can carry you.", true},
         {Item::none, "BODY", nullptr, false},
         {Item::body, "Your own body", "Spider-Man's body and hands; off draws gloves.", false},
@@ -28,7 +29,7 @@ std::array<Line, 11> layout() {
         {Item::haptics, "Controller vibration", "How strongly webs and punches buzz.", true},
         {Item::screenSize, "Game screen size", "For menus, cutscenes and flat mode.", true},
     };
-    std::array<Line, 11> out{};
+    std::array<Line, 12> out{};
     float y = headerHeight;
     for (size_t i = 0; i < out.size(); ++i) {
         const auto& e = entries[i];
@@ -77,7 +78,7 @@ Values sanitized(Values v) {
     v.screenSize = std::clamp(v.screenSize, 0, 2);
     return v;
 }
-const std::array<Line, 11>& lines() {
+const std::array<Line, 12>& lines() {
     static const auto all = layout();
     return all;
 }
@@ -147,6 +148,9 @@ bool press(const Hit& h, Values& v) {
         return true;
     case Item::webGrab:
         v.webGrab = !v.webGrab;
+        return true;
+    case Item::airWebs:
+        v.airWebs = !v.airWebs;
         return true;
     case Item::body:
         v.body = !v.body;

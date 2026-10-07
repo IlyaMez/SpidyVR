@@ -9,6 +9,7 @@ param(
     [switch]$CaptureImages,
     [switch]$OverlayWebs,
     [switch]$NoWebGrab,
+    [switch]$NoAirWebs,
     [switch]$NoBody,
     [switch]$NoPunch,
     [switch]$NoAimMarkers,
@@ -47,8 +48,8 @@ Write-Host "In VR B is the game's interact button (its Y: backpacks, doors, prom
 Write-Host 'Keep the game window in front on the desktop: the game pauses while another window is.'
 Write-Host 'Click both thumbsticks to switch between immersive VR and a flat game screen in the headset.'
 Write-Host 'VR SETTINGS hang beside the game screen (they open with the pause menu): point a controller and pull'
-Write-Host 'the trigger to change the aim markers, web grab, swing speed, body, punching, snap turn, vibration'
-Write-Host 'and screen size during play.'
+Write-Host 'the trigger to change the aim markers, web grab, webs in open air, swing speed, body, punching,'
+Write-Host 'snap turn, vibration and screen size during play.'
 Write-Host "Squeeze a grip to shoot that hand's web. Keep it held to swing; release it to let go."
 Write-Host "Swing speed cap: $SwingSpeed m/s. Pull the trigger while a web is attached to reel in."
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -62,6 +63,11 @@ else {
     Write-Host 'A web aimed at a throwable prop or a thug catches it: trigger reels it in, a sharp pull yanks'
     Write-Host 'it to your hand, release the grip to throw (add -NoWebGrab to only swing).'
 }
+if($NoAirWebs) {
+    $captureArgs+=@('--no-air-webs')
+    Write-Host 'Webs in open air off: a web that meets nothing within 100 m misses.'
+}
+else { Write-Host 'A web that meets nothing within 100 m holds in open air there (add -NoAirWebs to make it miss).' }
 if($NoBody) {
     $captureArgs+=@('--no-body')
     Write-Host 'Body off: the hero stays hidden in VR and gloves are drawn over the image.'

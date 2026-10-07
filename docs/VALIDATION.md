@@ -1,6 +1,64 @@
 # Validation — 2026-10-07
 
-## VR settings beside the game's menus — current build
+## Webs in open air as a setting — current build
+
+The user, October 7: "lets make the ability to hook webs on max distance
+without hitting an object (webs on nowhere) as an optional setting (on by
+default)".
+
+The swing already had the switch: `SwingConfig::airAnchors`, on, read by
+`Swing::shot`, which both the grip press and the aim previews call. A ray that
+meets nothing within reach (`maxRange`, 100 m) attaches the web in the air
+there when it is on, and misses when it is off. Nothing in the game turned it
+off until now.
+
+- `Swing::allowAirAnchors` switches it during play. Shots from then on follow
+  it; a web already attached keeps its anchor. (The panel shows only with the
+  game screen, when the swing has let go of every web anyway.)
+- `SpidySwingSettings` passes it: Settings version 2, still 24 bytes, the
+  reserved word is now `airWebs`; version 1 and values above 1 are refused
+  (2001). `previewAims` reads the solver's configuration too, so with it off a
+  hand aimed into open air previews `none` (no marker, as a press would miss),
+  and the red cross for an air point the body has no line to goes with it.
+- VR settings: "Webs hold in open air" under WEBS, after "Webs catch props
+  and thugs". One more 66-point row: the panel is 560 x 874 points, 0.9 x
+  1.40 m in the headset, 840 x 1311 pixels at 1.5 pixels a point.
+- A session starts with it off from XrConfig options bit 256
+  (`run_game_vr.py --no-air-webs`, `Launch Spidy VR.cmd -NoAirWebs`, the
+  launcher's "Webs hold in open air"). XrData settings bit 8 reports it; the
+  headset's line and the launcher's settings file carry `air_webs`.
+
+Protocol: XrConfig version 9 and XrData version 9 (sizes unchanged, 624 and
+704 bytes; options up to 511), Settings version 2. As before, the runner and
+the DLLs must come from one build: an older runner against these DLLs fails
+with "Game XR start: 1001", this runner against older DLLs with "Game XR
+protocol mismatch".
+
+Checks without the game: 153 core checks (new: switched off during play, a
+press into open air misses and its preview has neither web nor hit, a web
+already attached keeps its anchor, a surface still holds, and switched on
+again open air holds; the panel's switch switches back), 10 launcher checks
+(`--no-air-webs`; `air_webs=0` from the headset's line), 71 Python checks
+(XrData v9: settings bit 8 on and off; the start values and the line with
+`air_webs`), and the GPU test: the panel painted at 840 x 1311 pixels, the
+new switch showing its own value (on) beside punching off, drawn into the
+eye image within 0 levels, the D3D12 debug layer clean.
+
+In the game, without the headset (`tools/probe_aim.py --settings` in a fresh
+game on the user's save, the player 26 s after launch): the sky aim
+previewed open air at 100.0 m, as before. `SpidySwingSettings` with `airWebs`
+0 returned 0, and the same aim previewed none (no web, nothing met: a press
+would miss); with 1, 0 again and open air at 100 m. The grab switched as in
+the preceding build (a prop 6.3 m away: anchor, prop, anchor, prop), a 70 m/s
+limit was refused (2001), punching started and stopped twice (all 0). No
+swing fault in 21 aims, both modules stopped with 0, every hook entry
+restored, and the save files byte-identical to the backup taken before.
+
+Not checked: what only the headset shows: the new row in the Quest, a click
+on it, and the XR worker handing the launch option and the panel's switch to
+the swing (`applySettings`), which runs only in an OpenXR session.
+
+## VR settings beside the game's menus — preceding build
 
 The user, October 7: "can you add a vr settings section to ingame menu?"
 
