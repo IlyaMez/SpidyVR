@@ -136,8 +136,9 @@ jobs:
           if ($LASTEXITCODE) { throw 'Committing the version failed.' }
           git tag -a "v$env:VERSION" -m "Spidy $env:VERSION"
           # Atomic: main and the tag land together, or neither does (main moved during the build).
-          $check = if ($env:PUBLISH -eq 'true') { @() } else { @('--dry-run') }
-          git push --atomic @check origin HEAD:refs/heads/main "refs/tags/v$env:VERSION"
+          $push = @('push', '--atomic')
+          if ($env:PUBLISH -ne 'true') { $push += '--dry-run' }
+          git @push origin HEAD:refs/heads/main "refs/tags/v$env:VERSION"
           if ($LASTEXITCODE) { throw 'The push was refused, probably because main moved during the build. Run the workflow again.' }
 
       - name: Publish the release
