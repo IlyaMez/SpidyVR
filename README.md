@@ -515,30 +515,43 @@ than Quest Touch (Index bindings are also suggested) are untested.
 ### Publish a release
 
 GitHub Actions builds releases on a clean machine and puts them under the
-repository's **Releases**, zip attached:
+repository's **Releases**, zip attached. Publish from GitHub: **Actions >
+Release > Run workflow** on `main`, choose the part of the version to raise
+(patch 0.1.1 -> 0.1.2, minor 0.2.0, major 1.0.0), and run it. From a terminal:
+
+```powershell
+gh workflow run release.yml -f bump=patch                    # or minor, major
+gh workflow run release.yml -f bump=patch -f publish=false   # a test run that changes nothing
+```
+
+[.github/workflows/release.yml](.github/workflows/release.yml) runs on GitHub's
+Windows Server 2022 image (Visual Studio 2022). It raises `project(Spidy VERSION
+...)` in `CMakeLists.txt`, runs `bootstrap.ps1 -Observer`, `build.ps1 -Observer`
+with the C++ tests, the Python protocol tests and `package.ps1`, checks that the
+launcher carries the new version, and only then commits the version ("Release
+Spidy 0.1.2", by github-actions), tags it `v0.1.2`, pushes both to `main` and
+publishes "Spidy 0.1.2" with the zip, its SHA-256 and the commits since the
+previous release. Only the repository's owner can release: a run anyone else
+starts is skipped. Only what is on GitHub's `main` is released, so push first;
+afterwards `git pull` brings the version commit here. A failed build changes
+nothing. If `main` moved during the build, the push is refused: run it again.
+Without *publish* the run does all of this but only checks the push, and keeps
+the zip with the run for 14 days; on another branch it test-builds that branch
+as it is. Given an existing tag, it builds and publishes that tag again (the way
+out when publishing failed after the tag was pushed).
+
+`tools/release.ps1` makes the version commit and tag on this PC instead; the
+pushed tag starts the same workflow:
 
 ```powershell
 .\tools\release.ps1 -DryRun   # the next version, and what the push takes along
-.\tools\release.ps1           # 0.1.0 -> 0.1.1; or -Bump minor, -Bump major, -Version 0.3.0
-.\tools\release.ps1 -Wait     # also follows the build and prints the release's address
+.\tools\release.ps1 -Wait     # 0.1.1 -> 0.1.2 (-Bump minor, -Bump major, -Version 0.3.0), then follows the build
 ```
 
-`tools/release.ps1` raises `project(Spidy VERSION ...)` in `CMakeLists.txt`,
-commits that line alone ("Release Spidy 0.1.1"), tags the commit `v0.1.1` and
-pushes both. It stops when the checkout is not on `main`, lacks commits from
-`origin/main` or has uncommitted edits in `CMakeLists.txt`, and undoes its
-commit and tag when the push fails. Given the current version, `-Version` tags
-the current commit without a commit of its own. It builds nothing here: the tag
-starts [.github/workflows/release.yml](.github/workflows/release.yml) on
-GitHub's Windows Server 2022 image (Visual Studio 2022), which runs
-`bootstrap.ps1 -Observer`, `build.ps1 -Observer` with the C++ tests, the Python
-protocol tests and `package.ps1`, checks that the launcher carries the version,
-and publishes "Spidy 0.1.1" with the zip, its SHA-256 and the commits since the
-previous release. Only committed work is released. A failed build publishes
-nothing: re-run it when a download failed, otherwise fix the cause and release
-the next version. *Run workflow* on the Actions tab builds a branch without
-publishing (the zip stays with the run for 14 days), or publishes a given tag
-again.
+It stops when the checkout is not on `main`, lacks commits from `origin/main` or
+has uncommitted edits in `CMakeLists.txt`, and undoes its commit and tag when
+the push fails. Given the current version, `-Version` tags the current commit
+without a commit of its own.
 
 ## What's runnable
 

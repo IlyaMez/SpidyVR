@@ -1,16 +1,34 @@
 # Builds Spidy on a clean Windows machine and publishes the player zip under Releases.
-# tools/release.ps1 starts it by pushing a version tag (v1.2.3). "Run workflow" on the Actions
-# tab builds the chosen branch and keeps the zip with the run instead, or, given an existing
-# tag, builds that tag and publishes its release (again).
+# Publish from GitHub: Actions > Release > Run workflow on main, choosing the part of the version to
+# raise. The run raises project(Spidy VERSION) in CMakeLists.txt, builds and tests that, and only then
+# commits the version, tags it (v1.2.3), pushes both and publishes the zip. Without "publish" it is a
+# test run: the same steps, the push only checked, the zip kept with the run. On another branch it
+# test-builds the branch as it is. Given an existing tag, it builds and publishes that tag again.
+# tools/release.ps1 makes the version commit and tag on the PC instead; the pushed tag starts this.
 name: Release
+run-name: >-
+  ${{ github.event_name == 'push' && format('Spidy {0}', github.ref_name)
+  || inputs.tag && format('Spidy {0} again', inputs.tag)
+  || github.ref_name != 'main' && format('Test build of {0}', github.ref_name)
+  || inputs.publish && format('New {0} release', inputs.bump)
+  || format('Test of a {0} release', inputs.bump) }}
 
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
     inputs:
+      bump:
+        description: Part of the version to raise (0.1.1 becomes 0.1.2, 0.2.0 or 1.0.0)
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      publish:
+        description: Publish the release (untick for a test run that changes nothing)
+        type: boolean
+        default: true
       tag:
-        description: Version tag to build and publish (v1.2.3). Empty builds the branch without publishing.
+        description: Or build and publish this existing tag again (v1.2.3), leaving the version alone
         required: false
         default: ''
 
@@ -26,6 +44,9 @@ defaults:
 
 jobs:
   release:
+    # Only the repository's owner releases: a run anyone else starts (a collaborator's tag push or
+    # Run workflow, or a re-run) is skipped.
+    if: github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
     # tools/build.ps1 needs Visual Studio 2022 with its C++ CMake tools; this image has both.
     runs-on: windows-2022
     timeout-minutes: 60
@@ -41,14 +62,38 @@ jobs:
         with:
           python-version: '3.12' # the Python that tools/package.ps1 ships
 
-      - name: Check the version
+      - name: Choose the version
         id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+          PUBLISH: ${{ inputs.publish }}
         run: |
-          $version = (Select-String -LiteralPath CMakeLists.txt -Pattern 'project\(Spidy VERSION ([0-9.]+)').Matches[0].Groups[1].Value
-          if ($env:TAG -and $env:TAG -ne "v$version") {
-            throw "Tag $env:TAG differs from project(Spidy VERSION $version) in CMakeLists.txt; tools/release.ps1 sets both."
+          $text = [IO.File]::ReadAllText("$PWD/CMakeLists.txt")
+          $found = [regex]::Match($text, 'project\(Spidy VERSION (\d+\.\d+\.\d+)')
+          if (-not $found.Success) { throw 'CMakeLists.txt has no "project(Spidy VERSION x.y.z" line.' }
+          $current = [version]$found.Groups[1].Value
+          $version = $current
+          $tag = $env:TAG
+          if ($tag) {
+            if ($tag -ne "v$current") {
+              throw "Tag $tag differs from project(Spidy VERSION $current) in CMakeLists.txt; tools/release.ps1 sets both."
+            }
+          } elseif ($env:GITHUB_REF -eq 'refs/heads/main') {
+            # Built with the raised version; it is committed only once the build and tests pass.
+            if ($env:BUMP -eq 'major') { $version = [version]::new($current.Major + 1, 0, 0) }
+            elseif ($env:BUMP -eq 'minor') { $version = [version]::new($current.Major, $current.Minor + 1, 0) }
+            else { $version = [version]::new($current.Major, $current.Minor, $current.Build + 1) }
+            $newest = git tag --list 'v*' | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } |
+              ForEach-Object { [version]$_.Substring(1) } | Sort-Object | Select-Object -Last 1
+            if ($newest -and $version -le $newest) { throw "v$version is not above the newest tag, v$newest." }
+            $index = $found.Groups[1].Index
+            [IO.File]::WriteAllText("$PWD/CMakeLists.txt", $text.Remove($index, $found.Groups[1].Length).Insert($index, "$version"))
+            'raise=true' >> $env:GITHUB_OUTPUT
+            if ($env:PUBLISH -eq 'true') { $tag = "v$version" }
+            Write-Output "Spidy $current -> $version"
           }
           "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Fetch the pinned OpenXR SDK, Dear ImGui and MinHook
         run: ./tools/bootstrap.ps1 -Observer
@@ -72,18 +117,35 @@ jobs:
           if ($launcher -ne $env:VERSION) { throw "The launcher carries version $launcher, not $env:VERSION." }
 
       - name: Keep the zip with this run
-        if: env.TAG == ''
+        if: steps.version.outputs.tag == ''
         uses: actions/upload-artifact@v7
         with:
           path: dist/Spidy-${{ steps.version.outputs.version }}-win64.zip
           archive: false
           retention-days: 14
 
+      - name: Commit and tag the version
+        if: steps.version.outputs.raise == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit --quiet -m "Release Spidy $env:VERSION" -- CMakeLists.txt
+          if ($LASTEXITCODE) { throw 'Committing the version failed.' }
+          git tag -a "v$env:VERSION" -m "Spidy $env:VERSION"
+          # Atomic: main and the tag land together, or neither does (main moved during the build).
+          $check = if ($env:PUBLISH -eq 'true') { @() } else { @('--dry-run') }
+          git push --atomic @check origin HEAD:refs/heads/main "refs/tags/v$env:VERSION"
+          if ($LASTEXITCODE) { throw 'The push was refused, probably because main moved during the build. Run the workflow again.' }
+
       - name: Publish the release
-        if: env.TAG != ''
+        if: steps.version.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           $zip = "dist/Spidy-$env:VERSION-win64.zip"
