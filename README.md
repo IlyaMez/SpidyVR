@@ -49,9 +49,9 @@ coming. Questions, bugs, clips: come say hi on
   follow your controllers.
 - 👊 **Real punches.** A fast fist into a thug lands the game's own melee hit,
   harder the faster you swing.
-- ⚙️ **VR settings in the headset.** A panel beside the pause menu for aim
-  markers, snap turn, vibration, swing speed, screen size and more. Changes
-  apply at once.
+- ⚙️ **VR settings in the game's menu.** A SPIDY VR tab in the game's own
+  Settings for aim markers, snap turn, vibration, swing speed, screen size and
+  more. Changes apply at once.
 - 🖥️ **Menus and cutscenes on a screen.** The Touch controllers work as an
   Xbox controller there; VR resumes when play does.
 
@@ -103,7 +103,7 @@ Spidy changes nothing in the game's folder.
 | Walk and run / jump | **Left stick** / **A** |
 | Snap turn | **Right stick** (30°; adjustable or off in VR settings) |
 | Interact (the game's Y) | **B** |
-| Pause and VR settings | **Menu** button |
+| Pause (VR settings: Settings > SPIDY VR) | **Menu** button |
 | Game menu (map, suits, skills) | **Y** |
 | Show or hide aim markers | **X** |
 | Switch between VR and a flat screen | Click **both sticks** |

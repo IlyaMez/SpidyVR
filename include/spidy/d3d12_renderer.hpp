@@ -34,11 +34,6 @@ class D3D12Renderer {
     // unchanged; `linearSource` holds light values and is encoded. Asynchronous
     // like renderViews.
     void blit(ID3D12Resource* source, DXGI_FORMAT sourceView, bool linearSource, const ViewTarget& target);
-    // Draws display-encoded BGRA8 `pixels` (`width` x `height`, rows
-    // `rowPitch` bytes apart) as blit does, over the target's top-left
-    // target.width x target.height. Null `pixels` draws the last ones again:
-    // each frame's swapchain image needs them, though they rarely change.
-    void blitPixels(const void* pixels, unsigned width, unsigned height, unsigned rowPitch, const ViewTarget& target);
     void waitIdle();
     // Diagnostic RGBA8 readback; target enters and exits in RENDER_TARGET state.
     std::vector<unsigned char> readback(ID3D12Resource* target);
@@ -95,12 +90,6 @@ class D3D12Renderer {
     ComPtr<ID3D12RootSignature> blitRoot_;
     ComPtr<ID3D12PipelineState> blitPipeline_;
     DXGI_FORMAT blitFormat_ = DXGI_FORMAT_UNKNOWN;
-    // blitPixels(): the uploaded pixels, and their upload buffer, mapped for its lifetime.
-    ComPtr<ID3D12Resource> pixelTexture_, pixelUpload_;
-    unsigned char* pixelMapped_{};
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT pixelFootprint_{};
-    unsigned pixelWidth_{}, pixelHeight_{};
-    bool pixelsReadable_{}; // the texture is in PIXEL_SHADER_RESOURCE state, else COPY_DEST
 };
 void addBox(std::vector<Vertex>& out, Vec3 min, Vec3 max, Vec3 color);
 void addBeam(std::vector<Vertex>& out, Vec3 a, Vec3 b, float radius, Vec3 color);

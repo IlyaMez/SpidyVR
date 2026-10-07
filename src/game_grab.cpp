@@ -55,7 +55,7 @@ struct Tracked {
 uintptr_t base{};
 Call driveCall{}, drivenCall{};
 uint32_t offered{};
-// The settings panel's switch (allow()); offered stays as started.
+// The VR settings' switch (allow()); offered stays as started.
 bool allowed = true;
 game_targets::Watch watch;
 std::vector<Candidate> candidates;

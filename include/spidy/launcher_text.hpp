@@ -184,7 +184,7 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
         args.emplace_back(L"--no-air-webs");
     if (!options.webShooter)
         args.emplace_back(L"--no-web-shooter");
-    // The headset's settings panel offers these too; the defaults go unsaid.
+    // The game's Settings offer these too (SPIDY VR); the defaults go unsaid.
     const std::pair<int, std::pair<const wchar_t*, int>> settings[] = {
         {std::clamp(options.snapTurn, 0, 90), {L"--snap-turn", 30}},
         {std::clamp(options.haptics, 0, 100), {L"--haptics", 100}},
@@ -206,8 +206,8 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
 }
 
 // The line tools/run_game_vr.py prints when a session ends with other VR
-// settings than it began with (the headset's settings panel beside the
-// game's menus, or X for the aim markers):
+// settings than it began with (the SPIDY VR tab in the game's Settings,
+// or X for the aim markers):
 //   VR settings from the headset: aim_markers=1 web_grab=0 punch=1 ...
 // Applies them to `options` for the next session; false when the line is
 // another one, or changes nothing.

@@ -251,7 +251,7 @@ CAMERA_MOVERS = {0x3871fd8: 'follow', 0x38720d0: 'combat', 0x38727f0: 'death', 0
                  0x4f76d90: 'photo_mode'}
 
 
-# What the headset's VR settings panel (beside the game screen) changes, as XrData reports it. A session
+# What the VR settings (the SPIDY VR tab in the game's Settings, and X) changed, as XrData reports it. A session
 # that ends with other values than it started with prints them on one line, from which the launcher
 # starts the next session (launcher_text.hpp, headsetSettings).
 SETTINGS_LINE = 'VR settings from the headset: '
@@ -278,7 +278,7 @@ def snapshot(game, address):
         raw = game.read(address, 704)
         if len(raw) != 704:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53585244, 10, 704):
+        if struct.unpack_from('<3I', raw) != (0x53585244, 11, 704):
             raise RuntimeError('Game XR protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -314,8 +314,9 @@ def snapshot(game, address):
         interacts, aim_markers = struct.unpack_from('<2I', raw, 648)
         result.update(interacts=interacts, aim_markers=bool(aim_markers),
                       markers=struct.unpack_from('<Q', raw, 656)[0])
-        # The VR settings now (the settings panel beside the game screen changes them, X the aim
-        # markers), the panel's changes, and headset frames that showed it open or folded to its tab.
+        # The VR settings now (the SPIDY VR tab in the game's Settings changes them, X the aim markers),
+        # the tab's changes, the times the game built its Settings with it, whether its hooks are in, and
+        # why it is missing (game_menu.hpp: 93xx-94xx not hooked, 95xx not built).
         flags, snap_turn, haptics, screen_size = struct.unpack_from('<4I', raw, 664)
         swing_speed, changes = struct.unpack_from('<fI', raw, 680)
         result.update(vr_settings=dict(aim_markers=bool(aim_markers), web_grab=bool(flags & 1),
@@ -324,7 +325,8 @@ def snapshot(game, address):
                                        swing_speed=round(swing_speed, 1), snap_turn=snap_turn,
                                        haptics=haptics, screen_size=screen_size),
                       setting_changes=changes)
-        result.update(zip(('panel_frames', 'tab_frames'), struct.unpack_from('<2Q', raw, 688)))
+        menu_tabs, menu_installed, menu_status = struct.unpack_from('<Q2I', raw, 688)
+        result.update(menu_tabs=menu_tabs, menu_installed=bool(menu_installed), menu_status=menu_status)
         return result
     return None
 
@@ -740,7 +742,7 @@ def main():
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
                                            'SpidyBodyData'))
-        config = struct.pack('<4I7Q2IfI', 0x53585243, 10, 624, game.pid, game.base, queue,
+        config = struct.pack('<4I7Q2IfI', 0x53585243, 11, 624, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
@@ -781,7 +783,7 @@ def main():
         settings_start = start_settings(a)
 
         def hand_over_settings(sample):
-            """Tell the launcher what the headset's settings panel left, for the next session."""
+            """Tell the launcher what the VR settings were left at, for the next session."""
             line = settings_line(settings_start, sample)
             if line:
                 print(line, flush=True)

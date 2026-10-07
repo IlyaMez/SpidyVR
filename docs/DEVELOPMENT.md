@@ -36,8 +36,8 @@ output live; STOP VR (or closing the window, after a question) stops the
 session through a named event that `run_game_vr.py --stop-event` treats as
 Ctrl+C, so the hooks come out and the report is written as before. Options
 and the game's hash are remembered in `%APPDATA%\Spidy\launcher.ini`. A session
-that ends with other VR settings than it began with (the headset's settings
-panel, or X for the aim markers) prints them on its last line, "VR settings
+that ends with other VR settings than it began with (the SPIDY VR tab in the
+game's Settings, or X for the aim markers) prints them on its last line, "VR settings
 from the headset: ...", and the launcher saves them as its options. The
 first start offers desktop and Start menu shortcuts.
 
@@ -248,14 +248,20 @@ from a reel or a menu shoots only after a release. Switch **Web shooter** off
 (VR settings, the launcher's options) or start with
 `Launch Spidy VR.cmd -NoWebShooter` to keep the trigger for reeling only.
 
-**VR settings** hang beside the game screen: they open with the pause menu
-(the menu button), and on every other game screen a VR SETTINGS tab at the
-screen's right edge opens them. Point a controller and pull the trigger to
-switch the aim markers, web grabbing, webs in open air, the web shooter, your
-body and punching, or to step the swing speed limit, snap turn, controller
-vibration and the game screen's size.
+**VR settings** are a tab of the game's own Settings: pause (the menu
+button), choose Settings, then **SPIDY VR**, after KEY MAPPING (Up from GAME
+reaches it; the list wraps). The game builds and draws it with its own option
+code, so it handles like its other tabs: switch the aim markers, web grabbing,
+webs in open air, the web shooter, your body and punching, or step the swing
+speed limit, snap turn, controller vibration and the game screen's size with
+left and right; X resets a setting, Y the whole tab (to Spidy's defaults).
 Changes apply at once; Spidy Launcher starts your next session with them.
-A hand pointing at the panel keeps its trigger from the game.
+`src/game_menu.cpp` adds the tab when the pause menu's Settings hand their tabs
+to Flash and answers the game's questions about its rows (setting numbers from
+0x200, past the game's 123), so the game's own settings and its settings file
+never see them. The title screen's Options build their own lists and have no
+such tab. `tools/probe_menu.py` checks it in the running game
+([docs/AUTOMATION.md](AUTOMATION.md)).
 
 You are Spider-Man's body: look down to see it, your arms and hands follow the
 controllers, and the body turns with you once you look far enough to the side.

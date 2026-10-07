@@ -48,9 +48,9 @@ Write-Host 'In VR the menu button pauses and Y opens the game menu (map, suits, 
 Write-Host "In VR B is the game's interact button (its Y: backpacks, doors, prompts; web strike in a fight)."
 Write-Host 'Keep the game window in front on the desktop: the game pauses while another window is.'
 Write-Host 'Click both thumbsticks to switch between immersive VR and a flat game screen in the headset.'
-Write-Host 'VR SETTINGS hang beside the game screen (they open with the pause menu): point a controller and pull'
-Write-Host 'the trigger to change the aim markers, web grab, webs in open air, the web shooter, swing speed,'
-Write-Host 'body, punching, snap turn, vibration and screen size during play.'
+Write-Host "VR settings are in the game's own Settings: pause, Settings, then SPIDY VR (Up from GAME reaches it)."
+Write-Host 'There change the aim markers, web grab, webs in open air, the web shooter, swing speed, body,'
+Write-Host 'punching, snap turn, vibration and screen size during play.'
 Write-Host "Squeeze a grip to shoot that hand's web. Keep it held to swing; release it to let go."
 Write-Host "Swing speed cap: $SwingSpeed m/s. Pull the trigger while a web is attached to reel in."
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'

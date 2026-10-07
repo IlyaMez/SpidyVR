@@ -56,7 +56,7 @@ void handCursor() {
 
 constexpr const char* kEyeSizes[] = {"Headset default", "2048 x 2048", "1792 x 1792", "1536 x 1536", "1280 x 1280"};
 constexpr int kEyeValues[] = {0, 2048, 1792, 1536, 1280};
-// The steps the headset's settings panel offers too (vr_settings.hpp).
+// The steps the game's Settings offer too (SPIDY VR, vr_settings.hpp).
 constexpr const char* kSnapTurns[] = {"Off", "15\xC2\xB0", "30\xC2\xB0", "45\xC2\xB0", "60\xC2\xB0", "90\xC2\xB0"};
 constexpr int kSnapValues[] = {0, 15, 30, 45, 60, 90};
 constexpr const char* kHaptics[] = {"Off", "25%", "50%", "75%", "100%"};
@@ -154,7 +154,7 @@ void App::poll() {
     logCount_ = session_.lines(logCount_, log_);
     if (log_.size() != before)
         scrollLog_ = true;
-    // What the headset's settings panel left becomes the next session's options.
+    // What the VR settings were left at becomes the next session's options.
     for (size_t i = before; i < log_.size(); ++i)
         if (spidy::launcher::headsetSettings(log_[i].text, settings_.options))
             save();
@@ -968,8 +968,8 @@ void App::optionsCard(ImVec2 size) {
     if (running) {
         ImGui::Dummy(ImVec2(0, S(6)));
         ImGui::PushStyleColor(ImGuiCol_Text, vec(kFaint));
-        ImGui::TextWrapped("Options apply when VR starts. In the headset, VR SETTINGS beside the game's menus "
-                           "change them during play, and the next session starts with them.");
+        ImGui::TextWrapped("Options apply when VR starts. In the headset, pause and open Settings, then "
+                           "SPIDY VR, to change them during play; the next session starts with them.");
         ImGui::PopStyleColor();
     }
     if (changed)
@@ -1158,7 +1158,7 @@ void App::controls(ImVec2 origin, ImVec2 size) {
          {{"Left stick", "Walk and run"},
           {"A", "Jump"},
           {"B", "Interact: the game's Y (backpacks, doors, prompts); web strike in a fight"},
-          {"Menu button", "Pause"},
+          {"Menu button", "Pause; VR settings are in Settings > SPIDY VR"},
           {"Y", "Game menu: map, suits, skills"},
           {"Click both sticks", "Switch between VR and a flat game screen"}}},
         {"MENUS AND CUTSCENES",

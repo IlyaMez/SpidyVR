@@ -75,8 +75,9 @@ Aim markers (where each hand's web would go if you squeezed its grip now)
                          hold in open air" off it would miss: no marker)
   Red cross ............ it would miss (a car, or a wall in your way)
   Amber corners ........ it catches that prop or thug
-  X .................... hide or show the markers (VR SETTINGS has the
-                         same switch; the next session starts as you left it)
+  X .................... hide or show the markers (SPIDY VR in the game's
+                         Settings has the same switch; the next session
+                         starts as you left it)
 
 Your body and fists
   Look down ............ you are Spider-Man: his body under you, his arms
@@ -87,8 +88,8 @@ Your body and fists
 
 Moving
   Left stick ........... walk and run
-  Right stick .......... flick left or right to turn (30 degrees; VR
-                         SETTINGS sets how far, or turns it off)
+  Right stick .......... flick left or right to turn (30 degrees; SPIDY VR
+                         in Settings sets how far, or turns it off)
   A .................... jump
   B .................... interact: the game's Y (backpacks, doors, prompts;
                          web strike in a fight)
@@ -101,20 +102,19 @@ as an Xbox controller: left stick moves, A selects, B goes back, grips switch
 tabs, the menu button is Start.
 
 VR settings
-  Pause with the menu button and VR SETTINGS opens beside the pause menu. On
-  every other game screen (the game menu, loading, cutscenes) a small VR
-  SETTINGS tab hangs at the screen's right edge; point at it and pull the
-  trigger to open it.
-  Point a controller at a setting and pull the trigger: switch the aim
-  markers, catching props and thugs, webs holding in open air (a web that
-  meets nothing within 100 m holds there; off, it misses), the web shooter,
-  your own body and punching on or off, or step the swing speed limit, snap
-  turn, controller vibration and the game screen's size. Changes apply at
-  once. The launcher
-  starts your next session with them; its options show them too.
-  A hand pointing at the panel keeps its trigger from the game; every other
-  control still works the game's menu. The X in the corner folds the panel
-  to its tab until you open it again.
+  They are a tab of the game's own Settings: pause with the menu button,
+  choose Settings, then SPIDY VR, the last tab (Up from GAME gets there in
+  one press). It works like the game's other tabs: the left stick moves and
+  changes the selected setting, X resets it, Y resets the whole tab, B goes
+  back.
+  Switch the aim markers, catching props and thugs, webs holding in open air
+  (a web that meets nothing within 100 m holds there; off, it misses), the
+  web shooter, your own body and punching on or off, or step the swing speed
+  limit, snap turn, controller vibration and the game screen's size. Changes
+  apply at once. The launcher starts your next session with them; its
+  options show them too.
+  The title screen's Options have no SPIDY VR tab: load your save first, or
+  set them in the launcher.
 
 
 IF SOMETHING IS WRONG
@@ -129,21 +129,22 @@ IF SOMETHING IS WRONG
   the larger render memory VR needs.
 - Low frame rate: lower "Eye resolution" in the launcher's options, or your
   streaming quality in Virtual Desktop.
-- Your body looks wrong or gets in the way: switch "Your own body" off in VR
-  SETTINGS or the launcher's options; you get gloves instead, as in earlier
-  versions.
+- Your body looks wrong or gets in the way: switch "Your own body" off in
+  Settings > SPIDY VR or the launcher's options; you get gloves instead, as
+  in earlier versions.
 - The aim markers distract you: press X in VR to hide them, or switch "Aim
-  markers" off in VR SETTINGS.
+  markers" off in Settings > SPIDY VR.
 - Webs shot at the sky hold somewhere you can't see: switch "Webs hold in
-  open air" off in VR SETTINGS or the launcher's options; a web then needs
-  something within 100 m to hold on to.
+  open air" off in Settings > SPIDY VR or the launcher's options; a web then
+  needs something within 100 m to hold on to.
 - Web balls fly when you only meant to reel in: the trigger reels only while
   that hand's web is attached; otherwise it shoots. Switch "Web shooter" off
-  in VR SETTINGS or the launcher's options to keep the trigger for reeling.
-- Snap turning makes you uneasy, or the vibration is too strong: VR SETTINGS
-  has both.
-- The menu screen is too small or too large: "Game screen size" in VR
-  SETTINGS.
+  in Settings > SPIDY VR or the launcher's options to keep the trigger for
+  reeling.
+- Snap turning makes you uneasy, or the vibration is too strong: Settings >
+  SPIDY VR has both.
+- The menu screen is too small or too large: "Game screen size" in Settings
+  > SPIDY VR.
 - The game asks for Y (Triangle) to interact: in VR that is B.
 
 

@@ -88,6 +88,27 @@ its own gadget, then fired by Spidy:
 | Camera manager's update, once a frame on the main thread | `0x897d30` | Spidy fires its shots after it; 1,692 calls during the probe |
 | `ShotWebShooter`, the shot | vtable `0x3907d30` | Flew 52-61 m/s to its aim point, ended there, at a surface or after 1 s |
 
+For the SPIDY VR tab in the game's Settings (October 7;
+`include/spidy/game_menu.hpp`), found from the executable's strings, RTTI and
+reflection tables, then traced in the running game with a research DLL that
+logged the Settings' Flash calls and callbacks and added a test tab. The
+Settings are Scaleform (AS3) screens fed from `configs/uiconfig/uisystemmenu.config`:
+
+| Fact | RVA | Verification |
+|---|---:|---|
+| Settings system (`UISettingsMenuSystem`, static); +0x20 its config (`UISystemMenuConfig`) | `0x5d96dd0` | The config's tabs at +0x168 (0x40 bytes each), +0x170 counts them: 9, ids 2-10 |
+| Per-setting records, 0x28 bytes from +0x420, 123 of them (+0x1758 follows) | settings 0-122 | Getters index them unchecked; set (`0x730ee0`) and reset (`0x730ae0`) skip numbers above 0x7a |
+| Tab (`UISystemMenu`, vtable `0x3a7da68`): +8 id, +0x10 name tag (pointer, length, hash), +0x20 heading tag, +0x30 items, +0x38 count | 0x40 bytes | Read from the GAME tab (id 4, 15 items) |
+| Item (`UISystemMenuItem`, vtable `0x3a7d988`): +8 setting, +0x10 title tag, +0x20 help tag, +0x48 option type, +0x70 choices (0x50 bytes; +0x8 name tag, +0x18 help tag, +0x28 preview), +0x78 count | 0x88 bytes | No choices: the game's OFF/ON list at `0x5d9a310` |
+| Option types: setting, heading | vtables `0x3a7d6e8`, `0x3a7d838` | RTTI |
+| Builds every tab, calls Flash's `OpenOptions` (tabs array, flag) | `0x7dd9f0` | Logged through the UI's call wrapper (`0x1d1cf30`, name literal at `0x389f4c0`) |
+| Builds one tab's Flash object (out value, movie, tab) | `0x807740` | Built a tab of copied items; its rows, ids above 0x200, drew and changed |
+| A row (`0x80a220`, `0x809e20`), a setting's choices and value (`0x80b950`) | | Disassembly; per-setting cases only for 4-122 |
+| The UI movie Flash objects are made in | `0x1d29690` | Disassembly |
+| A setting's kind (0 list, 1-2 slider, 3 colour, 4 command, 5 heading) / value / changeable / default / default choice | `0x72d640` / `0x72d650` / `0x72e1d0` / `0x72d5f0` / `0x72d610` | Disassembly; hooked for numbers 0x200-0x20c |
+| The pause menu's Settings callbacks (ui, name hash, args, count) | `0x7dc400` | Logged: `UpdateOption` (setting, value), `ResetOption`, `ResetAllOptionsForCurrentOptionsMenu` (tab id; ignored above 10, hash at `0x6d8ed88`) |
+| Text by hash (hash, fallback); whether there is one | `0x1749970`, `0x1749ae0` | Hashes are CRC-32 of tags (`0x1749a20` hashes a tag string) |
+
 The camera-related entry was temporarily hooked by the independently written
 Spidy observer. Local disassembly showed RCX as the object, XMM1 as the float
 delta, and the low bytes of R8/R9 as flags. A live 30-second test produced 3,362

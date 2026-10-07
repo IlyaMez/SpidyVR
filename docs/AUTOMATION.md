@@ -309,6 +309,23 @@ RB on the virtual pad fires the gadget the game's gadget wheel has selected,
 which need not be the web shooter (the user's save had the Impact Web), and a
 perched hero fires it too; Spidy's shots always use the web shooter.
 
+### The SPIDY VR tab in the game's Settings
+
+`python tools/probe_menu.py` after `tools/probe_menu_pad.py start` and
+`pad a --until-player` (a loaded save, in free roam or anywhere the pause menu
+has Settings fifth): it starts the tab's hooks with test values
+(`SpidyMenuStart`: 33 m/s, the web shooter off), pauses with the virtual Xbox
+controller, moving with its left stick as the Touch controllers do, opens
+Settings, goes Up to SPIDY VR and opens it, then switches the aim markers off,
+steps the swing speed to 40 m/s, switches the body off and resets it with X,
+steps snap turn to 45 degrees and resets the tab with Y and A. After each step
+it reads `SpidyMenuSample` (what the tab holds, the tabs built, the changes)
+and captures the window. It fails if a step left other values than expected or
+a hooked function does not start with the game's own bytes after
+`SpidyMenuStop`. Report: `reports/menu-probe.json`, captures in
+`reports/menu-probe/`. Settings must not have been opened in that game yet:
+the game reopens them on the tab last used, and the probe counts from GAME.
+
 ## Performance comparison
 
 The initial successful headset test was `game-vr-20261004-131244.json`: 509 pairs

@@ -533,12 +533,12 @@ class ProtocolTests(unittest.TestCase):
 
     def test_xr_never_publishes_partly_updated_pose(self):
         raw = bytearray(704)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 10, 704, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 11, 704, 3, 4)
         self.assertIsNone(xr_snapshot(Reader(*([raw, struct.pack('<Q', 6)]*8)), 0))
 
     def test_xr_decodes_both_hands_and_status_message(self):
         raw = bytearray(704)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 10, 704, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 11, 704, 3, 4)
         struct.pack_into('<16f', raw, 160, *range(16))
         struct.pack_into('<16f', raw, 224, *range(16, 32))
         raw[288:295] = b'Tracked'
@@ -556,7 +556,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_xr_says_why_gameplay_was_unavailable_and_which_camera_ran(self):
         raw = bytearray(704)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 10, 704, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 11, 704, 3, 4)
         # A played scene whose camera the gate does not accept, the third player of the session,
         # and the menu button held on the virtual controller the game has read 900 times.
         struct.pack_into('<2I2Q2IQ', raw, 592, 8, 0x3872860, 3, 0x2aefe723280, 0x10, 1, 900)
@@ -575,7 +575,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_xr_counts_interacts_and_aim_markers(self):
         raw = bytearray(704)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 10, 704, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 11, 704, 3, 4)
         result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual((result['interacts'], result['aim_markers'], result['markers']), (0, False, 0))
         # Three B presses reached the game as its Y; markers on, 5000 drawn so far.
@@ -583,19 +583,23 @@ class ProtocolTests(unittest.TestCase):
         result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual((result['interacts'], result['aim_markers'], result['markers']), (3, True, 5000))
 
-    def test_xr_reports_the_vr_settings_and_the_panel(self):
+    def test_xr_reports_the_vr_settings_and_the_settings_tab(self):
         raw = bytearray(704)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 10, 704, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 11, 704, 3, 4)
         # Markers on; web grab, webs in open air, the web shooter and body on, punching off; 48 m/s, 45 degree
-        # turns, half vibration, the large screen; two changes on the panel, shown open for 900 frames and folded
-        # for 300.
+        # turns, half vibration, the large screen; two changes in the SPIDY VR tab, which the game built 7 times.
         struct.pack_into('<2IQ', raw, 648, 0, 1, 0)
-        struct.pack_into('<4IfI2Q', raw, 664, 29, 45, 50, 2, 48.0, 2, 900, 300)
+        struct.pack_into('<4IfIQ2I', raw, 664, 29, 45, 50, 2, 48.0, 2, 7, 1, 0)
         result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual(result['vr_settings'], dict(aim_markers=True, web_grab=True, air_webs=True, web_shooter=True,
                                                      punch=False, body=True, swing_speed=48.0, snap_turn=45,
                                                      haptics=50, screen_size=2))
-        self.assertEqual((result['setting_changes'], result['panel_frames'], result['tab_frames']), (2, 900, 300))
+        self.assertEqual((result['setting_changes'], result['menu_tabs'], result['menu_installed'],
+                          result['menu_status']), (2, 7, True, 0))
+        # The tab could not be hooked: the game's code at its second hook is not the supported build's.
+        struct.pack_into('<2I', raw, 696, 0, 9302)
+        result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
+        self.assertEqual((result['menu_installed'], result['menu_status']), (False, 9302))
         # Webs in open air and the web shooter switched off: a web that meets nothing misses, and a free hand's
         # trigger shoots nothing.
         struct.pack_into('<I', raw, 664, 5)

@@ -12,7 +12,7 @@ reports/aim-probe.json.
 
     python tools/probe_aim.py --settings
 
-also switches web grabbing and the speed limit as the headset's VR settings panel does (SpidySwingSettings): the
+also switches web grabbing and the speed limit as the VR settings do during play (SpidySwingSettings): the
 swing starts without the grab, as a -NoWebGrab session does, and the prop aim is held again with the grab started
 during play, switched off and on again; punching is started and stopped twice (SpidyPunchStart, SpidyPunchStop).
 The sky aim is held again with webs in open air switched off (nothing to preview: a press would miss) and on.
@@ -77,7 +77,7 @@ def main():
     parser.add_argument('--seconds', type=float, default=.6, help='how long to hold each aim')
     parser.add_argument('--output', type=pathlib.Path, default=ROOT/'reports/aim-probe.json')
     parser.add_argument('--settings', action='store_true',
-                        help="switch the grab, the speed limit and punching during play, as the VR settings panel does")
+                        help="switch the grab, the speed limit and punching during play, as the VR settings do")
     args = parser.parse_args()
     game = Game(find_game())
     process = None
@@ -175,7 +175,7 @@ def main():
             print(f"{name:>16}: {entry['kind']!s:>9} {entry.get('distance', '')!s:>7} m  {entry.get('point', '')}",
                   flush=True)
         if args.settings:
-            # The VR settings panel during play: the prop aim with the grab off (as started), switched on (the
+            # The VR settings during play: the prop aim with the grab off (as started), switched on (the
             # grab starts now, its hooks under the swing's lock), off (presses swing), on again; each with
             # another speed limit. A limit above 65 m/s is refused.
             def settings(grab, speed, air=1):

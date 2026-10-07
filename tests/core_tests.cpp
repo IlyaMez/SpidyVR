@@ -21,6 +21,8 @@
 #include "spidy/body_ik.hpp"
 #include "spidy/punch.hpp"
 #include "spidy/shooter.hpp"
+#include <algorithm>
+#include <cstring>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -2938,173 +2940,76 @@ int main() {
               "NaN assist accepted");
         check(!bad([](ShooterConfig&) {}), "defaults rejected");
     });
-    // A controller at `from` aimed at a point of the panel (or its tab), given in points.
-    auto aimedAt = [](const vr_settings::Panel& panel, float x, float y, Vec3 from = {0, 1.6f, 0}) {
-        const bool open = panel.look().open;
-        const float wide = open ? vr_settings::panelPoints[0] : vr_settings::tabPoints[0],
-                    high = open ? vr_settings::panelPoints[1] : vr_settings::tabPoints[1];
-        const Vec3 local{(x / wide - .5f) * panel.metresWide(), (.5f - y / high) * panel.metresHigh(), 0};
-        const Vec3 d = normalized(panel.pose().position + panel.pose().orientation.rotate(local) - from);
-        const float pitch = std::asin(d.y);
-        return Pose{from, Quat::yaw(std::atan2(-d.x, -d.z)) * Quat{std::sin(pitch / 2), 0, 0, std::cos(pitch / 2)}};
-    };
-    test("VR settings panel layout: lines and controls fit, each control hits its own setting", [] {
+    test("VR settings tab: three sections, every setting once, a list's choices one per step", [] {
         using namespace vr_settings;
-        const auto& all = lines();
-        float y = all.front().box.y;
-        check(closeBox().y + closeBox().h <= y, "the close button reaches below the header");
-        for (const auto& line : all) {
-            near(line.box.y, y);
-            y += line.box.h;
-            if (line.item == Item::none)
+        const auto& all = rows();
+        unsigned seen = 0, headings = 0;
+        for (const auto& row : all) {
+            check(row.title && *row.title, "a row without a title");
+            for (const char* c = row.title; *c; ++c)
+                check(!(*c >= 'a' && *c <= 'z'), "a title not in upper case, as the game's own");
+            if (row.item == Item::none) {
+                check(!row.help && row.choices.empty(), "a heading with help or choices");
+                ++headings;
                 continue;
-            const auto c = controlBox(line);
-            check(c.x > 300 && c.x + c.w <= panelPoints[0] - 20 && c.y >= line.box.y &&
-                      c.y + c.h <= line.box.y + line.box.h, "a control leaves its line");
-            const auto h = hit(true, c.x + (line.stepper ? 10 : c.w / 2), c.y + c.h / 2);
-            check(h.item == line.item && h.step == (line.stepper ? -1 : 0), "a control hits another setting");
-            if (line.stepper)
-                check(hit(true, c.x + c.w - 10, c.y + c.h / 2).step == 1 && hit(true, 60, c.y).item == Item::none,
-                      "a stepper's right half steps up, its title not at all");
+            }
+            const unsigned bit = 1u << static_cast<unsigned>(row.item);
+            check(!(seen & bit), "a setting twice");
+            seen |= bit;
+            check(row.help && std::strlen(row.help) <= 80, "help missing, or too long for the game's column");
+            for (const char* c : row.choices)
+                check(c && *c, "an empty choice");
         }
-        near(y + 16, footerBox().y);
-        check(footerBox().y + footerBox().h <= panelPoints[1], "the footer leaves the panel");
-        const auto close = closeBox();
-        check(hit(true, close.x + close.w / 2, close.y + close.h / 2).item == Item::close, "close");
-        check(hit(false, 10, 10).item == Item::tab && hit(false, tabPoints[0] + 1, 10).item == Item::none &&
-                  hit(true, std::nanf(""), 10).item == Item::none, "the tab, and nothing outside it");
+        check(headings == 3 && all[0].item == Item::none && all[6].item == Item::none && all[9].item == Item::none,
+              "the sections: webs, body, comfort");
+        check(seen == 0x7fe, "a setting missing");
+        auto choicesOf = [&](Item item) {
+            return std::find_if(all.begin(), all.end(), [&](const Row& r) { return r.item == item; })->choices.size();
+        };
+        check(choicesOf(Item::swingSpeed) == std::size(swingSpeeds) && choicesOf(Item::snapTurn) == std::size(snapTurns) &&
+                  choicesOf(Item::haptics) == std::size(hapticLevels) && choicesOf(Item::screenSize) == 3 &&
+                  choicesOf(Item::body) == 0 && choicesOf(Item::aimMarkers) == 0,
+              "lists: one choice per step; switches: the game's own ON and OFF");
     });
-    test("VR settings steppers step through their values and stop at the ends", [] {
+    test("VR settings choices: switches and lists round-trip, launcher values show the nearest step", [] {
         using namespace vr_settings;
+        const Values defaults;
+        check(choice(Item::aimMarkers, defaults) == 1 && choice(Item::swingSpeed, defaults) == 4 &&
+                  choice(Item::snapTurn, defaults) == 2 && choice(Item::haptics, defaults) == 4 &&
+                  choice(Item::screenSize, defaults) == 1,
+              "the defaults as the tab shows them: ON, 32 m/s, 30 degrees, 100%, medium");
         Values v;
-        check(valueText(Item::swingSpeed, v) == "32 m/s" && valueText(Item::snapTurn, v) == "30\xC2\xB0" &&
-                  valueText(Item::haptics, v) == "100%" && valueText(Item::screenSize, v) == "Medium",
-              "the defaults as shown");
-        check(press({Item::swingSpeed, 1}, v) && v.swingSpeed == 40, "faster");
+        check(choose(Item::swingSpeed, 5, v) && v.swingSpeed == 40, "faster");
+        check(!choose(Item::swingSpeed, 5, v), "the same choice changed something");
+        check(!choose(Item::swingSpeed, -1, v) && !choose(Item::swingSpeed, 9, v) && v.swingSpeed == 40,
+              "a choice past either end");
         v.swingSpeed = 33;
-        check(press({Item::swingSpeed, -1}, v) && v.swingSpeed == 32, "a launcher value steps to the step below");
-        v.swingSpeed = 65;
-        check(!canStep(Item::swingSpeed, v, 1) && !press({Item::swingSpeed, 1}, v) && canStep(Item::swingSpeed, v, -1),
-              "65 m/s is the top");
-        v.snapTurn = 15;
-        check(press({Item::snapTurn, -1}, v) && v.snapTurn == 0 && valueText(Item::snapTurn, v) == "Off" &&
-                  !press({Item::snapTurn, -1}, v), "snap turning off is the bottom");
-        check(!press({Item::haptics, 1}, v), "more than full vibration");
-        v.haptics = 25;
-        check(press({Item::haptics, -1}, v) && valueText(Item::haptics, v) == "Off", "vibration off");
-        check(press({Item::screenSize, 1}, v) && valueText(Item::screenSize, v) == "Large" &&
-                  !press({Item::screenSize, 1}, v), "the large screen is the top");
-        check(press({Item::body}, v) && !v.body && press({Item::body}, v) && v.body, "a switch switches back");
-        check(press({Item::airWebs}, v) && !v.airWebs && press({Item::airWebs}, v) && v.airWebs,
-              "webs in open air switch back");
-        check(!press({Item::close}, v) && !press({Item::tab}, v), "close and the tab change no value");
+        check(choice(Item::swingSpeed, v) == 4, "a launcher value shows the step nearest to it");
+        v.swingSpeed = 36;
+        check(choice(Item::swingSpeed, v) == 4, "halfway shows the lower step");
+        v.swingSpeed = 37;
+        check(choice(Item::swingSpeed, v) == 5, "past halfway shows the higher step");
+        check(choose(Item::snapTurn, 0, v) && v.snapTurn == 0 && choice(Item::snapTurn, v) == 0, "snap turning off");
+        check(choose(Item::haptics, 1, v) && v.haptics == 25, "a quarter of the vibration");
+        check(choose(Item::screenSize, 2, v) && v.screenSize == 2 && !choose(Item::screenSize, 3, v),
+              "the large screen is the last");
+        check(choose(Item::body, 0, v) && !v.body && choice(Item::body, v) == 0 && !choose(Item::body, 2, v) &&
+                  choose(Item::body, 1, v) && v.body,
+              "a switch switches back, and takes only OFF and ON");
+        check(choose(Item::airWebs, 0, v) && !v.airWebs && choose(Item::webShooter, 0, v) && !v.webShooter,
+              "webs in open air and the web shooter off");
+        check(choice(Item::none, v) == 0 && !choose(Item::none, 0, v), "a heading holds no value");
+        // RESET: each setting's default choice puts its default back.
+        for (const auto& row : rows())
+            choose(row.item, defaultChoice(row.item), v);
+        check(v == defaults, "every default choice together is Spidy's defaults");
         const auto clean = sanitized({true, true, true, true, 90, 120, -5, 7});
         check(clean.swingSpeed == 65 && clean.snapTurn == 90 && clean.haptics == 0 && clean.screenSize == 2,
               "values outside the ranges");
         near(screenWidth(0), 2.4f);
         near(screenWidth(7), 4.2f);
     });
-    test("VR settings panel hangs right of the game screen, square to the viewer", [] {
-        using namespace vr_settings;
-        const Pose head{{1, 1.6f, -3}, Quat::yaw(.7f)};
-        const Pose screen = screenAhead(head, screenDistance);
-        const float high = panelMetres * panelPoints[1] / panelPoints[0];
-        for (int size = 0; size < 3; ++size) {
-            const float width = screenWidth(size);
-            const Pose open = placement(screen, width, true);
-            const Vec3 normal = open.orientation.rotate({0, 0, 1});
-            const Vec3 leftEdge = open.position - open.orientation.rotate({panelMetres / 2, 0, 0});
-            near(dot(leftEdge - screen.position, screen.orientation.rotate({1, 0, 0})), width / 2 + .08f);
-            near(dot(normal, normalized(head.position - leftEdge)), 1);
-            near(open.position.y, screen.position.y);
-            const Pose tab = placement(screen, width, false);
-            near(tab.position.y, screen.position.y + high / 2 - tabMetres * tabPoints[1] / tabPoints[0] / 2);
-            float u{}, v{};
-            const Vec3 toCentre = normalized(open.position - head.position);
-            const Pose aim{head.position, Quat::yaw(std::atan2(-toCentre.x, -toCentre.z))};
-            check(aimAt(aim, open, panelMetres, high, u, v), "a ray at the panel's centre missed it");
-            near(u, .5f);
-            near(v, .5f);
-            check(!aimAt(head, open, panelMetres, high, u, v), "looking at the game screen hit the panel");
-            // From a metre behind it, aimed at its centre.
-            const Pose behind{open.position - normal, Quat::yaw(std::atan2(-normal.x, -normal.z))};
-            check(!aimAt(behind, open, panelMetres, high, u, v), "a ray from behind hit the panel");
-        }
-    });
-    test("VR settings panel: a pulled trigger clicks once and keeps its trigger from the game", [&] {
-        using namespace vr_settings;
-        const Pose screen = screenAhead({{0, 1.6f, 0}, {}}, screenDistance);
-        Panel panel;
-        Values values;
-        panel.shown(true);
-        std::array<Pointer, 2> hands{};
-        auto frame = panel.update(hands, screen, 3.2f, values);
-        check(panel.look().open && !frame.pointing, "the pause from VR did not open the panel");
-        const auto& markers = lines()[1];
-        hands[1] = {true, aimedAt(panel, 100, markers.box.y + 33), 0};
-        frame = panel.update(hands, screen, 3.2f, values);
-        check(frame.pointing == 2 && !frame.changed && panel.look().hover[1].item == Item::aimMarkers &&
-                  panel.look().cursor[1], "pointing at the aim markers' line");
-        near(panel.look().x[1], 100, 1.01f);
-        hands[1].trigger = .9f;
-        frame = panel.update(hands, screen, 3.2f, values);
-        check(frame.changed && frame.clicked == 2 && !values.aimMarkers, "a pull did not switch the markers off");
-        frame = panel.update(hands, screen, 3.2f, values);
-        hands[1].trigger = .5f;
-        frame = panel.update(hands, screen, 3.2f, values);
-        check(!frame.changed && !values.aimMarkers && panel.look().held[1], "a held pull clicked again");
-        hands[1].trigger = .2f;
-        panel.update(hands, screen, 3.2f, values);
-        hands[1].trigger = .9f;
-        frame = panel.update(hands, screen, 3.2f, values);
-        check(frame.changed && values.aimMarkers, "a second pull did not switch them back");
-        hands[1].aim = {{0, 1.6f, 0}, {}}; // at the game screen, the press still held
-        frame = panel.update(hands, screen, 3.2f, values);
-        check(frame.pointing == 2 && !panel.look().cursor[1], "a press the panel took went to the game");
-        hands[1].trigger = 0;
-        frame = panel.update(hands, screen, 3.2f, values);
-        check(frame.pointing == 0, "the trigger stayed away from the game");
-        // A trigger pulled at the game screen and then pointed at the panel presses nothing.
-        hands[0] = {true, {{0, 1.6f, 0}, {}}, .9f};
-        panel.update(hands, screen, 3.2f, values);
-        hands[0].aim = aimedAt(panel, 100, markers.box.y + 33);
-        frame = panel.update(hands, screen, 3.2f, values);
-        check(!frame.changed && frame.pointing == 1, "a pull begun off the panel clicked it");
-    });
-    test("VR settings panel folds to a tab that stays folded until it is opened", [&] {
-        using namespace vr_settings;
-        const Pose screen = screenAhead({{0, 1.6f, 0}, {}}, screenDistance);
-        Panel panel;
-        Values values;
-        std::array<Pointer, 2> hands{};
-        panel.shown(false);
-        panel.update(hands, screen, 3.2f, values);
-        check(!panel.look().open, "the panel opened without a pause");
-        // A trigger already pulled when the screen comes up is no press.
-        hands[0] = {true, aimedAt(panel, 100, 30), .9f};
-        panel.shown(false);
-        auto frame = panel.update(hands, screen, 3.2f, values);
-        check(!panel.look().open && !frame.clicked && frame.pointing == 1, "a held trigger opened the tab");
-        hands[0].trigger = 0;
-        panel.update(hands, screen, 3.2f, values);
-        hands[0].trigger = 1;
-        frame = panel.update(hands, screen, 3.2f, values);
-        check(panel.look().open && frame.clicked == 1 && !frame.changed, "the tab did not open the panel");
-        check(!panel.look().cursor[0], "a cursor left on the shape before it opened");
-        hands[0].trigger = 0;
-        panel.update(hands, screen, 3.2f, values);
-        const auto close = closeBox();
-        hands[0].aim = aimedAt(panel, close.x + close.w / 2, close.y + close.h / 2);
-        panel.update(hands, screen, 3.2f, values);
-        hands[0].trigger = 1;
-        panel.update(hands, screen, 3.2f, values);
-        check(!panel.look().open, "close did not fold the panel");
-        panel.hidden();
-        panel.shown(true);
-        panel.update({}, screen, 3.2f, values);
-        check(!panel.look().open, "a panel closed this session opened at the next pause");
-    });
-    test("game rig snap turn takes the settings panel's angle, or none", [] {
+    test("game rig snap turn takes the VR settings' angle, or none", [] {
         for (const float snap : {0.f, 1.5707963f}) {
             GameTrackingRig rig;
             rig.snapTurn(snap);

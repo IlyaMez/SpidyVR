@@ -1,6 +1,74 @@
 # Validation — 2026-10-07
 
-## The web shooter — current build
+## VR settings in the game's own Settings — current build
+
+The user, October 7: "can we put the ingame vr settings as actual new items in
+the ingame settings menu (not a seperately rendered drawer)?", then "build it".
+
+**How the game builds its Settings.** From the executable's strings, RTTI,
+reflection tables and disassembly, then a research DLL in the running game
+that logged the Settings' Flash calls and callbacks (addresses in
+[REFERENCE.md](REFERENCE.md)). The Settings are Scaleform (AS3) screens. The
+pause menu's Settings (`PopupSystemMenuUI`) build every tab of the settings
+config (`configs/uiconfig/uisystemmenu.config`: 9 tabs, ids 2-10) with one
+builder (`0x807740`) and hand the list to Flash (`OpenOptions`, through the
+UI's call wrapper `0x1d1cf30`): 8 of them, since CONNECTIONS (id 10) has no
+row to show on PC and its builder returns nothing. A tab's items name the game's settings by number (0-122); the settings
+system answers a number's kind, value and default from unchecked 40-byte
+records. Flash calls back `UpdateOption` (setting, value), `ResetOption` and
+`ResetAllOptionsForCurrentOptionsMenu` (tab id); set and reset skip numbers
+above 0x7a, RESET ALL tab ids above 10. A setting with no choices of its own
+is the game's OFF/ON list.
+
+**What Spidy adds** (`src/game_menu.cpp`). When the Settings call
+`OpenOptions`, one more tab is built by the game's builder and pushed onto the
+list: a copy of the GAME tab (id 93) holding 13 items copied from the config's
+first heading and its first setting with choices, numbered 0x200-0x20c, their
+texts and choices Spidy's (`vr_settings::rows`: WEBS, BODY, COMFORT; 6
+switches, 4 lists). Hooks answer the getters for those numbers (kind, value =
+the choice shown, changeable, default), take set and reset, answer the texts'
+hashes only while Spidy's tab is being built, and take RESET ALL for tab 93
+(Spidy's defaults, then the tabs built again as the game does). 11 hooks; each
+function's first bytes are compared with the supported game's first, and all
+are enabled and disabled together. The XR worker installs it when it starts,
+takes the tab's changes each headset frame (`take`, then `applySettings` as
+before) and publishes its values (`publish`: what X switched shows too). A
+launcher value between steps shows as the nearest step and stays until changed.
+The panel is gone: `vr_settings::Panel`, its canvas, `D3D12Renderer::blitPixels`
+and `XrRuntime::panel`; no trigger is kept from the virtual controller.
+
+**Protocol.** XrConfig v11 (layout unchanged) and XrData v11: the panel's
+frame counts became `menuTabs` (the game built its Settings with the tab),
+`menuInstalled` and `menuStatus` (93xx-94xx not hooked, 95xx not built);
+`run_game_vr.py` reports `menu_tabs`, `menu_installed`, `menu_status`. Headless
+probes: `SpidyMenuStart`, `SpidyMenuSample`, `SpidyMenuStop`.
+
+**Measured in the game** (`tools/probe_menu.py`, the user's save, free roam,
+steered with the virtual controller's left stick): Settings listed SPIDY VR
+after KEY MAPPING (Up from GAME); the tab showed the start values (33 m/s as
+32 M/S, the web shooter OFF); right on AIM MARKERS gave OFF, on SWING SPEED
+LIMIT 40 M/S, on YOUR OWN BODY OFF, X put it back ON, right on SNAP TURN 45°; Y
+asked "Are you sure?" and A put Spidy's defaults back (4 more changes, the web
+shooter ON); each step's values as expected, 9 changes, the tab built 7 times
+(each opening and refresh), status 0; B three times resumed play. All 11 hook
+entries patched while in and the game's own bytes after `SpidyMenuStop`. In an
+earlier run of the same code (texts not yet gated to the tab's build), Settings
+with the hooks out listed the game's 8 tabs only, and with them in again SPIDY
+VR (opened from the remembered position: KEY MAPPING, then down). The game's
+settings file (`-userprefs.save`) stayed byte-identical; `slot0-s.save` was
+rewritten by the game's own save after Continue, as on every probe's load. 155
+core checks (the panel's 5 replaced by 2: the tab's rows, sections and choices;
+switches and lists round-trip, launcher values show the nearest step, every
+default together is `Values{}`), 10 launcher checks, 72 Python checks
+(`menu_tabs`, `menu_installed`, `menu_status`) and the GPU test (its panel part
+removed) pass.
+
+Not checked: the XR worker's part (install at session start, changes taken and
+applied, XrData telemetry) runs only in an OpenXR session; how the tab reads on
+the headset's game screen. The title screen's Options keep their own lists and
+show no SPIDY VR tab.
+
+## The web shooter — preceding build
 
 The user, October 7: "Lets add the ability to shoot the web projectiles
 spiderman has normally (not the regular webs, the web bullets)".
@@ -100,7 +168,7 @@ Not checked: a ball reaching a thug and the game taking the thug as its target
 the headset, and the XR worker's start, stop and haptics, which run only in an
 OpenXR session.
 
-## Webs in open air as a setting — preceding build
+## Webs in open air as a setting — earlier build
 
 The user, October 7: "lets make the ability to hook webs on max distance
 without hitting an object (webs on nowhere) as an optional setting (on by

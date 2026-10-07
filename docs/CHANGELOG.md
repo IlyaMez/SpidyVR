@@ -3,7 +3,47 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 7, third build): the web shooter.** You asked for the
+**Latest build (October 7, fourth build): VR settings in the game's own
+Settings.** You asked for the in-game VR settings as real items in the game's
+settings menu, not a separately drawn drawer. They are now a tab of the game's
+own Settings: pause with the menu button, choose Settings, and **SPIDY VR** is
+the last tab, after KEY MAPPING (Up from GAME reaches it in one press, since
+the list wraps; the game reopens Settings on the tab you last used). The game
+draws the tab with its own code, so it looks and works like its other tabs:
+the sections WEBS, BODY and COMFORT, switches showing the game's ON and OFF,
+the swing speed limit, snap turn, controller vibration and game screen size
+as lists you step with left and right, each setting's explanation beside the
+rows, X to reset the selected setting and Y to reset the whole tab (after the
+game's own "Are you sure?") to Spidy's defaults. Changes apply at once, and
+the launcher starts your next session with them, as before. A swing speed the
+launcher set between two steps (say 33 m/s) shows as the nearest step and
+stays as set until you change it. The panel beside the game screen, its tab
+and pointing at it are gone, so both triggers always reach the game's menus.
+The title screen's Options have no SPIDY VR tab: set things in the launcher,
+or pause once your save is loaded. When the pause menu's Settings hand their
+tabs to the game's Flash interface, Spidy adds one more, built by the game's
+own tab builder from items copied from its settings config but numbered past
+the game's 123 settings; Spidy answers the game's questions about those
+numbers itself, so the game's own settings and its settings file never see
+them. Measured in the game without the headset, on your save, steered with
+the virtual controller's left stick as the Touch controllers do: SPIDY VR
+appeared after KEY MAPPING and showed the session's values (33 m/s as 32 M/S,
+the web shooter off); right on AIM MARKERS switched them off, on SWING SPEED
+LIMIT stepped it to 40 M/S, on YOUR OWN BODY switched it off and X put it back,
+on SNAP TURN stepped it to 45°; Y then A put back Spidy's defaults, the web
+shooter on again; each change reached Spidy's values at once; backing out
+resumed play. With Spidy's hooks taken out, Settings showed the game's eight
+tabs only; put back in, SPIDY VR returned. Every hook was restored and your
+settings file was unchanged (the game re-saved its autosave on Continue, as
+it does on every load). 155 core checks (new: the tab's rows and choices,
+launcher values between steps, RESET to the defaults), 10 launcher checks, 72
+Python checks and the GPU test pass. How the tab reads on the headset's game
+screen, and the XR worker taking its changes during a session, need the
+headset. This build changes the VR protocol (the XR config and the XR data
+each have a new version), so it runs only as a whole package. Details:
+[docs/VALIDATION.md](VALIDATION.md).
+
+**Preceding build (October 7, third build): the web shooter.** You asked for the
 web projectiles Spider-Man shoots in the game, the web balls of his gadget
 button, not the swinging webs. Pull the **trigger** of a hand whose web is not
 attached and that hand shoots one: the game's own web-shooter shot, leaving

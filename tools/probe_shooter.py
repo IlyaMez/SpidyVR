@@ -224,7 +224,7 @@ def main():
         else:
             report['bot'] = None
             print('no bot within 40 m: the targeted shot is untested', flush=True)
-        # Switched off and on again during play, as the settings panel does.
+        # Switched off and on again during play, as the VR settings do.
         report['restart_codes'] = [call_remote(process, rays['SpidyShooterStop']),
                                    call_with_payload(process, rays['SpidyShooterStart'], start_shooter)]
         report['after_restart'] = pull('after restart', level)['fired']

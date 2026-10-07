@@ -438,8 +438,6 @@ bool XrRuntime::frameStereo(const std::function<bool(const XrFrame&)>& prepare,
     auto elapsed = [](auto t) { return std::chrono::duration<double, std::milli>(Clock::now() - t).count(); };
     frameTiming_ = {};
     lastFrameSubmitted_ = false;
-    // The settings panel shows only in a frame whose draw puts it up.
-    panelShown_ = false;
     poll();
     if (exit_)
         return false;
@@ -545,23 +543,11 @@ bool XrRuntime::frameStereo(const std::function<bool(const XrFrame&)>& prepare,
                         screenPose_.orientation.w},
                        {screenPose_.position.x, screenPose_.position.y, screenPose_.position.z}};
         screen.size = {screenWidth_, screenWidth_ / screenAspect_};
-        // The settings panel beside the screen, from the right eye's image.
-        XrCompositionLayerQuad panel{XR_TYPE_COMPOSITION_LAYER_QUAD};
-        panel.space = space_;
-        panel.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
-        panel.subImage = projectionViews[1].subImage;
-        panel.subImage.imageRect.extent = {static_cast<int32_t>(panelPixels_[0]),
-                                           static_cast<int32_t>(panelPixels_[1])};
-        panel.pose = {{panelPose_.orientation.x, panelPose_.orientation.y, panelPose_.orientation.z,
-                       panelPose_.orientation.w},
-                      {panelPose_.position.x, panelPose_.position.y, panelPose_.position.z}};
-        panel.size = {panelSize_[0], panelSize_[1]};
         const XrCompositionLayerBaseHeader* layers[] = {
             flatScreen_ ? reinterpret_cast<const XrCompositionLayerBaseHeader*>(&screen)
-                        : reinterpret_cast<const XrCompositionLayerBaseHeader*>(&layer),
-            reinterpret_cast<const XrCompositionLayerBaseHeader*>(&panel)};
+                        : reinterpret_cast<const XrCompositionLayerBaseHeader*>(&layer)};
         if (state.shouldRender && tracked.valid && ready && drawn) {
-            end.layerCount = flatScreen_ && panelShown_ && panel.subImage.swapchain ? 2 : 1;
+            end.layerCount = 1;
             end.layers = layers;
         }
         endCalled = true;

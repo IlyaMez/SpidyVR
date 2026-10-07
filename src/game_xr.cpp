@@ -6,6 +6,7 @@
 #include "spidy/eye_snapshot.hpp"
 #include "spidy/game_bridge_protocol.hpp"
 #include "spidy/game_grab.hpp"
+#include "spidy/game_menu.hpp"
 #include "spidy/game_pad.hpp"
 #include "spidy/game_player.hpp"
 #include "spidy/game_punch.hpp"
@@ -18,7 +19,6 @@
 #include "spidy/native_webs.hpp"
 #include "spidy/presentation_gate.hpp"
 #include "spidy/vr_settings.hpp"
-#include "spidy/vr_settings_canvas.hpp"
 #include "spidy/vr_shortcut.hpp"
 #include "spidy/xr_session.hpp"
 #include <algorithm>
@@ -31,7 +31,7 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 10, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 11, bytes = sizeof(XrConfig), pid{};
     // record and mover are no longer used: VR starts with the game, before
     // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
@@ -50,7 +50,7 @@ struct XrConfig {
     // OpenXR runtime manifest the launcher chose; empty: Virtual Desktop's if
     // installed, else Windows' active runtime.
     wchar_t runtime[260]{};
-    // The rest of what the VR settings panel starts from (options bits 3 and
+    // The rest of the VR settings a session starts from (options bits 3 and
     // 5-9 and swingSpeed give the others): degrees per snap turn (0: none),
     // controller vibration in percent, the game screen's size (0-2).
     uint32_t snapTurn = 30, haptics = 100, screenSize = 1, reserved{};
@@ -65,7 +65,7 @@ enum GateReason : uint32_t {
     gateTracking = 16,    // the headset's pose or timing was not usable
 };
 struct XrData {
-    uint32_t magic = 0x53585244, version = 10, bytes = sizeof(XrData), status{};
+    uint32_t magic = 0x53585244, version = 11, bytes = sizeof(XrData), status{};
     int64_t sequence{};
     uint64_t frames{}, tracked{}, submitted{}, dropped{}, leftHands{}, rightHands{}, serial{}, generation{};
     uint32_t nativeKeys{}, error{};
@@ -96,15 +96,17 @@ struct XrData {
     // one per hand per headset frame that shows one.
     uint32_t interacts{}, aimMarkers{};
     uint64_t markers{};
-    // The VR settings now: the settings panel beside the game screen changes
+    // The VR settings now: the SPIDY VR tab in the game's Settings changes
     // them during play (X the aim markers, too). settings bits: 1 web grab,
-    // 2 punch, 4 body, 8 webs in open air, 16 web shooter. Then the panel's
-    // changes so far, and the headset frames that showed it open, or folded
-    // to its tab.
+    // 2 punch, 4 body, 8 webs in open air, 16 web shooter. Then the changes
+    // made in that tab so far, the times the game built its Settings with it,
+    // whether its hooks are in, and why it is missing (game_menu: 93xx-94xx
+    // not hooked, 95xx not built).
     uint32_t settings{}, snapTurn{}, haptics{}, screenSize{};
     float swingSpeed{};
     uint32_t settingChanges{};
-    uint64_t panelFrames{}, tabFrames{};
+    uint64_t menuTabs{};
+    uint32_t menuInstalled{}, menuStatus{};
 };
 static_assert(sizeof(XrData) == 704);
 extern "C" {
@@ -240,6 +242,13 @@ DWORD WINAPI run(void*) {
         // Menus are played with a virtual Xbox controller (game_pad).
         padInstalled = !game_pad::install();
         uint64_t padRetryMs = GetTickCount64() + 1000;
+        // The VR settings are a tab of the game's own Settings (game_menu).
+        const uint32_t menuCode = game_menu::install(config.base);
+        if (menuCode) {
+            const auto text = "No SPIDY VR tab in the game's Settings (" + std::to_string(menuCode) +
+                              "); the launcher's settings apply";
+            message(3, 0, text.c_str());
+        }
         // The last frame showed the game screen; A held from there (Resume,
         // Continue) is not a jump once gameplay is back.
         bool wasScreen{}, jumpFromScreen{};
@@ -250,8 +259,8 @@ DWORD WINAPI run(void*) {
         enum class Origin { none, screen, play } interactOrigin{};
         bool interacting{};
         uint32_t interacts{};
-        // The VR settings: the launch options, then the settings panel beside
-        // the game screen (and X for the aim markers) during play.
+        // The VR settings: the launch options, then the SPIDY VR tab in the
+        // game's Settings (and X for the aim markers) during play.
         vr_settings::Values values;
         values.aimMarkers = !(config.options & 128);
         values.webGrab = !(config.options & 8);
@@ -264,15 +273,7 @@ DWORD WINAPI run(void*) {
         values.haptics = static_cast<int>(config.haptics);
         values.screenSize = static_cast<int>(config.screenSize);
         values = vr_settings::sanitized(values);
-        // The panel, its painting (redone when what it shows changes), and the
-        // pause that opens it: the menu button pressed in play, shortly before
-        // the game screen came up. A panel that cannot draw is left out.
-        vr_settings::Panel panel;
-        vr_settings::Canvas canvas;
-        vr_settings::Panel::Look paintedLook{};
-        vr_settings::Values paintedValues{};
-        bool painted{}, panelScreen{}, panelFailed{}, menuHeld{};
-        uint64_t pausedAtMs{}, panelFrames{}, tabFrames{};
+        game_menu::publish(values);
         uint32_t settingChanges{};
         // X switches the aim markers in immersive VR; it must be released
         // between switches. aims are each hand's latest preview.
@@ -506,49 +507,19 @@ DWORD WINAPI run(void*) {
                                                   : "Aim markers off - X shows them");
                     }
                     aimSwitchHeld = aimSwitch;
-                    // The menu button pauses the game from play: the game screen
-                    // that comes up next is its pause menu, and the settings open beside it.
-                    const bool menu = (frame.buttons & buttonMenu) != 0;
-                    if (menu && !menuHeld && mapping == game_pad::Mapping::gameplay)
-                        pausedAtMs = GetTickCount64();
-                    menuHeld = menu;
+                    // A change in the SPIDY VR tab takes effect at once; the tab
+                    // shows what X switched.
+                    if (game_menu::take(values)) {
+                        ++settingChanges;
+                        applySettings();
+                    }
+                    game_menu::publish(values);
                     const uint32_t gate =
                         (player.hero ? 0 : gateNoPlayer) | (bridgeRunning ? 0 : gateBridge) |
                         (committed ? 0 : gateNoCommit) | (followsPlayer ? 0 : gateOtherCamera) |
                         (gameplay && !motion.active ? gateTracking : 0);
                     if ((gameScreen.entered() && !flatScreen) || ((flatScreen || screen) && frame.recentered))
                         screenPose = screenAhead(frame.head, vr_settings::screenDistance);
-                    // The VR settings beside the game screen. A hand pointing at them
-                    // gives its trigger to them instead of the game.
-                    uint32_t panelPointing{};
-                    if (screen != panelScreen) {
-                        if (screen)
-                            panel.shown(pausedAtMs && GetTickCount64() - pausedAtMs < 2000);
-                        else
-                            panel.hidden();
-                        panelScreen = screen;
-                    }
-                    if (screen && !panelFailed) {
-                        std::array<vr_settings::Pointer, 2> pointers{};
-                        for (unsigned i = 0; i < 2; ++i) {
-                            const auto& hand = frame.hands[i];
-                            pointers[i] = {hand.valid && validTrackedPose(hand.aim), hand.aim, hand.trigger};
-                        }
-                        const auto result =
-                            panel.update(pointers, screenPose, vr_settings::screenWidth(values.screenSize), values);
-                        panelPointing = result.pointing;
-                        if (result.changed) {
-                            ++settingChanges;
-                            applySettings();
-                        }
-                        for (unsigned i = 0; i < 2; ++i)
-                            if (result.clicked & (1u << i))
-                                runtime.haptic(i, .3f);
-                    }
-                    XrFrame padFrame = frame;
-                    for (unsigned i = 0; i < 2; ++i)
-                        if (panelPointing & (1u << i))
-                            padFrame.hands[i].trigger = 0;
                     // An image keeps the tracking-space poses it was rendered
                     // for, valid until the tracking space itself changes.
                     if (!viewing || frame.recentered)
@@ -724,7 +695,7 @@ DWORD WINAPI run(void*) {
                             walk.interact = interactOrigin == Origin::play;
                         }
                         walk.jump = (keys & swingJumpKey) != 0;
-                        auto pad = game_pad::fromControllers(padFrame, mapping, walk);
+                        auto pad = game_pad::fromControllers(frame, mapping, walk);
                         if (interactOrigin == Origin::play)
                             pad.buttons = static_cast<uint16_t>(pad.buttons & ~game_pad::b);
                         game_pad::submit(pad, 200);
@@ -761,6 +732,10 @@ DWORD WINAPI run(void*) {
                         d.screenSize = static_cast<uint32_t>(values.screenSize);
                         d.swingSpeed = values.swingSpeed;
                         d.settingChanges = settingChanges;
+                        const auto menu = game_menu::telemetry();
+                        d.menuTabs = menu.tabs;
+                        d.menuInstalled = menu.installed;
+                        d.menuStatus = menuCode ? menuCode : menu.status;
                         std::memcpy(d.head, motion.head.data(), 64);
                         const Mat4 basis = {1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1};
                         for (unsigned i = 0; i < 2; ++i) {
@@ -908,37 +883,6 @@ DWORD WINAPI run(void*) {
                         runtime.presentation(true, screenPose,
                                              static_cast<float>(image.width) / static_cast<float>(image.height),
                                              vr_settings::screenWidth(values.screenSize));
-                        // The settings panel, or its tab, in the right eye's image (the
-                        // screen uses the left one): painted again only when what it shows
-                        // changed, drawn into each frame's image.
-                        if (!panelFailed) {
-                            try {
-                                const auto& right = targets[1];
-                                const auto& look = panel.look();
-                                const float scale =
-                                    std::min({1.5f, static_cast<float>(right.width) / vr_settings::panelPoints[0],
-                                              static_cast<float>(right.height) / vr_settings::panelPoints[1]});
-                                const bool repaint = !painted || !(look == paintedLook) || !(values == paintedValues);
-                                if (repaint) {
-                                    canvas.draw(look, values, scale);
-                                    paintedLook = look;
-                                    paintedValues = values;
-                                    painted = true;
-                                }
-                                overlay.blitPixels(repaint ? canvas.pixels() : nullptr, canvas.width(),
-                                                   canvas.height(), canvas.rowPitch(),
-                                                   {right.texture, right.format, canvas.width(), canvas.height(), {}});
-                                runtime.panel(panel.pose(), panel.metresWide(), panel.metresHigh(), canvas.width(),
-                                              canvas.height());
-                                ++(look.open ? panelFrames : tabFrames);
-                            } catch (const std::exception& e) {
-                                // The game screen goes on without it.
-                                panelFailed = true;
-                                painted = false;
-                                const std::string text = std::string("VR settings panel unavailable: ") + e.what();
-                                message(3, 0, text.c_str());
-                            }
-                        }
                         drawn = Presentation::gameScreen;
                         D3D12Renderer::Captured pixels;
                         if (snapshotTicket && overlay.captured(snapshotTicket, pixels)) {
@@ -953,8 +897,6 @@ DWORD WINAPI run(void*) {
                         std::lock_guard lock(telemetry);
                         InterlockedIncrement64(&SpidyXrData.sequence);
                         SpidyXrData.serial = SpidyXrData.generation = 0;
-                        SpidyXrData.panelFrames = panelFrames;
-                        SpidyXrData.tabFrames = tabFrames;
                         InterlockedIncrement64(&SpidyXrData.sequence);
                         return true;
                     }
@@ -1174,7 +1116,7 @@ DWORD WINAPI run(void*) {
                     message(3, 0,
                             drawn == Presentation::gameScreen
                                 ? "Game screen (menus, loading, cutscenes): the controllers work as an Xbox "
-                                  "controller, VR settings hang beside it - VR resumes with gameplay"
+                                  "controller, VR settings are in Settings > SPIDY VR - VR resumes with gameplay"
                             : drawn == Presentation::flat
                                 ? "Flat screen - click both thumbsticks for VR"
                                 : "VR active - B interacts, Y opens the game menu, the menu button pauses, "
@@ -1212,6 +1154,7 @@ DWORD WINAPI run(void*) {
     players.stop();
     if (padInstalled)
         game_pad::uninstall();
+    game_menu::uninstall();
     bridge::Control release;
     release.serial = ++serial;
     release.leaseMs = 0;
@@ -1275,7 +1218,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 10 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 11 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
@@ -1304,7 +1247,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     sampleAim = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyAimSample"));
     startPunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchStart"));
     samplePunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchSample"));
-    // Optional too: without them the settings panel's grab, speed and punch
+    // Optional too: without them the VR settings' grab, speed and punch
     // switches take effect only at the next session.
     stopPunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchStop"));
     swingSettings = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingSettings"));

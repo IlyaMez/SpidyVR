@@ -64,7 +64,7 @@ uint32_t start(uintptr_t base, Call drive, Call driven, uint32_t kinds);
 uint32_t stop();
 // Whether a start offered anything to catch.
 bool offering();
-// The headset's settings panel switches catching off and on during play,
+// The VR settings switch catching off and on during play,
 // in the swing's callback lock. Off, the webs let go of what they hold at the
 // next sample and every press swings; the watch keeps running. On by default.
 void allow(bool);

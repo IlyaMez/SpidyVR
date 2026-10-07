@@ -99,9 +99,9 @@ int main() {
         const std::vector<std::wstring> settings{L"--auto-launch", L"--seconds", L"0", L"--size", L"0",
                                                  L"--swing-speed", L"32", L"--output", L"r.json", L"--snap-turn",
                                                  L"45", L"--haptics", L"0", L"--screen-size", L"2"};
-        check(args == settings, "the headset panel's settings, the screen size capped at large");
+        check(args == settings, "the VR settings, the screen size capped at large");
     });
-    test("what the headset's settings panel left becomes the next session's options", [] {
+    test("what the VR settings were left at in the headset becomes the next session's options", [] {
         SessionOptions options;
         check(headsetSettings("VR settings from the headset: aim_markers=0 web_grab=1 air_webs=0 web_shooter=0 "
                               "punch=0 body=1 swing_speed=48 snap_turn=45 haptics=50 screen_size=2\r",

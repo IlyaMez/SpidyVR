@@ -123,7 +123,8 @@ struct Data {
     uint32_t takeoffPhase{}, takeoffAttempts{}, takeoffTimeouts{}, nativeContact{};
 };
 static_assert(sizeof(Config) == 64 && sizeof(Hand) == 52 && sizeof(Command) == 168);
-// SpidySwingSettings: what the headset's settings panel changes during play.
+// SpidySwingSettings: what the VR settings (the SPIDY VR tab in the game's
+// Settings) change during play.
 // grab: webs catch props and thugs (a swing started without them starts
 // them here); off lets go of what they hold. maxSpeed: the speed limit, up to
 // 65 m/s, which the movement module is started with for that reason.
@@ -135,7 +136,7 @@ struct Settings {
     uint32_t airWebs = 1;
 };
 static_assert(sizeof(Settings) == 24);
-// The movement module's own limit: every speed the panel offers.
+// The movement module's own limit: every speed the VR settings offer.
 constexpr float motionSpeedLimit = 65;
 static_assert(sizeof(WebState) == 28 && sizeof(Data) == 240);
 // What a grip press would do now with each hand (SpidyAimSample), for the

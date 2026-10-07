@@ -466,7 +466,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingRetarget(void* input) {
     ReleaseSRWLockExclusive(&lifecycle);
     return result;
 }
-// The headset's settings panel: the speed limit, whether webs catch props and
+// The VR settings during play: the speed limit, whether webs catch props and
 // thugs, and whether they hold in open air. All apply from the next step; the
 // visit holds `simulation`.
 extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {

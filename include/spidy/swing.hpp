@@ -97,11 +97,11 @@ class Swing {
     void settleStep(float predictedSeconds, float actualSeconds);
     void reset(Body body = {});
     void releaseAll();
-    // A new speed limit during play (the headset's settings panel). A body
+    // A new speed limit during play (the VR settings). A body
     // faster than it slows to it in the next step.
     void limitSpeed(float maxSpeed);
     // Whether a clear shot attaches in the air at maximum reach from now on
-    // (the headset's settings panel); off, it misses. Webs already attached
+    // (the VR settings); off, it misses. Webs already attached
     // keep their anchors.
     void allowAirAnchors(bool allowed);
     // A web shot now along `aim` (world space, -Z forward) with the body at
