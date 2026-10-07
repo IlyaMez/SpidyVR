@@ -1,0 +1,563 @@
+# Spidy development notes
+
+The detailed reference behind the [README](../README.md): how the launcher and
+the release zip work, every tool and module, building, running VR from a
+checkout, memory and graphics in VR, the lab, and checks without a headset.
+What each build changed is in [CHANGELOG.md](CHANGELOG.md).
+
+## Share Spidy: the launcher and the release zip
+
+`Spidy Launcher.exe` (source in `apps/launcher`, built as
+`build\windows-ninja\spidy_launcher.exe`) lets other people play without the
+development setup. It is credited to Ilya Mezerowsky in its header, its About
+tab, its file properties and the zip's README, and carries a Ko-fi button. On
+start it checks the PC and shows what it finds:
+
+- **The game:** in every Steam library (Steam's registry entries, then
+  `libraryfolders.vdf` and the app manifest), else where you point it with
+  *Change...*. It compares `Spider-Man.exe` with the supported build's SHA-256
+  (read from `tools/inspect_game.py`) and explains when the copy is another
+  build or the Epic Games Store version.
+- **The VR runtime:** every registered OpenXR runtime. Virtual Desktop is
+  chosen when installed (the tested one), else Windows' active runtime. The
+  choice reaches both the headset check and the game's XR worker, which used
+  to open Virtual Desktop's runtime only (`XrConfig` version 7 carries the
+  manifest path).
+- **The headset:** *Check* runs `spidy_headset_probe.exe` against that runtime.
+- **The Visual C++ runtime:** 14.40 or newer, which the modules need. *Install*
+  downloads Microsoft's installer, runs it only if Microsoft signed it, and
+  checks again. The launcher itself is linked statically and needs nothing.
+- **Memory** Windows can still promise programs, against `VR_COMMIT_MB` in
+  `tools/run_game_vr.py`; below that, START VR asks before it starts.
+- **Spidy's own files:** the modules, Python, and a writable folder.
+
+START VR runs `tools/run_game_vr.py` with the chosen options and shows its
+output live; STOP VR (or closing the window, after a question) stops the
+session through a named event that `run_game_vr.py --stop-event` treats as
+Ctrl+C, so the hooks come out and the report is written as before. Options
+and the game's hash are remembered in `%APPDATA%\Spidy\launcher.ini`. A session
+that ends with other VR settings than it began with (the headset's settings
+panel, or X for the aim markers) prints them on its last line, "VR settings
+from the headset: ...", and the launcher saves them as its options. The
+first start offers desktop and Start menu shortcuts.
+
+Make the zip with:
+
+```powershell
+.\tools\bootstrap.ps1 -Observer   # also fetches Dear ImGui for the launcher
+.\tools\build.ps1 -Observer
+.\tools\package.ps1               # dist\Spidy-<version>-win64.zip
+```
+
+It holds the launcher, the seven game modules, the Python tools a session
+imports, the Windows embeddable Python 3.12.10 (hash-pinned), the notices and
+[docs/PLAYERS.md](PLAYERS.md) as `README.txt`. Players extract it anywhere
+they can write and start `Spidy Launcher.exe`. The version comes from
+`project(Spidy VERSION ...)` in `CMakeLists.txt`. The supported game build is
+one Steam build: a game update needs new addresses in Spidy before the
+launcher accepts it. Other runtimes than Virtual Desktop and other controllers
+than Quest Touch (Index bindings are also suggested) are untested.
+
+### Publish a release
+
+GitHub Actions builds releases on a clean machine and puts them under the
+repository's **Releases**, zip attached. Publish from GitHub: **Actions >
+Release > Run workflow** on `main`, choose the part of the version to raise
+(patch 0.1.1 -> 0.1.2, minor 0.2.0, major 1.0.0), and run it. From a terminal:
+
+```powershell
+gh workflow run release.yml -f bump=patch                    # or minor, major
+gh workflow run release.yml -f bump=patch -f publish=false   # a test run that changes nothing
+```
+
+[.github/workflows/release.yml](../.github/workflows/release.yml) runs on GitHub's
+Windows Server 2022 image (Visual Studio 2022). It raises `project(Spidy VERSION
+...)` in `CMakeLists.txt`, runs `bootstrap.ps1 -Observer`, `build.ps1 -Observer`
+with the C++ tests, the Python protocol tests and `package.ps1`, checks that the
+launcher carries the new version, and only then commits the version ("Release
+Spidy 0.1.2", by github-actions), tags it `v0.1.2`, pushes both to `main` and
+publishes "Spidy 0.1.2" with the zip, its SHA-256 and the commits since the
+previous release. Only the repository's owner can release: a run anyone else
+starts is skipped. Only what is on GitHub's `main` is released, so push first;
+afterwards `git pull` brings the version commit here. A failed build changes
+nothing. If `main` moved during the build, the push is refused: run it again.
+Without *publish* the run does all of this but only checks the push, and keeps
+the zip with the run for 14 days; on another branch it test-builds that branch
+as it is. Given an existing tag, it builds and publishes that tag again (the way
+out when publishing failed after the tag was pushed).
+
+`tools/release.ps1` makes the version commit and tag on this PC instead; the
+pushed tag starts the same workflow:
+
+```powershell
+.\tools\release.ps1 -DryRun   # the next version, and what the push takes along
+.\tools\release.ps1 -Wait     # 0.1.1 -> 0.1.2 (-Bump minor, -Bump major, -Version 0.3.0), then follows the build
+```
+
+It stops when the checkout is not on `main`, lacks commits from `origin/main` or
+has uncommitted edits in `CMakeLists.txt`, and undoes its commit and tag when
+the push fails. Given the current version, `-Version` tags the current commit
+without a commit of its own.
+
+## What's runnable
+
+- `spidy_xr_lab.exe`: an original block city in OpenXR/D3D12 with tracked hands,
+  separate eye renders, two webs, gravity, reeling, physical zips, point launches,
+  and crates, barrels and thugs to web, yank, carry and throw.
+- `spidy_tests.exe`: deterministic physics, input, and camera checks.
+- `spidy_graphics_test.exe`: actual D3D12 stereo rendering and pixel readback,
+  usable without a headset.
+- `spidy_headset_probe.exe`: checks for a connected OpenXR headset without
+  creating a session. The game VR tool runs this before any game injection.
+- `spidy_sim.exe`: a reproducible pendulum/release simulation written as CSV to stdout.
+- `tools/inspect_game.py`: read-only executable identity, signature, and RTTI checks.
+- `tools/capture_game_state.py`: bounded live camera/player discovery in a
+  free-roam session. It reads the supported game process and saves candidate
+  transforms; it does not install anything or write game memory.
+- `tools/game_driver.mjs`: launch, window recovery, screenshots, and observed
+  mouse/keyboard actions through the Computer Use runtime. See
+  [automation and its verified controls](AUTOMATION.md).
+- Optional `spidy_observer.dll` and `tools/observe_game.py`: camera-update timing
+  and transform diagnostics in the supported game process, with automatic hook
+  disable/restore after capture. This is a diagnostic, not the VR game adapter.
+- Experimental `spidy_bridge.dll` and `spidy_view.dll`: bounded native input,
+  final camera pose, and lens tests. Commands expire without renewal.
+- `Launch Spidy VR.cmd`: checks the headset, starts Steam Spider-Man with its
+  launcher skipped, and attaches VR when your save has loaded. It stays running
+  until game exit or Ctrl+C in its console. Eye resolution follows the active
+  runtime recommendation. Click both thumbsticks to switch between VR and a
+  flat game screen inside the headset. These new launch/toggle features are
+  built and locally tested; headset validation is pending.
+- `spidy_render_memory.dll`: replaces the game's 128 MB per-frame render memory
+  with a 512 MB ring where the game creates it, and reports how much of it
+  frames use. The VR launcher loads it while the game starts.
+- `tools/vr_launcher.py`: run as a script, starts the game as the VR launcher
+  does (small window, larger render memory) for checks without a headset.
+- `Launch Spidy Game VR.cmd`: the same launcher with a console that remains
+  open after exit. `Test Spidy Game VR.cmd` preserves the 20-second, 1536-square
+  diagnostic. Add `-CaptureImages` to save eye images with readback overhead.
+- `tools/run_game_vr.py`: the same integration test with command-line settings.
+- `tools/probe_collision.py`: six native city raycasts during a verified collision
+  worker callback, with hit telemetry and automatic hook restoration.
+- `tools/probe_native_motion.py`: a five-second native jump/velocity test with a
+  single 200 ms command, measured movement feedback, and automatic hook restoration.
+- `tools/probe_native_rays.py`: repeated world queries, fixed-body classification,
+  command expiry, and hook restoration checks.
+- `tools/probe_game_swing.py`: a six-second native web attachment/release/landing
+  test with automatic hook restoration. No headset is required.
+- `tools/probe_game_grab.py`: webs the nearest throwable prop in sight from where
+  the player stands, reels (or with `--yank` yanks) it in, carries it and throws
+  it, in a freshly started game; `--watch SECONDS` watches it land and come to
+  rest after the throw (3 s by default), `--bots` does the same with a bot, and
+  `--fling-test` checks the game's flung reaction on the nearest bot.
+- `tools/probe_game_body.py`: the player's body and fists in a freshly started
+  game, no headset: lists the hero's rig (joint names, parents, rest pose),
+  turns the body toward a scripted headset and controllers and measures how
+  far the wrists and head land from them, saves the eyes' image looking down
+  at the body (`eyes`), drives a scripted fist through the nearest thug as a
+  controller would (`fist`), and sends one blow straight to the game's damage
+  system (`punch`; `--punch-hero` also staggers the hero).
+- `tools/probe_aim.py`: what a grip press would do with a scripted hand aimed
+  at the sky, around the horizon, at the floor and at the nearest prop, read
+  from the swing module's aim previews (what the headset's aim markers show),
+  in a freshly started game; checks that nothing faulted and every hook entry
+  is restored.
+- `tools/probe_shooter.py`: the web shooter in a freshly started game, no
+  headset: a scripted hand pulls its trigger aimed level, down, at the sky and
+  to either side, holds it, and pulls three times quickly, through the swing's
+  input commands; follows each ShotWebShooter the game spawns (where it
+  starts, its direction and speed, where it ends), shoots the nearest bot
+  within 40 m if there is one, stops and starts the shooter during play, and
+  checks that nothing faulted and every hook entry is restored.
+- `tools/probe_vr_load.py`: renders the VR views at the headset's resolution
+  where the player stands and reports, per phase, the game's frame rate, its
+  render commands per frame, GPU use, and the CPU time of each game thread;
+  `--profile-threads` samples where chosen threads spend their time, and
+  `--gpu capture` with the `shots` phase saves eye images with the eyes'
+  occlusion culling on and off. No headset is required.
+- `spidy_stereo_probe.dll`, `spidy_eye_capture.dll`, and `spidy_scene_trace.dll`:
+  offscreen-view lifetime, synchronized GPU readback, and render scheduling
+  diagnostics. A texture allocation alone is not evidence of a rendered eye.
+
+## Build on Windows
+
+Requires Visual Studio 2022 C++ Build Tools, its CMake/Ninja tools, and a Windows
+SDK. The detected installation on this PC already has these components.
+
+```powershell
+.\tools\bootstrap.ps1
+.\tools\build.ps1
+```
+
+Executables are in `build\windows-ninja`. Build the dependency-free core with
+`tools\build.ps1 -CoreOnly`; its output is in `build\core-ninja`.
+
+For other C++20 environments, configure CMake with `-DSPIDY_BUILD_XR=OFF`.
+No game files or reference-mod assets are needed for the lab.
+
+## Start Spider-Man in VR
+
+1. Connect Quest 3 to this PC in Virtual Desktop.
+2. With the game closed, double-click **Launch Spidy VR.cmd**. It starts the
+   game itself, which is what lets it enlarge the game's render memory; see
+   [Memory for a VR session](#memory-for-a-vr-session).
+3. VR starts with the game, about ten seconds after launch: its intro and menus
+   appear on a screen in the headset. Select your save and Continue with the
+   VR controllers. Immersive VR starts with gameplay and follows every load,
+   respawn and character switch; there is no second attach command.
+
+The game pauses while another window is in front of it on the desktop, so the
+launcher brings the game window to the front. If the headset shows a still
+game screen, click the game window once (in Virtual Desktop's desktop view).
+
+Squeeze a **grip** to shoot that hand's web where the controller points, and
+keep squeezing to swing; release it to let go. Pull the **trigger** while a web
+is attached to reel in; if it was already held when the web attached, release it
+first. Pull a hand sharply away from its anchor to zip. A web that breaks
+mid-swing stays released until you squeeze that grip again. A web that meets
+nothing within 100 m holds in open air there; switch **Webs hold in open air**
+off (VR settings, the launcher's options) or start with
+`Launch Spidy VR.cmd -NoAirWebs`, and it misses instead.
+
+Webs are drawn by the game's own web-line system. If they look wrong in the
+eyes, start with `Launch Spidy VR.cmd -OverlayWebs` for Spidy's overlay strands.
+
+Aim the web at a throwable prop (one the game's combat lets you web and
+throw) or a thug, and it catches it instead. Pull the trigger to reel it in, or
+pull the hand back sharply to yank it to you; it then hangs below your hand on
+a short web and swings as you move. Swing your arm and let go of the grip to
+throw it: it flies with what the swing gave it, a heavy one slower, and a
+throw close to a thug is aimed to hit them. The controller hums with the web's
+pull.
+`Launch Spidy VR.cmd -NoWebGrab` keeps webs for swinging only. See
+[docs/WEB-GRAB.md](WEB-GRAB.md).
+
+Each hand without a web shows an aim marker where its grip would send the
+web now: a white ring where the web would hold, a faint dashed ring where it
+would hold in open air (no marker there with webs in open air switched off),
+a red cross where it would miss, amber corners around
+a prop or thug it would catch. It tightens as you squeeze. **X** hides or
+shows the markers; `Launch Spidy VR.cmd -NoAimMarkers` starts with them hidden.
+
+Pull the **trigger** of a hand whose web is not attached to shoot a web ball
+from that wrist where the controller points: the game's own web-shooter shot.
+Aimed within about 7 degrees of a thug, with nothing in between, it goes to
+him; otherwise it splats on the first thing in its way, or ends in open air
+about 60 m out. One ball per pull; the hand ticks as it leaves. A trigger held
+from a reel or a menu shoots only after a release. Switch **Web shooter** off
+(VR settings, the launcher's options) or start with
+`Launch Spidy VR.cmd -NoWebShooter` to keep the trigger for reeling only.
+
+**VR settings** hang beside the game screen: they open with the pause menu
+(the menu button), and on every other game screen a VR SETTINGS tab at the
+screen's right edge opens them. Point a controller and pull the trigger to
+switch the aim markers, web grabbing, webs in open air, the web shooter, your
+body and punching, or to step the swing speed limit, snap turn, controller
+vibration and the game screen's size.
+Changes apply at once; Spidy Launcher starts your next session with them.
+A hand pointing at the panel keeps its trigger from the game.
+
+You are Spider-Man's body: look down to see it, your arms and hands follow the
+controllers, and the body turns with you once you look far enough to the side.
+A squeezed grip, or a hand moving fast, closes into a fist. Punch a thug with a
+fist moving 2.2 m/s or more and he takes the game's melee damage and reacts as
+hard as you hit him; the controller kicks. `-NoBody` hides the hero and draws
+gloves instead; `-NoPunch` lets fists pass through. See
+[docs/BODY.md](BODY.md).
+
+The intro, menus, loading, the map, hint cards, cutscenes, finishers and death
+appear on a screen in front of you, as the game shows them on the monitor; VR
+resumes when play does. On that screen the VR controllers are the game's Xbox
+controller: the left thumbstick moves through menus, A selects, B goes back,
+X and Y are the game's X and Y, the grips are the bumpers (menu tabs), the
+triggers are the triggers, the right thumbstick and the stick clicks are the
+same on both, and the menu button is Start. The game shows Xbox prompts, which
+sit where the Touch controller buttons are. In immersive VR the menu button
+pauses the game, Y opens the game menu (map, suits, skills), and B is the
+game's Y, its interact button (backpacks, doors, consoles, prompts; web strike
+in a fight), except while a web carries you. Every other control stays with
+VR, which walks and jumps through the same virtual controller. A held from the
+screen (Resume, Continue) does not jump, nor B held from it interact. A real
+gamepad keeps working. The keyboard does not: once the virtual controller has
+pressed a button, the game ignores the keyboard for the player. The screen has the size of the
+game's desktop window, small when the launcher starts the game;
+`-FullDesktopView` makes it sharper.
+
+Click **both thumbsticks** to switch between immersive VR and a flat screen
+inside the headset. Release both before clicking again. Flat mode uses the
+stock game camera and the game's own controls on a real gamepad (not the
+keyboard, as above; the Touch controllers pass only the menu button and Y);
+VR movement and web input are released. In immersive VR the monitor shows your head view, horizontally
+stretched; in flat mode it shows the normal game view. Add `-StockMonitorView`
+to keep the normal game view on the monitor in immersive VR too, at the cost of
+culling and shading that follow the stock camera instead of your head.
+
+When the launcher starts the game, the game opens in a small window with your
+desktop's shape, 540 pixels tall, centred. The engine still runs culling, shadow
+setup, and auto-exposure for that view; a small window keeps that work and skips
+most of its rendering. The launcher saves the game's window settings in
+`reports\desktop-view-before-vr.json` and writes them back after the game
+closes. If the launcher stops while the game is still running, they are written
+back the next time it starts the game, or run `python tools\vr_display.py
+--restore` after closing the game. A game that is already running keeps its
+size. Add `-FullDesktopView` to start the game with your own settings.
+
+The session has no 20-second cutoff. Close the game normally, or press Ctrl+C
+in the launcher console to stop VR and restore the hooks. Keep that console
+running during play. A second launcher is rejected instead of attaching twice.
+
+Every session leaves `reports\game-vr-<date>-<time>.json`, however it ends: the
+game closing, Ctrl+C, or the console window being closed. Beside it are
+`...-game.log`, a copy of the game's own log with its once-a-minute memory and
+frame rate lines (the game overwrites that log at its next start), and
+`...-eyes\`, the left eye as it was sent to the headset. One reduced image is
+saved every 5 seconds, or every 1.5 seconds while a web is held above 15 m/s,
+with a full-resolution crop around the hand holding it; the newest 72 are kept.
+If something looked wrong in the headset, these show whether the game's image
+was wrong too.
+
+Resolution defaults to the runtime's recommended width and height for each eye,
+which can change with your Virtual Desktop quality preset. These are the
+[OpenXR recommended render dimensions](https://registry.khronos.org/OpenXR/specs/1.1/man/html/XrViewConfigurationView.html),
+not a fixed 1536-square image. The launcher prints the selected dimensions.
+For an explicit square override, use `tools/launch-game-vr.ps1 -Size 2048`.
+
+The new launcher, automatic dimensions, and thumbstick toggle are built. Their
+combined headset check was deferred at the user's request. Returning to VR
+after stopping the launcher is not yet seamless. Restart the game before
+reattaching after a stopped session or a rebuilt DLL.
+
+### Launch options
+
+`Launch Spidy VR.cmd` passes its arguments to `tools\launch-game-vr.ps1`:
+
+| Option | Effect |
+|---|---|
+| `-SwingSpeed 32` | Swing speed limit in m/s (1-65) |
+| `-SnapTurn 30` | Snap turn angle in degrees; 0 turns it off |
+| `-Haptics 100` | Controller vibration in percent; 0 turns it off |
+| `-ScreenSize Medium` | Size of the game screen in the headset: Small, Medium or Large |
+| `-Size 2048` | Square eye resolution instead of the runtime's recommendation |
+| `-NoWebGrab` | Webs swing only; they do not catch props or thugs |
+| `-NoAirWebs` | A web that meets nothing within 100 m misses instead of holding in open air |
+| `-NoWebShooter` | The trigger only reels |
+| `-NoAimMarkers` | Start with the aim markers hidden (X shows them) |
+| `-NoBody` | Hide the hero and draw gloves |
+| `-NoPunch` | Fists pass through thugs |
+| `-OverlayWebs` | Spidy's overlay strands instead of the game's web lines |
+| `-FullDesktopView` | Start the game with your own window settings, not the small VR window |
+| `-StockMonitorView` | Keep the stock camera on the monitor (culling and shading follow it, not your head) |
+| `-NoEyeOcclusion` | Turn off the eyes' occlusion culling, for comparison |
+| `-XrRuntime <manifest>` | Use this OpenXR runtime manifest |
+| `-AttachOnly` | Attach to a game that is already running instead of starting it |
+| `-Seconds 20` | A timed test that stops after 2-25 seconds |
+| `-CaptureImages` | Save eye images (costs readback time) |
+
+## Memory for a VR session
+
+Two memory limits matter, and neither of them is RAM running out.
+
+**Render memory.** The game keeps two frames of draw lists and render commands
+in a 128 MB ring. Three scene views need more, so the launcher gives the game a
+512 MB ring while the game starts (see the [changelog](CHANGELOG.md), October 5, fifth build). A few seconds
+into VR the launcher prints either `Render memory: 512 MB for two frames (the
+game's own: 128 MB).` or a warning that the game is on its own ring. After the
+warning, close the game and start it with `Launch Spidy VR.cmd`. When the
+session ends the launcher prints the most two frames used and how many frames
+did not fit; the report has the same under `render_memory`.
+
+**Windows commit.** Windows promises each program the memory it asks for, out
+of RAM plus page file, whether or not the program then uses it. The game's GPU
+allocations count as well. In VR at 3072 x 3264 per eye the game takes about
+17 GB of promises. On October 5 this PC had 61.6 GB of RAM with half of it
+free, but other programs held about 50 GB of promises and the page file was
+4 GB, which left 14-15 GB. The game went past that. Windows enlarges a system-managed page file when this happens, and while
+it does, requests for memory can stall or fail. When less than about 19 GB is
+left, the launcher prints a warning and waits for Enter before it starts the
+game, and the report records `free_commit_mb` at the start and at its lowest.
+Either of these makes room:
+
+- Close large programs before a session: browsers, chat apps, game launchers.
+- Give Windows a larger page file. System Properties > Advanced > Performance
+  Settings > Advanced > Virtual memory > Change: clear "Automatically manage",
+  select the system drive, choose Custom size with initial 32768 MB and maximum
+  49152 MB, press Set, and restart Windows. While RAM is free the larger file is
+  not read or written; it only raises what Windows can promise.
+
+## Graphics settings in VR
+
+Spidy does not change in-game graphics options at runtime. One persistent change
+was made on October 4 for a performance comparison: the game's `VSync` registry
+value went from 1 to 0 (backup in `reports/vsync-before-performance-test.json`).
+When the VR launcher starts the game, it changes only the window settings
+(windowed, size, position) for that session and writes them back after the game
+closes; see [Start Spider-Man in VR](#start-spider-man-in-vr).
+
+The two eyes are extra native scene views. They inherit the game's own quality
+settings, including textures, shadows, level of detail, crowds, ray-traced
+reflections, ambient occlusion, anti-aliasing, and motion blur strength. For
+each eye, Spidy sets only:
+
+- the runtime-recommended resolution (3072 x 3264 in the latest session), with
+  private scene buffers at that size;
+- the tracked eye pose and asymmetric headset lens, with zero lens jitter;
+- the active post-processing profile and the main camera's display path;
+- the main camera's current exposure, so both eyes share auto-exposure;
+- the HUD's sRGB overlay setup pass, which the game skips for secondary views;
+- avatar visibility while immersive VR is active (this also hides the avatar
+  and its shadow on the monitor).
+
+While immersive, Spidy also moves the game's own camera view, the one on the
+monitor, to your tracked head with a lens covering both eyes. The game does some
+per-frame work only for that view: occlusion, "drawn in any view" checks, and the
+shading inputs shared by every view of a frame, which carry the key-light shadow
+setup and a camera position available to every shader. Moving the view lines
+that work up with the headset. That view now covers a wider field of view than
+the stock camera, which may cost some frame rate; compare with `-StockMonitorView`.
+
+The desktop view renders at the game window's size. Before the small VR window,
+it rendered the full 3440 x 1440 desktop, about a fifth of the frame's pixels;
+at 1290 x 540 it is about 3%. The October 5 morning session averaged 44 new
+stereo pairs per second at
+3072 x 3264 per eye with the headset at 120 Hz; about 40% of the frames sent to
+the headset repeated an earlier pair, which doubles fast-moving scenery. The
+largest cost is eye resolution: lower Virtual Desktop's quality preset, or
+use `tools\launch-game-vr.ps1 -Size 2048` for a square override. Ray-traced
+reflections are computed for each eye. On this PC, motion blur, film grain, and
+sharpening are at their lowest stored value (1), and depth of field, vignette,
+chromatic aberration, and lens flares are off. The game also has a traversal
+motion blur bonus while swinging; whether that low setting suppresses it in the
+eyes is not verified. When frames arrive slower than the refresh rate, Virtual
+Desktop repeats or synthesizes frames (Synchronous Spacewarp), which can double
+fast-moving edges. A refresh rate the frame rate divides evenly, such as 72 or
+90 Hz, gives a steadier cadence than 120 Hz. With SSW on, Virtual Desktop renders
+the game at half the refresh rate and synthesizes the frames in between; at 90 Hz
+that is 45 frames per second, close to the rate measured above, so most frames it
+receives are new rather than repeats.
+
+## Run the lab
+
+Connect Quest 3 to Virtual Desktop on this PC, then double-click
+`Launch Spidy Lab.cmd`, or run:
+
+```powershell
+.\tools\launch-lab.ps1
+```
+
+Use `-Probe` to check the runtime without starting a headset session. The default
+launcher uses VDXR for its own process. `-SystemRuntime` uses the registered
+OpenXR runtime instead. Neither option changes the system registration.
+
+| Quest Touch control | Action |
+|---|---|
+| Aim hand, squeeze grip | Shoot that hand's web |
+| Keep grip held | Keep swinging |
+| Release grip | Release web and retain momentum |
+| Hold trigger while attached | Reel the web in (release it first if it was held when the web attached) |
+| Pull hand sharply away from the anchor | Zip once per attachment |
+| Aim at a crate, barrel or thug (a yellow marker shows it), squeeze grip | Web it |
+| Trigger on a webbed prop or thug | Reel it in until it hangs from your hand |
+| Pull hand sharply back from it | Yank it to your hand |
+| Swing your arm and release grip while it hangs from your hand | Throw it |
+| Left stick | Move / steer |
+| Right stick left/right | 30-degree snap turn |
+| Right A | Jump; shortly after a zip landing, point launch |
+| Left Y | Reset to the lab rooftop |
+| Escape on PC | Exit |
+
+Clear shots that reach no surface create a fixed anchor at maximum reach
+(100 metres by default). Hold grip and pull the trigger to reel toward either a
+real surface or an open-space anchor.
+
+The lab starts on a rooftop. Controller markers and colored aim markers indicate
+each hand. Tracking/focus loss releases webs and requires releasing grip before
+reattaching. The lab has no desktop mirror or in-headset menu yet. Its collision
+world uses static boxes and a swept sphere; room-scale head/body collision is
+still pending. The user has confirmed the lab works on Quest 3 through Virtual
+Desktop. Detailed haptic, recentering, comfort, and performance checks remain open.
+
+## Verify without a headset
+
+```powershell
+.\build\windows-ninja\spidy_tests.exe
+.\build\windows-ninja\spidy_graphics_test.exe reports\graphics
+.\tools\launch-lab.ps1 -Probe
+python tools\inspect_game.py "C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\Spider-Man.exe" --output reports\game-inspection.json
+python tools\discover_render_types.py "C:\Program Files (x86)\Steam\steamapps\common\Marvel's Spider-Man Remastered\Spider-Man.exe" --output reports\render-types.json
+```
+
+The graphics check saves left/right BMP images and checks near-object parallax,
+typed and typeless image copies, and tracked hand overlays on the same device/queue.
+It does not verify an OpenXR headset session or game rendering. Spidy loads its
+modules from this workspace; there is no game-folder installer in this build.
+
+Two probes check eye rendering in the running game itself, with no headset.
+Each needs a freshly started game, because a Spidy module starts only once per
+game process. `tools\vr_launcher.py` starts the game the way the VR launcher
+does, in the small window and with Spidy's render memory (`--ring 0` keeps the
+game's own 128 MB ring, for comparison).
+
+```powershell
+python tools\vr_launcher.py                    # start the game, then load a save
+python tools\probe_eye_frames.py               # at the main menu
+python tools\probe_web_frames.py --views 13    # in free roam, with open space ahead
+```
+
+`probe_eye_frames.py` drives two eye views with a moving pose and counts, for
+every eye render job, whether its pose was placed in that frame and whether its
+previous camera differs from its current one. `probe_web_frames.py` swings and
+reels at the VR launcher's settings with a game web held in front of a sideways
+eye camera, and measures how far the web's first point is from where that
+camera expects it. It runs the first half with the eyes placed a frame late, as
+before October 5, for comparison, and saves left-eye images with a marker at
+the expected start. Its report also lists every physics step of the swing.
+`--views 13` moves the game's own view to the eyes as a VR session does, so the
+frame carries three scene views; the report's `render_memory` shows what they
+used, and the check fails if any frame's render memory did not fit.
+
+For the next integration session, load free roam and run
+`python tools\capture_game_state.py`. It checks the running executable's SHA-256,
+scans up to 8 GiB of cacheable private writable memory within a 45-second budget, and samples
+plausible player/camera objects for three seconds. `reports/live-camera.json`
+records partial scans explicitly; absence of a candidate does not mean the
+object does not exist. Reuse current-process candidates with `--seed-capture` to
+avoid another heap scan. These observations do not verify a render or physics ABI.
+
+The optional callback diagnostic is built with `tools/bootstrap.ps1 -Observer`
+and `tools/build.ps1 -Observer`. Its launch/capture/stop workflow is documented
+in [AUTOMATION.md](AUTOMATION.md). A 30-second free-roam run captured 3,362
+valid camera/player observations; its hook was disabled and original entry
+bytes restored afterward. Native eye rendering is now demonstrated in a bounded
+diagnostic; the playable VR game adapter is still in development.
+
+## Development map
+
+See [validation results](VALIDATION.md) for what passed locally and what
+still requires a running game or headset.
+
+| Path | Role |
+|---|---|
+| `include/spidy`, `src/swing.cpp` | Engine-independent physics and control logic |
+| `src/xr_session.cpp` | OpenXR timing, tracking, actions, stereo submission |
+| `src/d3d12_renderer.cpp` | Lab renderer, tracked hand overlay, diagnostic readback |
+| `src/native_webs.cpp` | The game's own web lines, started at the tracked wrists |
+| `src/web_grab.cpp`, `src/lab_props.cpp` | Web grab: catching, yanking, carrying and throwing props and characters; the lab's props |
+| `src/body_ik.cpp`, `src/native_body.cpp` | The player's body: the solver, and the hero's joints turned after the game's pose writer |
+| `src/punch.cpp`, `src/game_punch.cpp` | Punching: fists against characters, and the game's own melee damage for each punch |
+| `src/shooter.cpp`, `src/game_shooter.cpp` | The web shooter: trigger pulls and their aim, and the game's own web-shooter shot fired from the hand |
+| `src/game_grab.cpp`, `src/native_bodies.cpp`, `src/game_targets.cpp` | Web grab in the game: candidates, freed Havok props, flung bots |
+| `src/native_render_memory.cpp`, `tools/vr_launcher.py` | A larger per-frame render memory ring, installed while the game starts |
+| `src/web_visual.cpp` | Fallback game-style web strands for the headset overlay and lab |
+| `src/game_xr.cpp`, `src/game_tracking.cpp` | Native eye presentation and Quest controls |
+| `src/native_rays.cpp`, `src/native_movement.cpp`, `src/game_swing.cpp` | Native world queries and collision-controlled swing requests |
+| `src/lab_world.cpp`, `apps/xr_lab.cpp` | Synthetic collision world and VR lab |
+| `tools/inspect_game.py`, `tools/discover_render_types.py` | Offline game research |
+| `src/game_observer.cpp`, `tools/observe_game.py` | Opt-in native camera callback diagnostic |
+| `tools/game_driver.mjs` | Observed game launch, screenshots, and input workflow |
+| `tools/vr_display.py` | Small desktop window for VR launches; restores the game's window settings |
+| `docs/MILESTONE-1.md` | In-game acceptance criteria and remaining integration work |
+| `docs/REFERENCE.md` | Reference mechanics, executable evidence, source attribution |
+
+The bounded adapter connects `spidy_openxr` to the game's D3D12 device and direct
+queue, then copies matching native eyes after their submitted GPU markers.
+See [milestone details](MILESTONE-1.md) for its remaining validation.
