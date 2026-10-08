@@ -98,29 +98,48 @@ int main() {
     test("session arguments carry every option", [] {
         SessionOptions options;
         auto args = sessionArguments(options, L"r.json", L"vd.json", L"Local\\Stop");
-        const std::vector<std::wstring> defaults{L"--auto-launch", L"--seconds", L"0", L"--size", L"0", L"--swing-speed",
-                                                 L"32", L"--output", L"r.json", L"--xr-runtime", L"vd.json",
+        const std::vector<std::wstring> defaults{L"--auto-launch", L"--seconds", L"0", L"--swing-speed", L"32",
+                                                 L"--output", L"r.json", L"--xr-runtime", L"vd.json",
                                                  L"--stop-event", L"Local\\Stop"};
         check(args == defaults, "defaults");
         options = {false, true, false, true, 2048, 90, false, false, false, false, false};
         args = sessionArguments(options, L"r.json", L"", L"");
-        const std::vector<std::wstring> changed{L"--auto-launch", L"--seconds", L"0", L"--size", L"2048",
-                                                L"--swing-speed", L"65", L"--output", L"r.json", L"--overlay-webs",
-                                                L"--no-web-grab", L"--full-desktop-view", L"--stock-monitor-view",
-                                                L"--no-body", L"--no-punch", L"--no-aim-markers",
-                                                L"--no-air-webs", L"--no-web-shooter"};
-        check(args == changed, "every flag, speed capped at 65");
+        const std::vector<std::wstring> changed{L"--auto-launch", L"--seconds", L"0", L"--swing-speed", L"65",
+                                                L"--output", L"r.json", L"--overlay-webs", L"--no-web-grab",
+                                                L"--full-desktop-view", L"--stock-monitor-view", L"--no-body",
+                                                L"--no-punch", L"--no-aim-markers", L"--no-air-webs",
+                                                L"--no-web-shooter", L"--render-scale", L"200"};
+        check(args == changed, "every flag, speed capped at 65 and the render scale at 200%");
         options = {};
+        options.renderScale = 125;
         options.snapTurn = 45;
         options.smoothTurn = 120;
         options.haptics = 0;
         options.screenSize = 7;
         args = sessionArguments(options, L"r.json", L"", L"");
-        const std::vector<std::wstring> settings{L"--auto-launch", L"--seconds", L"0", L"--size", L"0",
-                                                 L"--swing-speed", L"32", L"--output", L"r.json", L"--snap-turn",
+        const std::vector<std::wstring> settings{L"--auto-launch", L"--seconds", L"0", L"--swing-speed", L"32",
+                                                 L"--output", L"r.json", L"--render-scale", L"125", L"--snap-turn",
                                                  L"45", L"--smooth-turn", L"120", L"--haptics", L"0",
                                                  L"--screen-size", L"2"};
         check(args == settings, "the VR settings, the screen size capped at large");
+        options = {};
+        options.renderScale = 10;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 9 && args[7] == L"--render-scale" && args[8] == L"50", "the render scale at least 50%");
+    });
+    test("the headset check's eye size and the memory larger eyes take", [] {
+        const char* probe = "Headset available: Oculus Quest3; position tracking=1; orientation tracking=1. No session "
+                            "was started.\r\nRecommended eye 0: 2496x2688\r\nRecommended eye 1: 2496x2688\r\n";
+        const auto eye = recommendedEye(probe);
+        check(eye && (*eye)[0] == 2496 && (*eye)[1] == 2688, "the probe's first eye");
+        check(!recommendedEye("Headset available: x.\n") && !recommendedEye("Recommended eye 0: 0x2688\n") &&
+                  !recommendedEye("Recommended eye 0: 2496 x 2688\n") &&
+                  !recommendedEye("Not Recommended eye 0: 2496x2688\n"),
+              "no size, an invalid one, another format, another line");
+        check(vrCommitGb(19000, 150, {3072, 3264}) == 19000.0 / 1024, "VR_COMMIT_MB at its own eye size");
+        check(vrCommitGb(19000, 150, {2496, 2688}) == 19000.0 / 1024, "never less for smaller eyes");
+        const double larger = vrCommitGb(19000, 150, {4608, 4896});
+        check(larger > 22.0 && larger < 22.1, "150% of 3072 x 3264: 2 x 12.5 megapixels more at 150 bytes");
     });
     test("what the VR settings were left at in the headset becomes the next session's options", [] {
         SessionOptions options;

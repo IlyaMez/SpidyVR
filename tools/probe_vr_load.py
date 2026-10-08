@@ -10,8 +10,9 @@ At the player's current spot, in phases:
     after      the game alone again, once the eyes have left the render list
 
 Each phase reports the game's frame rate (frames counted by spidy_render_memory.dll), its per-frame
-render memory, GPU utilization from nvidia-smi, the game's busiest threads (CPU time of each, in
-percent of one core), the whole PC's CPU use, and the game's disk reads. A thread near 100% of a core
+render memory, GPU utilization and video memory in use from nvidia-smi, what Windows has committed to
+the game, the game's busiest threads (CPU time of each, in percent of one core), the whole PC's CPU use,
+and the game's disk reads. A thread near 100% of a core
 while the GPU is well below 100% means the game waits on that thread; a GPU near 100% means pixels or
 draw work on the GPU set the frame rate.
 
@@ -34,8 +35,8 @@ from capture_game_state import Game, find_game, open_process, close
 from observe_game import call_remote, call_with_payload, modules, write
 from probe_game_screen import game_window, user32
 from probe_stereo import snapshot as stereo_snapshot, frame_snapshot, render_memory_snapshot
-from probe_stereo_gpu import discover_queue, snapshot as gpu_snapshot
-from run_game_vr import rgb_rows, write_rgb_png
+from probe_stereo_gpu import MAX_EYE_SIZE, discover_queue, snapshot as gpu_snapshot
+from run_game_vr import process_commit_mb, rgb_rows, write_rgb_png
 from vr_launcher import enlarge_render_memory
 
 HEAD = 1.6        # eye height above the feet, metres
@@ -128,13 +129,15 @@ class Threads:
 
 
 class Gpu:
-    """nvidia-smi samples: utilization (share of time a kernel ran), graphics clock, board power."""
+    """nvidia-smi samples: utilization (share of time a kernel ran), graphics clock, board power, video memory
+    in use (MB, every process's)."""
 
     def __init__(self):
         self.samples = []
         try:
             self.process = subprocess.Popen(
-                ['nvidia-smi', '--query-gpu=utilization.gpu,clocks.gr,power.draw', '--format=csv,noheader,nounits',
+                ['nvidia-smi', '--query-gpu=utilization.gpu,clocks.gr,power.draw,memory.used',
+                 '--format=csv,noheader,nounits',
                  '-lms', '100'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         except OSError:
             self.process = None
@@ -144,10 +147,10 @@ class Gpu:
     def read(self):
         for line in self.process.stdout:
             try:
-                utilization, clock, power = (float(x) for x in line.split(','))
+                utilization, clock, power, memory = (float(x) for x in line.split(','))
             except ValueError:
                 continue
-            self.samples.append((time.perf_counter(), utilization, clock, power))
+            self.samples.append((time.perf_counter(), utilization, clock, power, memory))
 
     def window(self, start, end):
         return [s for s in self.samples if start <= s[0] <= end]
@@ -296,6 +299,8 @@ def summarize(name, samples, gpu, threads, cores, settle):
         gpu_utilization_min=min((s[1] for s in used), default=None),
         gpu_clock_mhz=round(sum(s[2] for s in used)/len(used)) if used else None,
         gpu_power_w=round(sum(s[3] for s in used)/len(used)) if used else None,
+        gpu_memory_mb=round(max(s[4] for s in used)) if used else None,
+        game_commit_mb=max((s['commit_mb'] for s in kept if s['commit_mb'] is not None), default=None),
         game_cpu_percent_of_pc=round(sum(p for p, _ in per_thread)/cores, 1),
         pc_cpu_percent=round(100*(total-idle)/total, 1) if total else None,
         disk_read_mb_per_s=round((last['read_bytes']-first['read_bytes'])/seconds/2**20, 1),
@@ -317,6 +322,8 @@ def main():
                         'with and without it (--gpu capture)')
     p.add_argument('--profile-threads', default='',
                    help='comma-separated thread ids to sample during the vr phase (from an earlier report)')
+    p.add_argument('--headings', type=int, choices=(1, 2, 3, 4), default=4,
+                   help='headings the shots phase saves, a quarter turn apart (large eyes take a while each)')
     p.add_argument('--gpu', choices=('staged', 'none', 'capture'), default='staged',
                    help="Spidy's GPU bridge, which starts once per game process: staged copies each eye pair as "
                         'VR does; capture reads every pair back for the shots phase, which costs GPU time')
@@ -324,8 +331,8 @@ def main():
     a = p.parse_args()
     phases = a.phases.split(',')
     known = {'stock', 'vr', 'turn', 'narrow', 'after', 'vr_off', 'turn_off', 'narrow_off', 'shots'}
-    if not all(64 <= x <= 4096 for x in (a.width, a.height)) or not set(phases) <= known:
-        p.error('Eye sizes are 64..4096; phases are ' + ', '.join(sorted(known)))
+    if not all(64 <= x <= MAX_EYE_SIZE for x in (a.width, a.height)) or not set(phases) <= known:
+        p.error(f'Eye sizes are 64..{MAX_EYE_SIZE}; phases are ' + ', '.join(sorted(known)))
     if ('shots' in phases) != (a.gpu == 'capture'):
         p.error('The shots phase and --gpu capture go together')
     game = Game(find_game())
@@ -372,7 +379,7 @@ def main():
             frames = frame_snapshot(game, eyes_dll['SpidyStereoFrames']) if eyes_on else None
             k32.GetProcessIoCounters(game.handle, c.byref(io))
             return dict(t=time.perf_counter(), frames=memory['frames'] if memory else 0,
-                        frame_mb=memory['last_frame_mb'] if memory else None,
+                        frame_mb=memory['last_frame_mb'] if memory else None, commit_mb=process_commit_mb(game.pid),
                         pairs=frames['left_copies'] if frames else None,
                         threads=threads.sample(), system=system_times(), read_bytes=io.read_bytes)
 
@@ -474,7 +481,7 @@ def main():
             folder.mkdir(parents=True, exist_ok=True)
             base_angle = math.atan2(heading[2], heading[0])
             found = []
-            for quarter in range(4):
+            for quarter in range(a.headings):
                 angle = base_angle+quarter*math.pi/2
                 look = (math.cos(angle), 0., math.sin(angle))
                 images, memory = {}, {}

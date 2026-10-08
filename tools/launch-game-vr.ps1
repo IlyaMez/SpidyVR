@@ -1,6 +1,7 @@
 param(
     [ValidateRange(0,25)][int]$Seconds=0,
-    [ValidateRange(0,4096)][int]$Size=0,
+    [ValidateRange(0,8192)][int]$Size=0,
+    [ValidateRange(50,200)][int]$RenderScale=100,
     [ValidateRange(1,65)][float]$SwingSpeed=32,
     [ValidateRange(0,90)][int]$SnapTurn=30,
     [ValidateRange(0,360)][int]$SmoothTurn=0,
@@ -37,12 +38,14 @@ foreach($name in @('spidy_headset_probe.exe','spidy_bridge.dll','spidy_render_pr
     $requiredFile=Join-Path $projectRoot "build\windows-ninja\$name"
     if(-not(Test-Path -LiteralPath $requiredFile)) { throw 'Build first with tools\build.ps1 -Observer.' }
 }
-if($Seconds -eq 1 -or ($Size -gt 0 -and $Size -lt 64)) { throw 'Use 0 or 2..25 seconds and 0 or 64..4096 pixels.' }
+if($Seconds -eq 1 -or ($Size -gt 0 -and $Size -lt 64)) { throw 'Use 0 or 2..25 seconds and 0 or 64..8192 pixels.' }
+if($Size -and $RenderScale -ne 100) { throw 'Use -Size or -RenderScale, not both.' }
 Write-Host 'Spidy VR - connect your headset before starting (Quest 3: Virtual Desktop or Steam Link; SteamVR headsets: start SteamVR).'
 if($XrRuntime) { Write-Host "VR runtime: $XrRuntime." }
 else { Write-Host 'VR runtime: the one your headset is connected to (add -XrRuntime <manifest> to choose).' }
 if($Size) { Write-Host "Eye resolution override: $Size x $Size." }
-else { Write-Host "Eye resolution: the VR runtime's recommendation." }
+elseif($RenderScale -ne 100) { Write-Host "Eye resolution: $RenderScale% of the VR runtime's recommendation, per side." }
+else { Write-Host "Eye resolution: the VR runtime's recommendation (add -RenderScale 125 for sharper, slower images)." }
 if($Seconds) { Write-Host "Timed test: $Seconds seconds." }
 else { Write-Host 'VR stays active until you close the game or press Ctrl+C here.' }
 Write-Host 'VR starts with the game: its intro, menus, loading and cutscenes show on a screen in the headset.'
@@ -111,6 +114,7 @@ if($SnapTurn -ne 30) { Write-Host "Snap turn: $SnapTurn degrees (0: off)." }
 if($SmoothTurn -ne 0) { Write-Host "Smooth turn: $SmoothTurn degrees a second (replaces snap turning)." }
 if($Haptics -ne 100) { Write-Host "Controller vibration: $Haptics%." }
 $screenIndex=@{Small=0;Medium=1;Large=2}[$ScreenSize]
-$captureArgs+=@('--snap-turn',$SnapTurn,'--smooth-turn',$SmoothTurn,'--haptics',$Haptics,'--screen-size',$screenIndex)
+$captureArgs+=@('--snap-turn',$SnapTurn,'--smooth-turn',$SmoothTurn,'--haptics',$Haptics,'--screen-size',$screenIndex,
+               '--render-scale',$RenderScale)
 & $Python (Join-Path $PSScriptRoot 'run_game_vr.py') --seconds $Seconds --size $Size --swing-speed $SwingSpeed --output $report @captureArgs
 exit $LASTEXITCODE

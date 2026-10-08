@@ -54,8 +54,6 @@ void handCursor() {
         ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
 }
 
-constexpr const char* kEyeSizes[] = {"Headset default", "2048 x 2048", "1792 x 1792", "1536 x 1536", "1280 x 1280"};
-constexpr int kEyeValues[] = {0, 2048, 1792, 1536, 1280};
 // The steps the game's Settings offer too (SPIDY VR, vr_settings.hpp).
 constexpr const char* kSnapTurns[] = {"Off", "15\xC2\xB0", "30\xC2\xB0", "45\xC2\xB0", "60\xC2\xB0", "90\xC2\xB0"};
 constexpr int kSnapValues[] = {0, 15, 30, 45, 60, 90};
@@ -188,6 +186,15 @@ const Runtime* App::runtime() {
     return nullptr;
 }
 
+std::array<uint32_t, 2> App::eyeSize() {
+    const auto eye = headset_.eye().value_or(std::array<uint32_t, 2>{3072, 3264});
+    return spidy::scaledEyeSize(eye[0], eye[1], static_cast<uint32_t>(settings_.options.renderScale));
+}
+
+double App::neededCommitGb() {
+    return spidy::launcher::vrCommitGb(scan_.neededCommitGb * 1024, scan_.eyeCommitBytes, eyeSize());
+}
+
 // A chosen runtime that is no longer installed gives way to Automatic.
 void App::chooseDefaultRuntime() {
     if (runtime() || settings_.runtime == kAutoRuntime || scan_.runtimes.empty())
@@ -218,7 +225,7 @@ std::vector<std::string> App::blockers() {
 
 void App::start(bool memoryConfirmed) {
     startError_.clear();
-    if (!memoryConfirmed && scan_.freeCommitGb > 0 && scan_.freeCommitGb < scan_.neededCommitGb) {
+    if (!memoryConfirmed && scan_.freeCommitGb > 0 && scan_.freeCommitGb < neededCommitGb()) {
         wantLowMemory_ = true;
         return;
     }
@@ -786,12 +793,13 @@ void App::setupCard(float width) {
         });
     }
     const Outcome install = vcInstall_.state();
-    const bool memoryOk = scan_.freeCommitGb >= scan_.neededCommitGb;
+    const double neededGb = neededCommitGb();
+    const bool memoryOk = scan_.freeCommitGb >= neededGb;
     const bool filesOk = !scan_.root.empty() && scan_.missing.empty() && !scan_.python.empty() && scan_.writable;
     if (scan_.done && scan_.vcCurrent && memoryOk && filesOk && install != Outcome::running && install != Outcome::warning) {
         const std::string detail =
             format("Visual C++ runtime %s  \xC2\xB7  %.0f GB free for programs (VR takes about %.0f)  \xC2\xB7  Python %s",
-                   scan_.vcVersion.c_str(), scan_.freeCommitGb, scan_.neededCommitGb,
+                   scan_.vcVersion.c_str(), scan_.freeCommitGb, neededGb,
                    scan_.pythonVersion.empty() ? "found" : scan_.pythonVersion.c_str());
         setupRow(Mark::ok, "Windows, memory and Spidy's files", detail, S(98), [&] {
             if (secondaryButton("Open folder", S(98)))
@@ -837,13 +845,12 @@ void App::setupCard(float width) {
         Mark mark = Mark::busy;
         std::string detail = "Checking...";
         if (scan_.done) {
-            const bool enough = scan_.freeCommitGb >= scan_.neededCommitGb;
-            mark = enough ? Mark::ok : Mark::warning;
-            detail = enough ? format("%.0f GB available for programs; the game in VR takes about %.0f GB.", scan_.freeCommitGb,
-                                     scan_.neededCommitGb)
-                            : format("Only %.1f GB available for programs; the game in VR takes about %.0f GB. Close "
-                                     "browsers, chat apps and other launchers, or enlarge the Windows page file.",
-                                     scan_.freeCommitGb, scan_.neededCommitGb);
+            mark = memoryOk ? Mark::ok : Mark::warning;
+            detail = memoryOk ? format("%.0f GB available for programs; the game in VR takes about %.0f GB.",
+                                       scan_.freeCommitGb, neededGb)
+                              : format("Only %.1f GB available for programs; the game in VR takes about %.0f GB. Close "
+                                       "browsers, chat apps and other launchers, or enlarge the Windows page file.",
+                                       scan_.freeCommitGb, neededGb);
         }
         setupRow(mark, "Memory", detail, 0, {});
     }
@@ -932,14 +939,21 @@ void App::optionsCard(ImVec2 size) {
             changed = true;
         }
     });
-    option("Eye resolution", "Lower is faster; default is the headset's.", S(150), [&] {
-        int index = 0;
-        for (int i = 0; i < static_cast<int>(std::size(kEyeValues)); ++i)
-            if (kEyeValues[i] == o.eyeSize)
-                index = i;
+    // Percent of the headset's own size, so no choice looks sharper than it is; with the headset checked,
+    // the pixels it makes.
+    std::string resolutionHelp = "Of the headset's own, per side. Higher is sharper; lower is faster.";
+    if (const auto eye = headset_.eye()) {
+        const auto rendered = eyeSize();
+        resolutionHelp = format("%u x %u per eye; the headset asks for %u x %u. Higher is sharper; lower is faster.",
+                                rendered[0], rendered[1], (*eye)[0], (*eye)[1]);
+    }
+    if (o.renderScale > 100)
+        resolutionHelp += " Costs frame rate and memory.";
+    option("Render resolution", resolutionHelp.c_str(), S(150), [&] {
         ImGui::PushFont(fonts_.semibold, 13.5f);
-        if (ImGui::Combo("##eyes", &index, kEyeSizes, static_cast<int>(std::size(kEyeSizes)))) {
-            o.eyeSize = kEyeValues[index];
+        if (ImGui::SliderInt("##resolution", &o.renderScale, static_cast<int>(spidy::minimumRenderScale),
+                             static_cast<int>(spidy::maximumRenderScale), "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
+            o.renderScale = (o.renderScale + 2) / 5 * 5;
             changed = true;
         }
         ImGui::PopFont();
@@ -1393,7 +1407,7 @@ void App::modals() {
                format("Windows can promise programs only %.1f GB more memory, and the game in VR takes about %.0f GB. "
                       "Close browsers, chat apps and other launchers, or enlarge the Windows page file; otherwise the "
                       "game may stall or crash.",
-                      scan_.freeCommitGb, scan_.neededCommitGb),
+                      scan_.freeCommitGb, neededCommitGb()),
                "Start anyway", "Cancel") == 1)
         start(true);
     if (dialog("VR is running", "Closing Spidy stops VR first: it restores the game and saves the session report. The "

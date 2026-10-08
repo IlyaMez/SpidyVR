@@ -31,7 +31,7 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 12, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 13, bytes = sizeof(XrConfig), pid{};
     // record and mover are no longer used: VR starts with the game, before
     // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
@@ -55,8 +55,11 @@ struct XrConfig {
     // controller vibration in percent, the game screen's size (0-2), degrees
     // a second of smooth turning (0: the stick snap turns).
     uint32_t snapTurn = 30, haptics = 100, screenSize = 1, smoothTurn{};
+    // Eye resolution in percent of the runtime's recommendation, per side
+    // (eye_resolution.hpp; with eyeSize set, 100). spare is 0.
+    uint32_t renderScale = 100, spare{};
 };
-static_assert(sizeof(XrConfig) == 624);
+static_assert(sizeof(XrConfig) == 632);
 // Why the last frame had no gameplay (XrData::gate bits).
 enum GateReason : uint32_t {
     gateNoPlayer = 1,     // no save loaded, or a level change in progress
@@ -232,7 +235,7 @@ DWORD WINAPI run(void*) {
         XrRuntime runtime;
         {
             RuntimeSelection selected(config.runtime);
-            runtime.initialize(device.Get(), queue, config.eyeSize);
+            runtime.initialize(device.Get(), queue, config.eyeSize, config.renderScale);
         }
         D3D12Renderer overlay;
         overlay.initialize(device.Get(), queue);
@@ -300,6 +303,11 @@ DWORD WINAPI run(void*) {
         bool flatScreen{};
         Pose screenPose{};
         const auto dimensions = runtime.eyeDimensions();
+        // Aim markers are drawn so many pixels wide: above the headset's own
+        // resolution they keep the size they have at it.
+        const auto recommended = runtime.recommendedDimensions();
+        const float markerPixels =
+            recommended[0] ? std::max(1.f, static_cast<float>(dimensions[0]) / static_cast<float>(recommended[0])) : 1.f;
         const auto moduleDuration = config.durationMs ? config.durationMs + 3000 : 0;
         {
             std::lock_guard lock(telemetry);
@@ -1065,7 +1073,7 @@ DWORD WINAPI run(void*) {
                                                                                     : 2.f;
                             if (!(away >= nearest))
                                 continue;
-                            appendAimMarker(vertices, marker, viewer, pixelAngle);
+                            appendAimMarker(vertices, marker, viewer, pixelAngle * markerPixels);
                             ++markersDrawn;
                         }
                         std::array<D3D12Renderer::ViewTarget, 2> overlayViews;
@@ -1254,7 +1262,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 12 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 13 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
@@ -1262,7 +1270,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
         config.screenSize > 2 || config.smoothTurn > 360 ||
         !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 || config.swingSpeed > 65 ||
         (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||
-        (config.eyeSize && !validEyeSize(config.eyeSize)))
+        (config.eyeSize && !validEyeSize(config.eyeSize)) || !validRenderScale(config.renderScale) ||
+        (config.eyeSize && config.renderScale != 100) || config.spare)
         return 1001;
     auto module = reinterpret_cast<HMODULE>(config.bridgeModule);
     submitInput = reinterpret_cast<BridgeCall>(GetProcAddress(module, "SpidySubmit"));

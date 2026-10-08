@@ -50,13 +50,14 @@ void XrRuntime::initialize(D3D12Renderer& renderer, bool probeOnly) {
         },
         probeOnly, false);
 }
-void XrRuntime::initialize(ID3D12Device* device, ID3D12CommandQueue* queue, unsigned eyeSize) {
+void XrRuntime::initialize(ID3D12Device* device, ID3D12CommandQueue* queue, unsigned eyeSize,
+                           unsigned renderScale) {
     initialize([=](const XrGraphicsRequirementsD3D12KHR&) { return Graphics{device, queue}; }, false, true,
-               eyeSize);
+               eyeSize, renderScale);
 }
 void XrRuntime::initialize(
     const std::function<Graphics(const XrGraphicsRequirementsD3D12KHR&)>& createGraphics, bool probeOnly,
-    bool copyDestination, unsigned eyeSize) {
+    bool copyDestination, unsigned eyeSize, unsigned renderScale) {
     if (instance_)
         throw std::logic_error("OpenXR runtime already initialized");
     uint32_t count{};
@@ -172,15 +173,23 @@ void XrRuntime::initialize(
         throw std::runtime_error("No supported color swapchain format");
     for (unsigned i = 0; i < 2; ++i) {
         auto& e = eyes_[i];
-        e.width = views[i].recommendedImageRectWidth;
-        e.height = views[i].recommendedImageRectHeight;
+        const auto& v = views[i];
+        e.recommendedWidth = v.recommendedImageRectWidth;
+        e.recommendedHeight = v.recommendedImageRectHeight;
         if (eyeSize) {
-            if (eyeSize < 64 || eyeSize > views[i].maxImageRectWidth || eyeSize > views[i].maxImageRectHeight)
+            if (eyeSize < 64 || eyeSize > v.maxImageRectWidth || eyeSize > v.maxImageRectHeight)
                 throw std::invalid_argument("Requested native eye size exceeds runtime limits");
             e.width = e.height = eyeSize;
+        } else {
+            // A runtime's largest is never below its own recommendation.
+            const auto size = scaledEyeSize(v.recommendedImageRectWidth, v.recommendedImageRectHeight, renderScale,
+                                            std::max(v.maxImageRectWidth, v.recommendedImageRectWidth),
+                                            std::max(v.maxImageRectHeight, v.recommendedImageRectHeight));
+            e.width = size[0];
+            e.height = size[1];
         }
         if (!validEyeSize(e.width) || !validEyeSize(e.height))
-            throw std::runtime_error("Runtime eye dimensions exceed supported 64..4096 range");
+            throw std::runtime_error("Runtime eye dimensions exceed supported 64..8192 range");
         if (copyDestination && i && (e.width != eyes_[0].width || e.height != eyes_[0].height))
             throw std::runtime_error("Native paired views require matching eye dimensions");
         XrSwapchainCreateInfo sc{XR_TYPE_SWAPCHAIN_CREATE_INFO};
@@ -198,7 +207,9 @@ void XrRuntime::initialize(
         xr(xrEnumerateSwapchainImages(e.swapchain, count, &count,
                                       reinterpret_cast<XrSwapchainImageBaseHeader*>(e.images.data())),
            "Read eye images");
-        std::cout << "Eye " << i << ": " << e.width << 'x' << e.height << " (" << count << " images)\n";
+        std::cout << "Eye " << i << ": " << e.width << 'x' << e.height << " (" << count << " images; runtime "
+                  << v.recommendedImageRectWidth << 'x' << v.recommendedImageRectHeight << " recommended, "
+                  << v.maxImageRectWidth << 'x' << v.maxImageRectHeight << " largest)\n";
         for (unsigned j = 0; j < e.images.size(); ++j) {
             const auto d = e.images[j].texture->GetDesc();
             std::cout << "Image " << i << '/' << j << ": format=" << d.Format

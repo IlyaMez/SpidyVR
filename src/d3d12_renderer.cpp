@@ -1,4 +1,5 @@
 #include "spidy/d3d12_renderer.hpp"
+#include <bit>
 #include <cstring>
 #include <d3dcompiler.h>
 #include <stdexcept>
@@ -422,7 +423,7 @@ void D3D12Renderer::prepareBlit(DXGI_FORMAT targetFormat) {
         parameters[0].DescriptorTable = {1, &range};
         parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
         parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-        parameters[1].Constants.Num32BitValues = 2;
+        parameters[1].Constants.Num32BitValues = 4;
         parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
         D3D12_STATIC_SAMPLER_DESC sampler{};
         sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
@@ -448,18 +449,18 @@ void D3D12Renderer::prepareBlit(DXGI_FORMAT targetFormat) {
         const char* shader = R"(
 Texture2D source : register(t0);
 SamplerState scaled : register(s0);
-cbuffer Mode : register(b0) { uint linearSource; uint srgbTarget; };
-struct Out { float4 position : SV_POSITION; float2 uv : TEXCOORD; };
-Out vs(uint id : SV_VertexID) {
-    Out o;
-    o.uv = float2((id << 1) & 2, id & 2);
-    o.position = float4(o.uv * float2(2, -2) + float2(-1, 1), 0, 1);
-    return o;
+cbuffer Mode : register(b0) { uint linearSource; uint srgbTarget; float2 targetPixel; };
+float4 vs(uint id : SV_VertexID) : SV_POSITION {
+    const float2 corner = float2((id << 1) & 2, id & 2);
+    return float4(corner * float2(2, -2) + float2(-1, 1), 0, 1);
 }
 float3 decode(float3 c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
 float3 encode(float3 c) { return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1 / 2.4) - 0.055; }
-float4 ps(Out i) : SV_TARGET {
-    float3 c = source.SampleLevel(scaled, i.uv, 0).rgb;
+float4 ps(float4 position : SV_POSITION) : SV_TARGET {
+    // From the pixel's own centre: a coordinate interpolated across the
+    // screen-covering triangle drifts off the source's texel centres on
+    // large targets (4608 x 4896 eyes changed copied values by 2 levels).
+    float3 c = source.SampleLevel(scaled, position.xy * targetPixel, 0).rgb;
     if (linearSource)
         c = srgbTarget ? max(c, 0) : encode(saturate(c));
     else if (srgbTarget)
@@ -515,8 +516,10 @@ void D3D12Renderer::recordBlit(ID3D12Resource* source, DXGI_FORMAT sourceView, b
     ID3D12DescriptorHeap* heaps[] = {srv_.Get()};
     list_->SetDescriptorHeaps(1, heaps);
     list_->SetGraphicsRootDescriptorTable(0, srv_->GetGPUDescriptorHandleForHeapStart());
-    const UINT mode[] = {linearSource ? 1u : 0u, srgb(target.format) ? 1u : 0u};
-    list_->SetGraphicsRoot32BitConstants(1, 2, mode, 0);
+    const UINT mode[] = {linearSource ? 1u : 0u, srgb(target.format) ? 1u : 0u,
+                         std::bit_cast<UINT>(1.f / static_cast<float>(target.width)),
+                         std::bit_cast<UINT>(1.f / static_cast<float>(target.height))};
+    list_->SetGraphicsRoot32BitConstants(1, 4, mode, 0);
     list_->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
     D3D12_VIEWPORT viewport{0, 0, static_cast<float>(target.width), static_cast<float>(target.height), 0, 1};
     D3D12_RECT rect{0, 0, static_cast<LONG>(target.width), static_cast<LONG>(target.height)};

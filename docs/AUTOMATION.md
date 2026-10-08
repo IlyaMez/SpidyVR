@@ -100,7 +100,8 @@ VR and the native game camera on a flat quad in the headset.
 
 `Test Spidy Game VR.cmd` selects 20 seconds at 1536-square resolution. Direct
 options: `tools/launch-game-vr.ps1 -Seconds 20 -Size 1536 -AttachOnly`, or omit
-`-AttachOnly` to launch/wait automatically. Size zero uses recommended dimensions;
+`-AttachOnly` to launch/wait automatically. Size zero uses recommended dimensions
+(times `-RenderScale`, 100% by default);
 seconds zero uses a heartbeat-controlled session until game exit or Ctrl+C.
 For validation beyond the old timeout, `run_game_vr.py --auto-launch --stop-after 45`
 exercises the untimed worker with a bounded external stop.
@@ -388,8 +389,12 @@ These measurements help separate runtime pacing from engine and GPU dependencies
 They are not GPU timestamp measurements. A fresh game process is required after
 rebuilding. Use `-Size 512` for a comparison at the original resolution, or the
 `-Size 1536` to reproduce that comparison. Normal launches use the runtime's
-recommended dimensions. Native and OpenXR image checks now allow up
-to 4096 pixels per dimension, subject to runtime limits.
+recommended dimensions times the render scale (`-RenderScale`, 50-200%).
+Native and OpenXR image checks allow up to 8192 pixels per dimension (4096
+before October 8), subject to runtime limits. `tools/probe_vr_load.py
+--width 4608 --height 4896 --views 29` measures larger eyes in the game
+without a headset; its phases report video memory in use and the game's
+commit, and `--headings 1` keeps a capture run's shots phase short.
 
 The 1536-square test `game-vr-20261004-133248.json` confirmed VSync Off but still
 spent 29.76 ms of its 31.92 ms mean frame in the matching-pair wait. The staged

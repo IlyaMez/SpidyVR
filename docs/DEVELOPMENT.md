@@ -132,9 +132,10 @@ without a commit of its own.
 - `Launch Spidy VR.cmd`: checks the headset, starts Steam Spider-Man with its
   launcher skipped, and attaches VR when your save has loaded. It stays running
   until game exit or Ctrl+C in its console. Eye resolution follows the active
-  runtime recommendation. Click both thumbsticks to switch between VR and a
-  flat game screen inside the headset. These new launch/toggle features are
-  built and locally tested; headset validation is pending.
+  runtime recommendation, times `-RenderScale`. Click both thumbsticks to
+  switch between VR and a flat game screen inside the headset. These new
+  launch/toggle features are built and locally tested; headset validation is
+  pending.
 - `spidy_render_memory.dll`: replaces the game's 128 MB per-frame render memory
   with a 512 MB ring where the game creates it, and reports how much of it
   frames use. The VR launcher loads it while the game starts.
@@ -369,8 +370,22 @@ was wrong too.
 Resolution defaults to the runtime's recommended width and height for each eye,
 which can change with your Virtual Desktop quality preset. These are the
 [OpenXR recommended render dimensions](https://registry.khronos.org/OpenXR/specs/1.1/man/html/XrViewConfigurationView.html),
-not a fixed 1536-square image. The launcher prints the selected dimensions.
-For an explicit square override, use `tools/launch-game-vr.ps1 -Size 2048`.
+not a fixed 1536-square image. The render scale multiplies each side by 50% to
+200% (the launcher's "Render resolution", `-RenderScale`, `--render-scale`):
+above 100% the image is supersampled, sharper and less jagged, for frame rate
+and memory. Scaled sizes are multiples of 8, at most the runtime's
+`maxImageRect` and 8192 a side, keeping the recommendation's shape
+(`spidy::scaledEyeSize`). The launcher prints the selected dimensions and what
+they are of. For an explicit square size instead, use
+`tools/launch-game-vr.ps1 -Size 2048`.
+
+On this PC (RTX 5090, the user's save, without a headset, October 8) 150% of
+3072 x 3264 rendered 66 frames a second looking ahead and 71 turning, against
+90 and 103 at 100%, with the GPU 92% busy; it took 2.5 GB more video memory
+and as much more commit, about 108 bytes per extra eye pixel
+(`EYE_COMMIT_BYTES` in `run_game_vr.py`, which the memory warning and the
+launcher's memory figure use). Aim markers are drawn at their 100% size
+whatever the scale.
 
 The new launcher, automatic dimensions, and thumbstick toggle are built. Their
 combined headset check was deferred at the user's request. Returning to VR
@@ -388,7 +403,8 @@ reattaching after a stopped session or a rebuilt DLL.
 | `-SmoothTurn 120` | Smooth turning in degrees a second at full tilt, instead of snap turning (0-360; 0, the default, snap turns) |
 | `-Haptics 100` | Controller vibration in percent; 0 turns it off |
 | `-ScreenSize Medium` | Size of the game screen in the headset: Small, Medium or Large |
-| `-Size 2048` | Square eye resolution instead of the runtime's recommendation |
+| `-RenderScale 125` | Eye resolution in percent of the runtime's recommendation, per side (50-200; 100 by default) |
+| `-Size 2048` | Square eye resolution instead of the runtime's recommendation (not with `-RenderScale`) |
 | `-NoWebGrab` | Webs swing only; they do not catch props or thugs |
 | `-NoAirWebs` | A web that meets nothing within 100 m misses instead of holding in open air |
 | `-NoWebShooter` | The trigger only reels |
@@ -449,8 +465,8 @@ settings, including textures, shadows, level of detail, crowds, ray-traced
 reflections, ambient occlusion, anti-aliasing, and motion blur strength. For
 each eye, Spidy sets only:
 
-- the runtime-recommended resolution (3072 x 3264 in the latest session), with
-  private scene buffers at that size;
+- the runtime-recommended resolution (3072 x 3264 in the latest session) times
+  the render scale, with private scene buffers at that size;
 - the tracked eye pose and asymmetric headset lens, with zero lens jitter;
 - the active post-processing profile and the main camera's display path;
 - the main camera's current exposure, so both eyes share auto-exposure;
@@ -472,8 +488,8 @@ at 1290 x 540 it is about 3%. The October 5 morning session averaged 44 new
 stereo pairs per second at
 3072 x 3264 per eye with the headset at 120 Hz; about 40% of the frames sent to
 the headset repeated an earlier pair, which doubles fast-moving scenery. The
-largest cost is eye resolution: lower Virtual Desktop's quality preset, or
-use `tools\launch-game-vr.ps1 -Size 2048` for a square override. Ray-traced
+largest cost is eye resolution: lower Virtual Desktop's quality preset, or the
+render scale below 100%. Ray-traced
 reflections are computed for each eye. On this PC, motion blur, film grain, and
 sharpening are at their lowest stored value (1), and depth of field, vignette,
 chromatic aberration, and lens flares are off. The game also has a traversal

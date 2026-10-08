@@ -13,6 +13,9 @@ from probe_render import snapshot as render_snapshot
 from probe_stereo import snapshot as stereo_snapshot, frame_snapshot, motion_command
 from capture_stereo import write_png
 
+# The largest eye side Spidy's modules take (spidy::maximumEyeSize, eye_resolution.hpp).
+MAX_EYE_SIZE = 8192
+
 
 def snapshot(game, address):
     for _ in range(8):
@@ -90,7 +93,7 @@ def save_eye_images(game, final, output):
     if not final['fence'] or final['completed'] < final['fence'] or final['completed'] == 0xffffffffffffffff:
         raise RuntimeError('Eye image GPU work did not complete')
     width, height = final['width'], final['height']
-    if not 64 <= width <= 4096 or not 64 <= height <= 4096:
+    if not 64 <= width <= MAX_EYE_SIZE or not 64 <= height <= MAX_EYE_SIZE:
         raise RuntimeError('Unexpected eye capture dimensions')
     count = width*height*4
     result = {}
@@ -113,8 +116,8 @@ def main():
     p.add_argument('--size', type=int, default=512)
     p.add_argument('--output', type=pathlib.Path, default=ROOT/'reports/stereo-gpu-pairs.json')
     a = p.parse_args()
-    if not 2 <= a.seconds <= 10 or not 64 <= a.size <= 4096:
-        p.error('Use 2..10 seconds and 64..4096 pixels')
+    if not 2 <= a.seconds <= 10 or not 64 <= a.size <= MAX_EYE_SIZE:
+        p.error(f'Use 2..10 seconds and 64..{MAX_EYE_SIZE} pixels')
     game = Game(find_game())
     process = None
     exports = None

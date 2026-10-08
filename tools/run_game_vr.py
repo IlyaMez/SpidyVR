@@ -20,7 +20,7 @@ from capture_game_state import Game, find_game, open_process, close
 from bridge_game import ROOT, HOOKS, prepare, snapshot as bridge_snapshot
 from inspect_game import PE
 from observe_game import call_remote, call_with_payload, modules
-from probe_stereo_gpu import discover_queue, snapshot as gpu_snapshot, save_eye_images
+from probe_stereo_gpu import MAX_EYE_SIZE, discover_queue, snapshot as gpu_snapshot, save_eye_images
 from probe_stereo import frame_snapshot, render_memory_snapshot, snapshot as stereo_snapshot
 from probe_native_rays import snapshot as ray_snapshot
 from probe_game_swing import snapshot as swing_snapshot
@@ -37,6 +37,12 @@ GAME_HOOKS = (*HOOKS, 0x2e67010, 0x1fbe360, 0x1fbda50, 0xa7b3a0, 0x1f9db60,
 # What the game process commits in a VR session at 3072 x 3264 per eye (16.7-17.1 GB on October 5),
 # with Spidy's render memory ring and some room to grow.
 VR_COMMIT_MB = 19000
+# Larger eyes commit more: their scene buffers are video memory, which Windows commits for the game as
+# well. Bytes per pixel of the two eyes beyond 3072 x 3264 each: 105-109 on October 8, eyes of 4608 x 4896
+# against 3072 x 3264 in tools/probe_vr_load.py (2.5-2.6 GB more, in video memory too).
+EYE_COMMIT_BYTES = 110
+# The render scale's range in percent (spidy::minimumRenderScale and maximumRenderScale).
+RENDER_SCALES = (50, 200)
 # Eye snapshots kept per session (the newest), and the header fields saved with each.
 EYE_SHOTS = 72
 EYE_SHOT_FIELDS = ('count', 'generation', 'serial', 'width', 'height', 'flat_screen', 'speed_mps',
@@ -135,6 +141,41 @@ def game_commit_mb():
         return None
 
 
+def scaled_eye_size(width, height, percent, limit=MAX_EYE_SIZE):
+    """The eye size for `percent` of the runtime's recommended `width` x `height`, as spidy::scaledEyeSize
+    computes it: the recommendation itself at 100, else in multiples of 8, shrunk with its shape to fit
+    `limit` (the session's runtime may allow less)."""
+    w, h = float(width), float(height)
+    if percent != 100:
+        w = max(64., math.floor(w*percent/800+.5)*8)
+        h = max(64., math.floor(h*percent/800+.5)*8)
+    fit = min(1., min(limit, MAX_EYE_SIZE)/w, min(limit, MAX_EYE_SIZE)/h)
+    if fit < 1:
+        w, h = math.floor(w*fit/8+1e-6)*8, math.floor(h*fit/8+1e-6)*8
+    return int(w), int(h)
+
+
+def vr_commit_mb(recommended, percent=100, size=0):
+    """What the game in VR commits with eyes `size` pixels square, or `percent` of the `recommended` eye
+    size: VR_COMMIT_MB, and more for eyes larger than 3072 x 3264."""
+    width, height = (size, size) if size else scaled_eye_size(*recommended, percent) if recommended else (0, 0)
+    return VR_COMMIT_MB+max(0, 2*(width*height-3072*3264)*EYE_COMMIT_BYTES >> 20)
+
+
+def rendering_line(width, height, percent, size, recommended):
+    """The console's line on the eye size the session renders, beside what the headset asked for."""
+    line = f'Rendering {width} x {height} pixels per eye'
+    if size:
+        return f'{line} (a square size instead of the headset\'s).'
+    if not recommended:
+        return f'{line}.'
+    wanted = scaled_eye_size(*recommended, percent)
+    of = f"{percent}% of the headset's {recommended[0]} x {recommended[1]}"
+    if (width, height) == wanted:
+        return f'{line} ({of}).'
+    return f'{line} ({of} would be {wanted[0]} x {wanted[1]}, more than the VR runtime takes).'
+
+
 def commit_warning(free_mb, game_mb=None, needed_mb=VR_COMMIT_MB):
     """Text for the console when Windows has less memory left to promise than a VR session takes.
 
@@ -219,7 +260,9 @@ def preflight(requested):
     print(said, flush=True)
     headset = next((line[len('Headset available: '):].split(';')[0] for line in said.splitlines()
                     if line.startswith('Headset available: ')), None)
-    return manifest, dict(name=runtime, manifest=str(manifest), automatic=automatic, headset=headset)
+    eye = re.search(r'^Recommended eye 0: (\d+)x(\d+)', said, re.M)
+    return manifest, dict(name=runtime, manifest=str(manifest), automatic=automatic, headset=headset,
+                          recommended_eye=[int(eye[1]), int(eye[2])] if eye else None)
 
 
 class _Echo:
@@ -640,7 +683,8 @@ def save_eye_snapshot(game, address, shot, folder, name, view=544, crop=512):
     `crop` around a hand that holds a game web. Returns the file names, or None if the copy was replaced
     or unreadable."""
     width, height, pitch = shot['width'], shot['height'], shot['row_pitch']
-    if not (64 <= width <= 4096 and 64 <= height <= 4096 and width*4 <= pitch <= 4096*4+4096) or shot['pixels'] < 0x10000:
+    if not (64 <= width <= MAX_EYE_SIZE and 64 <= height <= MAX_EYE_SIZE and width*4 <= pitch <= MAX_EYE_SIZE*4+4096) \
+            or shot['pixels'] < 0x10000:
         return None
     size = pitch*(height-1)+width*4
     data = game.read(shot['pixels'], size)
@@ -761,6 +805,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--seconds', type=float, default=0,help='0 runs until game exit or Ctrl+C; 2..25 runs a timed test')
     p.add_argument('--size', type=int, default=0,help='0 uses the runtime recommendation; otherwise a square override')
+    p.add_argument('--render-scale', type=int, default=100,
+                   help="Eye resolution in percent of the runtime's recommendation, per side (50-200; default "
+                        '100). Above 100 is sharper and costs frame rate and memory.')
     p.add_argument('--auto-launch',action='store_true')
     p.add_argument('--stop-after',type=float,default=0,help='End an untimed session after this many seconds for validation')
     p.add_argument('--capture-images', action='store_true',help='Enable diagnostic CPU eye readback (adds overhead)')
@@ -799,8 +846,11 @@ def main():
     a = p.parse_args()
     if a.stop_after and (a.seconds or not 5<=a.stop_after<=300):
         p.error('--stop-after requires --seconds 0 and a value from 5 to 300')
-    if (a.seconds!=0 and not 2 <= a.seconds <= 25) or (a.size!=0 and not 64 <= a.size <= 4096) or not 1 <= a.swing_speed <= 65:
-        p.error('Use 0 or 2..25 seconds, 0 or 64..4096 pixels, and 1..65 m/s')
+    if (a.seconds!=0 and not 2 <= a.seconds <= 25) or (a.size!=0 and not 64 <= a.size <= MAX_EYE_SIZE) or \
+            not 1 <= a.swing_speed <= 65:
+        p.error(f'Use 0 or 2..25 seconds, 0 or 64..{MAX_EYE_SIZE} pixels, and 1..65 m/s')
+    if not RENDER_SCALES[0] <= a.render_scale <= RENDER_SCALES[1] or (a.size and a.render_scale != 100):
+        p.error('Use a render scale of %d..%d%%, and not with --size' % RENDER_SCALES)
     if not 0 <= a.snap_turn <= 90 or not 0 <= a.smooth_turn <= 360 or not 0 <= a.haptics <= 100:
         p.error('Use 0..90 degrees of snap turn, 0..360 degrees a second of smooth turn and 0..100% vibration')
     keep_console(a.output)
@@ -824,7 +874,8 @@ def session(a, startup):
     manifest, runtime = preflight(a.xr_runtime)
     startup.fields['xr_runtime'] = runtime
     startup.stage = 'starting the game'
-    announce_low_memory(commit_warning(free_commit_mb(), game_commit_mb()),
+    announce_low_memory(commit_warning(free_commit_mb(), game_commit_mb(),
+                                       vr_commit_mb(runtime['recommended_eye'], a.render_scale, a.size)),
                         bool(sys.stdin and sys.stdin.isatty()))
 
     def prepare_display():
@@ -902,7 +953,7 @@ def session(a, startup):
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
                                            'SpidyBodyData'))
-        config = struct.pack('<4I7Q2IfI', 0x53585243, 12, 624, game.pid, game.base, queue,
+        config = struct.pack('<4I7Q2IfI', 0x53585243, 13, 632, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
@@ -910,7 +961,8 @@ def session(a, startup):
                              (16 if a.no_eye_occlusion else 0) | (32 if a.no_body else 0) |
                              (64 if a.no_punch else 0) | (128 if a.no_aim_markers else 0) |
                              (256 if a.no_air_webs else 0) | (512 if a.no_web_shooter else 0)) + \
-            runtime_path(manifest) + struct.pack('<4I', a.snap_turn, a.haptics, a.screen_size, a.smooth_turn)
+            runtime_path(manifest) + struct.pack('<6I', a.snap_turn, a.haptics, a.screen_size, a.smooth_turn,
+                                                 a.render_scale, 0)
         startup.stage = 'starting VR'
         code = call_with_payload(process, xr['SpidyXrStart'], config)
         if code:
@@ -954,7 +1006,8 @@ def session(a, startup):
 
         def session_report(**extra):
             """Everything sampled so far. It is written however the session ends."""
-            return dict(pid=game.pid, eye_size=a.size, swing_speed=a.swing_speed, vr_settings=settings_start,
+            return dict(pid=game.pid, eye_size=a.size, render_scale=a.render_scale, swing_speed=a.swing_speed,
+                        vr_settings=settings_start,
                         xr_runtime=runtime, motion_hash=motion_hash,
                         xr_hash=xr_hash, ray_hash=ray_hash, samples=list(samples),
                         swing_samples=list(swing_samples), motion_samples=list(motion_samples),
@@ -1052,7 +1105,8 @@ def session(a, startup):
                     if pad_ignored(pad_watch, sample):
                         print(PAD_IGNORED, flush=True)
                     if sample['eye_width'] and not printed_dimensions:
-                        print(f"Rendering {sample['eye_width']} x {sample['eye_height']} pixels per eye.",flush=True)
+                        print(rendering_line(sample['eye_width'], sample['eye_height'], a.render_scale, a.size,
+                                             runtime['recommended_eye']), flush=True)
                         printed_dimensions=True
                     aim = ray_snapshot(game, rays['SpidyRayData'])
                     if aim and aim['serial'] and (not ray_samples or aim['serial'] != ray_samples[-1]['serial']):
@@ -1123,7 +1177,8 @@ def session(a, startup):
         final_render_memory = render_memory_snapshot(game, render_data) if render_data else None
         render_stop = call_remote(process, render_module['SpidyRenderMemoryStop']) if render_module else 0
         result = dict(pid=game.pid, module_base=hex(game.base), bridge_hash=bridge_hash, xr_hash=xr_hash,
-            eye_size=a.size,capture_images=a.capture_images,timing=timing_snapshot(game,xr['SpidyXrTimingData']),
+            eye_size=a.size,render_scale=a.render_scale,capture_images=a.capture_images,
+            timing=timing_snapshot(game,xr['SpidyXrTimingData']),
             ray_hash=ray_hash, ray_samples=list(ray_samples), rays=ray_snapshot(game, rays['SpidyRayData']),
             motion_hash=motion_hash, swing_speed=a.swing_speed, vr_settings=settings_start, xr_runtime=runtime,
             swing_samples=list(swing_samples),

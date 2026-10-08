@@ -2,10 +2,12 @@
 // Text handling for the Spidy launcher: Steam's VDF files, constants read from
 // the Python tools, command lines, and log lines. No Windows calls, so the
 // checks in tests/launcher_tests.cpp run anywhere.
+#include "eye_resolution.hpp"
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -151,6 +153,31 @@ inline std::string headsetSummary(std::string_view output, bool found) {
     return eye.empty() ? summary + "." : summary + " - " + eye + " per eye";
 }
 
+// The eye size the headset check's runtime recommends ("Recommended eye 0: 3072x3264").
+inline std::optional<std::array<uint32_t, 2>> recommendedEye(std::string_view output) {
+    constexpr std::string_view prefix = "Recommended eye 0: ";
+    const size_t at = output.find(prefix);
+    if (at == std::string_view::npos || (at && output[at - 1] != '\n'))
+        return std::nullopt;
+    const char* p = output.data() + at + prefix.size();
+    const char* end = output.data() + output.size();
+    std::array<uint32_t, 2> eye{};
+    auto [x, first] = std::from_chars(p, end, eye[0]);
+    if (first != std::errc() || x == end || *x != 'x')
+        return std::nullopt;
+    if (std::from_chars(x + 1, end, eye[1]).ec != std::errc() || !validEyeSize(eye[0]) || !validEyeSize(eye[1]))
+        return std::nullopt;
+    return eye;
+}
+
+// What the game in VR commits, in GB: `baseMb` (run_game_vr.py's VR_COMMIT_MB, measured at 3072 x 3264 per
+// eye) and `bytesPerPixel` (its EYE_COMMIT_BYTES) for each pixel of the two eyes beyond that, as its
+// vr_commit_mb counts it.
+inline double vrCommitGb(double baseMb, double bytesPerPixel, std::array<uint32_t, 2> eye) {
+    const double extra = 2 * (static_cast<double>(eye[0]) * eye[1] - 3072.0 * 3264) * bytesPerPixel / (1 << 20);
+    return (baseMb + std::max(0.0, extra)) / 1024;
+}
+
 // Quotes one argument so CommandLineToArgvW (and Python) read it back unchanged.
 inline std::wstring quoteArgument(std::wstring_view argument) {
     if (!argument.empty() && argument.find_first_of(L" \t\n\v\"") == std::wstring_view::npos)
@@ -181,7 +208,7 @@ struct SessionOptions {
     bool overlayWebs = false;
     bool smallWindow = true;
     bool stockMonitorView = false;
-    int eyeSize = 0; // 0: the runtime's recommendation
+    int renderScale = 100; // eye resolution in percent of the headset's recommendation, per side
     int swingSpeed = 32;
     bool body = true;  // your own body (Spider-Man's) instead of gloves
     bool punch = true; // fists punch thugs
@@ -199,9 +226,9 @@ struct SessionOptions {
 // that starts the game itself (or uses the one already running).
 inline std::vector<std::wstring> sessionArguments(const SessionOptions& options, std::wstring_view report,
                                                   std::wstring_view runtime, std::wstring_view stopEvent) {
-    std::vector<std::wstring> args{L"--auto-launch", L"--seconds", L"0", L"--size", std::to_wstring(options.eyeSize),
-                                   L"--swing-speed", std::to_wstring(std::clamp(options.swingSpeed, 1, 65)),
-                                   L"--output", std::wstring(report)};
+    std::vector<std::wstring> args{L"--auto-launch", L"--seconds", L"0", L"--swing-speed",
+                                   std::to_wstring(std::clamp(options.swingSpeed, 1, 65)), L"--output",
+                                   std::wstring(report)};
     if (options.overlayWebs)
         args.emplace_back(L"--overlay-webs");
     if (!options.webGrab)
@@ -220,8 +247,10 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
         args.emplace_back(L"--no-air-webs");
     if (!options.webShooter)
         args.emplace_back(L"--no-web-shooter");
-    // The game's Settings offer these too (SPIDY VR); the defaults go unsaid.
+    // The game's Settings offer these too (SPIDY VR), all but the render scale; the defaults go unsaid.
     const std::pair<int, std::pair<const wchar_t*, int>> settings[] = {
+        {std::clamp(options.renderScale, static_cast<int>(minimumRenderScale), static_cast<int>(maximumRenderScale)),
+         {L"--render-scale", 100}},
         {std::clamp(options.snapTurn, 0, 90), {L"--snap-turn", 30}},
         {std::clamp(options.smoothTurn, 0, 360), {L"--smooth-turn", 0}},
         {std::clamp(options.haptics, 0, 100), {L"--haptics", 100}},

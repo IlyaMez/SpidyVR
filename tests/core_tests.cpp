@@ -153,15 +153,16 @@ SwingConfig inert() {
 // A small humanoid in the game's joint layout (four rows: x, y, z axes, then
 // the position), facing +z with its left on +x, its rest pose a T-pose. With
 // oddFrames every joint frame is turned and the left side mirrored, as game
-// rigs do, so the solver cannot lean on joint axes.
+// rigs do, so the solver cannot lean on joint axes. With heroHand its hands
+// are Spider-Man's own (four fingers and heroThumbs).
 struct TestBody {
     std::vector<float> rest;
     body::Rig rig;
     Vec3 at(const std::vector<float>& pose,int joint) const {return {pose[joint*16+12],pose[joint*16+13],pose[joint*16+14]};}
 };
-TestBody testBody(bool oddFrames=false) {
+TestBody testBody(bool oddFrames=false,bool heroHand=false) {
     struct J {int parent;Vec3 p;};
-    const J joints[]={
+    std::vector<J> joints={
         {-1,{0,0,0}},{0,{0,1.f,0}},{1,{0,1.12f,0}},{2,{0,1.25f,0}},{3,{0,1.38f,0}},{4,{0,1.52f,0}},{5,{0,1.62f,0}},
         {6,{.032f,1.7f,.08f}},{6,{-.032f,1.7f,.08f}},
         {4,{.03f,1.47f,.02f}},{9,{.18f,1.46f,0}},{10,{.44f,1.46f,0}},{11,{.74f,1.46f,0}},{12,{.83f,1.46f,0}},
@@ -175,8 +176,36 @@ TestBody testBody(bool oddFrames=false) {
         // Its thumb, ahead of the palm: base, two joints, end.
         {12,{.76f,1.45f,.03f}},{34,{.78f,1.45f,.06f}},{35,{.8f,1.45f,.085f}},{36,{.82f,1.45f,.1f}},
     };
+    if(heroHand){
+        // Spider-Man's left hand at rest (the game's rig), turned so its fingers run along +x and the palm a rest
+        // pose is assumed to hold (down, across the fingers) is -y. Its own palm faces 30 degrees from there,
+        // toward the thumb. Its middle finger and thumb take the places of the small ones (and the hand's
+        // finger and thumb joints theirs); its index, ring and little fingers follow, then the right hand, the
+        // left's mirror image.
+        const Vec3 fingers[4][5]={
+            {{.7547f,1.4682f,.0254f},{.8261f,1.4679f,.0223f},{.8739f,1.4709f,.0272f},{.9036f,1.4727f,.0302f},{.931f,1.4743f,.0329f}},
+            {{.7521f,1.4625f,.008f},{.8226f,1.46f,0},{.8791f,1.4514f,-.0046f},{.9141f,1.4459f,-.0075f},{.9464f,1.441f,-.0102f}},
+            {{.7507f,1.4533f,-.0112f},{.8093f,1.4475f,-.0189f},{.8603f,1.4276f,-.0306f},{.8931f,1.4147f,-.0382f},{.9241f,1.4026f,-.0453f}},
+            {{.7469f,1.4398f,-.021f},{.7989f,1.4339f,-.0358f},{.8333f,1.4134f,-.0501f},{.8545f,1.4007f,-.0589f},{.8741f,1.3891f,-.0671f}}};
+        const Vec3 thumb[4]={{.7509f,1.4536f,.0366f},{.7913f,1.4578f,.0674f},{.8164f,1.4634f,.0953f},{.8359f,1.4701f,.1244f}};
+        joints[13].p=fingers[1][1];joints[14].p=thumb[0];
+        for(int k=0;k<5;++k)joints[29+k].p=fingers[1][k];
+        for(int k=0;k<4;++k)joints[34+k].p=thumb[k];
+        for(const int f:{0,2,3}){
+            const int first=static_cast<int>(joints.size());
+            for(int k=0;k<5;++k)joints.push_back({k?first+k-1:12,fingers[f][k]});
+        }
+        const auto mirror=[](Vec3 v){return Vec3{-v.x,v.y,v.z};};
+        joints[19].p=mirror(fingers[1][1]);joints[20].p=mirror(thumb[0]);
+        for(int f=0;f<4;++f){
+            const int first=static_cast<int>(joints.size());
+            for(int k=0;k<5;++k)joints.push_back({k?first+k-1:18,mirror(fingers[f][k])});
+        }
+        const int first=static_cast<int>(joints.size());
+        for(int k=0;k<4;++k)joints.push_back({k?first+k-1:18,mirror(thumb[k])});
+    }
     TestBody b;
-    const int n=static_cast<int>(std::size(joints));
+    const int n=static_cast<int>(joints.size());
     b.rest.assign(n*16,0.f);
     for(int j=0;j<n;++j){
         Quat q{};
@@ -193,9 +222,39 @@ TestBody testBody(bool oddFrames=false) {
     r.arms[0]={9,10,11,12,13,14};r.arms[1]={15,16,17,18,19,20};
     r.arms[0].fingers={{29,30,31,32,33}};
     r.arms[0].thumbChain={34,35,36,37};
+    if(heroHand){
+        r.arms[0].fingers={{38,39,40,41,42},{29,30,31,32,33},{43,44,45,46,47},{48,49,50,51,52}};
+        r.arms[1].fingers={{53,54,55,56,57},{58,59,60,61,62},{63,64,65,66,67},{68,69,70,71,72}};
+        r.arms[1].thumbChain={73,74,75,76};
+    }
     r.legs[0]={21,22,23};r.legs[1]={25,26,27};
     check(body::prepare(r,b.rest),"the test rig was rejected");
     return b;
+}
+// testBody's heroHand: each hand's thumb (0 the left, 1 the right).
+constexpr int heroThumbs[2][4]={{34,35,36,37},{73,74,75,76}};
+// Where Spider-Man's palm faces in `pose`: across its knuckles and along its
+// bones in the palm, square to the hand's fingers.
+Vec3 heroPalm(const TestBody& b,const std::vector<float>& pose,int side){
+    const auto& arm=b.rig.arms[side];
+    Vec3 bones{};
+    for(const auto& f:arm.fingers)bones+=normalized(b.at(pose,f[1])-b.at(pose,f[0]));
+    const Vec3 along=normalized(b.at(pose,arm.finger)-b.at(pose,arm.hand));
+    // From the index finger's knuckle to the little one's, a left hand's palm is on the right.
+    Vec3 n=cross(normalized(b.at(pose,arm.fingers.back()[1])-b.at(pose,arm.fingers.front()[1])),normalized(bones));
+    if(side)n=n*-1.f;
+    return normalized(n-along*dot(n,along));
+}
+// A finger's hinge in `pose`: across its bone in the palm and the palm, a
+// positive turn closing it.
+Vec3 heroHinge(const TestBody& b,const std::vector<float>& pose,const std::vector<int16_t>& finger,int side){
+    return normalized(cross(normalized(b.at(pose,finger[1])-b.at(pose,finger[0])),heroPalm(b,pose,side)));
+}
+// How far `chain[k]` bends from the bone before it about `hinge`, radians.
+float bendOf(const TestBody& b,const std::vector<float>& pose,const std::vector<int16_t>& chain,size_t k,Vec3 hinge){
+    const auto flat=[&](Vec3 v){v=normalized(v);return v-hinge*dot(v,hinge);};
+    const Vec3 x=flat(b.at(pose,chain[k])-b.at(pose,chain[k-1])),y=flat(b.at(pose,chain[k+1])-b.at(pose,chain[k]));
+    return std::atan2(dot(cross(x,y),hinge),dot(x,y));
 }
 // A headset looking along model +z (OpenXR looks along -z), eyes at `eyes`.
 body::Targets lookingAhead(Vec3 eyes){
@@ -1812,8 +1871,29 @@ int main() {
         check(!swing.pointLaunchReady(),"cancellation retained the launch window");
     });
     test("VR eye dimensions include high resolution and reject unbounded allocation", [] {
-        check(validEyeSize(1536) && validEyeSize(2048) && validEyeSize(4096),"high resolution rejected");
-        check(!validEyeSize(0) && !validEyeSize(63) && !validEyeSize(4097),"invalid eye size accepted");
+        check(validEyeSize(1536) && validEyeSize(4096) && validEyeSize(8192),"high resolution rejected");
+        check(!validEyeSize(0) && !validEyeSize(63) && !validEyeSize(8193),"invalid eye size accepted");
+    });
+    test("the render scale sizes the eyes from the headset's recommendation", [] {
+        using Size=std::array<uint32_t,2>;
+        check(scaledEyeSize(3072,3264,100)==Size{3072,3264},"100% is not the recommendation");
+        check(scaledEyeSize(2500,2690,100)==Size{2500,2690},"100% rounded an uneven recommendation");
+        check(scaledEyeSize(3072,3264,150)==Size{4608,4896},"150% of the Quest 3's high preset");
+        check(scaledEyeSize(2496,2688,125)==Size{3120,3360},"125% of the Quest 3's default");
+        check(scaledEyeSize(2496,2688,50)==Size{1248,1344},"50%");
+        check(scaledEyeSize(2500,2690,110)==Size{2752,2960},"not rounded to multiples of 8");
+        // Virtual Desktop recommended 4032 x 3648 to one player: 200% would be 8064 x 7296.
+        check(scaledEyeSize(4032,3648,200)==Size{8064,7296},"200% below the cap");
+        const auto capped=scaledEyeSize(4320,4320,200);
+        check(capped==Size{8192,8192},"200% above the cap");
+        // A runtime that takes at most 5000 a side: the shape stays, within 8 pixels.
+        const auto limited=scaledEyeSize(3072,3264,200,5000,5000);
+        check(limited[0]<=5000 && limited[1]<=5000 && limited[1]>=4992 && limited[0]%8==0 && limited[1]%8==0 &&
+              std::abs(static_cast<double>(limited[0])/limited[1]-3072./3264)<.003,"runtime limit or shape lost");
+        check(scaledEyeSize(0,3264,150)==Size{0,0} && !validEyeSize(scaledEyeSize(3072,3264,150,40,40)[0]),
+              "an unusable recommendation or limit gave a usable size");
+        check(validRenderScale(50) && validRenderScale(100) && validRenderScale(200) && !validRenderScale(49) &&
+              !validRenderScale(201) && !validRenderScale(0),"render scale range");
     });
     test("both thumbsticks toggle once and require full release after focus loss", [] {
         VrShortcut chord;
@@ -2889,6 +2969,94 @@ int main() {
             // The thumb wraps over the curled finger.
             check(length(b.at(fist,37)-b.at(fist,31))<.03f,"the thumb did not wrap the fingers");
             near(length(b.at(fist,12)-wristOf(t.hands[0],0)),0,1e-3f);
+        }
+    });
+    // Spider-Man's hands held out before him, each controller thumb up.
+    const auto heroHandsOut=[](float fist,Quat left=gripFacing({0,0,1}),Quat right=gripFacing({0,0,1})){
+        auto t=lookingAhead({0,1.7f,.08f});
+        t.hands[0]={true,{.3f,1.2f,.45f},left,fist};
+        t.hands[1]={true,{-.3f,1.2f,.45f},right,fist};
+        return t;
+    };
+    test("body: each hand's palm faces its controller's, as its knuckles say", [&] {
+        for(const bool odd:{false,true}){
+            auto b=testBody(odd,true);
+            // Down across the fingers, what a rest pose is taken to hold, is 30 degrees off these palms.
+            for(int side=0;side<2;++side)near(dot(heroPalm(b,b.rest,side),{0,-1,0}),std::cos(.5236f),.01f);
+            const Quat grips[]={gripFacing({0,0,1}),gripFacing({0,.5f,.866f}),
+                                gripFacing({.3f,-.2f,1})*body::axisAngle({0,1,0},1.2f)};
+            for(const Quat grip:grips){
+                body::Config c;c.hideHead=false;
+                body::State s;
+                const auto pose=solved(b,heroHandsOut(0,grip,grip),s,c);
+                // A left palm faces the grip's +x, a right one its -x.
+                check(dot(heroPalm(b,pose,0),grip.rotate({1,0,0}))>std::cos(.01f),"the left palm does not face the controller's");
+                check(dot(heroPalm(b,pose,1),grip.rotate({-1,0,0}))>std::cos(.01f),"the right palm does not face the controller's");
+            }
+        }
+    });
+    test("body: a fist closes every finger joint toward the palm and never back, however the game had bent it", [&] {
+        for(const bool odd:{false,true}){
+            auto b=testBody(odd,true);
+            // The game's hands: as at rest, the fingers bent back (pressed flat on a ledge), and a fist of its own
+            // closed tighter than Spidy's.
+            const float games[3][3]={{0,0,0},{-.26f,-.26f,-.26f},{1.75f,1.9f,1.2f}};
+            for(const auto& game:games){
+                auto from=b.rest;
+                body::Pose view(from.data(),static_cast<int>(b.rig.parent.size()));
+                for(int side=0;side<2;++side)
+                    for(const auto& f:b.rig.arms[side].fingers){
+                        const Vec3 hinge=heroHinge(b,from,f,side);
+                        for(size_t k=1;k<=3;++k)
+                            view.turn(b.rig.below[f[k]],body::axisAngle(hinge,game[k-1]),b.at(from,f[k]));
+                    }
+                for(const float fist:{.25f,.5f,1.f}){
+                    body::Config c;c.hideHead=false;
+                    body::State s;
+                    const auto pose=solved(b,heroHandsOut(fist),s,c,1,nullptr,&from);
+                    for(int side=0;side<2;++side){
+                        const auto& fingers=b.rig.arms[side].fingers;
+                        // Every joint goes `fist` of the way from the game's bend to the fist's, about its hinge.
+                        for(const auto& f:fingers)
+                            for(size_t k=1;k<=3;++k){
+                                const float was=bendOf(b,from,f,k,heroHinge(b,from,f,side));
+                                near(bendOf(b,pose,f,k,heroHinge(b,pose,f,side)),was+(c.fistBend[k-1]-was)*fist,.01f);
+                            }
+                        if(fist<1)continue;
+                        // Closed, the fingertips are tucked into the palm, each beside the next as on the knuckles.
+                        const auto& arm=b.rig.arms[side];
+                        const Vec3 palm=heroPalm(b,pose,side),along=normalized(b.at(pose,arm.finger)-b.at(pose,arm.hand));
+                        const Vec3 across=normalized(b.at(pose,fingers.back()[1])-b.at(pose,fingers.front()[1]));
+                        for(size_t i=0;i<fingers.size();++i){
+                            const Vec3 tip=b.at(pose,fingers[i][4]),knuckle=b.at(pose,fingers[i][1]);
+                            check(dot(tip-knuckle,palm)>.01f&&dot(tip-knuckle,along)<-.01f,"a fingertip is not in the fist");
+                            if(i)check(dot(tip-b.at(pose,fingers[i-1][4]),across)>.005f,"the fingertips crossed");
+                        }
+                    }
+                }
+            }
+        }
+    });
+    test("body: a fist's thumb bends in one plane and lies on the curled fingers", [&] {
+        for(const bool odd:{false,true}){
+            auto b=testBody(odd,true);
+            body::Config c;c.hideHead=false;
+            body::State s;
+            const auto pose=solved(b,heroHandsOut(1),s,c);
+            for(int side=0;side<2;++side){
+                const auto& f=b.rig.arms[side].fingers;
+                const auto* thumb=heroThumbs[side];
+                // Its tip on the middle bones of the index and middle fingers, out of the fist.
+                const Vec3 onto=(b.at(pose,f[0][2])+b.at(pose,f[0][3])+b.at(pose,f[1][2])+b.at(pose,f[1][3]))/4+
+                                heroPalm(b,pose,side)*c.thumbRest;
+                check(length(b.at(pose,thumb[3])-onto)<.003f,"the thumb's tip is not on the fingers");
+                // Both joints bend the same way about one hinge: no twist, no kink.
+                const Vec3 base=b.at(pose,thumb[1])-b.at(pose,thumb[0]),middle=b.at(pose,thumb[2])-b.at(pose,thumb[1]),
+                           last=b.at(pose,thumb[3])-b.at(pose,thumb[2]);
+                check(dot(normalized(cross(base,middle)),normalized(cross(middle,last)))>std::cos(.1f),"the thumb twists");
+                near(std::atan2(length(cross(middle,last)),dot(middle,last)),c.thumbBend,.03f);
+                check(std::atan2(length(cross(base,middle)),dot(base,middle))<c.thumbBendMax+.03f,"the thumb bent too far");
+            }
         }
     });
     test("body: a taller player gets a body scaled about the feet", [] {

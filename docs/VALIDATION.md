@@ -1,6 +1,143 @@
 # Validation — 2026-10-08
 
-## Walls the game sticks the player to — current build
+## Fingers in a fist — current build
+
+The user, October 8: "my fingers in vr appear twisted and tangled in most
+poses". The hand crops of their October 7 23:11 session
+(`game-vr-20261007-231152-eyes/0015-right-hand.png`, `0017-left-hand.png`,
+64-68 s, swinging with the grips held): the right fist a claw, its fingertips
+bent up out of it; the left hand's fingers bent back out and crossing.
+
+**Cause.** A hand closes into a fist by its grip (every web) or by moving
+faster than 1.2 m/s against the head. The fist bent each finger joint toward
+the palm about cross(bone before it, palm's normal). That axis turns over
+once the bone before has curled past the normal: at a full fist the middle
+bones point back at 178° from the bones in the palm, so each tip joint bent
+60° backward; from a hand the game had already closed, middle joints folded
+back through themselves. And `prepare` took the rest pose's palms as facing
+down (the thumb overruling it only when clearly elsewhere). The hero's rest
+pose holds them 30° from down, toward the thumb, measured from the knuckles:
+the fingers closed diagonally across the palm, and each hand sat rolled 30°
+on its controller. The game's own bends agree with the knuckles: in the
+perch pose of `reports/body-probe-fist.json` it bends each finger's middle
+and tip joints about axes 3-9° from the knuckles' hinge, 24-32° from the
+assumed one.
+
+**What it does.** `body::prepare` takes the palm's normal across the line
+from the first finger's knuckle to the last's and along the bones in the
+palm, when an arm names two fingers or more and it lies within 60° of the
+old guess. Each finger joint after the palm's gets a hinge, across its
+finger's bone in the palm and the palm's normal at rest, kept in the frame of
+the joint before it (`Rig::fingerHinges`); the thumb's two joints get one
+across its first bone and the way to the little finger (`Rig::thumbHinges`).
+`body::solve` turns each joint about its hinge from the game's bend to
+`fistBend` (83°, 95°, 63°), the fist's share of the way. The thumb's last
+joint bends to `thumbBend` (1.1 rad), the joint before it as far as puts the
+tip as far from the thumb's base as its place (at most `thumbBendMax`,
+1.4 rad), and the base swings the tip there: over the middle bones of the
+index and middle fingers, `thumbRest` (0.016) out of the fist. `thumbFold` is
+gone. `tools/probe_game_body.py` gains `--fists LEFT,RIGHT` and `ik.hands`
+(each palm against its controller's, every finger joint's bend about its
+hinge, the thumb's bends, twist and tip height).
+
+**Measured without the game**: a scratch program with the old and the new
+solver on Spider-Man's own left hand (the rig's rest positions), a controller
+held thumb up:
+
+| | Before | Now |
+|---|---|---|
+| Palm against the controller's palm | 29.9° | 0.0° |
+| Full fist, every finger's knuckle, middle and tip joint | 82°, 96°, −60° | 83°, 95°, 63° |
+| Half fist from straight fingers | tips −35° on three fingers | 42-50°, 47°, 31-32° |
+| Half fist from the game's own fist (101-118°, 109°, 68-69°) | ring middle joint 172°, little −175° | 92-100°, 102°, 66° |
+| Joints bent backward, any start, half or full fist | 1 to 8 | 0 |
+| Fingertips off their finger's own plane | up to 7.1 cm | 2.6 cm, the rig's own spread |
+| Thumb | no hinge; tip at the index finger's middle joint | 59° and 63° about one hinge; tip 1.6 cm out of the fist |
+
+**Checks.** 171 core checks (3 new, with both of Spider-Man's hands and with
+turned and mirrored joint frames: each palm faces its controller's within
+0.6° for three grips; every finger joint goes a quarter, half or all of the
+way from the game's bend to the fist's within 0.6°, from straight fingers,
+fingers bent back 15° and the game's own fist, with the fingertips tucked in
+side by side; the thumb's tip within 3 mm of its place, its joints bending
+the same way about one hinge, the last at `thumbBend`). The scratch program's
+numbers fail the new checks for the old solver. 86 Python checks.
+
+**Not yet seen:** the game and the headset. The user declined the game check
+for now; `probe_game_body.py --phases rig,ik,eyes --fists 0.5,1` is ready for
+it. In the next report read the hand crops in `<report>-eyes/`, and ask how
+the hands sit on the controllers (the palm turned 30°).
+
+## Render resolution above the headset's — preceding build
+
+The user, October 8: "right now we can't change resolution to be above our
+current headset making the game look blurry\aliased, maybe add an option to
+go above it?" Two Discord reports the same day: a Quest 3 player over
+Virtual Desktop whose log shows "Recommended eye 0: 2496x2688" but
+"Rendering 2048 x 2048 pixels per eye" (the launcher's 2048 x 2048, below
+their headset's), and a player whose Virtual Desktop recommends 4032 x 3648.
+
+**Cause.** The eyes were the runtime's recommended size (`XrRuntime`), or a
+square override (`--size`, the launcher's 2048 down to 1280). Every layer
+refused more than 4096 a side (`maximumEyeSize`: OpenXR setup, the game's eye
+views, the GPU bridge, the session's snapshots, the probes).
+
+**What it does.** `spidy::scaledEyeSize` (`eye_resolution.hpp`): the
+recommendation itself at 100%, otherwise each side times the percentage in
+multiples of 8, shrunk with its shape to the runtime's `maxImageRect` and to
+`maximumEyeSize`, now 8192. XrConfig version 13 (632 bytes) carries
+`renderScale` (50-200; with `eyeSize` set only 100) and a spare word that
+must be 0, else 1001. The launcher's "Render resolution" is a slider in steps
+of 5 (`render_scale=` in launcher.ini; `eye_size=` is no longer read); after
+Check its line shows the eye size from the probe's "Recommended eye 0", and
+its memory figure is `vrCommitGb`. `run_game_vr.py --render-scale`,
+`launch-game-vr.ps1 -RenderScale`; the report has `render_scale` and
+`xr_runtime.recommended_eye`. Aim markers are drawn at `pixelAngle` times the
+eye width over the recommended width (at least 1), so they keep their size at
+100%. The blit that puts the game's presented frame into the headset image
+samples at `SV_Position` times one over the target size instead of an
+interpolated coordinate.
+
+**In the game, no headset** (`tools/probe_vr_load.py`, the user's save,
+phases stock, vr and turn, a fresh game per size, `spidy_stereo_probe.dll`
+38f9ca8e pinned because another session rebuilt meanwhile):
+
+| Eyes, views | vr fps | turn fps | GPU busy | video memory, vr | commit, vr |
+|---|---|---|---|---|---|
+| 3072 x 3264, 29 (occlusion) | 90.3 | 102.7 | 85-87% | 11,594 MB | 16,010 MB |
+| 4608 x 4896, 29 (occlusion) | 66.1 | 70.6 | 92-93% | 14,166 MB | 18,620 MB |
+| 4608 x 4896, 13 (none) | 32.2 | 42.0 | 67-74% | 14,617 MB | 19,276 MB |
+
+The game alone (stock): 221-235 fps, video memory 8.6-10.0 GB, commit
+12.7-14.2 GB. 150% against 100%: 2,532-2,572 MB more video memory and
+2,524-2,610 MB more commit (vr and turn phases), 105-109 bytes per extra eye
+pixel, so `EYE_COMMIT_BYTES` is 110. The engine reported both eyes' size,
+render size and viewport as 4608 x 4896. `reports/vr-load-4608-shots-eyes/`
+(capture mode, one heading, at half size) is a whole street view with no
+black or flat rows or columns; a full-size crop from the bottom-right corner
+past 4096 shows the pavement's texture. The first 150% run had no eye
+occlusion (the probe's default views 13); its render commands were 67 MB a
+frame against 17 and its frame rate half. Each game was closed with WM_CLOSE
+and the display settings restored.
+
+**Checks.** 168 core checks before another session's body tests were added
+(new: the scale's sizes, the 8192 limit), 12 launcher checks (new: the
+headset check's eye size and `vrCommitGb`; the session arguments without
+`--size` and with `--render-scale`, capped at 50 and 200), 86 Python checks
+(new: `scaled_eye_size` with the core cases, `vr_commit_mb`,
+`rendering_line`, the argument checks; the probe's video memory and commit),
+and the GPU test at 1536, 3072 x 3264, 4608 x 4896, 6144 x 6528 and
+8192 x 8192. At 4608 x 4896 it first failed twice: the aim marker check's
+window was too small for the catch target, which has a size in metres
+(widened), and the game-screen copy changed values by 2 levels where 1 is
+allowed (fixed by the blit change above). 4096 x 4096, 4608 x 1536 and
+1536 x 4896 had passed it before.
+
+**Not yet seen:** the headset. In the next report check `render_scale`,
+`xr_runtime.recommended_eye` and the eye size samples; ask how sharp it
+looks, and compare new eye pairs a second with the 77 of October 7.
+
+## Walls the game sticks the player to — earlier build
 
 The user, October 8: "sometimes the player gets attached to the walls in vr
 (crawling mode i guess) which looks and feels like im clipping through the
@@ -57,7 +194,7 @@ test.
 the stretches; `head_height_m` near 0 or below with `head_clearance_m` near
 0.5 is the fix at work. Ask how leaning on a wall feels.
 
-## Smooth turning — preceding build
+## Smooth turning — earlier build
 
 The user, October 7: "add smooth turning option".
 

@@ -65,6 +65,10 @@ private:
     void web(ImDrawList* draw, ImVec2 corner, float radius);
 
     std::vector<std::string> blockers();
+    // The eye size the options ask for: the render scale of the checked headset's recommendation, or of
+    // 3072 x 3264 (VR_COMMIT_MB's) before a check; and what the game in VR then commits, in GB.
+    std::array<uint32_t, 2> eyeSize();
+    double neededCommitGb();
     const Runtime* runtime();
     void chooseDefaultRuntime();
     void start(bool memoryConfirmed);

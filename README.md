@@ -119,7 +119,8 @@ or thug.
 | "This game version is not supported" | The game was updated, or it is not the Steam version. Wait for a Spidy update. |
 | The headset is not found | Connect it first, check the VR runtime in the launcher, press *Check*. |
 | The picture breaks up | Close the game and start it from the launcher, which gives it the render memory VR needs. |
-| Low frame rate | Lower *Eye resolution* in the launcher, or the streaming quality in Virtual Desktop. 90 Hz paces more evenly than 120 Hz. |
+| Low frame rate | Lower *Render resolution* in the launcher, or the streaming quality in Virtual Desktop. 90 Hz paces more evenly than 120 Hz. |
+| Blurry or jagged edges | Raise *Render resolution* in the launcher above 100% (try 125%); it costs frame rate and memory. |
 | A memory warning before start | Close big programs (browsers, chat apps), or [give Windows a larger page file](docs/DEVELOPMENT.md#memory-for-a-vr-session). |
 | Web balls fly when you meant to reel | The trigger reels only while that hand's web is attached. Switch *Web shooter* off to keep it for reeling. |
 

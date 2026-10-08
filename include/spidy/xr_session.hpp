@@ -15,7 +15,10 @@ class XrRuntime {
     void initialize(D3D12Renderer& renderer, bool probeOnly = false);
     // The game adapter supplies its actual device and direct queue. The runtime
     // validates the OpenXR GPU/feature requirements and retains COM references.
-    void initialize(ID3D12Device* device, ID3D12CommandQueue* queue, unsigned eyeSize = 0);
+    // eyeSize: a square size instead of the runtime's recommendation; otherwise
+    // renderScale percent of it per side (eye_resolution.hpp).
+    void initialize(ID3D12Device* device, ID3D12CommandQueue* queue, unsigned eyeSize = 0,
+                    unsigned renderScale = 100);
     bool frame(const std::function<void(const XrFrame&)>& update,
                const std::function<void(unsigned, const XrView&, ID3D12Resource*, DXGI_FORMAT, unsigned,
                                         unsigned)>& draw);
@@ -46,6 +49,10 @@ class XrRuntime {
     std::array<unsigned, 2> eyeDimensions() const {
         return {eyes_[0].width, eyes_[0].height};
     }
+    // What the runtime recommended, which the render scale multiplies.
+    std::array<unsigned, 2> recommendedDimensions() const {
+        return {eyes_[0].recommendedWidth, eyes_[0].recommendedHeight};
+    }
     // width: the screen's width in metres.
     void presentation(bool flat, Pose screenPose = {}, float aspect = 16.f / 9, float width = 3.2f) {
         flatScreen_ = flat;
@@ -60,7 +67,7 @@ class XrRuntime {
         ID3D12CommandQueue* queue;
     };
     void initialize(const std::function<Graphics(const XrGraphicsRequirementsD3D12KHR&)>& graphics,
-                    bool probeOnly, bool copyDestination, unsigned eyeSize = 0);
+                    bool probeOnly, bool copyDestination, unsigned eyeSize = 0, unsigned renderScale = 100);
     void actions();
     XrPath path(const char* value);
     XrAction action(const char* name, const char* label, XrActionType type, bool perHand = true);
@@ -80,7 +87,7 @@ class XrRuntime {
     std::array<XrSpace, 2> aimSpaces_{}, gripSpaces_{};
     struct Eye {
         XrSwapchain swapchain{};
-        unsigned width{}, height{};
+        unsigned width{}, height{}, recommendedWidth{}, recommendedHeight{};
         std::vector<XrSwapchainImageD3D12KHR> images;
     };
     std::array<Eye, 2> eyes_{};

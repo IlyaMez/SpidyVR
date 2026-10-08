@@ -129,10 +129,21 @@ frames may be mirrored, so no joint orientation is ever taken as a rotation):
    the upper arm first rolled about itself so the elbow bends in the plane it
    bends in; the elbow hangs down, out and a little back. The hand takes the
    grip's orientation (the knuckles past the grip's -y, the palm facing +x on a
-   left hand, -x on a right one), half of its roll taken by the forearm.
-8. A fist: each finger joint past the palm bends toward the palm to 83, 95 and
-   63 degrees from the joint before it, however the game had curled it; the
-   thumb folds and wraps across, its tip onto the index finger's middle joint.
+   left hand, -x on a right one), half of its roll taken by the forearm. Where
+   the palm faces comes from the rest pose's knuckles: across the line from
+   the index finger's knuckle to the little one's and along the four bones in
+   the palm (the hero's rest pose holds its palms 30 degrees from down,
+   toward the thumb).
+8. A fist: each finger joint past the palm turns about its finger's own hinge
+   (across the finger's bone in the palm and the palm's normal at rest,
+   carried by the joint before it) to 83, 95 and 63 degrees from the bone
+   before it, however the game had bent it; a hand closed part of the way
+   goes that share of the way from the game's bend. The thumb's last joint
+   bends 63 degrees about the thumb's hinge (across its first bone, toward
+   the little finger), the joint before it as far as puts the tip as far from
+   the thumb's base as the tip's place (at most 80 degrees), and the base
+   swings the tip there: over the middle bones of the index and middle
+   fingers, 1.6 cm out of the fist.
 9. The head shrinks to a millimetre at its joint, 11 cm behind and 5 cm below
    the eyes; the neck stays.
 
@@ -193,7 +204,7 @@ on a vent cap), October 6 (`reports/body-probe*.json`, images in
 | Solve time | 0.03 ms a frame on the game's job thread |
 | From the eyes, looking 50 degrees down | his right arm reaching ahead to the scripted controller, gloved hand and web shooter, his feet on the vent cap below; nothing of the head |
 | Body off | the hero hidden, as before |
-| Fist | the four fingers curled into the palm, the thumb across them |
+| Fist | the four fingers curled toward the palm, the thumb across them; their tips were bent back, which this image was too small to show ([Twisted fingers](#twisted-fingers-october-8)) |
 | A blow straight to the DamageSystem (30, kFlyBack) on a bot 126 m away | its health 100 to 67 |
 | The same on the hero (5, kStagger) | his health 110 to 105; he was shoved 7.9 m |
 | A scripted fist through a bot's chest at 6 m/s, through the swing's input as a controller's | one punch: 5.6 m/s, strength 0.64, kKnockdown, 29.1 damage; one request issued; the bot's health 100 to 68 |
@@ -242,8 +253,52 @@ from tracked controllers with the eye views on. The session did not record
 whether a thug came within reach while they were on; samples now carry
 `punch` (the bots within reach of a fist, the punches, each fist's speed).
 
+## Twisted fingers (October 8)
+
+You reported that your fingers in VR look twisted and tangled in most poses.
+The eye snapshots of your October 7 23:11 session show it while you swung
+(the grips held): at 64-68 s the right fist is a claw with its fingertips
+bent up out of it, and the left hand's fingers bend back out and cross each
+other. A hand closes into a fist whenever its grip is squeezed (every web)
+or it moves faster than 1.2 m/s against the head, which is most of play.
+Two faults in the fist:
+
+- Each joint bent toward the palm's normal about the axis across the bone
+  before it and that normal. That axis turns over once a bone has curled
+  past the normal: at a full fist the middle bones point back at 178 degrees
+  from the bones in the palm, so every fingertip joint bent 60 degrees
+  backward. From a hand the game had already closed (its own fists) the
+  middle joints folded back through themselves.
+- The palm's normal was assumed: a rest pose holding its palms down. The
+  hero's rest pose holds them 30 degrees from down, toward the thumb
+  (measured from the knuckles), so the fingers closed diagonally across the
+  palm into each other, and every hand sat rolled 30 degrees on its
+  controller. The game's own bends agree with the knuckles: in the perch pose
+  of the October 6 probe (`reports/body-probe-fist.json`) it bends each
+  finger's middle and tip joints about axes 3-9 degrees from the knuckles'
+  hinge, 24-32 degrees from the assumed one.
+
+Now each joint turns about its finger's own hinge to a set bend (step 8
+above), and the palm comes from the knuckles (step 7). Spider-Man's own hands
+(the rig's rest positions) in the solver, before and after:
+
+| | Before | Now |
+|---|---|---|
+| Palm against the controller's palm | 29.9 degrees off | 0.0 |
+| Full fist, each finger's knuckle, middle and tip joint | 82, 96, -60 degrees (tip bent back) | 83, 95, 63 |
+| Half fist from the game's own fist | ring finger's middle joint 172, little finger's -175 | 92-100, 102, 66 |
+| Fingertips off their finger's own plane | up to 7.1 cm | 2.6 cm, the rig's own spread |
+| Thumb | folded toward the palm's normal, then turned at its base and middle joint toward the index finger's middle joint, with no hinge | 59 and 63 degrees about one hinge, the tip 1.6 cm out of the fist |
+
+Not yet seen in the game or the headset: `tools/probe_game_body.py --phases
+rig,ik,eyes --fists 0.5,1` reports each hand's palm against its controller,
+every finger joint's bend and the thumb (`ik.hands`), and draws the right
+fist from the eyes.
+
 ## Open
 
+- How the new fists and the 30-degree palm correction look and feel in the
+  headset; the probe above in the game.
 - A thug in a fight reacting to a punch (his hit reaction, knockdown, flight)
   needs a crime or the headset: the bots measured were scripted, and the first
   headset session's fights were on the flat screen.
@@ -267,7 +322,7 @@ fist by the grip squeeze or by its speed relative to the head (fully closed at
 
 ## Validation
 
-`spidy_tests.exe` has 18 checks for this: the rest pose's references and
+`spidy_tests.exe` has 21 checks for this: the rest pose's references and
 refused rigs (a cycle, a missing hand, a rest pose lying down, a finger beyond
 the rig); hands reaching the controllers with every bone keeping its length,
 also with turned and mirrored joint frames; the head behind the eyes and
@@ -275,7 +330,12 @@ shrunk; upright hips from a face-down swing pose; standing feet kept while
 crouching, airborne legs kept; the dead zone; blending in and out (the game's
 pose untouched until then); an out-of-reach arm stretched toward its
 controller; a body standing on a wall; a snap turn; a fist with its thumb
-across; a taller player's body scaled about the feet; and for punching, one
+across; with Spider-Man's own hands (both, also with turned and mirrored
+frames), each palm facing its controller's, every finger joint closing a
+quarter, half or all of the way to its bend and never back (from straight
+fingers, fingers bent back and the game's own fist) with the fingertips side
+by side in the palm, and the thumb bending in one plane onto the fingers; a
+taller player's body scaled about the feet; and for punching, one
 punch per swing as hard as the fist went in, no punch for touches, grazes, a
 busy hand or a fist carried along by flight, uppercuts and very hard blows, a
 short punch from within reach, the capsule's side and caps, and configuration.

@@ -11,7 +11,8 @@ from probe_stereo_gpu import snapshot as gpu_snapshot, save_eye_images
 from run_game_vr import (snapshot as xr_snapshot, accepted as accepted_xr, timing_snapshot, frame_rates,
                          appearance_snapshot, eye_snapshot, save_eye_snapshot, rgb_rows, crop_origin,
                          game_memory, keep_game_log, commit_warning, VR_COMMIT_MB, body_snapshot,
-                         punch_snapshot, shooter_snapshot, start_settings, settings_line, SETTINGS_LINE)
+                         punch_snapshot, shooter_snapshot, start_settings, settings_line, SETTINGS_LINE,
+                         scaled_eye_size, vr_commit_mb, rendering_line, EYE_COMMIT_BYTES)
 from probe_collision import snapshot as collision_snapshot
 from probe_movement import snapshot as movement_snapshot
 from probe_native_motion import snapshot as motion_snapshot
@@ -383,6 +384,46 @@ class ProtocolTests(unittest.TestCase):
             run_game_vr.announce_low_memory(text, True, Mock(side_effect=EOFError))
             with self.assertRaises(KeyboardInterrupt):  # cancels the launch
                 run_game_vr.announce_low_memory(text, True, Mock(side_effect=KeyboardInterrupt))
+
+    def test_the_render_scale_sizes_the_eyes_and_the_memory_they_take(self):
+        # core_tests.cpp's cases for spidy::scaledEyeSize: the console and the warning count as the DLL does.
+        self.assertEqual(scaled_eye_size(3072, 3264, 100), (3072, 3264))
+        self.assertEqual(scaled_eye_size(2500, 2690, 100), (2500, 2690))
+        self.assertEqual(scaled_eye_size(3072, 3264, 150), (4608, 4896))
+        self.assertEqual(scaled_eye_size(2496, 2688, 125), (3120, 3360))
+        self.assertEqual(scaled_eye_size(2496, 2688, 50), (1248, 1344))
+        self.assertEqual(scaled_eye_size(2500, 2690, 110), (2752, 2960))
+        self.assertEqual(scaled_eye_size(4032, 3648, 200), (8064, 7296))
+        self.assertEqual(scaled_eye_size(4320, 4320, 200), (8192, 8192))
+        width, height = scaled_eye_size(3072, 3264, 200, 5000)
+        self.assertEqual((width % 8, height), (0, 5000))
+        self.assertAlmostEqual(width/height, 3072/3264, delta=.003)
+        # Eyes larger than VR_COMMIT_MB's 3072 x 3264 need more memory; smaller ones no less.
+        self.assertEqual(vr_commit_mb([3072, 3264]), VR_COMMIT_MB)
+        self.assertEqual(vr_commit_mb([2496, 2688]), VR_COMMIT_MB)
+        self.assertEqual(vr_commit_mb(None, 150), VR_COMMIT_MB)
+        self.assertEqual(vr_commit_mb([3072, 3264], 150), VR_COMMIT_MB+(2*(4608*4896-3072*3264)*EYE_COMMIT_BYTES >> 20))
+        self.assertEqual(vr_commit_mb([2496, 2688], 100, 4096), VR_COMMIT_MB+(2*(4096*4096-3072*3264)*EYE_COMMIT_BYTES >> 20))
+        # Measured October 8: 2.5-2.6 GB more for eyes of 150% of 3072 x 3264.
+        self.assertTrue(2500 < vr_commit_mb([3072, 3264], 150)-VR_COMMIT_MB < 2800)
+        # The console says what the size is of, and when the runtime took less.
+        self.assertEqual(rendering_line(4608, 4896, 150, 0, [3072, 3264]),
+                         "Rendering 4608 x 4896 pixels per eye (150% of the headset's 3072 x 3264).")
+        self.assertEqual(rendering_line(4000, 4248, 150, 0, [3072, 3264]),
+                         "Rendering 4000 x 4248 pixels per eye (150% of the headset's 3072 x 3264 would be "
+                         '4608 x 4896, more than the VR runtime takes).')
+        self.assertEqual(rendering_line(2048, 2048, 100, 2048, [2496, 2688]),
+                         "Rendering 2048 x 2048 pixels per eye (a square size instead of the headset's).")
+        self.assertEqual(rendering_line(3072, 3264, 100, 0, None), 'Rendering 3072 x 3264 pixels per eye.')
+
+    def test_the_render_scale_is_checked_before_anything_starts(self):
+        import run_game_vr
+        for argv in (['--render-scale', '49'], ['--render-scale', '201'], ['--size', '2048', '--render-scale', '125'],
+                     ['--size', '8193']):
+            with patch.object(sys, 'argv', ['run_game_vr.py', *argv]), patch('sys.stderr'), \
+                    patch.object(run_game_vr, 'session') as session, self.assertRaises(SystemExit):
+                run_game_vr.main()
+            session.assert_not_called()
 
     def test_vr_starts_once_the_game_draws_frames_and_shows_one_queue(self):
         import run_game_vr

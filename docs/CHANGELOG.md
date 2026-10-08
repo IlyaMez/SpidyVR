@@ -3,7 +3,75 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 8, second build): a wall the game sticks you to no
+**Latest build (October 8, fourth build): fingers no longer twist in a
+fist.** You reported that your fingers in VR look twisted and tangled in
+most poses. They did whenever a hand made a fist: a squeezed grip (every
+web) or a hand moving faster than 1.2 m/s, so most of play. The hand
+snapshots of your October 7 23:11 session show it at 64-68 s: the right fist
+a claw with its fingertips bent up out of it, the left hand's fingers bent
+back out and crossing. Two faults. Each finger joint bent toward the palm
+about an axis taken from the bone before it, and that axis turns over once a
+bone has curled past the palm's normal: in a full fist every fingertip bent
+60° backward, and a fist the game had already closed folded its middle
+joints back through themselves. And the solver assumed the rig's rest pose
+holds its palms down; Spider-Man's face 30° from down, toward the thumb
+(measured from his knuckles, and the game's own finger bends agree), so his
+fingers closed diagonally across the palm into each other, and each hand sat
+rolled 30° on its controller. Now the palm comes from the knuckles, and each
+finger joint turns about its finger's own hinge to a set bend (83°, 95° and
+63°, part of the way for a hand closed part of the way); the thumb bends at
+its two joints in one plane and swings its tip onto the index and middle
+fingers. Spider-Man's own hands in the solver, before and after: the palm
+29.9° off the controller's, now 0.0°; a full fist's knuckle, middle and tip
+joints 82°, 96° and −60° on every finger, now 83°, 95° and 63°; no joint
+bends back any more, from straight fingers, fingers bent back or the game's
+own fists. Your hands now sit 30° differently in your grip: tell me how that
+feels. 171 core checks (3 new, with his real hands) and 86 Python checks
+pass. Not yet run in the game or the headset (`tools/probe_game_body.py
+--fists 0.5,1` reports each hand's palm and joints), and not in your play
+folder: the fix is in the XR module, so it needs the whole package there,
+or a release. Details: [BODY.md](BODY.md#twisted-fingers-october-8).
+
+**Preceding build (October 8, third build): render resolution above the
+headset's.** You asked for a way to render above your headset's resolution:
+the game looks blurry and jagged, and the launcher's "Eye resolution" went
+no higher than "Headset default". Two Discord reports point the same way. A
+Quest 3 player over Virtual Desktop rendered 2048 x 2048, a choice that
+looked larger than "Headset default" but was below the 2496 x 2688 their
+headset asked for. Another player's Virtual Desktop asks for 4032 x 3648,
+just under the 4096 a side Spidy allowed. The launcher's option is now
+"Render resolution": a percentage of the headset's own resolution per side,
+50% to 200% in steps of 5, 100% by default. After Check in the Headset row it
+shows the pixels per eye (125% of 3072 x 3264 is 3840 x 4080). The fixed
+square sizes are gone, and one saved by an older launcher is dropped, so
+that player starts at their headset's resolution again. Eyes may now be up
+to 8192 pixels a side; a size the VR runtime does not take shrinks to its
+largest with the same shape. Aim markers keep the size they have at 100%:
+they are drawn so many pixels wide and would have shrunk with the scale. The
+console says "Rendering 4608 x 4896 pixels per eye (150% of the headset's
+3072 x 3264)", the report keeps `render_scale` and the headset's
+`recommended_eye`, and the launcher's memory figure and the console's
+memory warning grow with the scale.
+Measured in the game without a headset (`tools/probe_vr_load.py`, your save,
+eye occlusion on as in VR, a fresh game for each size): at 100% (3072 x 3264)
+90 frames a second looking ahead and 103 turning, GPU 85% busy; at 150%
+(4608 x 4896) 66 and 71, GPU 92%. That is about 30% fewer frames, with the
+GPU setting the rate. 150% took 2.5-2.6 GB more video memory and as much more
+Windows commit, about 108 bytes per extra eye pixel. The game made both
+eyes' buffers and viewports 4608 x 4896, and the left eye's image is whole:
+no black or cut-off part. Your October 7 session got 77 new eye pairs a
+second at 100%; 30% fewer would be well under 72 Hz, so start at 120-130%.
+The game screen's copy into the headset image now samples at each pixel's own
+centre: at 4608 x 4896 its interpolated coordinate drifted and changed copied
+values by 2 levels. XrConfig version 13 (632 bytes: `renderScale` and a spare
+word); `-RenderScale 125` for `tools\launch-game-vr.ps1`, `--render-scale` for
+`run_game_vr.py`. New checks: the scale's eye sizes (core, and the same cases
+in Python), the launcher's arguments and headset size, the scale's limits; 86
+Python checks and the GPU test pass, the GPU test now at every size from 1536
+to 8192 x 8192. Not in your play folder yet: version 13 needs the whole
+package there.
+
+**Preceding build (October 8, second build): a wall the game sticks you to no
 longer cuts through your view.** You reported that the player sometimes gets
 attached to walls in VR, which looks and feels like clipping through the
 wall, until you jump. That is the game's wall crawl: a player who flies into

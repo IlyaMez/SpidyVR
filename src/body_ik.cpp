@@ -1,6 +1,7 @@
 #include "spidy/body_ik.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
 
 namespace spidy::body {
@@ -37,6 +38,32 @@ Quat twistAbout(Quat q, Vec3 axis) {
 }
 bool valid(int joint, int count) {
     return joint >= 0 && joint < count;
+}
+// How far the bone from `joint` to `next` bends from the bone from `before`
+// to `joint`, about the unit `hinge` (radians, signed); NaN when either bone
+// lies within ten degrees of the hinge.
+float bendAbout(const Pose& pose, int before, int joint, int next, Vec3 hinge) {
+    const Vec3 a = across(normalized(pose.position(joint) - pose.position(before)), hinge);
+    const Vec3 b = across(normalized(pose.position(next) - pose.position(joint)), hinge);
+    if (length(a) < .17f || length(b) < .17f)
+        return std::numeric_limits<float>::quiet_NaN();
+    return std::atan2(dot(cross(a, b), hinge), dot(a, b));
+}
+// The turns about the unit `hinge` through `pivot` (radians, within half a
+// turn) that take `point` to `distance` from `from`: the two that do, or the
+// nearest one twice when none does.
+std::array<float, 2> turnsToDistance(Vec3 pivot, Vec3 hinge, Vec3 point, Vec3 from, float distance) {
+    const Vec3 u = point - pivot, along = hinge * dot(u, hinge), out = u - along, side = cross(hinge, out);
+    const Vec3 r = pivot - from;
+    // |r + along + out cos t + side sin t| = distance, with |side| = |out|:
+    // a cos t + b sin t = k.
+    const float a = 2 * dot(r, out), b = 2 * dot(r, side);
+    const float k = distance * distance - dot(r + along, r + along) - dot(out, out);
+    const float m = std::sqrt(a * a + b * b);
+    if (!(m > 1e-12f))
+        return {0, 0};
+    const float phase = std::atan2(b, a), spread = std::acos(std::clamp(k / m, -1.f, 1.f));
+    return {wrap(phase + spread), wrap(phase - spread)};
 }
 // Two bones from `upper` through `lower` to `end`: `end` onto `target` (or
 // toward it, out of reach), bending toward `pole`. The upper bone first
@@ -272,10 +299,51 @@ bool prepare(Rig& rig, std::span<const float> restPose) {
             if (length(palm) < .5f || (length(byThumb) > .5f && dot(byThumb, palm) < .5f))
                 palm = byThumb;
         }
+        // Two fingers or more say exactly: the palm faces across the line of
+        // their knuckles and along their bones in the palm (the hero's rest
+        // pose holds its palms 30 degrees from down, toward the thumb).
+        Vec3 knuckles{};
+        if (a.fingers.size() >= 2 && a.fingers.front().size() >= 2 && a.fingers.back().size() >= 2) {
+            Vec3 bones{};
+            for (const auto& f : a.fingers)
+                if (f.size() >= 2)
+                    bones += normalized(rest.position(f[1]) - rest.position(f[0]));
+            knuckles = rest.position(a.fingers.back()[1]) - rest.position(a.fingers.front()[1]);
+            Vec3 byKnuckles = normalized(across(cross(normalized(knuckles), normalized(bones)), fingers));
+            if (dot(byKnuckles, palm) < 0)
+                byKnuckles = byKnuckles * -1.f;
+            if (dot(byKnuckles, palm) > .5f)
+                palm = byKnuckles;
+        }
         if (length(fingers) < .5f || length(palm) < .5f)
             return false;
         rig.handFingers[i] = normalized(rest.local(a.hand, fingers));
         rig.handPalm[i] = normalized(rest.local(a.hand, palm));
+        // A finger bends across its bone in the palm and the palm's normal.
+        auto& hinges = rig.fingerHinges[i];
+        hinges.assign(a.fingers.size(), {});
+        for (size_t f = 0; f < a.fingers.size(); ++f) {
+            const auto& chain = a.fingers[f];
+            if (chain.size() < 3)
+                continue;
+            const Vec3 axis = cross(normalized(rest.position(chain[1]) - rest.position(chain[0])), palm);
+            if (length(axis) < .3f)
+                continue;
+            for (size_t k = 1; k <= 3 && k + 1 < chain.size(); ++k)
+                hinges[f][k - 1] = normalized(rest.local(chain[k - 1], normalized(axis)));
+        }
+        // The thumb across its first bone and the way to the little finger,
+        // across the palm (away from the thumb's side when the knuckles do
+        // not say).
+        rig.thumbHinges[i] = {};
+        if (const auto& thumb = a.thumbChain; thumb.size() >= 3) {
+            const Vec3 away = length(knuckles) > 1e-4f ? knuckles : hand - rest.position(thumb[0]);
+            const Vec3 toward = normalized(across(across(away, fingers), palm));
+            const Vec3 axis = cross(normalized(rest.position(thumb[1]) - rest.position(thumb[0])), toward);
+            if (length(axis) > .3f)
+                for (size_t k = 1; k <= 2 && k + 1 < thumb.size(); ++k)
+                    rig.thumbHinges[i][k - 1] = normalized(rest.local(thumb[k - 1], normalized(axis)));
+        }
         rig.upperArm[i] = length(rest.position(a.lower) - rest.position(a.upper));
         rig.forearm[i] = length(hand - rest.position(a.lower));
         const auto& l = rig.legs[i];
@@ -444,42 +512,68 @@ Result solve(Pose& pose, const Rig& rig, const Targets& t, const Config& c, Stat
             pose.turn(rig.below[arm.lower], partial(twistAbout(handTurn(), forearm), c.forearmRoll * w), elbow);
             pose.turn(rig.below[arm.hand], partial(handTurn(), w), pose.position(arm.hand));
         }
-        // A fist: every finger joint past the palm bends toward the palm to a
-        // set angle from the joint before it, however the game had curled
-        // it; the thumb folds in.
+        // A fist: every finger joint past the palm turns about its own hinge
+        // to a set bend from the bone before it, however the game had bent
+        // it. (Bending each bone toward the palm's normal instead turned the
+        // last ones backward once a finger curled past it: a claw.)
         const float fist = std::clamp(std::isfinite(hand.fist) ? hand.fist : 0.f, 0.f, 1.f) * w;
         if (fist <= 0)
             continue;
-        const Vec3 palm = normalized(pose.direction(arm.hand, rig.handPalm[i]));
-        const auto curl = [&](const std::vector<int16_t>& chain, size_t count, auto angleOf) {
-            for (size_t k = 1; k <= count && k + 1 < chain.size(); ++k) {
-                const int joint = chain[k];
-                const Vec3 before = normalized(pose.position(joint) - pose.position(chain[k - 1]));
-                const Vec3 axis = normalized(cross(before, palm));
-                if (length(axis) < .5f || length(before) < .5f)
-                    continue;
-                const Vec3 bent = axisAngle(axis, angleOf(k - 1)).rotate(before);
-                pose.turn(rig.below[static_cast<size_t>(joint)],
-                          partial(between(pose.position(chain[k + 1]) - pose.position(joint), bent), fist),
-                          pose.position(joint));
-            }
+        // Where the joint before `chain[k]` sends `local`: its hinge, and the
+        // joint's bend about it now (NaN when there is none).
+        const auto hingeAt = [&](const std::vector<int16_t>& chain, size_t k, Vec3 local, Vec3& hinge) {
+            hinge = normalized(pose.direction(chain[k - 1], local));
+            return length(hinge) > .5f ? bendAbout(pose, chain[k - 1], chain[k], chain[k + 1], hinge)
+                                       : std::numeric_limits<float>::quiet_NaN();
         };
-        for (const auto& finger : arm.fingers)
-            curl(finger, 3, [&](size_t k) { return c.fistBend[k]; });
-        curl(arm.thumbChain, 2, [&](size_t) { return c.thumbFold; });
-        // The thumb wraps across the curled fingers: its tip onto the index
-        // finger's middle joint, from its base and its next joint.
+        // Turns `chain[k]` and what hangs from it `share` of the way to
+        // `angle` from the bone before it.
+        const auto bendTo = [&](const std::vector<int16_t>& chain, size_t k, Vec3 local, float angle, float share) {
+            Vec3 hinge;
+            if (const float now = hingeAt(chain, k, local, hinge); std::isfinite(now))
+                pose.turn(rig.below[static_cast<size_t>(chain[k])], axisAngle(hinge, (angle - now) * share),
+                          pose.position(chain[k]));
+        };
+        const auto& hinges = rig.fingerHinges[i];
+        for (size_t f = 0; f < arm.fingers.size() && f < hinges.size(); ++f)
+            for (size_t k = 1; k <= 3 && k + 1 < arm.fingers[f].size(); ++k)
+                bendTo(arm.fingers[f], k, hinges[f][k - 1], c.fistBend[k - 1], fist);
+        // The thumb lies across the curled fingers, its tip on the middle
+        // bones of the first two, out of the fist: its last joint bends to a
+        // set bend, the one before it as far as puts the tip as far from the
+        // base as that place, and the base swings the tip there.
         const auto& thumb = arm.thumbChain;
-        if (thumb.size() >= 3 && !arm.fingers.empty() && arm.fingers.front().size() >= 3) {
-            const Vec3 onto = pose.position(arm.fingers.front()[2]) + palm * .012f;
-            for (int pass = 0; pass < 2; ++pass)
-                for (size_t k = 0; k + 2 < thumb.size(); ++k) {
-                    const Vec3 at = pose.position(thumb[k]);
-                    const Vec3 tip = pose.position(thumb.back());
-                    pose.turn(rig.below[static_cast<size_t>(thumb[k])], partial(between(tip - at, onto - at), fist),
-                              at);
+        Vec3 onto{};
+        int middles = 0;
+        for (size_t f = 0; f < arm.fingers.size() && f < 2; ++f)
+            if (const auto& finger = arm.fingers[f]; finger.size() >= 4) {
+                onto += (pose.position(finger[2]) + pose.position(finger[3])) / 2;
+                ++middles;
+            }
+        if (thumb.size() < 4 || !middles)
+            continue;
+        const Vec3 palm = normalized(pose.direction(arm.hand, rig.handPalm[i]));
+        onto = onto / static_cast<float>(middles) + palm * (c.thumbRest * s);
+        bendTo(thumb, 2, rig.thumbHinges[i][1], c.thumbBend, fist);
+        const Vec3 base = pose.position(thumb[0]), knuckle = pose.position(thumb[1]);
+        Vec3 hinge;
+        if (const float now = hingeAt(thumb, 1, rig.thumbHinges[i][0], hinge); std::isfinite(now)) {
+            const Vec3 tip = pose.position(thumb.back());
+            const float want = length(onto - base);
+            float best = std::clamp(now, 0.f, c.thumbBendMax), miss = std::numeric_limits<float>::infinity();
+            for (const float turn : turnsToDistance(knuckle, hinge, tip, base, want)) {
+                const float b = std::clamp(wrap(now + turn), 0.f, c.thumbBendMax);
+                const float off =
+                    std::abs(length(knuckle + axisAngle(hinge, b - now).rotate(tip - knuckle) - base) - want);
+                if (off < miss) {
+                    miss = off;
+                    best = b;
                 }
+            }
+            pose.turn(rig.below[static_cast<size_t>(thumb[1])], axisAngle(hinge, (best - now) * fist), knuckle);
         }
+        pose.turn(rig.below[static_cast<size_t>(thumb[0])],
+                  partial(between(pose.position(thumb.back()) - base, onto - base), fist), base);
     }
     // 7. The head shrinks to a point at its joint, behind and below the eyes:
     // at once while the body is wanted, so the eyes never see it from inside

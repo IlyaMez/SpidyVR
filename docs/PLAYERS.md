@@ -148,8 +148,14 @@ IF SOMETHING IS WRONG
 - The picture breaks up: start the game from the launcher with the game
   closed. Attached to a game that is already running, Spidy cannot give it
   the larger render memory VR needs.
-- Low frame rate: lower "Eye resolution" in the launcher's options, or your
-  streaming quality in Virtual Desktop.
+- Low frame rate: lower "Render resolution" in the launcher's options (below
+  100% renders fewer pixels than your headset asks for), or your streaming
+  quality in Virtual Desktop.
+- Blurry or jagged edges: raise "Render resolution" in the launcher's
+  options above 100%; try 125% first. It costs frame rate and memory: 150%
+  gave about 30% fewer frames on an RTX 5090. Press Check beside your
+  headset to see the pixels per eye. Virtual Desktop's quality setting
+  raises what 100% is.
 - Your body looks wrong or gets in the way: switch "Your own body" off in
   Settings > SPIDY VR or the launcher's options; you get gloves instead, as
   in earlier versions.

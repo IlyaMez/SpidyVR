@@ -336,7 +336,9 @@ int main(int argc, char** argv) {
                 const int cx = static_cast<int>((clip[0] / clip[3] * .5f + .5f) * width);
                 const int cy = static_cast<int>((.5f - clip[1] / clip[3] * .5f) * height);
                 size_t coloured{}, dark{};
-                const int reach = 40 * static_cast<int>(width) / 1536 + 30;
+                // The catch target has a size in metres: its corners lie about
+                // 52 pixels out per 1536 of width.
+                const int reach = 60 * static_cast<int>(width) / 1536 + 30;
                 for (int y = std::max(cy - reach, 0); y < std::min(cy + reach, static_cast<int>(height)); ++y)
                     for (int x = std::max(cx - reach, 0); x < std::min(cx + reach, static_cast<int>(width)); ++x) {
                         const auto* pixel = image.data() + (static_cast<size_t>(y) * width + x) * 4;

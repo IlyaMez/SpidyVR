@@ -123,7 +123,7 @@ class RuntimeTests(unittest.TestCase):
             manifest,runtime=run_game_vr.preflight('auto')
         detect.assert_called_once()
         self.assertEqual((manifest,runtime),(self.steamvr,dict(name='SteamVR',manifest=str(self.steamvr),automatic=True,
-                                                              headset='Test HMD')))
+                                                              headset='Test HMD',recommended_eye=[2528,2704])))
         with unittest.mock.patch.object(xr_runtime,'probe',return_value=(False,'Headset unavailable: x.')), \
              unittest.mock.patch('builtins.print'):
             with self.assertRaisesRegex(RuntimeError,'Headset unavailable: x. Connect your headset in Meta Quest Link'):
@@ -135,6 +135,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(packed.decode('utf-16-le').rstrip('\0'),
                          r'C:\Program Files\Virtual Desktop Streamer\OpenXR\virtualdesktop-openxr.json')
         self.assertEqual(struct.calcsize('<4I7Q2IfI')+len(packed),608)  # game_xr.cpp's XrConfig
+        self.assertEqual(608+struct.calcsize('<6I'),632)  # its v13 tail, ending in the render scale and a spare word
         self.assertEqual(run_game_vr.runtime_path('x'*259)[-2:],b'\0\0')
         with self.assertRaisesRegex(RuntimeError,'too long'):
             run_game_vr.runtime_path('x'*260)

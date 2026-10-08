@@ -4,6 +4,7 @@
 // reads snapshots.
 #include <spidy/launcher_text.hpp>
 #include <windows.h>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <mutex>
@@ -56,6 +57,8 @@ struct Scan {
     bool vcInstalled{}, vcCurrent{};
     std::string vcVersion;
     double freeCommitGb{}, neededCommitGb = 19;
+    // What each pixel of the two eyes beyond 3072 x 3264 adds to that (run_game_vr.py's EYE_COMMIT_BYTES).
+    double eyeCommitBytes = 110;
 };
 
 struct Settings {
@@ -94,12 +97,15 @@ public:
     void start(const std::wstring& root, const std::wstring& manifest, const std::wstring& python);
     Outcome state();
     std::string summary();
+    // The eye size the headset's runtime recommends, once a check found it.
+    std::optional<std::array<uint32_t, 2>> eye();
     void reset();
 
 private:
     std::mutex mutex_;
     Outcome state_ = Outcome::idle;
     std::string summary_;
+    std::optional<std::array<uint32_t, 2>> eye_;
     std::thread worker_;
 };
 

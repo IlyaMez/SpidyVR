@@ -517,7 +517,9 @@ Settings loadSettings() {
         else if (key == "aim_markers") o.aimMarkers = number() != 0;
         else if (key == "air_webs") o.airWebs = number() != 0;
         else if (key == "web_shooter") o.webShooter = number() != 0;
-        else if (key == "eye_size") o.eyeSize = number();
+        // eye_size (a square size, before October 8) is no longer read: 2048 x 2048 rendered one player's game
+        // below the 2496 x 2688 their headset asked for, and it looked blurry.
+        else if (key == "render_scale") o.renderScale = spidy::validRenderScale(number()) ? number() : 100;
         else if (key == "swing_speed") o.swingSpeed = std::clamp(number(), 10, 65);
         else if (key == "snap_turn") o.snapTurn = std::clamp(number(), 0, 90);
         else if (key == "smooth_turn") o.smoothTurn = std::clamp(number(), 0, 360);
@@ -544,7 +546,7 @@ void saveSettings(const Settings& settings) {
          << "\nweb_grab=" << o.webGrab << "\noverlay_webs=" << o.overlayWebs << "\nsmall_window=" << o.smallWindow
          << "\nstock_monitor_view=" << o.stockMonitorView << "\nbody=" << o.body << "\npunch=" << o.punch
          << "\naim_markers=" << o.aimMarkers << "\nair_webs=" << o.airWebs << "\nweb_shooter=" << o.webShooter
-         << "\neye_size=" << o.eyeSize
+         << "\nrender_scale=" << o.renderScale
          << "\nswing_speed=" << o.swingSpeed << "\nsnap_turn=" << o.snapTurn << "\nsmooth_turn=" << o.smoothTurn
          << "\nhaptics=" << o.haptics << "\nscreen_size=" << o.screenSize << "\nhash_path=" << narrow(settings.hashPath)
          << "\nhash_size=" << settings.hashSize << "\nhash_time=" << settings.hashTime
@@ -591,8 +593,11 @@ void Scanner::run(Settings settings) {
         scan.writable = folderWritable(root / L"reports");
         if (auto hash = text::pythonConstant(readText(root / L"tools/inspect_game.py"), "EXPECTED_SHA256"))
             scan.expectedHash = *hash;
-        if (auto need = text::pythonConstant(readText(root / L"tools/run_game_vr.py"), "VR_COMMIT_MB"))
+        const std::string session = readText(root / L"tools/run_game_vr.py");
+        if (auto need = text::pythonConstant(session, "VR_COMMIT_MB"))
             scan.neededCommitGb = std::atof(need->c_str()) / 1024;
+        if (auto bytes = text::pythonConstant(session, "EYE_COMMIT_BYTES"))
+            scan.eyeCommitBytes = std::atof(bytes->c_str());
         scan.python = findPython(scan.root);
         if (!scan.python.empty()) {
             std::string output;
@@ -698,6 +703,7 @@ void HeadsetCheck::start(const std::wstring& root, const std::wstring& manifest,
         std::lock_guard lock(mutex_);
         state_ = found ? Outcome::ok : Outcome::error;
         summary_ = text::headsetSummary(output, found);
+        eye_ = found ? text::recommendedEye(output) : std::nullopt;
     });
 }
 
@@ -711,11 +717,17 @@ std::string HeadsetCheck::summary() {
     return summary_;
 }
 
+std::optional<std::array<uint32_t, 2>> HeadsetCheck::eye() {
+    std::lock_guard lock(mutex_);
+    return state_ == Outcome::ok ? eye_ : std::nullopt;
+}
+
 void HeadsetCheck::reset() {
     std::lock_guard lock(mutex_);
     if (state_ != Outcome::running) {
         state_ = Outcome::idle;
         summary_.clear();
+        eye_.reset();
     }
 }
 

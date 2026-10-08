@@ -364,6 +364,51 @@ def wrist_of(grip, orientation, side):
     return add(grip, rotate(orientation, [-.02 if side == 0 else .02, .09, 0]))
 
 
+def hand_shape(names, body, transform, side, orientation):
+    """How a solved hand came out: how far its palm faces from its controller's (degrees; a left palm faces the
+    grip's +x, a right one its -x), each finger joint's bend about the finger's hinge (degrees; knuckle, middle, tip;
+    negative is bent back), and the thumb: its two joints' bends, how far apart their hinges are (a twist), and its
+    tip's height out of the fist over the index and middle fingers' middle bones (cm)."""
+    index = {n: i for i, n in enumerate(names)}
+    prefix = ('LF_', 'RT_')[side]
+    try:
+        def at(name):
+            return column(body[index[prefix+name]], 3)
+        chains = [[at(f'finger_{f}_{j}') for j in ('A', 'B', 'C', 'D', 'D_end')] for f in 'ABCD']
+        thumb = [at(f'thumb_{j}') for j in ('A', 'B', 'C', 'C_end')]
+        along = norm(sub(at('finger_B_B'), at('wrist')))
+    except KeyError:
+        return None
+    bones = [0, 0, 0]
+    for c in chains:
+        bones = add(bones, norm(sub(c[1], c[0])))
+    # From the index finger's knuckle to the little one's, a left hand's palm is on the right.
+    n = cross(norm(sub(chains[3][1], chains[0][1])), norm(bones))
+    n = scale(n, -1) if side else n
+    palm = norm(sub(n, scale(along, dot(n, along))))
+    palm_world = norm(sub(to_world(transform, palm), to_world(transform, [0, 0, 0])))
+    want = rotate(orientation, [-1 if side else 1, 0, 0])
+
+    def degrees(a, b, c, hinge):
+        x, y = norm(sub(b, a)), norm(sub(c, b))
+        x, y = sub(x, scale(hinge, dot(x, hinge))), sub(y, scale(hinge, dot(y, hinge)))
+        return round(math.degrees(math.atan2(dot(cross(x, y), hinge), dot(x, y))), 1)
+    fingers = {}
+    for name, c in zip(('index', 'middle', 'ring', 'little'), chains):
+        hinge = norm(cross(norm(sub(c[1], c[0])), palm))
+        fingers[name] = [degrees(c[k-1], c[k], c[k+1], hinge) for k in (1, 2, 3)]
+    segments = [sub(thumb[k+1], thumb[k]) for k in range(3)]
+    def angle(u, v):
+        return math.degrees(math.atan2(math.sqrt(dot(cross(u, v), cross(u, v))), dot(u, v)))
+    hinges = [norm(cross(segments[0], segments[1])), norm(cross(segments[1], segments[2]))]
+    middles = scale(add(add(chains[0][2], chains[0][3]), add(chains[1][2], chains[1][3])), .25)
+    return dict(palm_off_deg=round(math.degrees(math.acos(max(-1., min(1., dot(palm_world, want))))), 1),
+                fingers=fingers,
+                thumb=dict(bends=[round(angle(segments[0], segments[1]), 1), round(angle(segments[1], segments[2]), 1)],
+                           twist_deg=round(math.degrees(math.acos(max(-1., min(1., dot(*hinges))))), 1),
+                           tip_out_cm=round(dot(sub(thumb[3], middles), palm)*100, 1)))
+
+
 def screenshot(game, name):
     hwnd = game_window(game.pid)
     width, height = client_size(hwnd)
@@ -477,11 +522,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--phases', default='rig,ik,eyes,fist')
     parser.add_argument('--eye-size', type=int, default=1024)
+    parser.add_argument('--fists', default='0,1',
+                        help='how far the left and right hands close into fists, 0 to 1 (default: left open, '
+                             'right closed)')
     parser.add_argument('--punch-hero', action='store_true',
                         help='also deal the hero a light stagger, to check the damage pipeline without a bot')
     parser.add_argument('--output', type=pathlib.Path, default=ROOT/'reports/body-probe.json')
     args = parser.parse_args()
     phases = args.phases.split(',')
+    fists = [min(1., max(0., float(v))) for v in args.fists.split(',')]
+    if len(fists) != 2:
+        parser.error('--fists takes two values, left and right')
     game = Game(find_game())
     process = None
     report = dict(phases=phases)
@@ -579,8 +630,8 @@ def main():
             end = time.monotonic()+seconds
             while time.monotonic() < end:
                 serial += 1
-                # The right hand punching ahead is a closed fist.
-                hands = [(grip, orientation, 1, float(side == 1)) for side, (grip, orientation) in enumerate(targets)]
+                # By default the right hand punching ahead is a closed fist.
+                hands = [(grip, orientation, 1, fists[side]) for side, (grip, orientation) in enumerate(targets)]
                 code = call_with_payload(process, stereo['SpidyBodySubmit'],
                                          command(serial, flags, eyes_rel, look or facing, hands, 1.75))
                 if code:
@@ -610,6 +661,10 @@ def main():
                 result['eyes_target'] = [round(v, 3) for v in add(feet, eyes_rel)]
                 result['head_scale'] = round(math.sqrt(dot(column(solved['body'][roles['head']], 0),
                                                            column(solved['body'][roles['head']], 0))), 4)
+                if names:
+                    result['hands'] = [dict(fist=fists[side], **(hand_shape(names, solved['body'], transform, side,
+                                                                            targets[side][1]) or {}))
+                                       for side in (0, 1)]
             result['screenshot'] = screenshot(game, 'ik-third-person')
             report['ik'] = result
             print('IK:', json.dumps(result), flush=True)

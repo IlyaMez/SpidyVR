@@ -31,7 +31,7 @@ from bridge_game import ROOT, prepare
 from inspect_game import PE
 from observe_game import call_remote, call_with_payload
 from probe_stereo import snapshot as stereo_snapshot, frame_snapshot
-from probe_stereo_gpu import discover_queue, snapshot as gpu_snapshot
+from probe_stereo_gpu import MAX_EYE_SIZE, discover_queue, snapshot as gpu_snapshot
 from run_game_vr import write_rgb_png
 
 HOOKS = (0x18a0bb0, 0x189bd30, 0x186cc00, 0x1846c20, 0x19223e0, 0x189e310, 0x189e3a0, 0x1873470,
@@ -243,7 +243,7 @@ def main():
     try:
         hwnd = game_window(game.pid)
         width, height = client_size(hwnd)
-        if not 64 <= width <= 4096 or not 64 <= height <= 4096:
+        if not 64 <= width <= MAX_EYE_SIZE or not 64 <= height <= MAX_EYE_SIZE:
             raise RuntimeError(f'Unexpected window size {width} x {height}')
         pe = PE(pathlib.Path(game.path).read_bytes())
         entries = {rva: pe.bytes(rva, 16) for rva in HOOKS}

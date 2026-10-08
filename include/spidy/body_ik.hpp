@@ -69,7 +69,8 @@ struct ArmJoints {
     // from the hand joint) and the thumb's base (which side the thumb is on).
     int finger = -1, thumb = -1;
     // Optional, for a fist: each finger's joints from its base in the palm
-    // to its tip, and the thumb's.
+    // to its tip, from the index finger to the little one, and the thumb's.
+    // Two fingers or more also say which way the palm faces.
     std::vector<std::vector<int16_t>> fingers;
     std::vector<int16_t> thumbChain;
 };
@@ -98,6 +99,13 @@ struct Rig {
     // (out of the palm).
     Vec3 pelvisForward{}, pelvisUp{}, headForward{}, headUp{};
     std::array<Vec3, 2> handFingers{}, handPalm{};
+    // The axis each finger joint after the palm's bends about, in the frame
+    // of the joint before it: a positive turn closes the finger toward the
+    // palm. Per arm and finger, its first three such joints (zero where a
+    // finger has fewer). The thumb's two joints after its base likewise,
+    // closing it across the palm toward the little finger.
+    std::array<std::vector<std::array<Vec3, 3>>, 2> fingerHinges{};
+    std::array<std::array<Vec3, 2>, 2> thumbHinges{};
     // The point between the eyes from the head joint, along the head's
     // forward, up and left, in model units; its height above the feet.
     Vec3 eyesFromHead{};
@@ -156,10 +164,13 @@ struct Config {
     // The forearm takes this share of the wrist's roll about it.
     float forearmRoll = .5f;
     // A closed fist: each finger joint after the one in the palm bends this
-    // far from the joint before it (knuckle, middle, tip, radians); the
-    // thumb's joints after its base fold in this far.
+    // far from the joint before it (knuckle, middle, tip, radians), about
+    // the finger's own hinge. The thumb's last joint bends thumbBend, the
+    // one before it as far as lays the tip on the curled fingers (at most
+    // thumbBendMax), and its base swings the tip there: thumbRest (model
+    // units) out from the middle bones of the first two fingers.
     float fistBend[3]{1.45f, 1.65f, 1.1f};
-    float thumbFold = .6f;
+    float thumbBend = 1.1f, thumbBendMax = 1.4f, thumbRest = .016f;
     // Feet within this height of the ground in the game's pose stand on it:
     // the legs bend to keep them there. Higher, the legs keep the game's pose.
     float groundedFoot = .3f;
