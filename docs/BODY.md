@@ -25,6 +25,7 @@ The body is the game's own hero model, its joints turned every frame
 | Stand in a T-pose and hold both triggers | The calibration: Spider-Man takes your eye height and your arms' length ([below](#your-size-the-t-pose-calibration-october-8)); the first time VR shows the game, and from Settings > SPIDY VR > CALIBRATE BODY |
 | Walk around your room | The feet stay put until your hips are 15 cm from over them, then follow |
 | Swing, fall, jump | The legs keep the game's pose (a swing's tuck, a fall's flail) under your upright body |
+| Flip (A in the air, with the experimental FLIPS on) | The whole body turns with you about your eyes; the legs keep the game's pose |
 | Squeeze a grip | That hand closes into a fist (it still shoots its web) |
 | Move a hand fast | It closes into a fist too, and opens again within a third of a second |
 | Punch a thug | A fist moving 2.2 m/s or faster into him lands a blow (table below); the controller kicks |
@@ -87,8 +88,9 @@ parents and rest positions.
 
 The XR worker sends the body, every frame, the point between the eyes, the
 headset's orientation, each controller's grip pose, the player's standing eye
-height, the tracking space's yaw and each hand's fist, all relative to the
-player's feet in world axes: the anchor the eye views are placed from
+height, the tracking space's yaw, a flip's tilt (command version 2; the
+identity while level) and each hand's fist, all relative to the player's feet
+in world axes: the anchor the eye views are placed from
 (`native_eye_frame`). The eyes are moved to the hero's render position; the
 body is drawn from the same instance; the hero rope sample and the render
 transform agree (`hero_lag` 0.0 m over 41,378 frames on October 5). So the
@@ -149,8 +151,13 @@ frames may be mirrored, so no joint orientation is ever taken as a rotation):
    the thumb's base as the tip's place (at most 80 degrees), and the base
    swings the tip there: over the middle bones of the index and middle
    fingers, 1.6 cm out of the fist.
-9. The head shrinks to a millimetre at its joint, 11 cm behind and 5 cm below
-   the eyes; the neck stays.
+9. A flip (A in the air, game_tracking's FlipMotion): the headset and the
+   controllers go into steps 2-8 turned back level about the eyes, so the
+   body is solved as if the player stood level; then everything under the
+   body's root turns with the flip's tilt about the eyes. Tilted more than
+   0.09 rad (5 degrees), the legs keep the game's pose, as in the air.
+10. The head shrinks to a millimetre at its joint, 11 cm behind and 5 cm
+    below the eyes; the neck stays.
 
 The body blends in and out at 4 per second; the head shrinks at once while the
 body is wanted, so the eyes never see it from inside. While the body is not

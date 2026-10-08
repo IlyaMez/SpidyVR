@@ -545,8 +545,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
     return result;
 }
 extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSubmit(void* input) {
+    // A version 2 command (the probes') is shorter: read as many bytes as it says.
     Command c;
-    if (!copy(&c, input, sizeof(c)) || !valid(c))
+    uint32_t header[3]{};
+    if (!copy(header, input, sizeof(header)) || (header[2] != commandBytesV2 && header[2] != sizeof(c)) ||
+        !copy(&c, input, header[2]) || !valid(c))
         return 2001;
     AcquireSRWLockExclusive(&control);
     DWORD result{};

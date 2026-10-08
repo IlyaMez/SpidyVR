@@ -38,7 +38,7 @@ HOOKS = (0x1d1cf30, 0x7dc400, 0x72d640, 0x72d650, 0x72e1d0, 0x72d5f0, 0x72d610, 
          0x1749ae0)
 MAGIC = 0x554e4d53
 # ProbeSettings / ProbeSample flags, as XrData's settings bits plus the aim markers and a body calibration asked for.
-FLAGS = dict(web_grab=1, punch=2, body=4, air_webs=8, web_shooter=16, aim_markers=32, calibrate=64)
+FLAGS = dict(web_grab=1, punch=2, body=4, air_webs=8, web_shooter=16, aim_markers=32, calibrate=64, flips=128)
 # The left stick pushed fully one way (x, y; up is +y).
 STICK = dict(up=(0, 32767), down=(0, -32767), left=(-32767, 0), right=(32767, 0))
 
@@ -155,13 +155,18 @@ def main():
         press('down')
         press('right', wait=.8)
         step('smooth_turn_60', dict(smooth_turn=60, snap_turn=45), changes=8)
+        # Down past vibration, the screen size and the EXPERIMENTAL heading: the flips, off until switched on.
+        press('down', 'down', 'down')
+        press('right', wait=.8)
+        step('flips_on', dict(flips=True, smooth_turn=60), changes=9)
         press('y', wait=1.2)
         step('reset_all_asks')
         press('a', wait=1.2)
-        # Spidy's defaults: six settings changed back (aim markers, swing speed, weight, the calibration asked for,
-        # snap turn, smooth turn). The web shooter, which the tab does not offer, stays as the probe started it.
+        # Spidy's defaults: seven settings changed back (aim markers, swing speed, weight, the calibration asked
+        # for, snap turn, smooth turn, the flips). The web shooter, which the tab does not offer, stays as the
+        # probe started it.
         step('reset_all', dict(aim_markers=True, air_webs=True, swing_speed=32.0, weight=60, calibrate=False,
-                               snap_turn=30, smooth_turn=0, web_shooter=False, body=True), changes=14)
+                               snap_turn=30, smooth_turn=0, flips=False, web_shooter=False, body=True), changes=16)
         press('b', wait=.8)
         press('b', wait=.8)
         press('b', wait=1.5)

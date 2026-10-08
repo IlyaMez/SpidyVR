@@ -26,9 +26,10 @@ std::vector<game_targets::Candidate> bots;
 std::vector<PunchTarget> inReach;
 std::vector<PunchEvent> events;
 Punches punches{PunchConfig{}};
-// The tracking space's yaw at the last sample: the right stick turns it.
-float lastYaw{};
-bool yawSeen{};
+// The tracking space's orientation at the last sample: the right stick turns
+// it, a flip tilts it.
+Quat lastTurn{};
+bool turnSeen{};
 bool read(uintptr_t p, void* out, size_t n) {
     __try {
         if (p < 0x10000)
@@ -62,7 +63,7 @@ uint32_t game_punch::start(uintptr_t gameBase) {
         if (!result) {
             AcquireSRWLockExclusive(&updating);
             punches.reset();
-            yawSeen = false;
+            turnSeen = false;
             ReleaseSRWLockExclusive(&updating);
             watch.start(base, 1u << static_cast<unsigned>(game_targets::Kind::bot));
             enabled = true;
@@ -84,7 +85,7 @@ uint32_t game_punch::stop() {
     // An update in flight finishes first.
     AcquireSRWLockExclusive(&updating);
     punches.reset();
-    yawSeen = false;
+    turnSeen = false;
     ReleaseSRWLockExclusive(&updating);
     watch.stop();
     publish([](Data& d) { d.status = 0; });
@@ -108,14 +109,14 @@ void game_punch::update(float seconds, const Input& in, uint64_t hero, uint32_t 
     // The fist at the aim pose (the knuckles); its motion relative to the
     // player is the grip relative to the head, turned from tracking space.
     std::array<PunchHand, 2> hands{};
-    const Quat toWorld = Quat::yaw(in.trackingYaw);
-    // A snap or smooth turn since the last sample turned the hands with the
-    // player: no punch in it.
+    const Quat toWorld = trackingTurn(in);
+    // A snap or smooth turn, or a flip, since the last sample turned the
+    // hands with the player: no punch in it.
     if (std::isfinite(in.trackingYaw)) {
-        if (yawSeen)
-            punches.turn(std::remainder(in.trackingYaw - lastYaw, 6.2831853f));
-        lastYaw = in.trackingYaw;
-        yawSeen = true;
+        if (turnSeen)
+            punches.turn(toWorld * lastTurn.conjugate());
+        lastTurn = toWorld;
+        turnSeen = true;
     }
     for (int i = 0; i < 2; ++i) {
         const auto& h = in.hands[i];

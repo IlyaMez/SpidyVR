@@ -126,9 +126,10 @@ web controls, and lifecycle behavior remain open.
    works on Quest 3 / Virtual Desktop and confirmed the in-game stereo/head/hands
    smoke test. Physical web controls and performance still need their own checks.
 
-Moving anchors, rope wrapping, wall traversal, combat, gadgets, finger tracking,
-and optional flips are later work. The current camera keeps a level horizon;
-head rotation is always preserved, and body animation does not rotate the view.
+Moving anchors, rope wrapping, wall traversal, combat, gadgets and finger
+tracking are later work. The camera keeps a level horizon except in a flip (A
+in the air, October 8, eleventh build); head rotation is always preserved, and
+body animation does not rotate the view.
 
 Webbing props and thugs to yank, carry and throw them has begun outside this
 milestone: it works on throwable props in the game, measured without a headset;

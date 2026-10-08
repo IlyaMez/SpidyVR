@@ -102,7 +102,12 @@ PunchEvent Punches::blow(Vec3 direction, float speed) const {
 void Punches::turn(float radians) {
     if (!std::isfinite(radians) || radians == 0)
         return;
-    const Quat q = Quat::yaw(radians);
+    turn(Quat::yaw(radians));
+}
+void Punches::turn(Quat q) {
+    const float n = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+    if (!std::isfinite(n) || std::abs(n - 1) > .01f)
+        return;
     for (auto& h : hands_) {
         h.relative = q.rotate(h.relative);
         h.velocity = q.rotate(h.velocity);

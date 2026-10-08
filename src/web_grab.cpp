@@ -295,8 +295,7 @@ Input WebGrab::claim(float seconds, const Input& in, const WorldQueries& world, 
                     // head-relative samples so travel and room-scale steps
                     // never count as a pull.
                     if (g.phase == GrabPhase::Tethered && h.sample && !h.yankUsed) {
-                        const Vec3 delta =
-                            Quat::yaw(in.trackingYaw).rotate(hand.gripRelativeToHead - h.previous);
+                        const Vec3 delta = trackingTurn(in).rotate(hand.gripRelativeToHead - h.previous);
                         const float pull = -dot(delta, normalized(g.end - h.wrist));
                         if (pull > 0) {
                             h.pullDistance += pull;

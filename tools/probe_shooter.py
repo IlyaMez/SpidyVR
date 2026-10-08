@@ -8,7 +8,7 @@ the swing's input commands as the headset's controllers do, aimed level along th
 the sky and to either side. For each pull it reads the web shooter's telemetry (SpidyShooterData: a shot fired, where
 it left and where it was aimed) and follows the ShotWebShooter actor the game spawned: where it started, which way and
 how fast it flew, where it ended. Then a trigger held for a second (one shot), three pulls 0.2 s apart (three shots),
-the nearest bot within 40 m if there is one (SpidyShooterTest at its actor: the shot goes to him and the game takes
+the nearest enemy within 40 m if there is one (SpidyShooterTest at its actor: the shot goes to him and the game takes
 him as its target), and the shooter stopped and started again. It checks that nothing faulted and every hook entry is
 restored, and writes reports/shooter-probe.json with a screenshot after each pull.
 """
@@ -26,7 +26,8 @@ from capture_game_state import Game, find_game, open_process, close
 from inspect_game import PE
 from observe_game import call_remote, call_with_payload, modules
 from probe_aim import swing_health
-from probe_game_grab import BOT_MOVERS, ENTRIES, HERO_LOCAL, HERO_MOVERS, camera, hand_command, registry, resolve, shot
+from probe_game_grab import (BOT_MOVERS, ENTRIES, FRIENDLY, HERO_LOCAL, HERO_MOVERS, camera, hand_command, registry,
+                             resolve, shot)
 from probe_game_screen import user32
 from run_game_vr import shooter_snapshot
 from vr_launcher import bring_to_front
@@ -100,8 +101,10 @@ def main():
         feet = game.transform(game.pointer(record))['position']
         hand = (feet[0], feet[1]+1.2, feet[2])
         bots = []
+        # Enemies only: the shots web up no civilian or police officer.
+        friendly = {r for a, v, r, _ in components if v in FRIENDLY}
         for a, v, r, _ in components:
-            if v == BOT_MOVERS:
+            if v == BOT_MOVERS and r not in friendly:
                 t = game.transform(game.pointer(r))
                 if t and 3 < math.dist(t['position'], hand) < 40:
                     bots.append((math.dist(t['position'], hand), r, t['position']))

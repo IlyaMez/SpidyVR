@@ -115,12 +115,22 @@ Moving
                          SMOOTH TURN on, hold it to turn steadily instead:
                          the further you tilt it, the faster
   A .................... jump (from the ground, a wall or a perch; in the
-                         air it does nothing, no web zip from the wrist)
+                         air it flips you, below: no web zip from the wrist)
   B .................... interact: the game's Y (backpacks, doors, prompts;
                          web strike in a fight)
   Menu button .......... pause
   Y .................... game menu (map, suits, skills)
   Click both sticks .... switch between VR and a flat game screen
+
+Flips (experimental, off until you switch FLIPS on in Settings > SPIDY VR or
+in the launcher's options)
+  Tap A in the air ..... one flip, about a second, toward where the left
+                         stick points (ahead or at rest a front flip, back a
+                         backflip, to a side a cartwheel)
+  Hold A in the air .... the left stick turns you head over heels about your
+                         head, as fast as you tilt it (at rest you stay where
+                         you are); it does not move you meanwhile
+  Let go of A .......... you turn back level. Landing or a wall levels you too
 
 Menus and cutscenes show on a screen in the headset. There the controllers act
 as an Xbox controller: left stick moves, A selects, B goes back, grips switch
@@ -135,8 +145,9 @@ VR settings
   Switch the aim markers and webs holding in open air (a web that meets
   nothing within 100 m holds there; off, it misses) on or off, or step the
   swing speed limit, your weight, snap turn, smooth turn, controller
-  vibration and the game screen's size. Changes apply at once. The launcher
-  starts your next session with them; its options show them too.
+  vibration and the game screen's size. Under EXPERIMENTAL, FLIPS (off until
+  you switch it on) lets A in the air flip you. Changes apply at once. The
+  launcher starts your next session with them; its options show them too.
   CALIBRATE BODY: set it to ON RESUME and resume, and the T-pose panel asks
   for your measurements again.
   Catching props and thugs, the web shooter, your own body and punching are
@@ -193,6 +204,9 @@ IF SOMETHING IS WRONG
 - The menu screen is too small or too large: "Game screen size" in Settings
   > SPIDY VR.
 - The game asks for Y (Triangle) to interact: in VR that is B.
+- A flip you did not mean, or flips make you uneasy: switch FLIPS off in
+  Settings > SPIDY VR (or "Flips (experimental)" in the launcher's options).
+  It is off unless you switched it on.
 
 
 SHARING

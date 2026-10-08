@@ -48,7 +48,14 @@ struct Input {
     Vec3 move{}; // world horizontal direction, magnitude <= 1
     float trackingYaw{};
     bool focused = true, jump{};
+    // A flip's tilt of the tracking space (Rig::tilt), the identity while level.
+    Quat tilt{};
 };
+// The tracking space's orientation in the world (Rig::orientation): hand
+// motion relative to the head turns into the world with it.
+inline Quat trackingTurn(const Input& in) {
+    return Quat::yaw(in.trackingYaw) * in.tilt;
+}
 struct Body {
     Vec3 position{0, 3, 0}, velocity{};
     bool grounded{};

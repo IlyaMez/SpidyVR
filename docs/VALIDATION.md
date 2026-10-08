@@ -1,6 +1,150 @@
 # Validation — 2026-10-08
 
-## Web balls and pulls on thugs — current build
+## Flips as an experimental setting — current build
+
+The user, October 8: "ok lets put as an experemental option in settings (off
+by default)".
+
+**What changed.** `vr_settings::Values::flips` (false), `Item::flips` (the
+last item), a 14-row tab: EXPERIMENTAL heading and FLIPS switch at rows
+12-13 (setting numbers 0x20c-0x20d). `GameTrackingRig::flips(bool)` (off by
+default, kept by `reset()`): off, the flip is reset and the tilt level every
+frame. XR worker: `values.flips` from XrConfig options bit 11 (2048), applied
+with the other settings, reported as XrData settings bit 32; XrConfig and
+XrData version 16 (layouts unchanged; `SpidyXrStart` now takes options up to
+4095). Menu probe flags bit 128. Launcher: `SessionOptions::flips`, `--flips`,
+`flips=` in launcher.ini and from the headset line, an options row "Flips
+(experimental)". run_game_vr.py: `--flips`, `vr_settings.flips`, config and
+data version 16. launch-game-vr.ps1 `-Flips`.
+
+**Checks.** 199 core checks (new: off by default A in the air turns nothing
+and the stick still walks; on, it turns; switched off mid-flip, level at once;
+a reset keeps the switch. The tab test: four sections, FLIPS a switch under
+EXPERIMENTAL, the last row; the choices test: OFF by default), 13 launcher
+checks (the switch on adds `--flips`; `flips=1` from the headset), the 5
+Python suites (87: data version 16, `flips` in vr_settings and in the
+settings line), the export checks and the graphics test.
+
+**Unproven.** `probe_menu.py`'s new FLIPS step in the game; the launcher's new
+row on screen; the headset.
+
+## Flips held with the stick — preceding build
+
+The user, October 8, in the headset: "right now holding a just start
+continiously spinning super fast in the direction".
+
+**The session.** `dist/Spidy-0.2.4/reports/game-vr-20261008-171227.json`
+(17:12-17:19, the eleventh build: its ray and stereo DLLs hash as built at
+16:59). 6644 swing samples, none with an error: the version 3 swing
+commands worked in the game. The head's up in the report's samples (about
+20 a second) went below the horizon in 0.41-0.55 s stretches 0.7 s apart:
+held flips turning nonstop at the build's 0.7 s a turn, e.g. 8 turns at
+316-324 s, 4 at 328-332 s.
+
+**What changed.** `FlipMotion` (game_tracking): phases level, holding,
+flipping, settling. A press that starts in the air holds: the left stick's
+tilt (dead zone 0.2, full from 0.9, as smooth turning) turns the player
+about the stick's axis (the head goes the way it points and down) at up to
+2π/1.5 s, reaching 63% of what it asks in 80 ms; at rest the angle stays.
+Let go after 0.25 s or more: back level the short way at 2π a second (the
+last 0.4 rad slowing to no less than 30%). Let go sooner (a tap): a whole
+flip the way the stick pointed during the press, else the way it was
+turning, else ahead, at 2π a second after an 80 ms spin-up (1.16 s from
+rest); pressed during that flip, A holds it where it is, still turning, and a
+tap carries it on to level. Landing (80 ms) levels at twice the return
+speed. The web-held input is gone (rig and XR worker). Same command
+layouts as the eleventh build; only `spidy_stereo_probe.dll` changes in
+code.
+
+**Checks.** 198 core checks: five flip checks rewritten (a tap's front flip
+in 95-115 frames about a still head, bit for bit level after; a ground
+press held into the air turns nothing and keeps the stick walking; held, a
+whole turn in 1.5 s at full tilt and half as fast half tilted past the dead
+zone, the angle kept at rest within 1e-5, letting go no more than half a
+turn back; a tap with the stick back a whole backflip; a tap during a flip
+one whole turn; the stick's four ways held 31 frames, walking zeroed, level
+within 30 frames of letting go; landing upside down level within 40
+frames; a menu; a held A turns no more). The graphics test, the 5 Python
+suites (87) and the export checks (v2/v3 swing, v1/v2 body) pass. Built
+17:30 in build\windows-ninja (spidy_stereo_probe.dll 46F39C7CA2A9...,
+spidy_ray_bridge.dll 40E84B29556E...: its code is unchanged, its debug
+directory changed with the header).
+
+**Unproven.** The headset: the top speed, the return to level, taps.
+
+## Flips — preceding build
+
+The user, October 8, after the Ultimate Spider-Lair's VRChat controls (flip
+modes, both triggers held to flip, the sticks turning the player): "wdyt
+about adding something like the flip mode from here without hurting existing
+mapping?", then "build it, only the flip rotation stuff".
+
+**Mapping.** Only inputs idle in the air. A pressed in the air (kept from
+the game since the ninth build; Spidy's swing acts on A only on the ground)
+starts a flip. The left stick picks its way at the press and steers it while
+A is held; only then are the swing's air steering and the game's stick
+zeroed. The Spider-Lair's both-triggers and both-grips holds collide with
+reeling, web balls and webs, so they were not used.
+
+**What changed.**
+- `FlipMotion` (game_tracking): level, spinning, finishing, settling. A
+  press that starts airborne (`game_swing::airborne` from the latest swing
+  sample, the AirJumpFilter's rule) starts it. Held, it turns at 2π/0.7 s
+  about an axis from the stick (the head's left, a front flip, by default),
+  reaching 63% of that in 50 ms; the stick past 0.3 steers the axis. Let go,
+  or a web holding the player or a catch, and it finishes the turn toward
+  level the way it turns, slowing over the last 0.4 rad to no less than 30%;
+  let go within 0.6 rad past level after half a turn or more and it goes
+  back. 80 ms on the ground, a wall or a ceiling and it settles the short
+  way at twice the speed. A tap measures 72 frames (0.8 s) for the whole
+  turn at 90 Hz; a landing half way levels in 24 frames (0.27 s). Inactive
+  play (menus, scenes, stutters), a recenter and another player level it at
+  once; a held A must be let go before it flips again.
+- `Rig` gains `tilt` and `pivot` (the tracking-space head where the flip
+  began): `toWorld` turns tracking-space poses about the pivot, then yaws and
+  places them. With the identity tilt it takes the old path, bit for bit.
+- `Input::tilt` and `trackingTurn(in)` (yaw times tilt): the zip pull
+  (swing.cpp), the grab's yank (web_grab.cpp), the punch's arm motion and
+  its turn compensation (`Punches::turn(Quat)`, game_punch.cpp) and the aim
+  markers' steadying (`AimMarkerMotion::aim(direction, Quat)`) use the whole
+  orientation; level, it is the yaw exactly.
+- `game_swing::Command` version 3, 184 B: the tilt after version 2's 168
+  bytes. `valid` and `SpidySwingSubmit` take version 2 too (level), reading
+  as many bytes as the command names.
+- `native_body::Command` version 2, 160 B: the tilt in world axes after
+  version 1's 144 bytes; `SpidyBodySubmit` takes version 1 too. body_ik
+  solves the body for the player turned back level about the eyes, then
+  turns everything under the body's root with the tilt (step 7, before the
+  head shrinks); tilted more than 0.09 rad, the legs keep the game's pose.
+- game_xr: the rig gets `game_swing::airborne` and whether a web or a catch
+  holds; A is masked while the T-pose calibration has the controllers; the
+  swing and body commands carry the tilt; the aim markers steady with
+  `trackingTurn`. XrConfig and XrData are unchanged, so the session report
+  has no flip counter.
+
+**Checks.** 198 core checks (11 new: a tap's front flip about a still head
+in 60-90 frames, ending bit for bit level; a ground press held into the air;
+hold and release, just past level, a web holding; the stick's four ways and
+the stick taken from walking while held; landing, a menu, a held A; the
+rig's tilt about its pivot and a snap turn while tilted; an upside-down pull
+zipping and push not; a flip that is no punch; aim markers steady through a
+flip; swing commands v2 and v3; the body turned about the eyes with wrists
+on their controllers), the graphics test, 13 launcher checks and the 5
+Python suites (87). Built in a separate folder (a peer's in-game check was
+using build\windows-ninja). The rebuilt `spidy_ray_bridge.dll` and
+`spidy_stereo_probe.dll`, loaded in Python with no game: `SpidySwingSubmit`
+took a probe's v2 command and a v3 one with a tilt (2002, not running) and
+refused a scaled tilt and a v2 header claiming 184 B (2001);
+`SpidyBodySubmit` took v1 and v2 (0) and refused a zero tilt and a v1
+header claiming 160 B (7502).
+
+**Unproven.** Everything in the game and the headset: the XR worker's flip,
+comfort and speed, whether the game draws a rolled or upside-down view
+correctly (sky, shadows, particles, its active view following the head), the
+body seen mid-flip, and held images while flipping (a dropped frame shows the
+previous tilt, as with smooth turning).
+
+## Web balls and pulls on thugs — preceding build
 
 The user, October 8: "when shooting web projectiles at enemies and objects
 nothing really happens same with webbing and pulling enemies - they get

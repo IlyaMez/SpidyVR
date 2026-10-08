@@ -88,6 +88,8 @@ class Punches {
     // sample (the right stick's snap or smooth turning): the hands turned
     // with him, which is no motion of the arms.
     void turn(float radians);
+    // The same for any turn of the player in the world (a flip, too).
+    void turn(Quat q);
     void reset();
     // A hand's speed relative to the player, metres per second.
     float speed(int hand) const {

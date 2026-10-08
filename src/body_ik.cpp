@@ -371,15 +371,31 @@ bool prepare(Rig& rig, std::span<const float> restPose) {
     return true;
 }
 
-Result solve(Pose& pose, const Rig& rig, const Targets& t, const Config& c, State& state, bool wanted, float dt,
-             float scale, float armScale) {
+Result solve(Pose& pose, const Rig& rig, const Targets& targets, const Config& c, State& state, bool wanted,
+             float dt, float scale, float armScale) {
     Result r;
     dt = std::isfinite(dt) ? std::clamp(dt, 0.f, .1f) : 0.f;
     state.weight = approach(state.weight, wanted ? 1.f : 0.f, c.blendSpeed * dt);
     r.weight = state.weight;
     const float w = state.weight;
-    if (!rig.ready || !t.head || w <= 0 || pose.count() < static_cast<int>(rig.parent.size()) || !finite(t.eyes))
+    if (!rig.ready || !targets.head || w <= 0 || pose.count() < static_cast<int>(rig.parent.size()) ||
+        !finite(targets.eyes))
         return r;
+    // In a flip the body is solved for the player turned back level about the
+    // eyes, and turned with them at the end (7.).
+    Targets t = targets;
+    const Quat tilt = unit(targets.tilt);
+    const bool tilted = angle(tilt) > 1e-4f;
+    if (tilted) {
+        const Quat back = tilt.conjugate();
+        t.facing = back * t.facing;
+        for (auto& hand : t.hands) {
+            hand.grip = t.eyes + back.rotate(hand.grip - t.eyes);
+            hand.orientation = back * hand.orientation;
+        }
+        // Over a few degrees, the feet are nowhere near the ground.
+        t.airborne = t.airborne || angle(tilt) > .09f;
+    }
     const Vec3 F = normalized(t.facing.rotate({0, 0, -1})), U = normalized(t.facing.rotate({0, 1, 0}));
     if (length(F) < .5f || length(U) < .5f)
         return r;
@@ -584,7 +600,10 @@ Result solve(Pose& pose, const Rig& rig, const Targets& t, const Config& c, Stat
         pose.turn(rig.below[static_cast<size_t>(thumb[0])],
                   partial(between(pose.position(thumb.back()) - base, onto - base), fist), base);
     }
-    // 7. The head shrinks to a point at its joint, behind and below the eyes:
+    // 7. A flip turns the whole body with the player, about the eyes.
+    if (tilted)
+        pose.turn(bodyJoints, partial(tilt, w), t.eyes);
+    // 8. The head shrinks to a point at its joint, behind and below the eyes:
     // at once while the body is wanted, so the eyes never see it from inside
     // while the body blends in; gradually as it blends out.
     if (c.hideHead)

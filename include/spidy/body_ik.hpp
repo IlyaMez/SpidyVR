@@ -146,6 +146,10 @@ struct Targets {
         float fist{};
     };
     std::array<Hand, 2> hands{}; // 0 the left controller, 1 the right
+    // A flip's tilt of the player, model space (the identity while level):
+    // the body stands as the player would level, then turns with them about
+    // the eyes. Tilted, the legs keep the game's pose, as in the air.
+    Quat tilt{};
 };
 struct Config {
     // Where the wrist joint sits from the grip point of a right hand, in its

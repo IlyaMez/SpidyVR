@@ -40,7 +40,147 @@ Mat4 worldPose(Pose pose) {
                z = pose.orientation.rotate({0, 0, -1}), p = pose.position;
     return {x.x, x.y, x.z, 0, y.x, y.y, y.z, 0, z.x, z.y, z.z, 0, p.x, p.y, p.z, 1};
 }
+Quat unit(Quat q) {
+    const float n = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+    return n > 1e-6f && std::isfinite(n) ? Quat{q.x / n, q.y / n, q.z / n, q.w / n} : Quat{};
+}
+constexpr float pi = 3.14159265f;
+/// The left stick as a flip's turn in the tracking space: the head goes the
+// way the stick points (from where the headset looks) and down. Its length is
+// how far the stick is tilted: 0 within the dead zone, 1 from stickFull.
+Vec3 stickTurn(const FlipMotion::Sample& s) {
+    const float x = std::isfinite(s.stickX) ? s.stickX : 0, y = std::isfinite(s.stickY) ? s.stickY : 0;
+    const float amount = std::clamp((std::hypot(x, y) - FlipMotion::stickDeadZone) /
+                                        (FlipMotion::stickFull - FlipMotion::stickDeadZone),
+                                    0.f, 1.f);
+    if (amount <= 0)
+        return {};
+    // Looking straight down the crown points ahead, straight up behind.
+    const Vec3 look = s.head.rotate({0, 0, -1});
+    Vec3 forward = horizontal(look);
+    if (length(forward) < .5f)
+        forward = horizontal(s.head.rotate({0, look.y < 0 ? 1.f : -1.f, 0}));
+    if (length(forward) < .5f)
+        forward = {0, 0, -1};
+    const Vec3 right{-forward.z, 0, forward.x};
+    return normalized(cross({0, 1, 0}, right * x + forward * y)) * amount;
+}
+// A front flip's axis: the left of where the headset looks, level.
+Vec3 frontFlipAxis(const FlipMotion::Sample& s) {
+    FlipMotion::Sample ahead = s;
+    ahead.stickX = 0;
+    ahead.stickY = 1;
+    return normalized(stickTurn(ahead));
+}
 } // namespace
+void FlipMotion::reset() {
+    const bool held = held_, fromAir = fromAir_;
+    *this = {};
+    held_ = held;
+    fromAir_ = fromAir;
+}
+void FlipMotion::toLevel(Phase phase, Vec3 way) {
+    // The turn that takes the tilt back to level, the short way.
+    Quat back = tilt_.conjugate();
+    if (back.w < 0)
+        back = {-back.x, -back.y, -back.z, -back.w};
+    const Vec3 v{back.x, back.y, back.z};
+    const float sine = length(v);
+    float angle = 2 * std::atan2(sine, back.w);
+    Vec3 axis = sine > 1e-7f ? v / sine : way;
+    // A flip goes round the way it turns: from level, a whole turn.
+    if (phase == Phase::flipping) {
+        if (sine <= 1e-7f) {
+            axis = way;
+            angle = 2 * pi;
+        } else if (dot(axis, way) < 0) {
+            axis = -axis;
+            angle = 2 * pi - angle;
+        }
+    }
+    from_ = tilt_;
+    axis_ = axis;
+    total_ = left_ = angle;
+    speed_ = rate_ = length(spin_);
+    spin_ = {};
+    phase_ = phase;
+    if (left_ <= 1e-5f || length(axis) < .5f) {
+        phase_ = Phase::level;
+        tilt_ = {};
+    }
+}
+Quat FlipMotion::update(const Sample& s) {
+    const float dt = std::isfinite(s.seconds) ? std::clamp(s.seconds, 0.f, .1f) : 0.f;
+    const float returnRate = 2 * pi / returnTurnSeconds;
+    // A press is from the air or not as it starts, as AirJumpFilter decides.
+    const bool press = s.jump && !held_;
+    if (!s.jump)
+        fromAir_ = false;
+    else if (press)
+        fromAir_ = s.airborne;
+    held_ = s.jump;
+    landed_ = s.airborne && !s.surface ? 0.f : landed_ + dt;
+    const bool landed = landed_ >= landingSeconds;
+    if (landed && (phase_ == Phase::holding || phase_ == Phase::flipping)) {
+        toLevel(Phase::settling);
+        returnRate_ = 2 * returnRate;
+    }
+    if (press && fromAir_ && !landed) {
+        // From level a new flip; during one A takes it over where it is,
+        // still turning until the stick says otherwise.
+        if (phase_ == Phase::level)
+            turned_ = 0;
+        else if (phase_ != Phase::holding)
+            spin_ = axis_ * rate_;
+        phase_ = Phase::holding;
+        heldFor_ = 0;
+        tapWay_ = {};
+    }
+    if (phase_ == Phase::holding) {
+        if (!(s.jump && fromAir_)) {
+            if (heldFor_ < tapSeconds) {
+                // A tap: a whole flip the way the stick pointed, else the
+                // way it was turning, else ahead.
+                Vec3 way = tapWay_;
+                if (length(way) < .5f)
+                    way = length(spin_) > 1e-3f ? normalized(spin_) : frontFlipAxis(s);
+                toLevel(Phase::flipping, way);
+            } else {
+                toLevel(Phase::settling);
+                returnRate_ = returnRate;
+            }
+        } else {
+            heldFor_ += dt;
+            const Vec3 want = stickTurn(s);
+            if (length(want) > 0)
+                tapWay_ = normalized(want);
+            spin_ += (want * (2 * pi / holdTurnSeconds) - spin_) * (1 - std::exp(-dt / spinUpSeconds));
+            const float speed = length(spin_);
+            if (speed > 1e-6f) {
+                tilt_ = unit(tilt_ * Quat::around(spin_ / speed, speed * dt));
+                turned_ += speed * dt;
+            }
+        }
+    }
+    if (phase_ == Phase::flipping || phase_ == Phase::settling) {
+        float speed = returnRate_;
+        if (phase_ == Phase::flipping) {
+            speed_ += (2 * pi / tapTurnSeconds - speed_) * (1 - std::exp(-dt / spinUpSeconds));
+            speed = speed_;
+        }
+        rate_ = speed * std::clamp(left_ / easeAngle, slowest, 1.f);
+        const float step = std::min(left_, rate_ * dt);
+        left_ -= step;
+        turned_ += step;
+        if (left_ <= 1e-5f) {
+            phase_ = Phase::level;
+            tilt_ = {};
+        } else {
+            tilt_ = unit(from_ * Quat::around(axis_, total_ - left_));
+        }
+    }
+    return tilt_;
+}
 Input trackedSwingInput(const XrFrame& f, const Rig& rig) {
     Input input;
     input.focused = f.focused && f.valid && validTrackedPose(f.head);
@@ -48,6 +188,7 @@ Input trackedSwingInput(const XrFrame& f, const Rig& rig) {
         return input;
     input.jump = f.jump;
     input.trackingYaw = rig.yaw;
+    input.tilt = rig.tilt;
     for (unsigned i = 0; i < 2; ++i) {
         const auto& hand = f.hands[i];
         if (handValid(hand))
@@ -56,19 +197,25 @@ Input trackedSwingInput(const XrFrame& f, const Rig& rig) {
     }
     const auto& move = f.hands[0];
     if (handValid(move) && std::hypot(move.stickX, move.stickY) > .2f) {
-        const auto forward = horizontal(rig.toWorld(f.head).orientation.rotate({0, 0, -1}));
+        // Ahead of the player as they stand, a flip's tilt aside.
+        const auto forward = horizontal(Quat::yaw(rig.yaw).rotate(f.head.orientation.rotate({0, 0, -1})));
         input.move = limited(cross(forward, {0, 1, 0}) * move.stickX + forward * move.stickY, 1);
     }
     return input;
 }
 void GameTrackingRig::reset() {
     const float snap = snap_, smooth = smooth_;
+    const bool flips = flips_;
+    const FlipMotion flip = flip_;
     *this = {};
     snap_ = snap;
     smooth_ = smooth;
+    flips_ = flips;
+    flip_ = flip;
+    flip_.reset();
 }
 GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameForward, bool gameplay,
-                                        Vec3 surfaceUp) {
+                                        Vec3 surfaceUp, bool airborne) {
     GameMotionFrame out;
     out.swing.focused = false;
     pendingRecenter_ |= f.recentered;
@@ -79,7 +226,10 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
                         validTrackedPose(f.eyes[0].pose) && validTrackedPose(f.eyes[1].pose) &&
                         lens(f.eyes[0].fov) && lens(f.eyes[1].fov);
     if (!active) {
+        // Menus, scenes and stutters find the player level.
         wasActive_ = false;
+        flip_.reset();
+        rig_.tilt = {};
         return out;
     }
     const bool resumed = !wasActive_;
@@ -99,8 +249,12 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         const Vec3 travel = feet - lastFeet_;
         rig_.origin += travel;
         lastHead_.position += travel;
-        if (pendingRecenter_)
+        if (pendingRecenter_) {
+            // A recenter ends a flip: level, the head kept where it was.
+            flip_.reset();
+            rig_.tilt = {};
             rig_.preserveHead(lastHead_, f.head);
+        }
     }
     const float turn = handValid(f.hands[1]) ? f.hands[1].stickX : 0;
     // A stick held into play turns nothing until it is let go: out of a menu,
@@ -128,6 +282,25 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     const bool onSurface = finite(normal) && length(normal) > .5f &&
                            normal.y < (onSurface_ ? surfaceLeaveCos : surfaceEnterCos);
     const Vec3 away = normal.y < -surfaceEnterCos ? Vec3{0, -1, 0} : normalized(Vec3{normal.x, 0, normal.z});
+    // A flip tilts the tracking space about the head where it began.
+    FlipMotion::Sample flip;
+    flip.jump = f.jump;
+    flip.airborne = airborne;
+    flip.surface = onSurface;
+    if (handValid(f.hands[0])) {
+        flip.stickX = f.hands[0].stickX;
+        flip.stickY = f.hands[0].stickY;
+    }
+    flip.head = f.head.orientation;
+    flip.seconds = f.seconds;
+    if (flip_.level())
+        rig_.pivot = f.head.position;
+    if (flips_) {
+        rig_.tilt = flip_.update(flip);
+    } else {
+        flip_.reset();
+        rig_.tilt = {};
+    }
     const Vec3 unplacedHead = rig_.toWorld(f.head).position;
     Vec3 target{};
     if (onSurface) {
@@ -147,13 +320,16 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     out.standOff = standOff_;
     if (onSurface)
         out.surfaceClearance = dot(unplacedHead + standOff_ - feet, away);
-    const Rig placed{rig_.origin + standOff_, rig_.yaw};
+    const Rig placed{rig_.origin + standOff_, rig_.yaw, rig_.tilt, rig_.pivot};
     out.active = true;
     out.releaseWebs = longBreak || pendingRecenter_;
     pendingRecenter_ = false;
     out.predictedDisplayTime = f.predictedDisplayTime;
     out.anchor = feet;
     out.swing = trackedSwingInput(f, placed);
+    // A held flip steers with the left stick: the player does not walk or drift.
+    if (flip_.steering())
+        out.swing.move = {};
     if (out.releaseWebs)
         for (auto& hand : out.swing.hands)
             hand.tracked = false;
@@ -188,8 +364,9 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         out.nativeKeys |= 1u << 3;
     if (f.jump)
         out.nativeKeys |= 1u << 4;
-    // Kept from the feet: a recenter keeps the head where it was, stand-off apart.
-    lastHead_ = {unplacedHead, head.orientation};
+    // Kept from the feet: a recenter keeps the head where it was, stand-off
+    // apart, and its heading as it stands, a flip's tilt aside.
+    lastHead_ = {unplacedHead, Quat::yaw(rig_.yaw) * f.head.orientation};
     lastFeet_ = feet;
     lastTime_ = f.predictedDisplayTime;
     wasActive_ = true;

@@ -323,9 +323,14 @@ void AimMarkerMotion::begin(int64_t timeNs) {
     time_ = timeNs;
 }
 Vec3 AimMarkerMotion::aim(Vec3 direction, float yaw) {
-    if (!finite(direction) || length(direction) < .5f || !std::isfinite(yaw))
+    if (!std::isfinite(yaw))
         return direction;
-    const Quat turn = Quat::yaw(yaw);
+    return aim(direction, Quat::yaw(yaw));
+}
+Vec3 AimMarkerMotion::aim(Vec3 direction, Quat turn) {
+    const float n = turn.x * turn.x + turn.y * turn.y + turn.z * turn.z + turn.w * turn.w;
+    if (!finite(direction) || length(direction) < .5f || !std::isfinite(n) || std::abs(n - 1) > .01f)
+        return direction;
     const Vec3 raw = turn.conjugate().rotate(normalized(direction));
     if (!filtering_) {
         steady_ = raw;

@@ -384,7 +384,7 @@ def start_settings(a):
                 web_shooter=not a.no_web_shooter, punch=not a.no_punch, body=not a.no_body,
                 swing_speed=round(a.swing_speed, 1), weight=a.weight,
                 snap_turn=a.snap_turn, smooth_turn=a.smooth_turn, haptics=a.haptics, screen_size=a.screen_size,
-                eye_height_mm=a.eye_height, arm_length_mm=a.arm_length,
+                flips=a.flips, eye_height_mm=a.eye_height, arm_length_mm=a.arm_length,
                 calibration_prompt=not a.no_calibration_prompt)
 
 
@@ -428,7 +428,7 @@ def snapshot(game, address):
         raw = game.read(address, 792)
         if len(raw) != 792:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53585244, 15, 792):
+        if struct.unpack_from('<3I', raw) != (0x53585244, 16, 792):
             raise RuntimeError('Game XR protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -483,7 +483,7 @@ def snapshot(game, address):
                                        punch=bool(flags & 2), body=bool(flags & 4),
                                        swing_speed=round(swing_speed, 1), weight=weight, snap_turn=snap_turn,
                                        smooth_turn=smooth_turn, haptics=haptics, screen_size=screen_size,
-                                       eye_height_mm=eye_height, arm_length_mm=arm_length,
+                                       flips=bool(flags & 32), eye_height_mm=eye_height, arm_length_mm=arm_length,
                                        calibration_prompt=not calibration_flags & 1),
                       setting_changes=changes,
                       calibration=dict(phase=CALIBRATION_PHASES.get(phase, phase),
@@ -846,6 +846,8 @@ def main():
     p.add_argument('--no-web-grab', action='store_true', help='Webs never catch props or thugs; they only swing')
     p.add_argument('--no-air-webs', action='store_true',
                    help='A web that meets nothing within reach misses, instead of holding in open air 100 m out')
+    p.add_argument('--flips', action='store_true',
+                   help='Experimental: A tapped in the air flips you; held there, the left stick turns you over')
     p.add_argument('--no-body', action='store_true',
                    help="Keep the hero hidden in VR (gloves drawn over the image) instead of your own body")
     p.add_argument('--no-punch', action='store_true', help='Fists pass through thugs instead of punching them')
@@ -1002,7 +1004,7 @@ def session(a, startup):
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
                                            'SpidyBodyData'))
-        config = struct.pack('<4I7Q2IfI', 0x53585243, 15, 640, game.pid, game.base, queue,
+        config = struct.pack('<4I7Q2IfI', 0x53585243, 16, 640, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
@@ -1010,7 +1012,7 @@ def session(a, startup):
                              (16 if a.no_eye_occlusion else 0) | (32 if a.no_body else 0) |
                              (64 if a.no_punch else 0) | (128 if a.no_aim_markers else 0) |
                              (256 if a.no_air_webs else 0) | (512 if a.no_web_shooter else 0) |
-                             (1024 if a.no_calibration_prompt else 0)) + \
+                             (1024 if a.no_calibration_prompt else 0) | (2048 if a.flips else 0)) + \
             runtime_path(manifest) + struct.pack('<8I', a.snap_turn, a.haptics, a.screen_size, a.smooth_turn,
                                                  a.render_scale, a.weight, a.eye_height, a.arm_length)
         startup.stage = 'starting VR'

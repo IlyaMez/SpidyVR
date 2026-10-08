@@ -65,6 +65,14 @@ struct Quat {
     static Quat yaw(float r) {
         return {0, std::sin(r / 2), 0, std::cos(r / 2)};
     }
+    // A turn of `r` radians about `axis` (any length but zero; zero: none).
+    static Quat around(Vec3 axis, float r) {
+        const float n = length(axis);
+        if (!(n > 1e-6f))
+            return {};
+        const float s = std::sin(r / 2) / n;
+        return {axis.x * s, axis.y * s, axis.z * s, std::cos(r / 2)};
+    }
 };
 struct Pose {
     Vec3 position{};
@@ -114,11 +122,21 @@ inline Mat4 projection(float left, float right, float down, float up, float near
             0};
 }
 // Standing tracking space is translated and yawed with locomotion. Never inherit
-// animated body pitch/roll. Physical head translation remains 1:1.
+// animated body pitch/roll. Physical head translation remains 1:1. Only a flip
+// (game_tracking's FlipMotion) tilts it, about `pivot`, a point of the tracking
+// space (the head where the flip began); level, `tilt` is the identity.
 struct Rig {
     Vec3 origin{};
     float yaw{};
+    Quat tilt{};
+    Vec3 pivot{};
+    // The tracking space's orientation in the world.
+    Quat orientation() const {
+        return Quat::yaw(yaw) * tilt;
+    }
     Pose toWorld(Pose p) const {
+        if (tilt.x != 0 || tilt.y != 0 || tilt.z != 0)
+            p = {pivot + tilt.rotate(p.position - pivot), tilt * p.orientation};
         return compose({origin, Quat::yaw(yaw)}, p);
     }
     void turn(float radians, Vec3 trackedHead) {

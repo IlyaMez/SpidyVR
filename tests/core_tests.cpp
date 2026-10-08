@@ -307,6 +307,19 @@ GameMotionFrame playFor(GameTrackingRig& rig, XrFrame& f, Vec3 feet, Vec3 up, fl
     }
     return out;
 }
+// One 90 Hz frame for a flip: A held or not, the player in the air or not.
+GameMotionFrame flipFrame(GameTrackingRig& rig, XrFrame& f, bool jump, bool airborne = true) {
+    ++f.predictedDisplayTime;
+    f.jump = jump;
+    return rig.update(f, {}, {0, 0, -1}, true, {0, 1, 0}, airborne);
+}
+bool levelTilt(Quat q) {
+    return q.x == 0 && q.y == 0 && q.z == 0 && q.w == 1;
+}
+// A world matrix's row: 0 right, 1 down (worldPose), 2 ahead, 3 the place.
+Vec3 matrixRow(const Mat4& m, int r) {
+    return {m[r * 4], m[r * 4 + 1], m[r * 4 + 2]};
+}
 // A player in a T-pose in the tracking space (OpenXR axes: -z ahead, +x right, +y up from the floor): eyes
 // `eyes` high, each wrist `arm` (the left) and `rightArm` (the right; 0: the same) from the avatar's shoulder
 // at the player's size (Spider-Man's proportions), straight out to its side; both triggers at `trigger`.
@@ -3798,7 +3811,7 @@ int main() {
               "NaN assist accepted");
         check(!bad([](ShooterConfig&) {}), "defaults rejected");
     });
-    test("VR settings tab: three sections, every setting once, a list's choices one per step", [] {
+    test("VR settings tab: four sections, every setting once, a list's choices one per step", [] {
         using namespace vr_settings;
         const auto& all = rows();
         unsigned seen = 0, headings = 0;
@@ -3818,8 +3831,11 @@ int main() {
             for (const char* c : row.choices)
                 check(c && *c, "an empty choice");
         }
-        check(headings == 3 && all[0].item == Item::none && all[5].item == Item::none && all[7].item == Item::none,
-              "the sections: webs, body, comfort");
+        check(headings == 4 && all[0].item == Item::none && all[5].item == Item::none && all[7].item == Item::none &&
+                  all[12].item == Item::none,
+              "the sections: webs, body, comfort, experimental");
+        check(all[13].item == Item::flips && all[13].choices.empty() && std::strcmp(all[12].title, "EXPERIMENTAL") == 0,
+              "the flips: a switch under EXPERIMENTAL, the last row");
         check(all[3].item == Item::swingSpeed && all[4].item == Item::weight, "the weight under the swing speed");
         check(all[6].item == Item::calibrate && all[6].choices.size() == 2 &&
                   std::strcmp(all[6].choices[1], "ON RESUME") == 0,
@@ -3882,6 +3898,9 @@ int main() {
                   choose(Item::calibrate, 1, v) && v.calibrate && choice(Item::calibrate, v) == 1 &&
                   !choose(Item::calibrate, 2, v),
               "a calibration asked for: ON RESUME, after NO by default");
+        check(!defaults.flips && choice(Item::flips, defaults) == 0 && defaultChoice(Item::flips) == 0 &&
+                  choose(Item::flips, 1, v) && v.flips && choice(Item::flips, v) == 1,
+              "the experimental flips: OFF by default, a switch to ON");
         check(choice(Item::none, v) == 0 && !choose(Item::none, 0, v), "a heading holds no value");
         // RESET: each setting's default choice puts its default back.
         for (const auto& row : rows())
@@ -3974,6 +3993,351 @@ int main() {
         next(true);
         f.hands[1].stickX = 1;
         check(next(true).head[8] > held.head[8] + .01f, "the stick let go and held again did not turn");
+    });
+    test("flip: a tap of A in the air is one front flip about the head, and comes out level", [] {
+        GameTrackingRig rig;
+        rig.flips(true);
+        auto f = trackedFrame();
+        const auto start = flipFrame(rig, f, false);
+        const Vec3 head = matrixRow(start.head, 3), hand = start.hands[1].position;
+        auto m = flipFrame(rig, f, true);
+        check(levelTilt(m.swing.tilt), "A pressed alone turned the player");
+        m = flipFrame(rig, f, false);
+        check(!levelTilt(m.swing.tilt), "a tap did not start a flip");
+        bool down = false, upsideDown = false;
+        int frames = 1;
+        for (; frames < 300 && !levelTilt(m.swing.tilt); ++frames) {
+            m = flipFrame(rig, f, false);
+            // The eyes stay where they are; the hands turn about the head.
+            check(length(matrixRow(m.head, 3) - head) < 1e-4f, "the head moved in the flip");
+            near(length(m.hands[1].position - head), length(hand - head), 1e-4f);
+            const Vec3 ahead = matrixRow(m.head, 2), up = matrixRow(m.head, 1) * -1.f;
+            if (frames < 25)
+                down = down || ahead.y < -.5f;
+            upsideDown = upsideDown || up.y < -.95f;
+        }
+        check(down, "a front flip did not look down first");
+        check(upsideDown, "the flip never turned the player upside down");
+        check(frames >= 95 && frames <= 115, ("one flip took " + std::to_string(frames) + " frames").c_str());
+        for (int i = 0; i < 16; ++i)
+            near(m.head[i], start.head[i], 1e-5f);
+        check(levelTilt(flipFrame(rig, f, false).swing.tilt), "the flip did not stay level");
+    });
+    test("flip: A pressed on the ground is a jump, held into the air no flip; held in the air the stick turns", [] {
+        GameTrackingRig rig;
+        rig.flips(true);
+        auto f = trackedFrame();
+        f.hands[0].stickY = 1;
+        flipFrame(rig, f, false, false);
+        auto m = flipFrame(rig, f, true, false);
+        for (int i = 0; i < 30; ++i) {
+            check(levelTilt(m.swing.tilt), "a jump from the ground flipped");
+            m = flipFrame(rig, f, true, true);
+        }
+        check(length(m.swing.move) > .5f, "a jump held into the air took the stick");
+        flipFrame(rig, f, false, true);
+        for (int i = 0; i < 6; ++i)
+            m = flipFrame(rig, f, true, true);
+        check(!levelTilt(m.swing.tilt), "A held in the air with the stick did not turn the player");
+    });
+    test("flip: held, the stick turns as fast as it is tilted and at rest holds the angle; let go, level", [] {
+        constexpr float turn = 6.2831853f, full = turn / FlipMotion::holdTurnSeconds;
+        FlipMotion::Sample s;
+        s.airborne = true;
+        s.seconds = 1.f / 90;
+        const auto run = [&](FlipMotion& flip, int frames) {
+            for (int i = 0; i < frames; ++i)
+                flip.update(s);
+        };
+        const auto toLevel = [&](FlipMotion& flip) {
+            int frames = 0;
+            for (; frames < 1000 && !flip.level(); ++frames)
+                flip.update(s);
+            check(flip.level() && levelTilt(flip.tilt()), "the player did not come out level");
+            return frames;
+        };
+        // A held alone turns nothing, and let go after a tap's time it is no flip.
+        FlipMotion still;
+        s.jump = true;
+        run(still, 60);
+        check(levelTilt(still.tilt()) && still.turned() == 0, "A held alone turned the player");
+        s.jump = false;
+        run(still, 1);
+        check(still.level() && levelTilt(still.tilt()), "a long press alone flipped");
+        // The stick full ahead: a whole turn in holdTurnSeconds, once up to speed;
+        // tilted half way past the dead zone, half as fast.
+        FlipMotion held;
+        s.jump = true;
+        s.stickY = 1;
+        run(held, 45);
+        float before = held.turned();
+        run(held, 45);
+        near(held.turned() - before, full * .5f, .02f);
+        s.stickY = FlipMotion::stickDeadZone + (FlipMotion::stickFull - FlipMotion::stickDeadZone) / 2;
+        run(held, 30);
+        before = held.turned();
+        run(held, 45);
+        near(held.turned() - before, full * .25f, .02f);
+        // At rest the stick keeps the player where they are.
+        s.stickY = 0;
+        run(held, 30);
+        const Quat kept = held.tilt();
+        run(held, 30);
+        const Quat now = held.tilt();
+        near(std::abs(kept.x * now.x + kept.y * now.y + kept.z * now.z + kept.w * now.w), 1, 1e-5f);
+        // Let go: back level the short way.
+        before = held.turned();
+        s.jump = false;
+        toLevel(held);
+        check(held.turned() - before <= turn / 2 + .01f, "letting go went the long way round");
+        // A tap with the stick back: a whole backflip, the turn the stick began carried on.
+        FlipMotion back;
+        s.stickY = -1;
+        s.jump = true;
+        run(back, 10);
+        check(back.tilt().x > 0, "the stick back did not turn a backflip");
+        s.jump = false;
+        toLevel(back);
+        near(back.turned(), turn, .01f);
+        // Tapped again during a flip, the flip carries on to level: one whole turn.
+        FlipMotion again;
+        s.stickY = 0;
+        s.jump = true;
+        run(again, 1);
+        s.jump = false;
+        run(again, 30);
+        check(!again.level(), "the tap's flip did not start");
+        s.jump = true;
+        run(again, 2);
+        s.jump = false;
+        toLevel(again);
+        near(again.turned(), turn, .01f);
+    });
+    test("flip: held, the left stick picks the way and moves the player no more; let go, it moves them again", [] {
+        // Ahead a front flip, back a backflip, right a cartwheel to the right; at rest nothing.
+        const struct {
+            float x, y;
+        } sticks[] = {{0, 0}, {0, 1}, {0, -1}, {1, 0}};
+        for (const auto& stick : sticks) {
+            GameTrackingRig rig;
+            rig.flips(true);
+            auto f = trackedFrame();
+            f.hands[0].stickX = stick.x;
+            f.hands[0].stickY = stick.y;
+            const bool still = stick.x == 0 && stick.y == 0;
+            const auto before = flipFrame(rig, f, false);
+            check(still || length(before.swing.move) > .5f, "the stick did not walk");
+            auto m = flipFrame(rig, f, true);
+            for (int i = 0; i < 30; ++i) {
+                check(length(m.swing.move) == 0 && m.walkForward == 0 && m.walkRight == 0,
+                      "the stick moved the player while A was held in the air");
+                m = flipFrame(rig, f, true);
+            }
+            const Vec3 ahead = matrixRow(m.head, 2), up = matrixRow(m.head, 1) * -1.f;
+            if (still)
+                check(levelTilt(m.swing.tilt), "A held with the stick at rest turned the player");
+            else if (stick.x > 0)
+                check(up.x > .5f && std::abs(ahead.y) < .05f, "the stick to the right did not cartwheel right");
+            else if (stick.y < 0)
+                check(ahead.y > .5f, "the stick back did not backflip");
+            else
+                check(ahead.y < -.5f, "the stick ahead did not front flip");
+            // Let go of A: the stick moves the player again while they turn back level.
+            m = flipFrame(rig, f, false);
+            check(still || !levelTilt(m.swing.tilt), "the player snapped level as A was let go");
+            check(still || length(m.swing.move) > .5f, "the stick stayed the flip's");
+            int frames = 0;
+            for (; frames < 60 && !levelTilt(m.swing.tilt); ++frames)
+                m = flipFrame(rig, f, false);
+            check(levelTilt(m.swing.tilt) && frames <= 30, "letting go did not bring the player back level");
+        }
+    });
+    test("flip: landing brings it back level quickly; a menu at once; a held A turns no more", [] {
+        GameTrackingRig rig;
+        rig.flips(true);
+        auto f = trackedFrame();
+        f.hands[0].stickY = 1;
+        flipFrame(rig, f, false);
+        auto m = flipFrame(rig, f, true);
+        for (int i = 0; i < 75; ++i)
+            m = flipFrame(rig, f, true);
+        check(matrixRow(m.head, 1).y > .5f, "the held flip was not upside down");
+        int frames = 0;
+        for (; frames < 60 && !levelTilt(m.swing.tilt); ++frames)
+            m = flipFrame(rig, f, true, false);
+        check(levelTilt(m.swing.tilt) && frames <= 40, "landing did not level the player quickly");
+        for (int i = 0; i < 20; ++i)
+            check(levelTilt(flipFrame(rig, f, true, true).swing.tilt), "A held from the landing turned again");
+        // Mid-flip a menu opens: level when play comes back, A still held.
+        flipFrame(rig, f, false);
+        m = flipFrame(rig, f, true);
+        for (int i = 0; i < 20; ++i)
+            m = flipFrame(rig, f, true);
+        check(!levelTilt(m.swing.tilt), "no flip before the menu");
+        ++f.predictedDisplayTime;
+        check(!rig.update(f, {}, {0, 0, -1}, false, {0, 1, 0}, true).active, "the menu kept play going");
+        for (int i = 0; i < 5; ++i)
+            check(levelTilt(flipFrame(rig, f, true).swing.tilt), "the player came back from a menu tilted");
+    });
+    test("flip: off unless FLIPS is on, A in the air does nothing; switched off mid-flip, level at once", [] {
+        GameTrackingRig rig;
+        auto f = trackedFrame();
+        f.hands[0].stickY = 1;
+        flipFrame(rig, f, false);
+        // Off (the default): A held, then let go, in the air turns nothing; the stick still walks.
+        for (int i = 0; i < 40; ++i) {
+            const auto m = flipFrame(rig, f, i < 30);
+            check(levelTilt(m.swing.tilt) && length(m.swing.move) > .5f, "flips off, A in the air flipped");
+        }
+        // On, A held with the stick turns the player; switched off, they are level at once.
+        rig.flips(true);
+        auto m = flipFrame(rig, f, true);
+        for (int i = 0; i < 20; ++i)
+            m = flipFrame(rig, f, true);
+        check(!levelTilt(m.swing.tilt), "flips on, A held with the stick did not turn");
+        rig.flips(false);
+        m = flipFrame(rig, f, true);
+        check(levelTilt(m.swing.tilt) && length(m.swing.move) > .5f, "switched off mid-flip, the player stayed tilted");
+        // A reset (the flat screen, another player) keeps the switch.
+        rig.flips(true);
+        rig.reset();
+        flipFrame(rig, f, false);
+        m = flipFrame(rig, f, true);
+        for (int i = 0; i < 6; ++i)
+            m = flipFrame(rig, f, true);
+        check(!levelTilt(m.swing.tilt), "a reset switched the flips off");
+    });
+    test("rig: a flip's tilt turns the tracking space about its pivot; level it is the yawed rig, exactly", [] {
+        const Rig level{{10, 20, 30}, .5f};
+        Rig tilted = level;
+        tilted.pivot = {.1f, 1.7f, -.2f};
+        tilted.tilt = Quat::around({1, 0, .4f}, 2.f);
+        const Pose p{{.3f, 1.2f, -.5f}, Quat::around({0, 1, 0}, .3f)};
+        const Vec3 pivot = tilted.toWorld({tilted.pivot, {}}).position;
+        near(length(pivot - level.toWorld({tilted.pivot, {}}).position), 0);
+        near(length(tilted.toWorld(p).position - pivot), length(p.position - tilted.pivot));
+        const Quat q = tilted.toWorld(p).orientation, want = tilted.orientation() * p.orientation;
+        near(std::abs(q.x * want.x + q.y * want.y + q.z * want.z + q.w * want.w), 1, 1e-5f);
+        // A snap turn keeps the head where it is, tilted too.
+        const Vec3 h{.1f, 1.6f, .2f};
+        const auto before = tilted.toWorld({h, {}}).position;
+        tilted.turn(.5235988f, h);
+        near(length(tilted.toWorld({h, {}}).position - before), 0);
+        // Level, the pivot changes nothing at all.
+        Rig moved = level;
+        moved.pivot = {5, 5, 5};
+        const auto a = moved.toWorld(p), b = level.toWorld(p);
+        check(a.position.x == b.position.x && a.position.y == b.position.y && a.position.z == b.position.z,
+              "a level rig moved with its pivot");
+    });
+    test("flip: upside down, a hand pulled away from the anchor zips, one pushed toward it does not", [] {
+        // The anchor overhead is at the upside-down player's feet: up in the room is away from it.
+        for (const bool away : {true, false}) {
+            TestWorld w;
+            spidy::Swing s(inert());
+            auto in = aimed();
+            in.tilt = Quat::around({1, 0, 0}, 3.14159265f);
+            s.update(.01f, in, w);
+            int zips = 0;
+            for (int i = 0; i < 20; ++i) {
+                in.hands[0].gripRelativeToHead.y += away ? .03f : -.03f;
+                s.update(.01f, in, w);
+                for (auto e : s.events())
+                    zips += e.kind == EventKind::Zip;
+            }
+            check(zips == (away ? 1 : 0), away ? "a pull upside down did not zip" : "a push upside down zipped");
+        }
+    });
+    test("punch: a flip turning the player is no motion of the arm", [] {
+        // A fist held out while a flip turns the player a whole turn in 0.7 s: over 5 m/s in the world.
+        const Vec3 head{0, 1.6f, 0}, arm{0, -.2f, -.6f}, axis{-1, 0, .3f};
+        const float step = 8.975979f / 90;
+        const auto toWorld = [&](int i) { return Quat::yaw(.4f) * Quat::around(axis, step * static_cast<float>(i)); };
+        Punches turned, unturned;
+        std::vector<PunchEvent> out;
+        const std::vector<PunchTarget> none;
+        for (int i = 0; i < 30; ++i) {
+            const Quat q = toWorld(i);
+            std::array<PunchHand, 2> hands{};
+            hands[1] = {true, head + q.rotate(arm), q.rotate(arm), false};
+            if (i)
+                turned.turn(q * toWorld(i - 1).conjugate());
+            turned.update(1.f / 90, hands, none, out);
+            unturned.update(1.f / 90, hands, none, out);
+        }
+        check(unturned.speed(1) > unturned.config().minSpeed, "the test's flip is too slow to look like a punch");
+        check(turned.speed(1) < .01f, "the flip counted as the arm's motion");
+    });
+    test("aim marker motion: a flip turning the player is no motion of the aim", [] {
+        constexpr float dt = 1.f / 72;
+        const Vec3 held = normalized(Vec3{.1f, -.2f, -1}); // the hand still, in the tracking space
+        const auto angle = [](Vec3 a, Vec3 b) { return std::atan2(length(cross(a, b)), dot(a, b)); };
+        AimMarkerMotion tilted, yawOnly;
+        float worst = 0, lagging = 0;
+        for (int i = 0; i < 40; ++i) {
+            const int64_t t = 1'000'000'000 + static_cast<int64_t>(i * dt * 1e9);
+            const Quat turn = Quat::yaw(.3f) * Quat::around({-1, 0, 0}, 8.975979f * dt * static_cast<float>(i));
+            const Vec3 world = turn.rotate(held);
+            tilted.begin(t);
+            yawOnly.begin(t);
+            worst = std::max(worst, angle(tilted.aim(world, turn), world));
+            lagging = std::max(lagging, angle(yawOnly.aim(world, .3f), world));
+        }
+        check(worst < 1e-4f, "the flip swung the steadied aim");
+        check(lagging > .004f, "the test's flip is too slow to show in a yaw-only steadying");
+    });
+    test("game swing command: version 2 (the probes') is level, version 3 carries a flip's tilt", [] {
+        game_swing::Command c;
+        c.focused = 1;
+        c.serial = 1;
+        check(c.version == 3 && c.bytes == 184 && game_swing::valid(c), "a level version 3 command was rejected");
+        c.tilt = Quat::around({1, 0, .2f}, 2.f);
+        check(game_swing::valid(c), "a flip's tilt was rejected");
+        const auto tilt = game_swing::input(c).tilt;
+        near(tilt.x, c.tilt.x, 1e-6f);
+        near(tilt.z, c.tilt.z, 1e-6f);
+        near(tilt.w, c.tilt.w, 1e-6f);
+        auto v2 = c;
+        v2.version = 2;
+        v2.bytes = game_swing::commandBytesV2;
+        v2.tilt = {};
+        check(game_swing::valid(v2) && levelTilt(game_swing::input(v2).tilt), "a probe's version 2 command was not level");
+        auto bad = c;
+        bad.tilt = {0, 0, 0, 2};
+        check(!game_swing::valid(bad), "a scaled tilt was accepted");
+        bad = c;
+        bad.version = 2;
+        check(!game_swing::valid(bad), "a version 2 command of version 3's size was accepted");
+    });
+    test("body: a flip turns the whole body with the player about the eyes", [] {
+        for (const bool odd : {false, true}) {
+            auto b = testBody(odd);
+            auto t = lookingAhead({0, 1.7f, .08f});
+            t.airborne = true;
+            t.hands[0] = {true, {.3f, 1.2f, .45f}, gripFacing({0, 0, 1})};
+            t.hands[1] = {true, {-.25f, 1.55f, .4f}, gripFacing({0, .5f, .866f})};
+            body::Config c;
+            c.hideHead = false;
+            body::State s;
+            const auto level = solved(b, t, s, c);
+            // The same player well into a front flip: everything turned about the eyes.
+            const Quat tilt = body::axisAngle({1, 0, 0}, 2.2f);
+            auto flipped = t;
+            flipped.tilt = tilt;
+            flipped.facing = tilt * t.facing;
+            for (auto& h : flipped.hands) {
+                h.grip = t.eyes + tilt.rotate(h.grip - t.eyes);
+                h.orientation = tilt * h.orientation;
+            }
+            body::State s2;
+            const auto turned = solved(b, flipped, s2, c);
+            for (const int j : b.rig.below[static_cast<size_t>(b.rig.pelvis)])
+                check(length(b.at(turned, j) - (t.eyes + tilt.rotate(b.at(level, j) - t.eyes))) < 2e-3f,
+                      "the body did not turn with the player");
+            for (int i = 0; i < 2; ++i)
+                check(length(b.at(turned, b.rig.arms[i].hand) - wristOf(flipped.hands[i], i)) < 2e-3f,
+                      "a wrist missed its controller in the flip");
+        }
     });
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;

@@ -209,7 +209,7 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
             // Motion must be both fast and deliberate within a short window.
             // Head-relative samples remove virtual movement and room-scale translation.
             if (s.sample && !s.zipUsed) {
-                const Vec3 delta = Quat::yaw(in.trackingYaw).rotate(h.gripRelativeToHead - s.previous);
+                const Vec3 delta = trackingTurn(in).rotate(h.gripRelativeToHead - s.previous);
                 const float pull = -dot(delta, normalized(w.anchor - body_.position));
                 if (pull > 0) {
                     s.pullDistance += pull;

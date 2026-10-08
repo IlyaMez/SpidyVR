@@ -130,6 +130,11 @@ int main() {
         options.weight = 999;
         args = sessionArguments(options, L"r.json", L"", L"");
         check(args.size() == 9 && args[7] == L"--weight" && args[8] == L"300", "the weight at most 300%");
+        options = {};
+        check(!options.flips, "the experimental flips are on in a new launcher");
+        options.flips = true;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 8 && args[7] == L"--flips", "the experimental flips switched on");
     });
     test("the headset check's eye size and the memory larger eyes take", [] {
         const char* probe = "Headset available: Oculus Quest3; position tracking=1; orientation tracking=1. No session "
@@ -149,11 +154,11 @@ int main() {
         SessionOptions options;
         check(headsetSettings("VR settings from the headset: aim_markers=0 web_grab=1 air_webs=0 web_shooter=0 "
                               "punch=0 body=1 swing_speed=48 weight=150 snap_turn=45 smooth_turn=90 haptics=50 "
-                              "screen_size=2\r",
+                              "flips=1 screen_size=2\r",
                               options),
               "the line changed nothing");
         check(!options.aimMarkers && !options.airWebs && options.swingSpeed == 48 && options.weight == 150 &&
-                  options.snapTurn == 45 && options.smoothTurn == 90 && options.haptics == 50 &&
+                  options.snapTurn == 45 && options.smoothTurn == 90 && options.haptics == 50 && options.flips &&
                   options.screenSize == 2,
               "every value, the last one before a carriage return");
         const auto kept = options;

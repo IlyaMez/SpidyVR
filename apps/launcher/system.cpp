@@ -514,6 +514,7 @@ Settings loadSettings() {
         else if (key == "stock_monitor_view") o.stockMonitorView = number() != 0;
         else if (key == "aim_markers") o.aimMarkers = number() != 0;
         else if (key == "air_webs") o.airWebs = number() != 0;
+        else if (key == "flips") o.flips = number() != 0;
         // eye_size (a square size, before October 8) is no longer read: 2048 x 2048 rendered one player's game
         // below the 2496 x 2688 their headset asked for, and it looked blurry.
         else if (key == "render_scale") o.renderScale = spidy::validRenderScale(number()) ? number() : 100;
@@ -548,7 +549,7 @@ void saveSettings(const Settings& settings) {
     const auto& o = settings.options;
     file << "game=" << narrow(settings.gameExe) << "\nxr_runtime=" << narrow(settings.runtime)
          << "\nsmall_window=" << o.smallWindow << "\nstock_monitor_view=" << o.stockMonitorView
-         << "\naim_markers=" << o.aimMarkers << "\nair_webs=" << o.airWebs
+         << "\naim_markers=" << o.aimMarkers << "\nair_webs=" << o.airWebs << "\nflips=" << o.flips
          << "\nrender_scale=" << o.renderScale
          << "\nswing_speed=" << o.swingSpeed << "\nweight=" << o.weight << "\nsnap_turn=" << o.snapTurn
          << "\nsmooth_turn=" << o.smoothTurn

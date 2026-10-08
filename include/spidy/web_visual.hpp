@@ -118,6 +118,9 @@ class AimMarkerMotion {
     // The steadied direction of the hand's aim ray for this image, from its
     // `direction` (world, unit) and the tracking space's yaw in the world.
     Vec3 aim(Vec3 direction, float yaw);
+    // The same with the tracking space's whole orientation (trackingTurn): a
+    // flip's tilt is no motion of the aim either.
+    Vec3 aim(Vec3 direction, Quat turn);
     // Appends what to draw for this image: `wanted` (nullptr: no marker) on
     // the steadied ray from `origin` along `direction` (from aim()), easing
     // in, and the markers before it fading out where they were last wanted.

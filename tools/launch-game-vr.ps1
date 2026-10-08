@@ -20,6 +20,7 @@ param(
     [switch]$NoWebShooter,
     [switch]$NoAimMarkers,
     [switch]$NoCalibrationPrompt,
+    [switch]$Flips,
     [switch]$NoEyeOcclusion,
     [switch]$StockMonitorView,
     [switch]$FullDesktopView,
@@ -63,7 +64,7 @@ Write-Host 'Keep the game window in front on the desktop: the game pauses while 
 Write-Host 'Click both thumbsticks to switch between immersive VR and a flat game screen in the headset.'
 Write-Host "VR settings are in the game's own Settings: pause, Settings, then SPIDY VR (Up from GAME reaches it)."
 Write-Host 'There change the aim markers, webs in open air, swing speed, weight, your body calibration,'
-Write-Host 'snap turn, smooth turn, vibration and screen size during play.'
+Write-Host 'snap turn, smooth turn, vibration, screen size and the experimental flips during play.'
 Write-Host "Squeeze a grip to shoot that hand's web. Keep it held to swing; release it to let go."
 Write-Host "Swing speed cap: $SwingSpeed m/s. Pull the trigger while a web is attached to reel in."
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -99,6 +100,10 @@ if($NoAimMarkers) {
     Write-Host "Aim markers hidden at the start: X shows where each hand's web would land."
 }
 else { Write-Host "Aim markers show where each hand's web would land; X hides them (add -NoAimMarkers to start hidden)." }
+if($Flips) {
+    $captureArgs+=@('--flips')
+    Write-Host 'Flips (experimental) on: tap A in the air to flip; hold A there and the left stick turns you over.'
+}
 if($EyeHeight) {
     $captureArgs+=@('--eye-height',$EyeHeight,'--arm-length',$ArmLength)
     Write-Host "Your body: eye height $EyeHeight mm, arm $ArmLength mm from a T-pose calibration."

@@ -35,7 +35,9 @@ if ((Get-FileHash -LiteralPath $pythonZip -Algorithm SHA256).Hash -ne $pythonHas
 
 $name = "Spidy-$version"
 $dist = Join-Path $root 'dist'
-$stage = Join-Path $dist $name
+# Staged under build\, never dist\: players extract the zip into dist\Spidy-<version>
+# and play from there, and the line below would wipe that folder.
+$stage = Join-Path $root "build\package\$name"
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 foreach ($folder in @('build\windows-ninja', 'tools', 'python', 'docs\licenses')) {
     New-Item -ItemType Directory -Force (Join-Path $stage $folder) | Out-Null

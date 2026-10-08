@@ -4,6 +4,9 @@ running game, without a headset.
     python tools/probe_game_grab.py              the nearest throwable prop in sight
     python tools/probe_game_grab.py --bots       the nearest enemy in sight (never a civilian or the police)
     python tools/probe_game_grab.py --yank       pull it over with the zip gesture instead of reeling
+    python tools/probe_game_grab.py --bots --yank --shooter
+                                                 also start the web shooter after the swing, as a VR session does,
+                                                 and shoot the target once before webbing it
 
 It needs a freshly started game in free roam (Spidy's ray and movement modules start once per process) and
 the game window in front, which it brings there. It plays one grab with a scripted hand next to the player:
@@ -27,7 +30,7 @@ from inspect_game import PE
 from observe_game import call_remote, call_with_payload, modules
 from probe_game_screen import game_window, client_size, window_rgb, user32
 from probe_native_rays import snapshot as ray_snapshot, command as ray_command
-from run_game_vr import write_rgb_png
+from run_game_vr import shooter_snapshot, write_rgb_png
 from vr_launcher import bring_to_front
 
 OUTPUT = ROOT/'reports/grab-probe'
@@ -227,6 +230,21 @@ def aim_camera(game, target, attempts=20):
             close(process)
 
 
+def bot_states(game, pe, machine, names):
+    """A bot's states: its SyncStaticStateMachine's layer 0 (+0x70, valid +0x80) and its driver (+0x98, +0xa8)."""
+    out = []
+    for offset, valid in ((0x70, 0x80), (0x98, 0xa8)):
+        obj = game.pointer(machine+offset)
+        vt = game.pointer(obj)-game.base if obj and game.read(machine+valid, 1) != bytes(1) else 0
+        if vt and vt not in names:
+            try:
+                names[vt] = pe.vtable(vt)['type'].replace('.?AV', '').rstrip('@')
+            except Exception:
+                names[vt] = hex(vt)
+        out.append(names.get(vt))
+    return out
+
+
 def shot(game, name):
     hwnd = game_window(game.pid)
     width, height = client_size(hwnd)
@@ -258,17 +276,7 @@ def fling_test(game, process, rays, motion, output):
     names = {}
 
     def state():
-        out = []
-        for offset, valid in ((0x70, 0x80), (0x98, 0xa8)):
-            obj = game.pointer(machine+offset)
-            vt = game.pointer(obj)-game.base if obj and game.read(machine+valid, 1) != bytes(1) else 0
-            if vt and vt not in names:
-                try:
-                    names[vt] = pe.vtable(vt)['type'].replace('.?AV', '').rstrip('@')
-                except Exception:
-                    names[vt] = hex(vt)
-            out.append(names.get(vt))
-        return out
+        return bot_states(game, pe, machine, names)
 
     def fling(velocity):
         payload = struct.pack('<4I2Q3fI', 0x53475454, 1, 48, 0, machine, record, *velocity, 0)
@@ -332,6 +340,9 @@ def main():
     parser.add_argument('--aim-camera', action='store_true',
                         help='first turn the game camera toward the target (best effort, through the virtual pad)')
     parser.add_argument('--no-webs', action='store_true', help='do not draw the game web or read the rope slots')
+    parser.add_argument('--shooter', action='store_true',
+                        help='start the web shooter after the swing, as a VR session does, and shoot the target once '
+                             'before webbing it')
     parser.add_argument('--bodies', action='store_true',
                         help="record the prop's drawn matrix, physics bodies and keyframe record every sample, and "
                              "where the ground is under it at the end")
@@ -341,7 +352,7 @@ def main():
     game = Game(find_game())
     process = None
     rays = swing = webs = None
-    rays_active = swing_active = webs_active = False
+    rays_active = swing_active = webs_active = shooter_active = False
     try:
         pe = PE(game.path.read_bytes())
         if any(game.read(game.base+rva, 16) != pe.bytes(rva, 16) for rva in ENTRIES):
@@ -380,7 +391,8 @@ def main():
                                  ROOT/'reports/ray-modules',
                                  ('SpidyRayStart', 'SpidyRaySubmit', 'SpidyRayData', 'SpidyRayStop', 'SpidySwingStart',
                                   'SpidySwingSubmit', 'SpidySwingStop', 'SpidySwingData', 'SpidyGrabData',
-                                  'SpidyGrabTest'))
+                                  'SpidyGrabTest', 'SpidyShooterStart', 'SpidyShooterStop', 'SpidyShooterTest',
+                                  'SpidyShooterData'))
         swing = rays
         rope_manager = None
         if not args.no_webs:
@@ -430,6 +442,16 @@ def main():
         invoke(swing['SpidySwingStart'], struct.pack('<4I4QI2fI', 0x53574346, 1, 64, game.pid, game.base, record,
                                                       mover, motion_module, 30000, 32., 6., kinds))
         swing_active = True
+        shooter = None
+        if args.shooter:
+            # After the swing, whose movement module hooks the event field reader the shooter calls: the
+            # order of a VR session, in which the shooter refused to start on October 8 (9601).
+            shooter = dict(start=call_with_payload(process, rays['SpidyShooterStart'],
+                                                   struct.pack('<4IQ', 0x53484f43, 1, 24, game.pid, game.base)))
+            shooter_active = not shooter['start']
+            print(f"Shooter start: {shooter['start']}", flush=True)
+        machine = next((a for a, v, r, _ in components if v == 0x4f843d0 and r == target_record), None)
+        state_names = {}
         if webs:
             invoke(webs['SpidyWebsStart'], struct.pack('<4I2Q', 0x53574243, 1, 32, game.pid, game.base, record))
             webs_active = True
@@ -446,6 +468,7 @@ def main():
             t = game.transform(game.pointer(target_record))
             samples.append(dict(t=round(time.monotonic()-started, 3), phase=label, grab=g, hand=list(position),
                                 target=t['position'] if t else None,
+                                state=bot_states(game, pe, machine, state_names) if machine else None,
                                 ropes=ropes(game, rope_manager) if rope_manager else None,
                                 prop=prop_bodies(game, game.pointer(target_record)) if args.bodies else None))
             return g
@@ -463,6 +486,12 @@ def main():
             hand_phase = g['hands'][0]['phase'] if g else 'none'
             if phase == 'arm' and now >= state['until']:
                 shots['aim'] = shot(game, 'aim')
+                if shooter_active:
+                    # One web ball from the other hand at his chest, the swing's samples having named the
+                    # player (the webbing's damager) by now.
+                    shooter['test'] = call_with_payload(process, rays['SpidyShooterTest'], struct.pack(
+                        '<4I6fQ', 0x53484f54, 1, 48, 1, *hand, centre[0], centre[1]+1.15-LIFT[kind], centre[2],
+                        target_record))
                 state = dict(phase='grab', until=now+1)
                 grip = 1.
             elif phase == 'grab' and (hand_phase != 'none' or now >= state['until']):
@@ -542,12 +571,18 @@ def main():
                 time.sleep(.02)
         if webs_active:
             webs_active = call_remote(process, webs['SpidyWebsStop']) != 0
+        if shooter is not None:
+            shooter['final'] = shooter_snapshot(game, rays['SpidyShooterData'])
+            if shooter_active:
+                shooter['stop'] = call_remote(process, rays['SpidyShooterStop'])
+                shooter_active = shooter['stop'] != 0
         stop_swing = call_remote(process, swing['SpidySwingStop'])
         swing_active = stop_swing != 0
         stop_rays = call_remote(process, rays['SpidyRayStop'])
         rays_active = stop_rays != 0
         final = grab_snapshot(game, rays['SpidyGrabData'])
-        restored = all(game.read(game.base+rva, 16) == pe.bytes(rva, 16) for rva in ENTRIES[:2]+(0x2e54300,))
+        restored = all(game.read(game.base+rva, 16) == pe.bytes(rva, 16) for rva in
+                       ENTRIES[:2]+(0x2e54300,)+((0x897d30, 0x2150c40, 0xd2a570) if shooter is not None else ()))
         path = [s['target'] for s in samples if s['target']]
         start_pos = path[0] if path else None
         # Carried: where the web's end (the prop's centre) hung from the hand, and how hard the web pulled.
@@ -577,16 +612,24 @@ def main():
         report = dict(pid=game.pid, ray_hash=ray_hash, motion_hash=motion_hash, kind=kind, yank=args.yank,
                       front_at_start=front, hand=hand, target=hex(target_record), distance=distance,
                       caught=caught_at is not None, final=final, restored=restored, stop_swing=stop_swing,
-                      stop_rays=stop_rays, shots=shots, held=held, trail=trail, ground=ground,
+                      stop_rays=stop_rays, shots=shots, held=held, trail=trail, ground=ground, shooter=shooter,
+                      states=sorted({s for x in samples for s in (x['state'] or ()) if s}),
+                      closest=min((math.dist(p['target'], p['hand']) for p in samples if p['target']), default=None),
                       moved=math.dist(start_pos, path[-1]) if path else None,
                       highest=max(p[1] for p in path) if path else None, samples=samples)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=1)+'\n')
-        summary = {k: report[k] for k in ('kind', 'distance', 'caught', 'moved', 'highest', 'restored', 'held',
-                                          'trail')}
+        summary = {k: report[k] for k in ('kind', 'distance', 'caught', 'moved', 'highest', 'closest', 'restored',
+                                          'held', 'trail', 'states')}
         summary['counters'] = {k: final[k] for k in ('grabs', 'yanks', 'catches', 'throws', 'lost', 'frees', 'writes',
                                                      'follows', 'flings', 'steers', 'refused', 'drive_failures', 'flights',
-                                                     'landed')} if final else None
+                                                     'landed', 'launches', 'flown', 'impacts', 'struck')} if final else None
+        if shooter is not None:
+            f = shooter.get('final') or {}
+            summary['shooter'] = dict(start=shooter['start'], test=shooter.get('test'), stop=shooter.get('stop'),
+                                      **{k: f.get(k) for k in ('status', 'error', 'fired', 'collisions', 'webbed',
+                                                               'last_hit')},
+                                      hit_target=f.get('last_hit') == hex(target_record))
         summary['last_throw'] = final['last_throw'] if final else None
         if args.bodies and samples and samples[-1]['prop']:
             # Where it came to rest: the drawn origin, the body it is drawn from, and the ground under each.
@@ -603,6 +646,8 @@ def main():
     finally:
         if webs_active:
             call_remote(process, webs['SpidyWebsStop'])
+        if shooter_active:
+            call_remote(process, rays['SpidyShooterStop'])
         if swing_active:
             call_remote(process, swing['SpidySwingStop'])
         if rays_active:

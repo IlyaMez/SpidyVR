@@ -967,6 +967,8 @@ void App::optionsCard(ImVec2 size) {
         static constexpr int sizes[] = {0, 1, 2};
         stepCombo("##screen", kScreenSizes, sizes, 3, &o.screenSize);
     });
+    option("Flips (experimental)", "Tap A in the air to flip; hold A there and the left stick turns you over.",
+           S(40), [&] { changed |= toggle("##flips", &o.flips); });
     option("Small game window", "Saves GPU time while you play in VR.", S(40),
            [&] { changed |= toggle("##small", &o.smallWindow); });
     option("Normal camera on the monitor", "Off: the monitor shows your head's view.", S(40),

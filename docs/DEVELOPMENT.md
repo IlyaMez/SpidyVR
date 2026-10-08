@@ -277,8 +277,10 @@ button), choose Settings, then **SPIDY VR**, after KEY MAPPING (Up from GAME
 reaches it; the list wraps). The game builds and draws it with its own option
 code, so it handles like its other tabs: switch the aim markers and webs in
 open air, or step the swing speed limit, weight, snap turn, smooth turn,
-controller vibration and the game screen's size with left and right; X resets
-a setting, Y the whole tab (to Spidy's defaults). Web grabbing, the web
+controller vibration and the game screen's size with left and right, and switch
+the experimental FLIPS (off by default; `GameTrackingRig::flips`, XrConfig
+options bit 11, XrData settings bit 32, version 16); X resets a setting, Y the
+whole tab (to Spidy's defaults). Web grabbing, the web
 shooter, your body and punching are not in it or in the launcher's options
 (since October 8): they are always on unless a launch option below turns
 them off, and the game draws the webs unless `-OverlayWebs`. Changes apply at once; Spidy Launcher starts your next
@@ -417,6 +419,7 @@ reattaching after a stopped session or a rebuilt DLL.
 | `-NoAirWebs` | A web that meets nothing within 100 m misses instead of holding in open air |
 | `-NoWebShooter` | The trigger only reels |
 | `-NoAimMarkers` | Start with the aim markers hidden (X shows them) |
+| `-Flips` | Experimental flips on (off by default): A tapped in the air flips you; held there, the left stick turns you over |
 | `-EyeHeight 1630 -ArmLength 590` | Your T-pose calibration in millimetres (the console's last "VR settings from the headset" line has it): Spider-Man's body takes your eye height and arm length, and the first gameplay asks for none |
 | `-NoCalibrationPrompt` | Without a calibration, do not ask for the T-pose at the first gameplay (Settings > SPIDY VR > CALIBRATE BODY still does it) |
 | `-NoBody` | Hide the hero and draw gloves |

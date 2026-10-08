@@ -496,8 +496,8 @@ Telemetry game_menu::telemetry() {
 namespace {
 // Headless probes (tools/probe_menu.py) show the tab without a VR session.
 // The settings as XrData reports them: flags 1 web grab, 2 punch, 4 body,
-// 8 webs in open air, 16 web shooter, 32 aim markers; and 64 a T-pose
-// calibration wanted (CALIBRATE BODY: ON RESUME).
+// 8 webs in open air, 16 web shooter, 32 aim markers; 64 a T-pose
+// calibration wanted (CALIBRATE BODY: ON RESUME); 128 flips (experimental).
 struct ProbeSettings {
     uint32_t magic = 0x554e4d53, version = 3, bytes = sizeof(ProbeSettings), flags{};
     uint32_t snapTurn{}, haptics{}, screenSize{};
@@ -534,6 +534,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMenuStart(void* input) {
     v.webShooter = s.flags & 16;
     v.aimMarkers = s.flags & 32;
     v.calibrate = s.flags & 64;
+    v.flips = s.flags & 128;
     v.snapTurn = static_cast<int>(s.snapTurn);
     v.smoothTurn = static_cast<int>(s.smoothTurn);
     v.haptics = static_cast<int>(s.haptics);
@@ -556,7 +557,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMenuSample(void* output) {
     const auto v = shown;
     ReleaseSRWLockShared(&lock);
     s.flags = (v.webGrab ? 1u : 0u) | (v.punch ? 2u : 0u) | (v.body ? 4u : 0u) | (v.airWebs ? 8u : 0u) |
-              (v.webShooter ? 16u : 0u) | (v.aimMarkers ? 32u : 0u) | (v.calibrate ? 64u : 0u);
+              (v.webShooter ? 16u : 0u) | (v.aimMarkers ? 32u : 0u) | (v.calibrate ? 64u : 0u) |
+              (v.flips ? 128u : 0u);
     s.snapTurn = static_cast<uint32_t>(v.snapTurn);
     s.smoothTurn = static_cast<uint32_t>(v.smoothTurn);
     s.haptics = static_cast<uint32_t>(v.haptics);

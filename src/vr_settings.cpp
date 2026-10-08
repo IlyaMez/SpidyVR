@@ -67,6 +67,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.airWebs;
     case Item::calibrate:
         return &v.calibrate;
+    case Item::flips:
+        return &v.flips;
     default:
         return nullptr;
     }
@@ -82,9 +84,9 @@ Values sanitized(Values v) {
     v.weight = std::clamp(v.weight, 40, 300);
     return v;
 }
-const std::array<Row, 12>& rows() {
+const std::array<Row, 14>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 12> all{{
+    static const std::array<Row, 14> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::aimMarkers, "AIM MARKERS", "Show where each web would land. X also switches them during play.", {}},
         {Item::airWebs, "WEBS HOLD IN OPEN AIR",
@@ -104,6 +106,8 @@ const std::array<Row, 12>& rows() {
          hapticChoices},
         {Item::screenSize, "GAME SCREEN SIZE", "The screen that shows menus, cutscenes and flat mode.",
          screenChoices},
+        {Item::none, "EXPERIMENTAL", nullptr, {}},
+        {Item::flips, "FLIPS", "Tap A in the air to flip; hold A there and the left stick turns you over.", {}},
     }};
     return all;
 }

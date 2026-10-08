@@ -33,7 +33,7 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 15, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 16, bytes = sizeof(XrConfig), pid{};
     // record and mover are no longer used: VR starts with the game, before
     // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
@@ -49,13 +49,14 @@ struct XrConfig {
     // bit 8: no webs in open air (a web that meets nothing within reach misses);
     // bit 9: no web shooter (a free hand's trigger shoots nothing);
     // bit 10: no T-pose calibration at the first gameplay of a session without
-    // one (the player skipped it before; the SPIDY VR tab still offers it)
+    // one (the player skipped it before; the SPIDY VR tab still offers it);
+    // bit 11: flips, experimental (A in the air flips the player; FlipMotion)
     uint32_t options{};
     // OpenXR runtime manifest the launcher chose; empty: Virtual Desktop's if
     // installed, else Windows' active runtime.
     wchar_t runtime[260]{};
-    // The rest of the VR settings a session starts from (options bits 3 and
-    // 5-9, swingSpeed and weight give the others): degrees per snap turn (0:
+    // The rest of the VR settings a session starts from (options bits 3, 5-9
+    // and 11, swingSpeed and weight give the others): degrees per snap turn (0:
     // none), controller vibration in percent, the game screen's size (0-2),
     // degrees a second of smooth turning (0: the stick snap turns).
     uint32_t snapTurn = 30, haptics = 100, screenSize = 1, smoothTurn{};
@@ -77,7 +78,7 @@ enum GateReason : uint32_t {
     gateTracking = 16,    // the headset's pose or timing was not usable
 };
 struct XrData {
-    uint32_t magic = 0x53585244, version = 15, bytes = sizeof(XrData), status{};
+    uint32_t magic = 0x53585244, version = 16, bytes = sizeof(XrData), status{};
     int64_t sequence{};
     uint64_t frames{}, tracked{}, submitted{}, dropped{}, leftHands{}, rightHands{}, serial{}, generation{};
     uint32_t nativeKeys{}, error{};
@@ -110,7 +111,7 @@ struct XrData {
     uint64_t markers{};
     // The VR settings now: the SPIDY VR tab in the game's Settings changes
     // them during play (X the aim markers, too). settings bits: 1 web grab,
-    // 2 punch, 4 body, 8 webs in open air, 16 web shooter. Then the changes
+    // 2 punch, 4 body, 8 webs in open air, 16 web shooter, 32 flips. Then the changes
     // made in that tab so far, the times the game built its Settings with it,
     // whether its hooks are in, and why it is missing (game_menu: 93xx-94xx
     // not hooked, 95xx not built).
@@ -305,6 +306,7 @@ DWORD WINAPI run(void*) {
         values.punch = !(config.options & 64);
         values.airWebs = !(config.options & 256);
         values.webShooter = !(config.options & 512);
+        values.flips = config.options & 2048;
         values.swingSpeed = config.swingSpeed;
         values.snapTurn = static_cast<int>(config.snapTurn);
         values.smoothTurn = static_cast<int>(config.smoothTurn);
@@ -404,6 +406,7 @@ DWORD WINAPI run(void*) {
             runtime.hapticStrength(static_cast<float>(values.haptics) / 100);
             rig.snapTurn(static_cast<float>(values.snapTurn) * 3.14159265f / 180);
             rig.smoothTurn(static_cast<float>(values.smoothTurn) * 3.14159265f / 180);
+            rig.flips(values.flips);
             if (swingStarted && swingSettings) {
                 game_swing::Settings s;
                 s.grab = values.webGrab && sampleGrab;
@@ -547,13 +550,17 @@ DWORD WINAPI run(void*) {
                     else if (wasScreen)
                         jumpFromScreen = true;
                     XrFrame controller = frame;
-                    controller.jump = frame.jump && !jumpFromScreen;
+                    // The T-pose calibration has A as it has the other buttons.
+                    controller.jump = frame.jump && !jumpFromScreen && !calibrationInput;
                     // The player's up (its actor's second row): a wall's normal
                     // while the game holds it on one. Spidy's own flight is on none.
                     const Vec3 heroUp{body[4], body[5], body[6]};
+                    // A pressed in the air flips the player (FlipMotion), in the air
+                    // as the latest swing sample has it.
                     motion = rig.update(controller, {body[12], body[13], body[14]},
                                         {camera[8], camera[9], camera[10]}, gameplay,
-                                        swingState.owned ? Vec3{0, 1, 0} : heroUp);
+                                        swingState.owned ? Vec3{0, 1, 0} : heroUp,
+                                        game_swing::airborne(swingState, now.QuadPart, frequency.QuadPart));
                     if (motion.active && motion.onSurface) {
                         surfaceEntries += !wasOnSurface;
                         ++surfaceFrames;
@@ -747,6 +754,7 @@ DWORD WINAPI run(void*) {
                         input.jump = motion.swing.jump;
                         input.move = motion.swing.move;
                         input.trackingYaw = motion.swing.trackingYaw;
+                        input.tilt = motion.swing.tilt;
                         for (unsigned i = 0; i < 2; ++i) {
                             const auto& hand = motion.swing.hands[i];
                             input.hands[i] = {hand.aim, hand.gripRelativeToHead, hand.tracked, hand.trigger,
@@ -898,7 +906,8 @@ DWORD WINAPI run(void*) {
                         d.interacts = interacts;
                         d.aimMarkers = values.aimMarkers;
                         d.settings = (values.webGrab ? 1u : 0u) | (values.punch ? 2u : 0u) | (values.body ? 4u : 0u) |
-                                     (values.airWebs ? 8u : 0u) | (values.webShooter ? 16u : 0u);
+                                     (values.airWebs ? 8u : 0u) | (values.webShooter ? 16u : 0u) |
+                                     (values.flips ? 32u : 0u);
                         d.snapTurn = static_cast<uint32_t>(values.snapTurn);
                         d.smoothTurn = static_cast<uint32_t>(values.smoothTurn);
                         d.haptics = static_cast<uint32_t>(values.haptics);
@@ -1028,6 +1037,11 @@ DWORD WINAPI run(void*) {
                         pose.height = calibratedEye > 0 ? calibratedEye : standingEye;
                         pose.armLength = calibratedArm;
                         pose.trackingYaw = motion.swing.trackingYaw;
+                        // A flip's tilt in world axes: the body turns with the player.
+                        if (const Quat tilt = motion.swing.tilt; tilt.x != 0 || tilt.y != 0 || tilt.z != 0) {
+                            const Quat yaw = Quat::yaw(motion.swing.trackingYaw);
+                            pose.tilt = yaw * tilt * yaw.conjugate();
+                        }
                         native_body::submit(pose);
                     }
                     // Keep publishing tracking while the engine renders earlier
@@ -1219,8 +1233,9 @@ DWORD WINAPI run(void*) {
                             const auto kind = static_cast<game_swing::AimKind>(aim.kind);
                             // The hand moved with the player to this image, as its glove does.
                             const Vec3 origin = input.aim.position + travel;
-                            const Vec3 direction = steady.aim(normalized(input.aim.orientation.rotate({0, 0, -1})),
-                                                              rendered.swing.trackingYaw);
+                            const Vec3 direction =
+                                steady.aim(normalized(input.aim.orientation.rotate({0, 0, -1})),
+                                           trackingTurn(rendered.swing));
                             const float reach = length(aim.point - input.aim.position);
                             AimMarker marker;
                             marker.squeeze = input.grip;
@@ -1458,11 +1473,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 15 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 16 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
-        !config.motionModule || config.options > 2047 || config.snapTurn > 90 || config.haptics > 100 ||
+        !config.motionModule || config.options > 4095 || config.snapTurn > 90 || config.haptics > 100 ||
         config.screenSize > 2 || config.smoothTurn > 360 ||
         !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 || config.swingSpeed > 65 ||
         (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||

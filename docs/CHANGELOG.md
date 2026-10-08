@@ -3,7 +3,88 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 8, tenth build): web balls web thugs up, pulled
+**Latest build (October 8, thirteenth build): flips are an experimental
+setting, off by default.** You asked to put the flips in the settings as an
+experimental option, off by default. The SPIDY VR tab in the game's Settings
+has a new last section, EXPERIMENTAL, with one switch: FLIPS, OFF until you
+switch it on. The launcher's options have the same switch, "Flips
+(experimental)", and the next session starts with whichever you left it at
+(launcher.ini `flips=`; `Launch Spidy VR.cmd -Flips`, run_game_vr.py
+`--flips`). Off, A in the air does nothing, as before the flips; switched off
+mid-flip, you are level at once. The flips themselves are the twelfth
+build's (a tap flips you, held the left stick turns you). XrConfig and
+XrData went to version 16 (options bit 11, settings bit 32: flips), so the
+launcher, the Python tools and the modules must come from the same build;
+the session report's `vr_settings` has `flips`. 199 core checks (1 new: off
+by default, switched off mid-flip, kept through a reset; the tab's checks
+now count four sections), 13 launcher checks (the `--flips` switch, `flips=`
+from the headset) and the 5 Python suites pass. `tools/probe_menu.py` now
+also switches FLIPS on and expects RESET ALL to turn it off (16 changes); it
+has not run in the game with this build. Not tried in the headset.
+
+**Preceding build (October 8, twelfth build): holding A turns you only with the
+stick.** You said holding A just started you spinning nonstop, super fast,
+the way the stick pointed. Your 17:12 session shows it: held, the flip went
+round once every 0.7 s for as long as you held it, eight turns in a row at
+one point. Now, held in the air, A hands the left stick the turning, the
+way the Spider-Lair's hold mode does: the stick turns you head over heels as
+fast as you tilt it (a whole turn in 1.5 s at full tilt, slower tilted
+less), and at rest it keeps you at the angle you reached, so you can stay
+upside down or lie flat. Let go of A and you turn back level the short way
+(a turn's worth in a second). A quick tap (under a quarter second) is still
+one flip toward the stick, now a whole turn in about 1.2 s instead of 0.8
+s; tap again during it and the flip carries on to level. A long press
+without the stick does nothing. Landing or a wall levels you within about a
+third of a second, as before. A web catching no longer ends a held flip:
+the stick is yours until you let go. Only the stereo module's turning
+changed: no protocol change. 198 core checks pass (the five flip checks
+rewritten for holding: the stick's speed and its resting angle, letting go,
+taps with and without the stick, a tap during a flip), as do the graphics
+test and the 5 Python suites. Not tried in the headset yet. Tell me whether
+1.5 s a turn at full tilt is the right top speed, and whether coming back
+level on letting go feels right.
+
+**Preceding build (October 8, eleventh build): A in the air flips you.** You
+asked for a flip like the Ultimate Spider-Lair's (in VRChat), just the
+rotation, without changing any control you already have. Since the ninth
+build A in the air did nothing, so the flip lives there. Press A in the air
+and you turn head over heels toward where the left stick points: ahead (or
+with the stick at rest) a front flip, back a backflip, to a side a
+cartwheel. The world turns about your head, so your eyes stay where they
+are. A tap is one whole turn in 0.8 s. Keep A held and you keep turning,
+the left stick steering the flip instead of moving you; let go and you
+finish the turn you are in and come out level (let go just past level after
+a whole turn and you go back instead of round again). A web that catches
+meanwhile, or one already holding you, ends it the same way, so A pressed
+while swinging is one flip. Landing, or a wall or ceiling the game sticks
+you to, brings you back level the short way within 0.3 s; a menu, a
+cutscene or a recenter puts you level at once.
+What stays the same: A on the ground, a wall or a perch is the jump, and a
+jump held into the air never turns into a flip. The right stick, grips,
+triggers, B, X, Y, the menu button and the stick clicks do what they did.
+The left stick moves you as before, except while A is held in the air.
+There is no setting for flips (you asked for only the rotation): leave A
+alone in the air and you never flip.
+While you are turned, your hands, aim markers and web balls follow the
+turned view. A sharp pull still zips toward the anchor upside down, and a
+punch is still measured from your arm: both used only your turn left and
+right before, so upside down a pull would have counted backwards. The spin
+itself is not a punch or a pull. Spider-Man's body turns with you about
+your eyes, his legs keeping the game's pose.
+The swing input and the body command carry the flip's tilt now (swing
+command version 3, body command version 2). Both modules still take the
+probes' older, shorter commands, so the Python tools are unchanged; the ray
+and stereo modules must come from the same build. 198 core checks pass (11
+new: a tap, hold and release, the stick's directions, landing and menus,
+the rig's math, an upside-down pull, a flip that is no punch, the aim
+markers, the swing command, the body turning), as do the graphics test, the
+launcher's checks and the 5 Python suites. The rebuilt modules took the
+probes' old commands and the new ones and refused a bad tilt. Not tried yet:
+the game and the headset. Tell me whether 0.8 s a flip feels right, whether
+flipping makes you uneasy, and whether steering a held flip with the stick
+is useful.
+
+**Preceding build (October 8, tenth build): web balls web thugs up, pulled
 thugs fly and get hurt.** You said web balls at enemies and objects did
 nothing, and that pulled enemies came along without reacting to the web or
 taking collision damage. Your 13:50 session and a headless game at a street

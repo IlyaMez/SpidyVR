@@ -346,8 +346,10 @@ Settings, goes Up to SPIDY VR and opens it, then switches the aim markers off,
 switches webs in open air off and resets them with X, steps the swing speed to
 40 m/s and the weight to 80%, sets CALIBRATE BODY to ON RESUME (a calibration
 asked for; without a headset nothing calibrates), snap turn to 45 degrees,
-smooth turn to 60 degrees a second, and resets the tab with Y and A (14
-changes in all; the web shooter, which the tab does not offer, stays off).
+smooth turn to 60 degrees a second, switches the experimental FLIPS on, and
+resets the tab with Y and A (16 changes in all; the web shooter, which the tab
+does not offer, stays off). The FLIPS step is new on October 8 (thirteenth
+build) and has not run in the game yet.
 After each step
 it reads `SpidyMenuSample` (what the tab holds, the tabs built, the changes)
 and captures the window. It fails if a step left other values than expected or

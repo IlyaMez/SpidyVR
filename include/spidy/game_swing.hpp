@@ -2,6 +2,7 @@
 #include "presentation_gate.hpp"
 #include "swing.hpp"
 #include "swing_takeoff.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 
@@ -99,7 +100,7 @@ struct Hand {
     float trigger{}, grip{};
 };
 struct Command {
-    uint32_t magic = 0x5357434d, version = 2, bytes = sizeof(Command), focused{};
+    uint32_t magic = 0x5357434d, version = 3, bytes = sizeof(Command), focused{};
     uint64_t serial{};
     uint32_t leaseMs = 100, jump{};
     Hand hands[2];
@@ -108,7 +109,11 @@ struct Command {
     float sampleSeconds = 1.f / 90.f;
     uint32_t reserved{};
     uint64_t sampleTimeNs = 1;
+    // Version 3: a flip's tilt of the tracking space (Input::tilt). Version 2
+    // (commandBytesV2, the probes') ends before it: level.
+    Quat tilt{};
 };
+constexpr uint32_t commandBytesV2 = 168;
 struct WebState {
     uint32_t attached{}, bodyId{};
     Vec3 anchor{};
@@ -125,7 +130,8 @@ struct Data {
     uint32_t grounded{}, collisionFlags{}, takeoff{}, misses{}, obstructed{}, trackingLost{};
     uint32_t takeoffPhase{}, takeoffAttempts{}, takeoffTimeouts{}, nativeContact{};
 };
-static_assert(sizeof(Config) == 64 && sizeof(Hand) == 52 && sizeof(Command) == 168);
+static_assert(sizeof(Config) == 64 && sizeof(Hand) == 52 && sizeof(Command) == 184 &&
+              offsetof(Command, tilt) == commandBytesV2);
 // SpidySwingSettings: what the VR settings (the SPIDY VR tab in the game's
 // Settings) change during play.
 // grab: webs catch props and thugs (a swing started without them starts
@@ -183,11 +189,14 @@ struct AimData {
 static_assert(sizeof(Aim) == 32 && sizeof(AimData) == 96);
 constexpr uint32_t aimLeaseMs = 250;
 inline bool valid(const Command& c) {
-    if (c.magic != 0x5357434d || c.version != 2 || c.bytes != sizeof(c) || !c.serial || c.focused > 1 ||
-        c.jump > 1 || c.leaseMs > 250 || (c.focused && !c.leaseMs) || !finite(c.move) ||
-        length(c.move) > 1.001f || !std::isfinite(c.trackingYaw) || c.reserved ||
+    const auto& t = c.tilt;
+    const float tilt = t.x * t.x + t.y * t.y + t.z * t.z + t.w * t.w;
+    if (c.magic != 0x5357434d ||
+        !((c.version == 2 && c.bytes == commandBytesV2) || (c.version == 3 && c.bytes == sizeof(c))) ||
+        !c.serial || c.focused > 1 || c.jump > 1 || c.leaseMs > 250 || (c.focused && !c.leaseMs) ||
+        !finite(c.move) || length(c.move) > 1.001f || !std::isfinite(c.trackingYaw) || c.reserved ||
         !std::isfinite(c.sampleSeconds) || c.sampleSeconds <= 0 || c.sampleSeconds > .1f ||
-        (c.focused && !c.sampleTimeNs))
+        (c.focused && !c.sampleTimeNs) || !std::isfinite(tilt) || tilt < .99f || tilt > 1.01f)
         return false;
     for (const auto& h : c.hands) {
         const auto q = h.aim.orientation;
@@ -258,6 +267,10 @@ inline Input input(const Command& c) {
     out.jump = c.jump != 0;
     out.move = c.move;
     out.trackingYaw = c.trackingYaw;
+    const float n =
+        std::sqrt(c.tilt.x * c.tilt.x + c.tilt.y * c.tilt.y + c.tilt.z * c.tilt.z + c.tilt.w * c.tilt.w);
+    if (c.version == 3 && n > .5f)
+        out.tilt = {c.tilt.x / n, c.tilt.y / n, c.tilt.z / n, c.tilt.w / n};
     for (unsigned i = 0; i < 2; ++i)
         out.hands[i] = {c.hands[i].aim, c.hands[i].relative, c.hands[i].tracked != 0, c.hands[i].trigger,
                         c.hands[i].grip};

@@ -1,6 +1,7 @@
 #pragma once
 #include "body_calibration.hpp"
 #include "math.hpp"
+#include <cstddef>
 #include <cstdint>
 
 // Spider-Man's own body, driven by the headset and the controllers
@@ -39,7 +40,7 @@ enum Flags : uint32_t {
     calibrated = 16,
 };
 struct Command {
-    uint32_t magic = 0x53424443, version = 1, bytes = sizeof(Command), flags{};
+    uint32_t magic = 0x53424443, version = 2, bytes = sizeof(Command), flags{};
     uint64_t serial{};
     uint32_t leaseMs = 250, reserved{};
     Vec3 eyes{};   // between the eyes, relative to the feet
@@ -54,8 +55,13 @@ struct Command {
     // The player's arm from the hero's shoulder at their size to the wrist,
     // metres (the T-pose calibration; 0: the hero's own arms).
     float armLength{};
+    // Version 2: a flip's tilt of the player, world axes (the identity while
+    // level): the whole body turns with it about the eyes. Version 1
+    // (commandBytesV1, the probe's) ends before it: level.
+    Quat tilt{};
 };
-static_assert(sizeof(Hand) == 36 && sizeof(Command) == 144);
+constexpr uint32_t commandBytesV1 = 144;
+static_assert(sizeof(Hand) == 36 && sizeof(Command) == 160 && offsetof(Command, tilt) == commandBytesV1);
 
 enum State : uint32_t { off = 0, waiting = 1, active = 2, failed = 3 };
 // Why the body is not on the hero (Status::problem).
