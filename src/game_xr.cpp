@@ -66,7 +66,7 @@ enum GateReason : uint32_t {
     gateTracking = 16,    // the headset's pose or timing was not usable
 };
 struct XrData {
-    uint32_t magic = 0x53585244, version = 12, bytes = sizeof(XrData), status{};
+    uint32_t magic = 0x53585244, version = 13, bytes = sizeof(XrData), status{};
     int64_t sequence{};
     uint64_t frames{}, tracked{}, submitted{}, dropped{}, leftHands{}, rightHands{}, serial{}, generation{};
     uint32_t nativeKeys{}, error{};
@@ -109,9 +109,17 @@ struct XrData {
     uint64_t menuTabs{};
     uint32_t menuInstalled{}, menuStatus{};
     // Degrees a second of smooth turning now (0: the stick snap turns).
-    uint32_t smoothTurn{}, unused{};
+    uint32_t smoothTurn{};
+    // Walls and ceilings the game held the player on (GameTrackingRig): the
+    // stretches and frames of play on one, the player's up (its actor's)
+    // now, the head's stand-off now (m), and on the last frame on one the
+    // head's height over it from the feet, before and after the stand-off.
+    uint32_t surfaceEntries{};
+    uint64_t surfaceFrames{};
+    float heroUp[3]{};
+    float standOff{}, surfaceHeight{}, surfaceClearance{};
 };
-static_assert(sizeof(XrData) == 712);
+static_assert(sizeof(XrData) == 744);
 extern "C" {
 __declspec(dllexport) XrData SpidyXrData;
 __declspec(dllexport) XrTimingData SpidyXrTimingData;
@@ -328,6 +336,11 @@ DWORD WINAPI run(void*) {
         float fists[2]{};
         Vec3 gripsBefore[2]{};
         bool gripsSeen[2]{};
+        // Stretches and frames of play the game held the player on a wall
+        // or a ceiling (the head stood off it).
+        uint32_t surfaceEntries{};
+        uint64_t surfaceFrames{};
+        bool wasOnSurface{};
         LARGE_INTEGER frequency{};
         QueryPerformanceFrequency(&frequency);
         // Puts the settings into effect: at once, or when the module they
@@ -479,8 +492,17 @@ DWORD WINAPI run(void*) {
                         jumpFromScreen = true;
                     XrFrame controller = frame;
                     controller.jump = frame.jump && !jumpFromScreen;
+                    // The player's up (its actor's second row): a wall's normal
+                    // while the game holds it on one. Spidy's own flight is on none.
+                    const Vec3 heroUp{body[4], body[5], body[6]};
                     motion = rig.update(controller, {body[12], body[13], body[14]},
-                                        {camera[8], camera[9], camera[10]}, gameplay);
+                                        {camera[8], camera[9], camera[10]}, gameplay,
+                                        swingState.owned ? Vec3{0, 1, 0} : heroUp);
+                    if (motion.active && motion.onSurface) {
+                        surfaceEntries += !wasOnSurface;
+                        ++surfaceFrames;
+                    }
+                    wasOnSurface = motion.active && motion.onSurface;
                     // Without gameplay (menus, hint cards, cutscenes, animated
                     // cameras, loading) the game's own camera goes on the screen.
                     bool screen{};
@@ -742,6 +764,14 @@ DWORD WINAPI run(void*) {
                         d.menuTabs = menu.tabs;
                         d.menuInstalled = menu.installed;
                         d.menuStatus = menuCode ? menuCode : menu.status;
+                        d.surfaceEntries = surfaceEntries;
+                        d.surfaceFrames = surfaceFrames;
+                        std::memcpy(d.heroUp, body.data() + 4, 12);
+                        d.standOff = length(motion.standOff);
+                        if (motion.active && motion.onSurface) {
+                            d.surfaceHeight = motion.surfaceHeight;
+                            d.surfaceClearance = motion.surfaceClearance;
+                        }
                         std::memcpy(d.head, motion.head.data(), 64);
                         const Mat4 basis = {1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1};
                         for (unsigned i = 0; i < 2; ++i) {

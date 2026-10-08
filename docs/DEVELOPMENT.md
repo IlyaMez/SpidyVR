@@ -183,6 +183,13 @@ without a commit of its own.
   the game 3 s like a pause; reads every step of the player's mover and fails
   on an airborne step without Spidy's command or a jump in vertical speed.
   `--modules DIR` runs it with another build's movement and ray modules.
+- `tools/probe_wall_crawl.py`: how the game holds the player on a wall, in a
+  freshly started game loaded with the virtual controller: finds the nearest
+  wall with world rays, jumps, webs it and reels in until the game sticks the
+  player to it, reads the player's actor (feet, up) and mover every few
+  milliseconds, measures with rays how far the feet and the eyes (placed as
+  before, and stood off as `GameTrackingRig` does) are from the wall, jumps
+  off, and saves the game window on the wall and after the jump.
 - `tools/probe_vr_load.py`: renders the VR views at the headset's resolution
   where the player stands and reports, per phase, the game's frame rate, its
   render commands per frame, GPU use, and the CPU time of each game thread;

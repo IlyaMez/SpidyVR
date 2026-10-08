@@ -348,6 +348,26 @@ not survive `hold`, a module did not stop, or a hook entry was not restored.
 from another folder (a play folder's build) for a before-and-after. Report:
 `reports/air-handoff.json` (`--output`).
 
+### Walls the game sticks the player to
+
+`python tools/probe_wall_crawl.py` after `tools/probe_menu_pad.py start` and
+`pad a --until-player` (the same loaded save; a building within 50 m). It
+casts 48 world rays from the hand (16 headings, level and 12 degrees up and
+down) and takes the nearest wall 6-50 m away, preferring one level or above,
+jumps with the virtual controller's A, webs the wall and reels until the
+player's actor tilts past 45 degrees (the game's wall crawl), lets go, and on
+the wall casts rays along the actor's up from a metre out: the wall's distance
+from the feet and from eyes 1.65 m upright from them, without and with the
+stand-off `GameTrackingRig` gives (`wallClearance`). Then it jumps off. Every
+few milliseconds it records the actor's feet, up and forward, the mover's
+flags and contact, and whether the swing owns the flight; the summary has the
+time the actor took to turn onto the wall and back, how far it tilted in the
+air, and the mover flags on the wall. It fails unless the player was held on
+the wall, the stood-off eyes were at least 0.35 m from it, the modules stopped
+and the hook entries were restored. Report: `reports/wall-crawl.json`; the game
+window on the wall and after the jump in `reports/wall-crawl/`. A run took
+under 10 s after the save loaded (October 8).
+
 ## Performance comparison
 
 The initial successful headset test was `game-vr-20261004-131244.json`: 509 pairs

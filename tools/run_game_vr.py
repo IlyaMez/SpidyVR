@@ -369,10 +369,10 @@ def pad_ignored(watch, sample, quiet=5):
 
 def snapshot(game, address):
     for _ in range(8):
-        raw = game.read(address, 712)
-        if len(raw) != 712:
+        raw = game.read(address, 744)
+        if len(raw) != 744:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53585244, 12, 712):
+        if struct.unpack_from('<3I', raw) != (0x53585244, 13, 744):
             raise RuntimeError('Game XR protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -422,6 +422,15 @@ def snapshot(game, address):
                       setting_changes=changes)
         menu_tabs, menu_installed, menu_status = struct.unpack_from('<Q2I', raw, 688)
         result.update(menu_tabs=menu_tabs, menu_installed=bool(menu_installed), menu_status=menu_status)
+        # Walls and ceilings the game held the player on (its wall crawl): the stretches and frames of play
+        # on one, the player's up now (its actor's), the head's stand-off from the surface now, and on the
+        # last frame on one the head's height over it as placed from the feet, before and after the stand-off.
+        entries, frames = struct.unpack_from('<IQ', raw, 708)
+        up = struct.unpack_from('<3f', raw, 720)
+        stand_off, height, clearance = struct.unpack_from('<3f', raw, 732)
+        result.update(surface=dict(entries=entries, frames=frames, hero_up=[round(v, 3) for v in up],
+                                   stand_off_m=round(stand_off, 3), head_height_m=round(height, 3),
+                                   head_clearance_m=round(clearance, 3)))
         return result
     return None
 
@@ -721,6 +730,21 @@ def game_running():
         return not str(error).startswith('Spider-Man is not running.')
 
 
+# Spidy's modules start once per game process and stay in it until the game exits. The XR module goes in
+# just before VR starts, so a game that has it has had its VR session: a second start returns 1000.
+XR_MODULE = 'spidy_stereo_probe.dll'
+VR_RAN = ('VR already ran in this game, and Spidy VR starts once per game launch. Close Spider-Man, then '
+          'press START VR: the launcher starts the game again.')
+
+
+def had_vr(pid, modules_of=modules):
+    """Whether VR already ran in the game process `pid` (STOP VR, or VR that ended, leaves the game running)."""
+    try:
+        return any(m['name'].lower() == XR_MODULE for m in modules_of(pid))
+    except (OSError, RuntimeError):
+        return False  # closing, or still being set up; the XR start refuses a second session anyway
+
+
 def settle_display(running):
     """Restore the game settings saved for a VR launch (vr_display) once the game has closed."""
     if not vr_display.pending() or getattr(settle_display, 'deferred', False):
@@ -792,6 +816,11 @@ def session(a, startup):
     """One VR session from the headset check to the report; `startup` follows it until VR starts."""
     if a.stop_event:
         watch_stop_event(a.stop_event)
+    # First: nothing later can start VR in such a game.
+    startup.stage = 'checking the running game'
+    if game_running() and had_vr(find_game()):
+        raise RuntimeError(VR_RAN)
+    startup.stage = 'finding the headset'
     manifest, runtime = preflight(a.xr_runtime)
     startup.fields['xr_runtime'] = runtime
     startup.stage = 'starting the game'
@@ -885,7 +914,7 @@ def session(a, startup):
         startup.stage = 'starting VR'
         code = call_with_payload(process, xr['SpidyXrStart'], config)
         if code:
-            raise RuntimeError(f'Game XR start: {code}')
+            raise RuntimeError(VR_RAN if code == 1000 else f'Game XR start: {code}')
         xr_active = True
         started = time.monotonic()
         samples = deque(maxlen=12000)

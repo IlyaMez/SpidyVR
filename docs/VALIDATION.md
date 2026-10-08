@@ -1,6 +1,63 @@
-# Validation — 2026-10-07
+# Validation — 2026-10-08
 
-## Smooth turning — current build
+## Walls the game sticks the player to — current build
+
+The user, October 8: "sometimes the player gets attached to the walls in vr
+(crawling mode i guess) which looks and feels like im clipping through the
+wall. jumping from it fixes it."
+
+**Cause.** The game's wall crawl (`HeroStateWallCrawl*`): a player who flies
+into a wall sticks to it. In the session reports it is mover flags `0x80a6`
+with collision flags `0x2060005` (the game moves the player without sweeping),
+then `0x8001` / `0x2060000`, contact 0, Spidy not driving, body not grounded:
+six stretches in the October 6-7 reports (16:36 four, 10:43 one, 22:08 one at
+81 s), 1-2.4 s each, 20-200 m up, each ended by a jump. The eyes were the
+tracked head placed upright from the player's feet (`GameTrackingRig`), and
+the feet are on the wall: the 22:08 session's left eye at 180 s is on the
+brick wall's plane.
+
+**In the game, no headset** (`tools/probe_wall_crawl.py`, the user's save,
+October 8; `reports/wall-crawl.json`, `reports/wall-crawl/on-wall.png`): the
+nearest wall was 6.07 m from the hand, 12° up. Jump, web at it, reel: the game
+took the player at 2.45 s (`0x80a6` / `0x2060005`, contact 0) and turned the
+actor's up from 0° to 90° from the world's in 0.25 s, ending at (1, 0, 0), the
+wall's normal by rays to 2e-7. Rays along that normal: feet 0.00 m from the
+wall's surface; eyes 1.65 m upright from the feet (as before) 0.00 m from it,
+stood off as now 0.50 m. Idle on the wall (`0x8001` / `0x2060000`) the actor's
+up leaned away from the normal by up to 14° over 30-80 ms and snapped back,
+again and again (clean rotations, not torn reads), so the stand-off goes level
+from a wall and straight down under a ceiling, not along the actor's up.
+The jump off made the actor upright in 0.3 s (airborne from 81° down); Spidy's
+own flight (owned) never tilted it. Hook entries restored, modules stopped
+with 0, the save files byte-identical afterwards. The first attempt that
+morning stopped at the title: another window came in front, the game paused,
+and it was closed.
+
+**What it does.** `GameTrackingRig::update` takes the player's up (its actor's
+second row; the world's up while Spidy's swing owns the flight). Past 45° from
+upright (back within 35°) the player is on a surface: the head, eyes, hands
+and swing aims are placed `standOff` away from it, level from a wall, straight
+down from a ceiling, the feet staying the render anchor. The stand-off puts
+the head `wallClearance` (0.5 m) from the surface's plane for the first
+0.5 s (the actor turning onto it), then only keeps it `minWallClearance`
+(0.25 m) away; it never shrinks while on the surface, so leaning back moves
+away from the wall. It approaches its target by 63% in 0.06 s; off the
+surface it returns to zero the same way. A snap or smooth turn pivots at the
+head and a recenter keeps the head, stand-off apart.
+
+**Checks.** 167 core checks (5 new: stand-off on a wall with eyes, hands and
+web hands moved and the feet kept as anchor; the actor rocking 14° does not
+move the head; leaning in to the minimum and back; turning and recentering
+on a wall; a ceiling, a 30° slope, the 35-45° hysteresis), 84 Python checks
+(XrData version 13, 744 bytes: `surfaceEntries`, `surfaceFrames`, `heroUp`,
+`standOff`, `surfaceHeight`, `surfaceClearance`; report `surface`), the GPU
+test.
+
+**Not yet seen:** the headset. In the next report, `surface.entries` counts
+the stretches; `head_height_m` near 0 or below with `head_clearance_m` near
+0.5 is the fix at work. Ask how leaning on a wall feels.
+
+## Smooth turning — preceding build
 
 The user, October 7: "add smooth turning option".
 
@@ -50,7 +107,7 @@ v12 with smooth turning, the settings line) and the GPU test pass.
 11 changes. How smooth turning feels, and the XR worker applying the tab's
 change at once, need the headset.
 
-## Midair drops — preceding build
+## Midair drops — earlier build
 
 The user, October 7: "sometimes while in the air i get pulled down fast as im
 diving out of no where I think its a game mechanic lets stop it".

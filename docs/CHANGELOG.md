@@ -3,7 +3,51 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 7, seventh build): SteamVR headsets, and the VR
+**Latest build (October 8, second build): a wall the game sticks you to no
+longer cuts through your view.** You reported that the player sometimes gets
+attached to walls in VR, which looks and feels like clipping through the
+wall, until you jump. That is the game's wall crawl: a player who flies into
+a wall sticks to it. The game turns the hero onto the wall (his up along the
+wall's normal) with his feet on its surface, and VR placed your eyes upright
+from those feet: on the wall's plane, or inside it by as far as your head
+was toward it in your room. The left eye of your October 7 22:08 session at
+180 s shows it; your October 6-7 reports hold six such stretches, 1-2.4 s
+each, 20 to 200 m up. Now, while the game holds you on a wall, your head
+stands off it: 0.5 m out, reached in about 0.2 s. From there you can lean in
+to 0.25 m; lean back and the wall stays where it is. Under a ceiling the head
+goes 0.5 m below it. Back on your feet, or jumping off, the view returns over
+the feet. Hands, webs and the body go with the head; crawling and the jump off
+are the game's, as before (`GameTrackingRig`, `wallClearance`).
+Measured in the game without a headset (`tools/probe_wall_crawl.py`, your
+save, a wall 6 m from the player, reeled into on a web): the game took the
+player at the wall and turned him from upright to 90° in 0.25 s, feet 0.00 m
+from the wall's surface; eyes placed as before were 0.00 m from it, as now
+0.50 m. On the wall the hero rocks up to 14° about the wall's normal and
+snaps back several times a second, so the stand-off is level (straight down
+under a ceiling) and does not bob with him. He was upright 0.3 s after the
+jump off; Spidy's own flight never tilted him. Session reports carry
+`surface` per sample (stretches and frames on a wall, the hero's up, the
+stand-off, the head's distance from the wall without and with it; XrData
+version 13). 167 core checks (5 new), 84 Python checks and the GPU test pass.
+Not in your play folder yet: version 13 needs the whole package there.
+
+**Preceding build (October 8, first build): "Game XR start: 1000" says what to do.** A
+player on a Quest 3 through Virtual Desktop got "VR could not start: Game XR
+start: 1000". Their game had started at 09:14:46 and the launcher attached
+to it at 09:18:21 ("Using the running game."), so VR had already run once in
+that game: 1000 is the XR module refusing a second session in one game
+process, as every Spidy module does (AUTOMATION.md). STOP VR, or VR that
+ends by itself, leaves the game running, and the next START VR attached to
+it. The launcher now checks that first, before the headset: a running game
+that already holds Spidy's XR module gets "VR already ran in this game, and
+Spidy VR starts once per game launch. Close Spider-Man, then press START VR:
+the launcher starts the game again.", and a 1000 from the XR start says the
+same. PLAYERS.md says it under PLAY and IF SOMETHING IS WRONG. Starting VR
+again in the same game would need every module to start more than once; not
+done. 84 Python checks pass (new: the check, its message, and no headset
+check before it). Only the Python tools and PLAYERS.md changed.
+
+**Preceding build (October 7, seventh build): SteamVR headsets, and the VR
 runtime found automatically.** You reported that players with SteamVR
 headsets (a Steam Frame, a PSVR2) get the flat game instead of VR, and that
 on your Quest 3 over Steam Link VR works but the game's menus can't be

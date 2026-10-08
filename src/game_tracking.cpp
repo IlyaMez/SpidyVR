@@ -67,7 +67,8 @@ void GameTrackingRig::reset() {
     snap_ = snap;
     smooth_ = smooth;
 }
-GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameForward, bool gameplay) {
+GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameForward, bool gameplay,
+                                        Vec3 surfaceUp) {
     GameMotionFrame out;
     out.swing.focused = false;
     pendingRecenter_ |= f.recentered;
@@ -119,27 +120,55 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     }
     if (std::abs(turn) < .3f)
         turnHeld_ = false;
+    // On a wall the head stands off it level, under a ceiling straight down.
+    // On a wall the game's actor rocks up to 14 degrees about the wall's
+    // normal and snaps back, several times a second (in the game, October 8);
+    // a stand-off along its up bobbed the head with it.
+    const Vec3 normal = normalized(surfaceUp);
+    const bool onSurface = finite(normal) && length(normal) > .5f &&
+                           normal.y < (onSurface_ ? surfaceLeaveCos : surfaceEnterCos);
+    const Vec3 away = normal.y < -surfaceEnterCos ? Vec3{0, -1, 0} : normalized(Vec3{normal.x, 0, normal.z});
+    const Vec3 unplacedHead = rig_.toWorld(f.head).position;
+    Vec3 target{};
+    if (onSurface) {
+        const float height = dot(unplacedHead - feet, away);
+        surfaceSeconds_ = onSurface_ ? surfaceSeconds_ + f.seconds : 0.f;
+        const float wanted =
+            (surfaceSeconds_ < surfaceSettleSeconds ? wallClearance : minWallClearance) - height;
+        surfaceDepth_ = std::max(onSurface_ ? surfaceDepth_ : 0.f, wanted);
+        target = away * surfaceDepth_;
+        out.surfaceHeight = height;
+    } else {
+        surfaceDepth_ = 0;
+    }
+    onSurface_ = onSurface;
+    standOff_ += (target - standOff_) * (1 - std::exp(-f.seconds / standOffSeconds));
+    out.onSurface = onSurface;
+    out.standOff = standOff_;
+    if (onSurface)
+        out.surfaceClearance = dot(unplacedHead + standOff_ - feet, away);
+    const Rig placed{rig_.origin + standOff_, rig_.yaw};
     out.active = true;
     out.releaseWebs = longBreak || pendingRecenter_;
     pendingRecenter_ = false;
     out.predictedDisplayTime = f.predictedDisplayTime;
     out.anchor = feet;
-    out.swing = trackedSwingInput(f, rig_);
+    out.swing = trackedSwingInput(f, placed);
     if (out.releaseWebs)
         for (auto& hand : out.swing.hands)
             hand.tracked = false;
-    const auto head = rig_.toWorld(f.head);
+    const auto head = placed.toWorld(f.head);
     out.head = worldPose(head);
     out.headPose = head;
     for (unsigned i = 0; i < 2; ++i) {
-        out.eyes[i] = worldPose(rig_.toWorld(f.eyes[i].pose));
+        out.eyes[i] = worldPose(placed.toWorld(f.eyes[i].pose));
         out.fovs[i] = f.eyes[i].fov;
         if (handValid(f.hands[i])) {
             // The mesh's fingers point along -Z. A controller's grip pose is
             // angled along its handle; its aim pose supplies the pointing axis.
             Pose hand{f.hands[i].grip.position, f.hands[i].aim.orientation};
-            out.hands[i] = rig_.toWorld(hand);
-            out.grips[i] = rig_.toWorld(f.hands[i].grip);
+            out.hands[i] = placed.toWorld(hand);
+            out.grips[i] = placed.toWorld(f.hands[i].grip);
         }
     }
     // Existing native input bridge uses these bits for W/A/S/D/Space, the
@@ -159,7 +188,8 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         out.nativeKeys |= 1u << 3;
     if (f.jump)
         out.nativeKeys |= 1u << 4;
-    lastHead_ = head;
+    // Kept from the feet: a recenter keeps the head where it was, stand-off apart.
+    lastHead_ = {unplacedHead, head.orientation};
     lastFeet_ = feet;
     lastTime_ = f.predictedDisplayTime;
     wasActive_ = true;

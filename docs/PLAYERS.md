@@ -48,6 +48,8 @@ picture, click the game window once.
 
 Press STOP VR, or close the game, to end the session. Each session leaves a
 report in the "reports" folder; send it along when you report a problem.
+VR starts once per game launch: to play in VR again after STOP VR, or after
+VR ended by itself, close the game first, then press START VR.
 
 For VR the launcher starts the game with a small desktop window, without
 frame generation, and with the game's Windows.Gaming.Input off (under
@@ -134,6 +136,9 @@ IF SOMETHING IS WRONG
   SteamVR), then press Check in the launcher. On Automatic it shows which VR
   runtime has your headset; if it picks the wrong one, choose yours in the
   list.
+- "VR already ran in this game" (older versions: "Game XR start: 1000"):
+  VR starts once per game launch. Close the game (Spider-Man.exe gone from
+  Task Manager), then press START VR.
 - VR does not start and the game stays flat: send the whole "reports"
   folder. The newest game-vr-...-console.log holds everything the launcher
   showed, and the report beside it says where it stopped.

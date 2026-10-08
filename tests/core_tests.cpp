@@ -236,6 +236,15 @@ XrFrame trackedFrame() {
     }
     return f;
 }
+// Plays `seconds` of 90 Hz frames with the player's actor up `up`, its feet at `feet`.
+GameMotionFrame playFor(GameTrackingRig& rig, XrFrame& f, Vec3 feet, Vec3 up, float seconds) {
+    GameMotionFrame out;
+    for (int i = 0; i < static_cast<int>(seconds * 90 + .5f); ++i) {
+        ++f.predictedDisplayTime;
+        out = rig.update(f, feet, {0, 0, -1}, true, up);
+    }
+    return out;
+}
 int main() {
     int total = 0, failed = 0;
     auto test = [&](const char* name, const std::function<void()>& f) {
@@ -525,6 +534,84 @@ int main() {
         near(b.head[8],.5f);
         f.predictedDisplayTime=3;const auto held=rig.update(f,{},{0,0,-1},true);
         for(int i=0;i<16;++i)near(held.head[i],b.head[i]);
+    });
+    test("game rig stands the head off a wall the game holds the player on", [] {
+        // The feet on a wall whose normal is +x: placed upright from them, the
+        // head is on the wall's plane.
+        GameTrackingRig rig;auto f=trackedFrame();const Vec3 feet{10,20,30};
+        const auto upright=playFor(rig,f,feet,{0,1,0},.2f);
+        check(!upright.onSurface,"standing counted as a wall");near(length(upright.standOff),0);
+        near(upright.head[12],10);near(upright.head[13],21.7f);
+        const auto first=playFor(rig,f,feet,{1,0,0},1.f/90);
+        check(first.onSurface&&first.standOff.x>0&&first.standOff.x<.15f,"the head jumped off the wall");
+        const auto on=playFor(rig,f,feet,{1,0,0},.6f);
+        near(on.head[12],10.5f,.002f);near(on.head[13],21.7f);near(on.head[14],30);
+        near(on.surfaceHeight,0);near(on.surfaceClearance,.5f,.002f);
+        // Eyes, hands and the web hands go with the head; the feet stay the anchor.
+        near(on.eyes[0][12]-on.head[12],-.032f);near(on.hands[0].position.x-upright.hands[0].position.x,.5f,.002f);
+        near(on.swing.hands[1].aim.position.x-on.hands[1].position.x,0);
+        near(length(on.anchor-feet),0);
+        // Off the wall, the head comes back over the feet.
+        const auto off=playFor(rig,f,feet,{0,1,0},.6f);
+        check(!off.onSurface,"standing again kept the wall");near(off.head[12],10,.002f);
+    });
+    test("game rig head stays still while the actor rocks on the wall", [] {
+        // Measured in the game (reports/wall-crawl.json): on the wall the
+        // actor's up leans up to 14 degrees off the wall's normal over a few
+        // frames and snaps back to it.
+        GameTrackingRig rig;auto f=trackedFrame();const Vec3 feet{10,20,30};
+        const auto settled=playFor(rig,f,feet,{1,0,0},.6f);
+        float lowest=1e9f,highest=-1e9f,nearest=1e9f;
+        for(int cycle=0;cycle<6;++cycle)
+            for(int k=0;k<=6;++k){
+                const float a=.0407f*static_cast<float>(k);
+                const auto out=playFor(rig,f,feet,{std::cos(a),std::sin(a),0},1.f/90);
+                lowest=std::min(lowest,out.head[13]);highest=std::max(highest,out.head[13]);
+                nearest=std::min(nearest,out.head[12]);
+            }
+        near(highest-lowest,0);near(settled.head[12]-nearest,0);near(nearest,10.5f,.002f);
+    });
+    test("game rig head on a wall moves freely within its clearance", [] {
+        GameTrackingRig rig;auto f=trackedFrame();const Vec3 feet{10,20,30};
+        playFor(rig,f,feet,{1,0,0},.6f);
+        // A lean toward the wall comes closer, up to the minimum clearance.
+        f.head.position.x=-.2f;f.eyes[0].pose.position.x=-.232f;f.eyes[1].pose.position.x=-.168f;
+        auto out=playFor(rig,f,feet,{1,0,0},.3f);
+        near(out.head[12],10.3f,.002f);near(out.surfaceClearance,.3f,.002f);
+        f.head.position.x=-.4f;f.eyes[0].pose.position.x=-.432f;f.eyes[1].pose.position.x=-.368f;
+        out=playFor(rig,f,feet,{1,0,0},.3f);
+        near(out.surfaceClearance,minWallClearance,.002f);
+        // Leaning back, the wall does not follow.
+        f.head.position.x=0;f.eyes[0].pose.position.x=-.032f;f.eyes[1].pose.position.x=.032f;
+        out=playFor(rig,f,feet,{1,0,0},.3f);
+        near(out.head[12],10.65f,.002f);
+    });
+    test("game rig turns about the head on a wall and keeps it on a recenter", [] {
+        GameTrackingRig rig;auto f=trackedFrame();const Vec3 feet{10,20,30};
+        const auto before=playFor(rig,f,feet,{1,0,0},.6f);
+        f.hands[1].stickX=1;auto turned=playFor(rig,f,feet,{1,0,0},1.f/90);
+        f.hands[1].stickX=0;turned=playFor(rig,f,feet,{1,0,0},.3f);
+        near(turned.head[12],before.head[12],.002f);near(turned.head[14],before.head[14],.002f);
+        f.recentered=true;f.head.position={.3f,1.7f,.2f};
+        const auto recentered=playFor(rig,f,feet,{1,0,0},1.f/90);
+        f.recentered=false;
+        near(recentered.head[12],turned.head[12],.002f);near(recentered.head[14],turned.head[14],.002f);
+    });
+    test("game rig puts the head under a ceiling and leaves slopes alone", [] {
+        GameTrackingRig rig;auto f=trackedFrame();const Vec3 feet{10,20,30};
+        auto out=playFor(rig,f,feet,{0,-1,0},.8f);
+        near(out.head[13],19.5f,.003f);near(out.surfaceClearance,.5f,.003f);
+        out=playFor(rig,f,feet,{0,1,0},.8f);
+        near(out.head[13],21.7f,.003f);
+        // 30 degrees from upright is no wall; 40 is one only for a player already on a wall.
+        const float s30=.5f,c30=.8660254f,s40=.6427876f,c40=.7660444f;
+        out=playFor(rig,f,feet,{s30,c30,0},.3f);
+        check(!out.onSurface,"a slope counted as a wall");near(length(out.standOff),0);
+        out=playFor(rig,f,feet,{s40,c40,0},.1f);
+        check(!out.onSurface,"40 degrees from standing counted as a wall");
+        playFor(rig,f,feet,{1,0,0},.1f);
+        out=playFor(rig,f,feet,{s40,c40,0},.1f);
+        check(out.onSurface,"40 degrees on a wall let go of it");
     });
     test("aimed hand attaches to actual surface", [] {
         TestWorld w;
