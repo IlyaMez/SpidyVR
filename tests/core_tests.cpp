@@ -23,6 +23,7 @@
 #include "spidy/overlay_text.hpp"
 #include "spidy/punch.hpp"
 #include "spidy/shooter.hpp"
+#include "spidy/slow_motion.hpp"
 #include <algorithm>
 #include <cstring>
 #include <functional>
@@ -4338,6 +4339,189 @@ int main() {
                 check(length(b.at(turned, b.rig.arms[i].hand) - wristOf(flipped.hands[i], i)) < 2e-3f,
                       "a wrist missed its controller in the flip");
         }
+    });
+    test("slow motion eases the game's time in and out along a smooth curve", [] {
+        SlowMotion slow;
+        const auto& t = slow.tuning();
+        check(slow.timeScale() == 1 && slow.blend() == 0 && !slow.active(), "a new session starts slowed");
+        check(slow.update(.011f, true, true) == SlowMotion::Event::started && slow.active(), "a press did not start it");
+        float before = slow.timeScale(), steepest = 0;
+        for (float s = .011f; s < t.enterSeconds + .05f; s += .011f) {
+            check(slow.update(.011f, false, true) == SlowMotion::Event::none, "easing in raised an event");
+            const float now = slow.timeScale();
+            check(now <= before + 1e-6f, "time sped up while slowing");
+            steepest = std::max(steepest, before - now);
+            before = now;
+        }
+        near(slow.timeScale(), t.scale, 1e-4f);
+        near(slow.blend(), 1);
+        // No jolt: no frame changes time by more than a seventh of the whole way.
+        check(steepest < (1 - t.scale) / 7, "the ease has a jolt");
+        // Halfway along the curve time runs at the geometric mean (even steps in log time).
+        SlowMotion half;
+        half.update(.01f, true, true);
+        float halfway = 1;
+        for (float s = .01f; s < 2; s += .001f) {
+            half.update(.001f, false, true);
+            if (half.blend() >= .5f) {
+                halfway = half.timeScale();
+                break;
+            }
+        }
+        near(halfway, std::sqrt(t.scale), .01f);
+        check(slow.update(.011f, true, true) == SlowMotion::Event::stopped && !slow.active(), "a press did not end it");
+        before = slow.timeScale();
+        float seconds = 0;
+        while (slow.timeScale() < 1 && seconds < 2) {
+            slow.update(.011f, false, true);
+            seconds += .011f;
+            check(slow.timeScale() >= before - 1e-6f, "time slowed while easing out");
+            before = slow.timeScale();
+        }
+        check(slow.timeScale() == 1 && std::abs(seconds - t.exitSeconds) < .03f, "easing out took the wrong time");
+    });
+    test("slow motion spends focus in real time and ends when it runs out", [] {
+        SlowMotion slow;
+        const auto& t = slow.tuning();
+        slow.update(.01f, true, true);
+        float seconds = .01f;
+        SlowMotion::Event last{};
+        while (slow.active() && seconds < 30) {
+            last = slow.update(.01f, false, true);
+            seconds += .01f;
+        }
+        check(last == SlowMotion::Event::emptied && slow.focus() == 0, "an empty meter did not end slow motion");
+        near(seconds, t.drainSeconds, .03f);
+        check(slow.view().warning > .9f, "running empty did not flash");
+        check(slow.update(.01f, true, true) == SlowMotion::Event::refused && !slow.active(),
+              "an empty meter started slow motion");
+        // Refilling waits, then takes refillSeconds from empty.
+        for (float s = 0; s < t.refillDelay - .05f; s += .01f)
+            slow.update(.01f, false, true);
+        check(slow.focus() == 0, "focus refilled before its delay");
+        seconds = 0;
+        while (slow.focus() < 1 && seconds < 60) {
+            slow.update(.01f, false, true);
+            seconds += .01f;
+        }
+        near(seconds, t.refillSeconds + .05f, .06f);
+        // A press needs the minimum; a part-filled meter starts it above that.
+        SlowMotion low;
+        low.update(.01f, true, true);
+        while (low.focus() > low.tuning().minimum * .5f)
+            low.update(.01f, false, true);
+        low.update(.01f, true, true);
+        check(!low.active(), "the second press did not stop it");
+        check(low.update(.01f, true, true) == SlowMotion::Event::refused, "a press below the minimum started it");
+        while (low.focus() < low.tuning().minimum + .01f)
+            low.update(.01f, false, true);
+        check(low.update(.01f, true, true) == SlowMotion::Event::started, "a press over the minimum was refused");
+    });
+    test("slow motion ends with play and ignores presses outside it", [] {
+        SlowMotion slow;
+        check(slow.update(.01f, true, false) == SlowMotion::Event::none && !slow.active(),
+              "a press on the game screen started it");
+        slow.update(.01f, true, true);
+        for (int i = 0; i < 50; ++i)
+            slow.update(.01f, false, true);
+        check(slow.update(.01f, false, false) == SlowMotion::Event::interrupted && !slow.active(),
+              "a menu kept slow motion on");
+        for (int i = 0; i < 100; ++i)
+            slow.update(.01f, false, false);
+        check(slow.timeScale() == 1, "time stayed slowed in a menu");
+        // A hitch counts as a tenth of a second at most.
+        SlowMotion hitch;
+        hitch.update(.01f, true, true);
+        const float focus = hitch.focus();
+        hitch.update(5, false, true);
+        near(focus - hitch.focus(), .1f / hitch.tuning().drainSeconds, 1e-4f);
+        hitch.update(std::numeric_limits<float>::quiet_NaN(), false, true);
+        check(std::isfinite(hitch.timeScale()) && std::isfinite(hitch.focus()), "a bad frame time broke it");
+    });
+    test("slow motion's view: a ring at each change, a meter while focus is spent", [] {
+        SlowMotion slow;
+        check(slow.view().meter == 0 && slow.view().ripple < 0, "a full meter shows at rest");
+        slow.update(.01f, true, true);
+        auto v = slow.view();
+        check(v.active && v.entering && v.ripple >= 0 && v.ripple < .1f, "no ring at the start");
+        for (int i = 0; i < 20; ++i)
+            slow.update(.01f, false, true);
+        check(slow.view().meter > .9f, "the meter did not show while spending focus");
+        for (int i = 0; i < 40; ++i)
+            slow.update(.01f, false, true);
+        check(slow.view().ripple < 0, "the ring outlasted its time");
+        slow.update(.01f, true, true);
+        v = slow.view();
+        check(!v.active && !v.entering && v.ripple >= 0, "no ring at the end");
+        // It shows until the meter is full again and a moment after, then fades.
+        float seconds = 0;
+        while (slow.focus() < 1 && seconds < 30) {
+            slow.update(.01f, false, true);
+            seconds += .01f;
+            check(slow.view().meter > .99f, "the meter faded while refilling");
+        }
+        for (float s = 0; s < SlowMotion::meterHold - .02f; s += .01f)
+            slow.update(.01f, false, true);
+        check(slow.view().meter > .99f, "the full meter faded at once");
+        for (float s = 0; s < SlowMotion::meterOut + .05f; s += .01f)
+            slow.update(.01f, false, true);
+        check(slow.view().meter == 0, "the full meter stayed");
+        // A refused press shows the meter, flashing red.
+        SlowMotionTuning strict;
+        strict.minimum = .9f;
+        SlowMotion picky(strict);
+        picky.update(.01f, true, true);
+        for (int i = 0; i < 100; ++i)
+            picky.update(.01f, false, true);
+        picky.update(.01f, true, true);
+        check(picky.update(.01f, true, true) == SlowMotion::Event::refused, "a press below the minimum started it");
+        v = picky.view();
+        check(v.warning > .9f && v.meter > 0 && !v.active, "a refused press did not flash the meter");
+        // The minimum is a share of the meter: above 1, a full meter still suffices.
+        strict.minimum = 1.5f;
+        SlowMotion full(strict);
+        check(full.update(.01f, true, true) == SlowMotion::Event::started, "a full meter was refused");
+    });
+    test("the left thumbstick's click is not half of clicking both", [] {
+        StickPress press;
+        // A short click counts when it is let go.
+        check(!press.update(.011f, true, true, false), "a click counted while still short");
+        check(!press.update(.011f, true, true, false), "a click counted while still short");
+        check(press.update(.011f, true, false, false), "a short click did not count");
+        check(!press.update(.011f, true, false, false), "a click counted twice");
+        // A held click counts once, after the chord's time.
+        int counted = 0;
+        float at = -1;
+        for (int i = 0; i < 40; ++i)
+            if (press.update(.011f, true, true, false)) {
+                ++counted;
+                at = i * .011f;
+            }
+        check(counted == 1 && at >= StickPress::chordSeconds - .012f && at <= StickPress::chordSeconds + .012f,
+              "a held click counted wrongly");
+        check(!press.update(.011f, true, false, false), "letting go of a counted click counted again");
+        // Both sticks, either first, never count.
+        for (const bool rightFirst : {false, true}) {
+            StickPress chord;
+            bool any = chord.update(.011f, true, !rightFirst, rightFirst);
+            for (int i = 0; i < 30; ++i)
+                any = chord.update(.011f, true, true, true) || any;
+            any = chord.update(.011f, true, false, false) || any;
+            check(!any, "clicking both sticks counted as slow motion");
+        }
+        StickPress late;
+        bool any = late.update(.011f, true, true, false);
+        any = late.update(.05f, true, true, true) || any; // the right joins within the chord's time
+        any = late.update(.011f, true, false, false) || any;
+        check(!any, "a chord whose second stick came late counted");
+        // Held through a menu, it waits for a release.
+        StickPress menu;
+        menu.update(.011f, false, true, false);
+        for (int i = 0; i < 30; ++i)
+            check(!menu.update(.011f, true, true, false), "a click held through a menu counted");
+        check(!menu.update(.011f, true, false, false), "releasing a click held through a menu counted");
+        check(!menu.update(.011f, true, true, false), "a new click counted at once");
+        check(menu.update(.011f, true, false, false), "a new click after the menu did not count");
     });
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;

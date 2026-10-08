@@ -122,6 +122,19 @@ Moving
   Y .................... game menu (map, suits, skills)
   Click both sticks .... switch between VR and a flat game screen
 
+Slow motion (as in Blade & Sorcery)
+  Click the left stick . the world slows to a third of its speed, easing in;
+                         click again and it eases back. Your head and hands
+                         keep real time: you move fast in a slow world, and
+                         your swing slows with it
+  Focus meter .......... the cyan ring around an hourglass over the back of
+                         your left wrist. It empties while slow motion lasts
+                         (7 seconds from full) and ends it when empty; it
+                         refills a moment after slow motion ends (12 seconds
+                         from empty). With too little left a click flashes
+                         it red and does nothing
+  A menu, the game screen or the flat screen ends slow motion
+
 Flips (experimental, off until you switch FLIPS on in Settings > SPIDY VR or
 in the launcher's options)
   Tap A in the air ..... one flip, about a second, toward where the left
@@ -158,9 +171,15 @@ VR settings
 
 IF SOMETHING IS WRONG
 ---------------------
-- "This game version is not supported": the game was updated, or it is not
-  the Steam version. Spidy reads the game's code at fixed places, so a game
-  update needs a Spidy update.
+- "This game version is not supported": the launcher's game line names your
+  version and the fix. Spidy supports version 4.630.0.0, Steam's since July
+  8, 2026. An older version: Steam may be set to one of the game's rollback
+  betas (right-click the game in Steam > Properties > Betas > None) or have
+  an update waiting. Version 4.630.0.0 that still fails: a mod, a patch or a
+  damaged download changed Spider-Man.exe; Properties > Installed Files >
+  Verify integrity of game files puts Steam's file back. A newer version:
+  Spidy reads the game's code at fixed places, so a game update needs a
+  Spidy update.
 - The headset is not found: connect it first (SteamVR headsets: start
   SteamVR), then press Check in the launcher. On Automatic it shows which VR
   runtime has your headset; if it picks the wrong one, choose yours in the

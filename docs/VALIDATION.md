@@ -1,6 +1,101 @@
 # Validation — 2026-10-08
 
-## Flips as an experimental setting — current build
+## Slow motion — current build
+
+The user, October 8: "lets add a blade and sorcery like slow motion button
+with nice smooth transition in and out, effect when its active and a "mana"
+and recovery system (for the slowmo)".
+
+**What was built.** `slow_motion.hpp/.cpp` (spidy_core): `SlowMotion` (focus
+drains 1/7 per real second while on, ends it at 0; refills 1/12 per second
+from 1.2 s after it ends; a press needs 15%; the ease is a smootherstep over
+0.4 s in and 0.55 s out, mapped to time as `scale^blend`, so 0.3 at full) and
+`StickPress` (the left stick's click counts after 0.12 s held alone or at an
+earlier release, never as half of clicking both sticks). `game_time.cpp`
+(stereo module) hooks the game's `TimeScaleSystem` update and applies the
+smaller of the game's own scale and Spidy's to the system, the clock's
+double and Havok's step after each update, putting the game's own values
+back before the next. `native_bodies` keeps web-held props in the world's
+time. The XR worker steps it each headset frame (or every 0.2 s without
+frames), pulses the controllers at a change, recolours the eye images
+(`D3D12Renderer::Grade`, a copy of each image and a full-screen pass, only
+while visible) and draws the meter (`appendSlowMotionMeter`).
+
+**Checks.** 204 core checks, 5 new: the ease's shape and lengths (no frame
+changes time by a seventh of the way; halfway along the curve time runs at
+the square root of 0.3), focus spent and refilled to the hundredth of a
+second, refusals, interruptions and frame-time limits, the view's ring and
+meter timing, and the stick press against chords, late chords and a click
+held through a menu. The GPU test draws an orange wall into both eyes (typed
+sRGB and typeless): at rest the grade leaves them byte-identical; full, the
+middle's red-blue gap shrinks by over a quarter and blue rises 20+ levels,
+the corner is 8%+ darker than the middle; the ring at a fifth of its way
+lifts green and blue on its band and leaves the middle within 2 levels; the
+meter shows 2018 cyan and the hourglass's pale pixels; the debug layer stays
+clean (it caught a copy remade mid-list for the typeless eye, fixed by one
+typeless copy for both). 16 launcher checks and the 5 Python suites pass
+(new: `slow_motion_snapshot`, torn reads, the hook in `GAME_HOOKS`).
+
+**In the game** (headless, two launches with the user's OK; the first run's
+flight stalled when VS Code came to the front, and the world-ray module
+starts once per process): `tools/probe_slow_motion.py` after
+`probe_menu_pad.py start` and `pad a --until-player` (player at 33-37 s,
+perched on a lamp post by the waterfront). Three clock runs: the clock's
+scale 1.0, 0.30, 1.0; a frame's game time per real time 1.043, 0.311, 1.035
+(a floor near 1/240 s at the small window's 250 frames a second; 0.298 of
+normal when slowed); Havok's step 1/30 s, 0.010 s, 1/30 s; the game's physics
+flag set. A released swing flight (jump, web up, reel, let go; default 60%
+weight, the web grab offered): normal 1.022 game seconds per real second and
+gravity 5.888 m/s² on game time; at 30% 0.301 and 5.891; back 1.016 and
+5.892 (5.886 asked; no step undriven, airborne throughout). The web grab's
+step time 0.00402 s, then 0.00129 s; physics time per second of the world's
+8.29, then 7.75 (unchanged up to the frame rate). After stop the clock 1.0,
+the step 1/30 s, every stop code 0, the hooked entries restored. The save
+folder stayed byte-identical; the game closed by WM_CLOSE in 1.5-2.6 s.
+
+**Unproven.** The headset: the look of the grade and the ring, the meter's
+place and size on the wrist, the haptics, whether 30%, 7 s and 12 s feel
+right. The game's sound: Spidy does not touch it, and nobody listened to
+whether it slows. Thugs and traffic slowing was not filmed (the clock that
+drives them was measured). A web-held prop in slow motion was not flown.
+
+## Why a game version is not supported — preceding build
+
+The user, October 8, passing on a player's screenshot: "users says he's on the
+latest version in steam yet it his spiderman version is not recognized".
+
+**Facts.** Steam's app info (api.steamcmd.net, October 8): the `public`
+branch is build 23986256 (built June 30, published July 8, 2026), the build
+and depot manifests installed here, whose `Spider-Man.exe` hashes to
+`EXPECTED_SHA256` (checked again today) and reads version 4.630.0.0. The other
+branches are `previous_version` (build 12423814, October 2023) and
+`previous_version2` (build 10131361, v1.1212.0.0). So a player whose copy
+fails the hash has an older or changed file, not a newer one, and the old
+message ("a game update needs a Spidy update") misled them.
+
+**What changed.** `launcher_text.hpp`: `vdfTokens` (the tokenizer
+`vdfValues` had inline), `vdfBlock`, `SteamApp`/`steamApp` (UserConfig's
+`BetaKey`; StateFlags bit 2 or `TargetBuildID` other than `buildid` for an
+update waiting) and `unsupportedGame`. The scan reads `EXPECTED_VERSION` from
+`tools/inspect_game.py`, the game file's version resource, and the app
+manifest two folders above it when its `installdir` is the game's folder
+(looked up before and after the true path, which follows junctions). The
+game row shows `unsupportedGame` instead of the fixed text.
+
+**Checks.** 16 launcher checks (new: blocks, nested and with a quoted brace;
+the app manifest on a beta, leaving one, up to date, downloading; each
+message). The launcher's `Scanner` (system.cpp compiled into a harness beside
+a `tools` copy; built in a scratch folder, not `build\windows-ninja`) on: the
+real file, supported; a copy reading 1.1212.0.0 with `previous_version2` in
+UserConfig and MountedConfig, the beta message; a copy reading 3.618.0.0 with
+StateFlags 6, the update message; a copy with one header padding byte changed,
+the changed-file message with Verify integrity; that copy outside a Steam
+library, the choose-Steam's-copy message.
+
+**Unproven.** The row on screen (the wrapped text's height); the player's
+actual case (their version and manifest are unknown here).
+
+## Flips as an experimental setting — preceding build
 
 The user, October 8: "ok lets put as an experemental option in settings (off
 by default)".

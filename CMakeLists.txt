@@ -11,7 +11,7 @@ option(SPIDY_BUILD_OBSERVER "Build the opt-in camera diagnostic DLL" OFF)
 option(SPIDY_BUILD_LAUNCHER "Build the Spidy launcher window (Dear ImGui from tools/bootstrap.ps1)" ${SPIDY_BUILD_XR})
 add_library(spidy_core src/swing.cpp src/web_grab.cpp src/lab_world.cpp src/lab_props.cpp src/game_tracking.cpp
             src/web_visual.cpp src/body_ik.cpp src/punch.cpp src/shooter.cpp src/vr_settings.cpp
-            src/body_calibration.cpp src/overlay_text.cpp)
+            src/body_calibration.cpp src/overlay_text.cpp src/slow_motion.cpp)
 target_include_directories(spidy_core PUBLIC include)
 if(MSVC)
   target_compile_options(spidy_core PRIVATE /W4 /permissive-)
@@ -119,7 +119,7 @@ if(SPIDY_BUILD_XR)
   target_compile_definitions(spidy_openxr PUBLIC XR_USE_PLATFORM_WIN32 XR_USE_GRAPHICS_API_D3D12)
   if(SPIDY_BUILD_OBSERVER)
     target_sources(spidy_stereo_probe PRIVATE src/game_xr.cpp src/game_player.cpp src/game_pad.cpp
-                   src/game_menu.cpp)
+                   src/game_menu.cpp src/game_time.cpp)
     target_link_libraries(spidy_stereo_probe PRIVATE spidy_openxr)
   endif()
   add_executable(spidy_xr_lab apps/xr_lab.cpp)

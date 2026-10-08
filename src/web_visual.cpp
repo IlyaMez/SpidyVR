@@ -309,6 +309,53 @@ Vec3 onAimLine(Vec3 point, Vec3 normal, Vec3 origin, Vec3 direction) {
                ? crossing
                : point;
 }
+void appendSlowMotionMeter(std::vector<Vertex>& out, const SlowMotionView& view, Pose hand, Vec3 viewer,
+                           float pixelAngle, float seconds) {
+    const float opacity = std::isfinite(view.meter) ? std::clamp(view.meter, 0.f, 1.f) : 0.f;
+    if (opacity <= 0 || !finite(hand.position) || !finite(viewer) || !std::isfinite(pixelAngle) || pixelAngle <= 0)
+        return;
+    // Over the back of the wrist, toward the forearm, like a watch's face.
+    const Vec3 c = hand.position + hand.orientation.rotate({0, .045f, .065f});
+    const float distance = length(viewer - c);
+    if (!finite(c) || !(distance > .08f && distance < 3))
+        return;
+    // Level and upright across the line of sight, as the aim markers are.
+    const Vec3 view3 = (viewer - c) / distance;
+    Vec3 right = cross(Vec3{0, 1, 0}, view3);
+    right = length(right) > .1f ? normalized(right) : perpendicular(view3);
+    const Vec3 up = cross(view3, right);
+    const float px = pixelAngle * distance, soft = std::max(.8f * px, .0003f);
+    constexpr float radius = .02f, half = .0026f;
+    constexpr Vec3 cyan{.3f, .85f, 1.f}, bright{.78f, .97f, 1.f}, red{1.f, .16f, .1f}, glass{.88f, .94f, 1.f};
+    const auto unit = [](float v) { return std::isfinite(v) ? std::clamp(v, 0.f, 1.f) : 0.f; };
+    const float focus = unit(view.focus), blend = unit(view.blend), warning = unit(view.warning);
+    const float t = std::isfinite(seconds) ? seconds : 0.f;
+    // In slow motion it glows and breathes; a warning flashes it red.
+    const float pulse = view.active ? .5f + .5f * std::sin(t * 6.f) : 0.f;
+    Vec3 fill = mix(cyan, bright, blend * (.3f + .3f * pulse));
+    fill = mix(fill, red, warning * (.55f + .45f * std::cos(t * 28.f)));
+    const Vec3 track = mix(mix(cyan, {0, 0, 0}, .62f), red, warning * .5f);
+    // A soft dark shadow keeps it readable on the sky and on a lit wall; the
+    // empty track under the fill.
+    softArc(out, c, right, up, radius - half - 1.2f * px, radius + half + 1.6f * px, 0, 2 * pi, shadowColor,
+            .55f * opacity, 1.8f * px, 72, 1.1f * px);
+    softArc(out, c, right, up, radius - half, radius + half, 0, 2 * pi, track, .45f * opacity, soft, 72);
+    if (focus > .002f) {
+        constexpr float top = pi / 2;
+        softArc(out, c, right, up, radius - half, radius + half, top - 2 * pi * focus, top, fill, opacity, soft,
+                72);
+    }
+    // The hourglass: two triangles tip to tip, its shadow first.
+    constexpr float width = .0062f, height = .0088f, neck = .0007f;
+    const std::array<Vec3, 3> upper{c + (up * height) - right * width, c + (up * height) + right * width,
+                                    c + up * neck};
+    const std::array<Vec3, 3> lower{c - (up * height) + right * width, c - (up * height) - right * width,
+                                    c - up * neck};
+    for (const bool shadow : {true, false})
+        for (const auto& shape : {upper, lower})
+            softTriangle(out, shape, view3, shadow ? shadowColor : mix(glass, fill, .35f),
+                         opacity * (shadow ? .55f : .9f), shadow ? 1.2f * px : 0.f, shadow ? 1.6f * px : soft);
+}
 void AimMarkerMotion::reset() {
     *this = {};
 }

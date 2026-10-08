@@ -26,6 +26,21 @@ Locally checked on 2026-10-03:
   were removed from this game's directory at the user's request and backed up
   under `backups/realvr-removed-20261004`. The executable hash is unchanged.
 
+Steam's branches, from Steam's app info on 2026-10-08 (api.steamcmd.net):
+
+- `public`: build 23986256, built June 30, 2026 and published July 8, 2026;
+  its depot manifests (1817071 `3826860471854644257`, 1817072
+  `2734256798601145338`, 1817074 `2767115330843299188`) match this PC's
+  install. `Spider-Man.exe`'s version resource reads 4.630.0.0 and the game
+  logs `Build: v4.630.0.0` (`tools/inspect_game.py` `EXPECTED_VERSION`).
+- `previous_version` ("Rollback to previous version"): build 12423814, built
+  October 12, 2023.
+- `previous_version2` ("Rollback to v1.1212.0.0"): build 10131361, built
+  December 12, 2022.
+- Language depots carry no `Spider-Man.exe`: six of them keep one manifest on
+  all three branches while the executable differs between them. A Steam copy
+  on `public`, fully updated, is therefore this exact file.
+
 Public leads came from [ArkWeb](https://github.com/luki-1/ArkWeb/tree/17ec697bd431fce96a60fff1075f7e399d296058),
 specifically its `recon/PHASE0.md`, `src/sm_guest/main.cpp`, and `combat.h`.
 The source checkout is research material under ignored `.research/`; none of
@@ -126,6 +141,21 @@ Settings are Scaleform (AS3) screens fed from `configs/uiconfig/uisystemmenu.con
 | A setting's kind (0 list, 1-2 slider, 3 colour, 4 command, 5 heading) / value / changeable / default / default choice | `0x72d640` / `0x72d650` / `0x72e1d0` / `0x72d5f0` / `0x72d610` | Disassembly; hooked for numbers 0x200-0x20e |
 | The pause menu's Settings callbacks (ui, name hash, args, count) | `0x7dc400` | Logged: `UpdateOption` (setting, value), `ResetOption`, `ResetAllOptionsForCurrentOptionsMenu` (tab id; ignored above 10, hash at `0x6d8ed88`) |
 | Text by hash (hash, fallback); whether there is one | `0x1749970`, `0x1749ae0` | Hashes are CRC-32 of tags (`0x1749a20` hashes a tag string) |
+
+For slow motion (October 8; `include/spidy/game_time.hpp`), found from the
+executable's strings (`TimeScaleSystem Update`, the channel names
+`kHeroMelee` ... `kHeroMeleeKill`) and disassembly, then measured in the
+running game with `tools/probe_slow_motion.py`:
+
+| Fact | RVA | Verification |
+|---|---:|---|
+| `TimeScaleSystem` update (system): 23 channels, the winner by priority (+0x1ec + 4i; a tie to the lower scale), blended linearly at its rate (+0xd8 + 4i, 30/s by default) per real second | `0x19bb430` | Hooked; the game's own values restored before each update; 16 entry bytes and 6 instructions checked |
+| The system's scale (+0x18), physics scale (+0x1c), flag "physics follows" (+0x7d0 bit 0); channel targets +0x20 + 4i, per-frame requests +0x47c + 0x24i | | Disassembly; the flag was set in free roam |
+| Set a channel (system, channel, scale, rate, reason, kind) / clear one | `0x19bbaa0` / `0x19bbb40` | Disassembly; not used by Spidy |
+| Linear blend (from, to, rate, seconds) | `0x1c477e0` | Disassembly |
+| The clock's time scale (double): a frame's game time `0x7a7fbd8` is its real time `0x7a7fbf0` times it | `0x7a7fb90` | In the game: 1.0, then 0.30 slowed; the frame ratio went from 1.043 to 0.311 (a frame's game time has a floor near 1/240 s) |
+| Havok's step: float step, float base (1/30 s), owner; set by `0x1822670` (step = scale x base) | `0x609a560` | In the game: 0.0333 s, 0.0100 s at 30% |
+| Component timestep (the player's mover's step) | `0x16769f0` | In the game: 0.301 game seconds per real second at 30% |
 
 The camera-related entry was temporarily hooked by the independently written
 Spidy observer. Local disassembly showed RCX as the object, XMM1 as the float

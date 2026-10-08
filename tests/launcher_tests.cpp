@@ -53,6 +53,48 @@ int main() {
                       "InstallLocation");
         check(folders.size() == 1 && folders[0] == R"(D:\Epic\MarvelsSpiderMan)", "install location");
     });
+    test("a block's text, blocks inside it included", [] {
+        const char* text = R"("AppState" { "UserConfig" { "language" "english" "x" { "BetaKey" "inner" } }
+            "MountedConfig" { "BetaKey" "mounted" "brace" "}" } })";
+        check(vdfValues(vdfBlock(text, "userconfig"), "BetaKey") == std::vector<std::string>{"inner"},
+              "a block inside, the name without case");
+        check(vdfValues(vdfBlock(text, "MountedConfig"), "brace") == std::vector<std::string>{"}"},
+              "a quoted brace");
+        check(vdfBlock(text, "Missing").empty(), "no such block");
+        check(vdfBlock(R"("language" "UserConfig")", "UserConfig").empty(), "a value, not a block");
+    });
+    test("Steam's app manifest gives the beta chosen and an update waiting", [] {
+        auto app = steamApp(R"("AppState"
+{
+	"appid"		"1817070"
+	"StateFlags"		"4"
+	"installdir"		"Marvel's Spider-Man Remastered"
+	"buildid"		"10131361"
+	"TargetBuildID"		"10131361"
+	"UserConfig"
+	{
+		"language"		"english"
+		"BetaKey"		"previous_version2"
+	}
+	"MountedConfig"
+	{
+		"language"		"english"
+		"BetaKey"		"previous_version2"
+	}
+})");
+        check(app.found && app.beta == "previous_version2" && !app.updateWaiting, "on a beta");
+        // Back on None, the installed files stay the beta's until Steam updates them.
+        app = steamApp(R"("AppState" { "appid" "1817070" "StateFlags" "6" "buildid" "10131361"
+            "TargetBuildID" "23986256" "UserConfig" { "language" "english" }
+            "MountedConfig" { "BetaKey" "previous_version2" } })");
+        check(app.found && app.beta.empty() && app.updateWaiting, "leaving a beta");
+        app = steamApp(R"("AppState" { "appid" "1817070" "StateFlags" "4" "buildid" "23986256"
+            "TargetBuildID" "23986256" "UserConfig" { "BetaKey" "" } })");
+        check(app.found && app.beta.empty() && !app.updateWaiting, "up to date, no beta");
+        check(steamApp(R"("AppState" { "appid" "1817070" "StateFlags" "1026" })").updateWaiting,
+              "downloading");
+        check(!steamApp("").found, "no manifest");
+    });
     test("constants come from the Python tools", [] {
         const std::string source = "\"\"\"doc EXPECTED_SHA256 = 'no'\"\"\"\nimport x\nEXPECTED_SHA256 = \"e297d4\"\n"
                                    "VR_COMMIT_MB = 19000\n# VR_COMMIT_MB = 1\nOTHER_VR_COMMIT_MB = 5\n";
@@ -224,6 +266,37 @@ int main() {
         check(parseVersion("14.44.35211.0") >= std::array<int, 4>{14, 40, 0, 0}, "newer");
         check(parseVersion("14.38.33135") < std::array<int, 4>{14, 40, 0, 0}, "older");
         check(parseVersion("v14.40") == std::array<int, 4>{14, 40, 0, 0}, "prefix");
+    });
+    test("another game version says which it is and what fixes it", [] {
+        check(unsupportedGame("1.1212.0.0", "4.630.0.0", {true, "previous_version2", false}) ==
+                  "Version 1.1212.0.0, older than the 4.630.0.0 Spidy supports. Steam is set to the beta "
+                  "\"previous_version2\": in Steam, right-click the game > Properties > Betas, choose None "
+                  "and let it update. Then press Re-check.",
+              "older, on a beta");
+        check(unsupportedGame("3.618.0.0", "4.630.0.0", {true, "", true}) ==
+                  "Version 3.618.0.0, older than the 4.630.0.0 Spidy supports. Steam has an update for it "
+                  "waiting: let Steam install it, then press Re-check.",
+              "older, an update waiting");
+        const std::string verify = " In Steam, right-click the game > Properties > Installed Files > Verify "
+                                   "integrity of game files, then press Re-check.";
+        check(unsupportedGame("3.618.0.0", "4.630.0.0", {true, "", false}) ==
+                  "Version 3.618.0.0, older than the 4.630.0.0 Spidy supports." + verify,
+              "older, Steam sees nothing to do");
+        check(unsupportedGame("4.630.0.0", "4.630.0.0", {true, "", false}) ==
+                  "Version 4.630.0.0, the one Spidy supports, but a mod, a patch or a damaged download "
+                  "changed Spider-Man.exe." + verify,
+              "the supported version, changed");
+        check(unsupportedGame("4.1015.0.0", "4.630.0.0", {true, "", true}) ==
+                  "Version 4.1015.0.0, newer than the 4.630.0.0 Spidy supports. Spidy reads the game's code "
+                  "at fixed places, so a game update needs a Spidy update.",
+              "newer: nothing to do in Steam");
+        check(unsupportedGame("", "4.630.0.0", {}) ==
+                  "A different game version than the one Spidy supports (4.630.0.0). Spidy works with Steam's "
+                  "copy of the game: choose the Spider-Man.exe in your Steam library with Change...",
+              "no version resource, not installed by Steam");
+        check(unsupportedGame("4.630.0.0", "", {true, "", false}) ==
+                  "A different game version than the one Spidy supports." + verify,
+              "no supported version known");
     });
     std::cout << (total - failed) << '/' << total << " launcher checks passed\n";
     return failed ? 1 : 0;

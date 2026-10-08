@@ -413,6 +413,28 @@ and the hook entries were restored. Report: `reports/wall-crawl.json`; the game
 window on the wall and after the jump in `reports/wall-crawl/`. A run took
 under 10 s after the save loaded (October 8).
 
+### Slow motion
+
+`python tools/probe_slow_motion.py` after `tools/probe_menu_pad.py start` and
+`pad a --until-player` (the same loaded save; open air around the player). It
+hooks the game's time as a VR session does (`SpidyTimeStart` in the stereo
+module) and reads the game's clock every 20 ms through `SpidyTimeSample`: 1 s
+at normal speed, 1.5 s slowed to 30% (`SpidyTimeSet`), 1 s back. Then it flies
+as the weight probe does, with the web grab offered: 0.5 s of released
+flight at normal speed, 1.4 s at 30%, 0.4 s back, fitting the vertical
+acceleration on game time and the game seconds the mover stepped per real
+second in each, and taking the web grab's step times. It fails unless the
+clock's scale and Havok's step follow (a frame's game time is compared with
+normal speed's: it has a floor near 1/240 s, 4% over real time in the small
+window), the mover slows to 30% while the swing's gravity on game time stays
+within 6% of the weight's, the grab's step time slows, and after
+`SpidyTimeStop` the clock and the step are back and every hook entry is
+restored. `--check` scores a report again without the game. The world-ray
+module starts once per game process, so each run needs a fresh game (a
+crashed or stalled run included); the clock part can repeat. Report:
+`reports/slow-motion-probe.json`. A run took about 12 s after the save
+loaded (October 8).
+
 ## Performance comparison
 
 The initial successful headset test was `game-vr-20261004-131244.json`: 509 pairs

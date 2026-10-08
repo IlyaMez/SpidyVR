@@ -13,12 +13,14 @@
 #include "spidy/game_punch.hpp"
 #include "spidy/game_shooter.hpp"
 #include "spidy/game_swing.hpp"
+#include "spidy/game_time.hpp"
 #include "spidy/game_tracking.hpp"
 #include "spidy/native_eye_frame.hpp"
 #include "spidy/native_eye_gpu.hpp"
 #include "spidy/native_eye_history.hpp"
 #include "spidy/native_webs.hpp"
 #include "spidy/presentation_gate.hpp"
+#include "spidy/slow_motion.hpp"
 #include "spidy/vr_settings.hpp"
 #include "spidy/vr_shortcut.hpp"
 #include "spidy/xr_session.hpp"
@@ -145,8 +147,32 @@ struct XrData {
     float calibrationReach[2]{};
 };
 static_assert(sizeof(XrData) == 792);
+// Slow motion (slow_motion.hpp, game_time.hpp): what the player did with it
+// and what the game's time did. status: 1 before VR starts, then 0 with the
+// game's time hooked, else why it is not (game_time::install) and slow
+// motion does nothing.
+struct SlowMotionData {
+    uint32_t magic = 0x574f4c53, version = 1, bytes = sizeof(SlowMotionData), status = 1;
+    int64_t sequence{};
+    // Presses that started it, ended it, or came with too little focus; the
+    // times focus ran out and play stopped it (a menu, the game screen, the
+    // flat screen); whether it is on now.
+    uint32_t starts{}, stops{}, refused{}, emptied{}, interrupted{}, active{};
+    // Real seconds in it so far; focus (0-1) and how far into it (0-1) now;
+    // the time scale asked of the game.
+    float seconds{}, focus = 1, blend{}, wanted = 1;
+    // The game's side in the last update of its time system: its own time
+    // scale, its world's (the smaller of that and Spidy's), Havok's step (s)
+    // and whether the game scales physics itself; its updates so far, and
+    // those Spidy slowed.
+    float gameScale = 1, worldScale = 1, physicsStep{};
+    uint32_t physicsScaled{};
+    uint64_t updates{}, slowedUpdates{};
+};
+static_assert(sizeof(SlowMotionData) == 96);
 extern "C" {
 __declspec(dllexport) XrData SpidyXrData;
+__declspec(dllexport) SlowMotionData SpidySlowMotionData;
 __declspec(dllexport) XrTimingData SpidyXrTimingData;
 __declspec(dllexport) EyeSnapshot SpidyXrSnapshot;
 DWORD WINAPI SpidyStart(void*);
@@ -285,6 +311,19 @@ DWORD WINAPI run(void*) {
                               "); the launcher's settings apply";
             message(3, 0, text.c_str());
         }
+        // Slow motion slows the game's own time (game_time).
+        const uint32_t timeCode = game_time::install(config.base);
+        if (timeCode) {
+            const auto text =
+                "No slow motion: the game's time could not be hooked (" + std::to_string(timeCode) + ")";
+            message(3, 0, text.c_str());
+        }
+        {
+            std::lock_guard lock(telemetry);
+            InterlockedIncrement64(&SpidySlowMotionData.sequence);
+            SpidySlowMotionData.status = timeCode;
+            InterlockedIncrement64(&SpidySlowMotionData.sequence);
+        }
         // The last frame showed the game screen; A held from there (Resume,
         // Continue) is not a jump once gameplay is back.
         bool wasScreen{}, jumpFromScreen{};
@@ -400,6 +439,70 @@ DWORD WINAPI run(void*) {
         uint32_t calibrations{}, calibrationSkips{};
         LARGE_INTEGER frequency{};
         QueryPerformanceFrequency(&frequency);
+        // Slow motion: the left thumbstick's click (StickPress keeps it apart
+        // from clicking both), its focus and the game's eased time
+        // (SlowMotion). Each step sets the game's time, gives the controllers
+        // a pulse at a change and reports it; without headset frames for a
+        // while the loop below steps it to its end.
+        SlowMotion slowMotion;
+        StickPress slowPress;
+        SlowMotionData slowCounts;
+        uint64_t slowSteppedMs = GetTickCount64();
+        auto stepSlowMotion = [&](float seconds, bool pressed, bool allowed) {
+            using Event = SlowMotion::Event;
+            const bool before = slowMotion.active();
+            const auto event = slowMotion.update(seconds, pressed, allowed);
+            game_time::slow(slowMotion.timeScale());
+            slowSteppedMs = GetTickCount64();
+            if (before && std::isfinite(seconds))
+                slowCounts.seconds += std::clamp(seconds, 0.f, .1f);
+            switch (event) {
+            case Event::started:
+                ++slowCounts.starts;
+                runtime.haptic(0, .55f);
+                runtime.haptic(1, .55f);
+                break;
+            case Event::stopped:
+                ++slowCounts.stops;
+                runtime.haptic(0, .3f);
+                runtime.haptic(1, .3f);
+                break;
+            case Event::emptied:
+                ++slowCounts.emptied;
+                runtime.haptic(0, .8f);
+                break;
+            case Event::refused:
+                ++slowCounts.refused;
+                runtime.haptic(0, .6f);
+                break;
+            case Event::interrupted:
+                ++slowCounts.interrupted;
+                break;
+            case Event::none:
+                break;
+            }
+            const auto time = game_time::telemetry();
+            std::lock_guard lock(telemetry);
+            auto& d = SpidySlowMotionData;
+            InterlockedIncrement64(&d.sequence);
+            d.starts = slowCounts.starts;
+            d.stops = slowCounts.stops;
+            d.refused = slowCounts.refused;
+            d.emptied = slowCounts.emptied;
+            d.interrupted = slowCounts.interrupted;
+            d.active = slowMotion.active();
+            d.seconds = slowCounts.seconds;
+            d.focus = slowMotion.focus();
+            d.blend = slowMotion.blend();
+            d.wanted = slowMotion.timeScale();
+            d.gameScale = time.own;
+            d.worldScale = time.world;
+            d.physicsStep = time.physicsStep;
+            d.physicsScaled = time.physicsScaled;
+            d.updates = time.updates;
+            d.slowedUpdates = time.slowed;
+            InterlockedIncrement64(&d.sequence);
+        };
         // Puts the settings into effect: at once, or when the module they
         // belong to starts (each start reads `values`).
         auto applySettings = [&] {
@@ -711,6 +814,12 @@ DWORD WINAPI run(void*) {
                         for (auto& hand : motion.swing.hands)
                             hand.trigger = hand.grip = 0;
                     }
+                    // Slow motion: the left thumbstick's click, in VR play outside the calibration.
+                    const bool slowAllowed = immersive && calibration.phase() == CalibrationPhase::idle;
+                    stepSlowMotion(frame.seconds,
+                                   slowPress.update(frame.seconds, slowAllowed, frame.hands[0].stickClick,
+                                                    frame.hands[1].stickClick),
+                                   slowAllowed);
                     if (motion.active && !raysStarted) {
                         native_rays::Config rays;
                         rays.pid = config.pid;
@@ -1067,6 +1176,7 @@ DWORD WINAPI run(void*) {
                     saved.flatScreen = flatScreen;
                     saved.screenPose = screenPose;
                     saved.screenAspect = SpidyFlatAspect();
+                    saved.slow = slowMotion.view();
                     for (unsigned i = 0; i < 2; ++i) {
                         saved.webs[i] = swingState.webs[i];
                         saved.webTimes[i] = webTimes[i];
@@ -1278,6 +1388,15 @@ DWORD WINAPI run(void*) {
                         std::vector<Vertex> translucent;
                         for (const auto& mark : marks)
                             appendAimMarker(translucent, mark, viewer, pixelAngle * markerPixels);
+                        // Slow motion's focus meter over the back of the left wrist, moved
+                        // with the player to this image as the glove is.
+                        if (!saved->flatScreen && saved->slow.meter > 0 && rendered.swing.hands[0].tracked) {
+                            auto wrist = rendered.hands[0];
+                            wrist.position += travel;
+                            const double clock = std::fmod(static_cast<double>(shown) * 1e-9, 3600.);
+                            appendSlowMotionMeter(translucent, saved->slow, wrist, viewer, pixelAngle,
+                                                  static_cast<float>(clock));
+                        }
                         // The T-pose calibration's panel and controller rings, moved with
                         // the player to this image as the hands are.
                         if (!saved->flatScreen && saved->calibration.phase != body_calibration::Phase::idle) {
@@ -1288,6 +1407,17 @@ DWORD WINAPI run(void*) {
                             body_calibration::appendView(vertices, view, viewer);
                         }
                         std::array<D3D12Renderer::ViewTarget, 2> overlayViews;
+                        // Slow motion recolours the image under the overlay, about each eye's lens.
+                        D3D12Renderer::Grade grade;
+                        grade.amount = saved->slow.blend;
+                        grade.ripple = saved->slow.ripple;
+                        grade.rippleStrength = saved->slow.entering ? 1.f : .7f;
+                        grade.entering = saved->slow.entering;
+                        for (unsigned eye = 0; eye < 2; ++eye) {
+                            const auto& f = rendered.fovs[eye];
+                            grade.tangents[eye] = {std::tan(f.left), std::tan(f.right), std::tan(f.up),
+                                                   std::tan(f.down)};
+                        }
                         for (unsigned eye = 0; eye < 2; ++eye) {
                             const auto& target = targets[eye];
                             const auto& f = rendered.fovs[eye];
@@ -1301,7 +1431,7 @@ DWORD WINAPI run(void*) {
                                                  vp};
                         }
                         if (!saved->flatScreen)
-                            overlay.renderViews(overlayViews, vertices, true, false, translucent);
+                            overlay.renderViews(overlayViews, vertices, true, false, translucent, &grade);
                         overlayMs = std::chrono::duration<double, std::milli>(
                                         std::chrono::steady_clock::now() - overlayStart)
                                         .count();
@@ -1348,6 +1478,9 @@ DWORD WINAPI run(void*) {
                     InterlockedIncrement64(&d.sequence);
                     return copied;
                 });
+            // No headset frame for a while: slow motion ends on its own, in real time.
+            if (const auto now = GetTickCount64(); now - slowSteppedMs >= 200)
+                stepSlowMotion(static_cast<float>(now - slowSteppedMs) / 1000, false, false);
             const auto& timing = runtime.lastFrameTiming();
             if (submittedFrames >= 30 && timing.period > 0) {
                 const double stages[] = {timing.total,   timing.wait,  timing.tracking, timing.prepare,
@@ -1375,7 +1508,8 @@ DWORD WINAPI run(void*) {
                             : drawn == Presentation::flat
                                 ? "Flat screen - click both thumbsticks for VR"
                                 : "VR active - B interacts, Y opens the game menu, the menu button pauses, "
-                                  "X shows or hides aim markers; click both thumbsticks for flat screen");
+                                  "X shows or hides aim markers, the left thumbstick's click slows time; "
+                                  "click both thumbsticks for flat screen");
                 }
             }
             {
@@ -1410,6 +1544,8 @@ DWORD WINAPI run(void*) {
     if (padInstalled)
         game_pad::uninstall();
     game_menu::uninstall();
+    // The game's own time back.
+    game_time::uninstall();
     bridge::Control release;
     release.serial = ++serial;
     release.leaseMs = 0;

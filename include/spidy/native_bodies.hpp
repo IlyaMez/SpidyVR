@@ -38,13 +38,15 @@
 // only its TimeScaleSystem changes, during its time effects; otherwise it
 // stays 1/30 s. At 240 frames a second a freed prop fell 32 m in 0.3 s:
 // physics ran 8 times faster than real time, and at a VR frame rate it runs
-// fps/30 times. Spidy keeps the props it moves in real time: their
-// velocities are real ones divided by that ratio (the physics step over the
-// real time it stands for), and Havok's gravity is replaced by real gravity
-// for the real time of the step. Contacts, friction and bounce are ratios of
-// velocities, so the game's own collision response stays right in real time.
-// A prop the web lets go of stays in real time this way, flying, bouncing
-// and sliding by the game's physics, until it comes to rest.
+// fps/30 times. Spidy keeps the props it moves in the world's time: real
+// time at the game's time scale (game_time.hpp), so the game's own slow
+// motions and Spidy's slow them like everything else. Their velocities are
+// the world's divided by that ratio (the physics step over the world's time
+// it stands for), and Havok's gravity is replaced by real gravity for the
+// world's time of the step. Contacts, friction and bounce are ratios of
+// velocities, so the game's own collision response stays right in that time.
+// A prop the web lets go of stays in the world's time this way, flying,
+// bouncing and sliding by the game's physics, until it comes to rest.
 //
 // An actor here is what a component record's first field points to:
 // transform at +0, handle +0x64, model override +0xb6 (s16), physics system
@@ -136,9 +138,11 @@ struct Counters {
         rested{}, flying{}, damages{}, damageDropped{};
 };
 Counters counters();
-// Physics steps seen so far, and the real time the latest took (seconds).
+// Physics steps seen so far, and the world's time the latest took (seconds:
+// its real time at the game's time scale).
 uint64_t physicsSteps(float& dt);
-// Physics time per real second, as the latest steps ran: 1 when the game
-// steps its physics at the frame rate, more when it steps 1/30 s faster.
+// Physics time per second of the world's, as the latest steps ran: 1 when
+// the game steps its physics at the frame rate, more when it steps 1/30 s
+// faster.
 float timeScale();
 } // namespace spidy::native_bodies

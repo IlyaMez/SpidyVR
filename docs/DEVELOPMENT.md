@@ -16,8 +16,11 @@ start it checks the PC and shows what it finds:
 - **The game:** in every Steam library (Steam's registry entries, then
   `libraryfolders.vdf` and the app manifest), else where you point it with
   *Change...*. It compares `Spider-Man.exe` with the supported build's SHA-256
-  (read from `tools/inspect_game.py`) and explains when the copy is another
-  build or the Epic Games Store version.
+  (read from `tools/inspect_game.py`) and explains when the copy is the Epic
+  Games Store version or another file: it names the file's version against
+  `EXPECTED_VERSION` and, from Steam's app manifest beside the game, the fix
+  (a beta chosen in *Properties > Betas*, an update waiting, else *Verify
+  integrity of game files*); only a newer version needs a Spidy update.
 - **The VR runtime:** every registered OpenXR runtime, after *Automatic* (the
   default since October 7; `xr_runtime=auto` in `launcher.ini`, which replaced
   `runtime=`, so every earlier install starts on Automatic). Automatic leaves
@@ -626,6 +629,7 @@ still requires a running game or headset.
 | `src/body_calibration.cpp`, `src/overlay_text.cpp` | The T-pose calibration (the player's eye height and arm length, and its panel in the headset); the overlay's stroke font |
 | `src/punch.cpp`, `src/game_punch.cpp` | Punching: fists against characters, and the game's own melee damage for each punch |
 | `src/shooter.cpp`, `src/game_shooter.cpp` | The web shooter: trigger pulls and their aim, and the game's own web-shooter shot fired from the hand |
+| `src/slow_motion.cpp`, `src/game_time.cpp` | Slow motion: the left stick's click, focus and the eased time scale; the game's own time system slowed to it (its look: `D3D12Renderer::Grade`, the meter in `web_visual.cpp`) |
 | `src/game_grab.cpp`, `src/native_bodies.cpp`, `src/game_targets.cpp` | Web grab in the game: candidates, freed Havok props, flung bots |
 | `src/native_render_memory.cpp`, `tools/vr_launcher.py` | A larger per-frame render memory ring, installed while the game starts |
 | `src/web_visual.cpp` | Fallback game-style web strands for the headset overlay and lab |

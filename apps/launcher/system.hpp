@@ -16,6 +16,7 @@
 namespace launcher {
 using spidy::launcher::LineKind;
 using spidy::launcher::SessionOptions;
+using spidy::launcher::SteamApp;
 
 inline constexpr const char* kVersion = SPIDY_VERSION;
 inline constexpr const char* kAuthor = "Ilya Mezerowsky";
@@ -49,6 +50,9 @@ struct Scan {
     bool epicFound{}, gameRunning{};
     Build build = Build::unknown;
     std::string expectedHash;
+    // Spider-Man.exe's version and the supported file's, and what Steam says about the game.
+    std::string gameVersion, expectedVersion;
+    SteamApp steamApp;
     std::wstring hashPath;
     uint64_t hashSize{}, hashTime{};
     std::string hashValue;

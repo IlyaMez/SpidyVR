@@ -18,11 +18,16 @@
 
 namespace spidy::launcher {
 
-// Every value that follows `key` in a Valve KeyValues (VDF/ACF) text, in order.
-// Keys match without regard to case, as Steam's do; escapes (\\ \" \n \t) are decoded.
-inline std::vector<std::string> vdfValues(std::string_view text, std::string_view key) {
-    std::vector<std::string> tokens;
-    std::vector<bool> quoted;
+// A Valve KeyValues (VDF/ACF) text's quoted strings (escapes \\ \" \n \t decoded) and
+// braces, each with the offset just past it; // comments are skipped.
+struct VdfToken {
+    std::string text;
+    bool quoted{};
+    size_t end{};
+};
+
+inline std::vector<VdfToken> vdfTokens(std::string_view text) {
+    std::vector<VdfToken> tokens;
     for (size_t i = 0; i < text.size();) {
         const char c = text[i];
         if (c == '/' && i + 1 < text.size() && text[i + 1] == '/') {
@@ -39,28 +44,86 @@ inline std::vector<std::string> vdfValues(std::string_view text, std::string_vie
                 }
             }
             ++i;
-            tokens.push_back(std::move(token));
-            quoted.push_back(true);
+            tokens.push_back({std::move(token), true, std::min(i, text.size())});
         } else if (c == '{' || c == '}') {
-            tokens.emplace_back(1, c);
-            quoted.push_back(false);
-            ++i;
+            tokens.push_back({std::string(1, c), false, ++i});
         } else {
             ++i;
         }
     }
-    const auto same = [](std::string_view a, std::string_view b) {
-        return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
-                   return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
-               });
-    };
+    return tokens;
+}
+
+// Keys match without regard to case, as Steam's do.
+inline bool vdfSameKey(std::string_view a, std::string_view b) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+               return std::tolower(static_cast<unsigned char>(x)) ==
+                      std::tolower(static_cast<unsigned char>(y));
+           });
+}
+
+// Every value that follows `key` in a VDF/ACF text, in order, at any depth.
+inline std::vector<std::string> vdfValues(std::string_view text, std::string_view key) {
+    const auto tokens = vdfTokens(text);
     std::vector<std::string> values;
     for (size_t i = 0; i + 1 < tokens.size(); ++i)
-        if (quoted[i] && quoted[i + 1] && same(tokens[i], key)) {
-            values.push_back(tokens[i + 1]);
+        if (tokens[i].quoted && tokens[i + 1].quoted && vdfSameKey(tokens[i].text, key)) {
+            values.push_back(tokens[i + 1].text);
             ++i;
         }
     return values;
+}
+
+// The text inside the first block named `name` ("UserConfig" { ... }), blocks inside it
+// included; empty when there is none.
+inline std::string_view vdfBlock(std::string_view text, std::string_view name) {
+    const auto tokens = vdfTokens(text);
+    for (size_t i = 0; i + 1 < tokens.size(); ++i) {
+        if (!tokens[i].quoted || tokens[i + 1].quoted || tokens[i + 1].text != "{" ||
+            !vdfSameKey(tokens[i].text, name))
+            continue;
+        const size_t start = tokens[i + 1].end;
+        int depth = 0;
+        for (size_t j = i + 1; j < tokens.size(); ++j) {
+            if (tokens[j].quoted)
+                continue;
+            depth += tokens[j].text == "{" ? 1 : -1;
+            if (depth == 0)
+                return text.substr(start, tokens[j].end - 1 - start);
+        }
+        return text.substr(start);
+    }
+    return {};
+}
+
+// What Steam's app manifest (steamapps\appmanifest_1817070.acf) says about the game it installed.
+struct SteamApp {
+    bool found{};
+    // The beta chosen in the game's Properties > Betas; empty for none.
+    std::string beta;
+    // An update Steam has for the game, not yet installed (waiting, downloading or paused).
+    bool updateWaiting{};
+};
+
+inline SteamApp steamApp(std::string_view manifest) {
+    SteamApp app;
+    app.found = !vdfValues(manifest, "appid").empty();
+    // UserConfig holds the player's choice; MountedConfig, the installed files' until the
+    // update that choice needs is in.
+    for (const auto& beta : vdfValues(vdfBlock(manifest, "UserConfig"), "BetaKey"))
+        if (!beta.empty() && beta != "public")
+            app.beta = beta;
+    const auto number = [&](std::string_view key) {
+        const auto values = vdfValues(manifest, key);
+        uint64_t value{};
+        if (!values.empty())
+            std::from_chars(values[0].data(), values[0].data() + values[0].size(), value);
+        return value;
+    };
+    // StateFlags 2: update required.
+    const uint64_t target = number("TargetBuildID");
+    app.updateWaiting = (number("StateFlags") & 2) || (target && target != number("buildid"));
+    return app;
 }
 
 // The value of a module-level Python constant (`NAME = "text"` or `NAME = 123`).
@@ -379,6 +442,42 @@ inline std::array<int, 4> parseVersion(std::string_view text) {
         }
     }
     return fields;
+}
+
+// Why the game's Spider-Man.exe is not the file Spidy supports, and what to do about it. `version`:
+// the file's own (its version resource; empty without one); `expected`: the supported file's
+// (tools/inspect_game.py's EXPECTED_VERSION); `steam`: Steam's app manifest for the game's folder.
+inline std::string unsupportedGame(std::string_view version, std::string_view expected,
+                                   const SteamApp& steam) {
+    const std::string have(version), want(expected);
+    const bool known = !have.empty() && !want.empty();
+    const bool newer = known && parseVersion(have) > parseVersion(want);
+    std::string text;
+    if (!known)
+        text = "A different game version than the one Spidy supports" +
+               (want.empty() ? "" : " (" + want + ")") + ".";
+    else if (newer)
+        text = "Version " + have + ", newer than the " + want +
+               " Spidy supports. Spidy reads the game's code at fixed places, so a game update needs a "
+               "Spidy update.";
+    else if (parseVersion(have) < parseVersion(want))
+        text = "Version " + have + ", older than the " + want + " Spidy supports.";
+    else
+        text = "Version " + have +
+               ", the one Spidy supports, but a mod, a patch or a damaged download changed Spider-Man.exe.";
+    if (!steam.beta.empty())
+        return text + " Steam is set to the beta \"" + steam.beta +
+               "\": in Steam, right-click the game > Properties > Betas, choose None and let it update. "
+               "Then press Re-check.";
+    if (newer)
+        return text;
+    if (steam.updateWaiting)
+        return text + " Steam has an update for it waiting: let Steam install it, then press Re-check.";
+    if (steam.found)
+        return text + " In Steam, right-click the game > Properties > Installed Files > Verify integrity of "
+                      "game files, then press Re-check.";
+    return text + " Spidy works with Steam's copy of the game: choose the Spider-Man.exe in your Steam "
+                  "library with Change...";
 }
 
 } // namespace spidy::launcher

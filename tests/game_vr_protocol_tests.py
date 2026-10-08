@@ -12,7 +12,8 @@ from run_game_vr import (snapshot as xr_snapshot, accepted as accepted_xr, timin
                          appearance_snapshot, eye_snapshot, save_eye_snapshot, rgb_rows, crop_origin,
                          game_memory, keep_game_log, commit_warning, VR_COMMIT_MB, body_snapshot,
                          punch_snapshot, shooter_snapshot, start_settings, settings_line, SETTINGS_LINE,
-                         scaled_eye_size, vr_commit_mb, rendering_line, EYE_COMMIT_BYTES)
+                         scaled_eye_size, vr_commit_mb, rendering_line, EYE_COMMIT_BYTES,
+                         slow_motion_snapshot, GAME_HOOKS)
 from probe_collision import snapshot as collision_snapshot
 from probe_movement import snapshot as movement_snapshot
 from probe_native_motion import snapshot as motion_snapshot
@@ -228,6 +229,29 @@ class ProtocolTests(unittest.TestCase):
         torn = bytearray(raw)
         struct.pack_into('<q', torn, 16, 5)
         self.assertIsNone(punch_snapshot(Reader(*([torn, struct.pack('<q', 5)]*8)), 0))
+
+    def test_slow_motion_decodes_presses_focus_and_the_games_time_and_rejects_torn_reads(self):
+        raw = bytearray(96)
+        struct.pack_into('<4Iq6I', raw, 0, 0x574f4c53, 1, 96, 0, 6, 3, 2, 1, 1, 0, 1)
+        struct.pack_into('<7fI2Q', raw, 48, 4.5, .25, 1, .3, 1, .3, .01, 1, 9000, 1200)
+        result = slow_motion_snapshot(Reader(raw, struct.pack('<q', 6)), 0)
+        self.assertEqual((result['status'], result['starts'], result['stops'], result['refused'],
+                          result['emptied'], result['interrupted'], result['active']), (0, 3, 2, 1, 1, 0, True))
+        self.assertEqual((result['seconds'], result['focus'], result['blend']), (4.5, .25, 1))
+        self.assertAlmostEqual(result['wanted'], .3, 6)
+        self.assertAlmostEqual(result['world_scale'], .3, 6)
+        self.assertAlmostEqual(result['physics_step'], .01, 6)
+        self.assertEqual((result['game_scale'], result['physics_scaled']), (1, True))
+        self.assertEqual((result['updates'], result['slowed_updates']), (9000, 1200))
+        torn = bytearray(raw)
+        struct.pack_into('<q', torn, 16, 7)
+        self.assertIsNone(slow_motion_snapshot(Reader(*([torn, struct.pack('<q', 7)]*8)), 0))
+        wrong = bytearray(raw)
+        struct.pack_into('<I', wrong, 4, 2)
+        with self.assertRaises(RuntimeError):
+            slow_motion_snapshot(Reader(wrong, struct.pack('<q', 6)), 0)
+        # The session checks the time system's update is unpatched before and restored after.
+        self.assertIn(0x19bb430, GAME_HOOKS)
 
     def test_shooter_feedback_decodes_each_hand_and_the_latest_shot(self):
         raw = bytearray(192)

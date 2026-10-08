@@ -449,6 +449,107 @@ int main(int argc, char** argv) {
                          "result.\n";
         }
         {
+            // Slow motion: both eyes recoloured under the overlay (the typed sRGB
+            // eye and the typeless one), round about each lens; the ring crossing
+            // the view after a start; the focus meter over the left wrist. A
+            // uniform orange wall 50 m ahead fills both images first.
+            const Vec3 orange{.9f, .3f, .08f};
+            const auto corner = [&](float x, float y) { return Vertex{{x, y, -31}, orange}; };
+            const std::vector<Vertex> wall{corner(-120, -100), corner(120, -100), corner(120, 140),
+                                           corner(-120, -100), corner(120, 140), corner(-120, 140)};
+            overlay.renderViews(pairedViews, wall, true);
+            std::array<std::vector<unsigned char>, 2> flat;
+            for (unsigned eye = 0; eye < 2; ++eye)
+                flat[eye] = overlay.readback(copied[eye].Get());
+            const auto at = [&](const std::vector<unsigned char>& image, float u, float v) {
+                const size_t x = std::min<size_t>(static_cast<size_t>(u * width), width - 1);
+                const size_t y = std::min<size_t>(static_cast<size_t>(v * height), height - 1);
+                const auto* p = image.data() + (y * width + x) * 4;
+                return std::array<int, 3>{p[0], p[1], p[2]};
+            };
+            D3D12Renderer::Grade grade;
+            for (unsigned eye = 0; eye < 2; ++eye)
+                grade.tangents[eye] = {std::tan(-.8f), std::tan(.8f), std::tan(.65f), std::tan(-.65f)};
+            overlay.renderViews(pairedViews, {}, true, true, {}, &grade);
+            for (unsigned eye = 0; eye < 2; ++eye)
+                if (overlay.readback(copied[eye].Get()) != flat[eye])
+                    throw std::runtime_error("Slow motion at rest changed the image");
+            grade.amount = 1;
+            overlay.renderViews(pairedViews, {}, true, true, {}, &grade);
+            for (unsigned eye = 0; eye < 2; ++eye) {
+                const auto image = overlay.readback(copied[eye].Get());
+                const auto was = at(flat[eye], .5f, .5f), now = at(image, .5f, .5f);
+                const auto rim = at(image, .02f, .03f);
+                if (at(flat[eye], .02f, .03f) != was)
+                    throw std::runtime_error("The orange wall did not fill the image");
+                // Drained toward grey and cooler in the middle; darker at the rim.
+                if (!(now[0] - now[2] < (was[0] - was[2]) * 3 / 4 && now[2] > was[2] + 20))
+                    throw std::runtime_error("Slow motion did not drain or cool the image (eye " +
+                                             std::to_string(eye) + ")");
+                if (!(rim[0] + rim[1] + rim[2] < (now[0] + now[1] + now[2]) * 92 / 100))
+                    throw std::runtime_error("Slow motion's darker rim is missing (eye " + std::to_string(eye) +
+                                             ")");
+            }
+            // The ring a fifth of its way out: a lit band about 0.75 of a tangent
+            // from the lens, the middle of the view left alone.
+            grade.amount = 0;
+            grade.ripple = .2f;
+            grade.rippleStrength = 1;
+            grade.entering = true;
+            overlay.renderViews(pairedViews, wall, true);
+            overlay.renderViews(pairedViews, {}, true, true, {}, &grade);
+            {
+                const auto image = overlay.readback(copied[0].Get());
+                const float ringU = (.752f + std::tan(.8f)) / (2 * std::tan(.8f));
+                const auto band = at(image, ringU, .5f), wasBand = at(flat[0], ringU, .5f);
+                const auto middle = at(image, .5f, .5f), wasMiddle = at(flat[0], .5f, .5f);
+                if (!(band[1] > wasBand[1] + 15 && band[2] > wasBand[2] + 25))
+                    throw std::runtime_error("Slow motion's ring is missing");
+                for (int c = 0; c < 3; ++c)
+                    if (std::abs(middle[c] - wasMiddle[c]) > 2)
+                        throw std::runtime_error("Slow motion's ring changed the middle of the view");
+            }
+            // The meter over the left wrist, 62% full, in slow motion, drawn over
+            // the recoloured image as the headset draws it. Saved for inspection.
+            SlowMotionView view;
+            view.meter = 1;
+            view.focus = .62f;
+            view.blend = .8f;
+            view.active = view.entering = true;
+            const Pose camera{{-.032f, 19.7f, 19}, {}};
+            const Vec3 centre = camera.position + Vec3{-.09f, -.16f, -.42f};
+            const Pose hand{centre - Vec3{0, .045f, .065f}, {}};
+            std::vector<Vertex> meter;
+            appendSlowMotionMeter(meter, view, hand, camera.position, 2 * std::tan(.8f) / width, 0);
+            grade.amount = .8f;
+            grade.ripple = .25f;
+            overlay.renderViews(pairedViews, wall, true);
+            overlay.renderViews(pairedViews, {}, true, true, meter, &grade);
+            const auto image = overlay.readback(copied[0].Get());
+            if (argc >= 2)
+                saveBmp(std::filesystem::path(argv[1]) / "slow-motion.bmp", image, width, height);
+            const auto& vp = pairedViews[0].viewProjection;
+            const float x = vp[0] * centre.x + vp[1] * centre.y + vp[2] * centre.z + vp[3],
+                        y = vp[4] * centre.x + vp[5] * centre.y + vp[6] * centre.z + vp[7],
+                        w = vp[12] * centre.x + vp[13] * centre.y + vp[14] * centre.z + vp[15];
+            const int cx = static_cast<int>((x / w * .5f + .5f) * width),
+                      cy = static_cast<int>((.5f - y / w * .5f) * height);
+            const int reach = 80 * static_cast<int>(width) / 1536 + 10;
+            size_t cyan{}, glass{};
+            for (int py = std::max(cy - reach, 0); py < std::min(cy + reach, static_cast<int>(height)); ++py)
+                for (int px = std::max(cx - reach, 0); px < std::min(cx + reach, static_cast<int>(width)); ++px) {
+                    const auto* p = image.data() + (static_cast<size_t>(py) * width + px) * 4;
+                    cyan += p[2] > 215 && p[1] > 190 && p[0] + 30 < p[2];
+                    glass += p[0] > 200 && p[1] > 215 && p[2] > 225;
+                }
+            if (cyan < 40 || glass < 10)
+                throw std::runtime_error("Slow motion's meter is missing its ring or hourglass (" +
+                                         std::to_string(cyan) + " cyan, " + std::to_string(glass) +
+                                         " glass pixels)");
+            std::cout << "PASS slow motion: both eyes drained, cooled and darker at the rim, the ring, and the "
+                         "focus meter (" << cyan << " cyan pixels).\n";
+        }
+        {
             // The game screen: the game's presented frame drawn into an eye
             // image. Display-encoded back buffers keep their stored values in
             // the sRGB (VDXR typeless) target; light values are encoded.

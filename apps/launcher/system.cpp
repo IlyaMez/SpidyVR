@@ -336,6 +336,17 @@ std::wstring epicGame() {
     return {};
 }
 
+// What Steam's app manifest says about the game whose Spider-Man.exe is `exe`, when Steam
+// installed it there (steamapps\common\<installdir>\Spider-Man.exe).
+SteamApp steamAppFor(const fs::path& exe) {
+    const fs::path folder = exe.parent_path(), steamapps = folder.parent_path().parent_path();
+    const std::string manifest = readText(steamapps / (std::wstring(L"appmanifest_") + kSteamAppId + L".acf"));
+    const auto installdir = text::vdfValues(manifest, "installdir");
+    return !installdir.empty() && sameFile(widen(installdir.front()), folder.filename().wstring())
+               ? text::steamApp(manifest)
+               : SteamApp{};
+}
+
 std::optional<std::string> sha256(const std::wstring& path) {
     BCRYPT_ALG_HANDLE algorithm{};
     BCRYPT_HASH_HANDLE hash{};
@@ -598,8 +609,11 @@ void Scanner::run(Settings settings) {
             if (!isFile(modules / module))
                 scan.missing.push_back(narrow(module));
         scan.writable = folderWritable(root / L"reports");
-        if (auto hash = text::pythonConstant(readText(root / L"tools/inspect_game.py"), "EXPECTED_SHA256"))
+        const std::string inspect = readText(root / L"tools/inspect_game.py");
+        if (auto hash = text::pythonConstant(inspect, "EXPECTED_SHA256"))
             scan.expectedHash = *hash;
+        if (auto version = text::pythonConstant(inspect, "EXPECTED_VERSION"))
+            scan.expectedVersion = *version;
         const std::string session = readText(root / L"tools/run_game_vr.py");
         if (auto need = text::pythonConstant(session, "VR_COMMIT_MB"))
             scan.neededCommitGb = std::atof(need->c_str()) / 1024;
@@ -628,8 +642,17 @@ void Scanner::run(Settings settings) {
         scan.gameExe = epic;
         scan.gameSource = "Epic Games Store";
     }
-    if (!scan.gameExe.empty())
+    if (!scan.gameExe.empty()) {
+        // Before the true path too: that follows a junction the game folder may have been moved through.
+        scan.steamApp = steamAppFor(scan.gameExe);
         scan.gameExe = truePath(scan.gameExe);
+        if (!scan.steamApp.found)
+            scan.steamApp = steamAppFor(scan.gameExe);
+        std::array<int, 4> fields{};
+        if (!fileVersion(scan.gameExe, fields).empty())
+            scan.gameVersion = std::to_string(fields[0]) + '.' + std::to_string(fields[1]) + '.' +
+                               std::to_string(fields[2]) + '.' + std::to_string(fields[3]);
+    }
     scan.gameRunning = processRunning(L"Spider-Man.exe");
     scan.runtimes = openXrRuntimes();
     wchar_t system[MAX_PATH];

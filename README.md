@@ -120,7 +120,7 @@ a red cross misses, a turning ring of three arcs catches a prop or thug.
 
 | Problem | Fix |
 |---|---|
-| "This game version is not supported" | The game was updated, or it is not the Steam version. Wait for a Spidy update. |
+| "This game version is not supported" | The launcher's game line names your version and the fix. An older version or a changed `Spider-Man.exe`: in Steam, right-click the game > *Properties* > *Betas* > *None*, then *Installed Files* > *Verify integrity of game files*. A newer version needs a Spidy update. |
 | The headset is not found | Connect it first, check the VR runtime in the launcher, press *Check*. |
 | The picture breaks up | Close the game and start it from the launcher, which gives it the render memory VR needs. |
 | Low frame rate | Lower *Render resolution* in the launcher, or the streaming quality in Virtual Desktop. 90 Hz paces more evenly than 120 Hz. |

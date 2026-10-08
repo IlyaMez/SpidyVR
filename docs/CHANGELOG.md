@@ -3,7 +3,81 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 8, thirteenth build): flips are an experimental
+**Latest build (October 8, fifteenth build): slow motion, as in Blade &
+Sorcery.** You asked for a Blade & Sorcery-like slow-motion button with a
+smooth transition in and out, an effect while it is on, and a "mana" that
+runs down and recovers. Click the left thumbstick on its own (both together
+still switch to the flat screen) and the game's time eases down to 30% in
+0.4 s; click again and it eases back in 0.55 s. The ease is an S-curve in
+log time, so the world decelerates evenly and never jolts. Your head and
+hands keep real time. Focus, the mana, drains in real time while slow
+motion lasts: a full meter lasts 7 s, and when it runs out slow motion ends
+by itself. It starts refilling 1.2 s after slow motion ends and takes 12 s
+from empty; a click with under 15% left is refused. The meter is a cyan
+ring around an hourglass floating over the back of your left wrist. It shows
+while focus is spent, empties clockwise from the top, glows and breathes in
+slow motion, flashes red when it runs empty or refuses a click, and fades
+1.5 s after it is full again. In slow motion the headset's image is drained
+toward grey, cooler, and darker toward the rim (round about each lens), and
+a ring of light bends the image slightly as it sweeps out across your view
+at the start and at the end. Both controllers pulse at the start and end;
+the left one buzzes when the meter runs empty or refuses a click. A menu,
+the game screen or the flat screen ends it.
+How: Spidy hooks the game's own `TimeScaleSystem`, the one its dodges and
+gadget wheel slow the world with (update `0x19bb430`, game_time.cpp). After
+each of its updates the system's scale, the clock's scale (`0x7a7fb90`) and
+Havok's step (`0x609a560`) become the smaller of the game's own and Spidy's.
+Before the next update the game's own values go back, so its own slow-motion
+moments, channels and events work as before. Everything on the game's clock
+slows: thugs, traffic, physics, effects, and Spidy's own swing, which steps
+with the player's mover. Props a web holds or throws used to be kept in real
+time; `native_bodies` now keeps them in the world's time (real time at the
+game's time scale), so they slow too, and they also follow the game's own
+slow-motion moments.
+Measured in the game, headless (`tools/probe_slow_motion.py`, reports
+`slow-motion-probe.json` and `-first.json`): at 30% the clock read 0.30,
+each frame's game time came to 0.298 of its normal share of real time, and
+Havok's step to 0.30 of its base. In a released swing flight the player's
+mover stepped 0.301 game seconds per real second (1.022 at normal speed),
+while the swing's gravity on game time stayed 5.89 m/s² (5.886 asked): the
+swing slowed with the world. The web grab's step time fell to 0.32 of
+normal. Everything came back to 1.0, every module stopped with code 0, the
+hooked code was restored, and the save files stayed byte-identical.
+No XrConfig/XrData change (both stay version 16), but the session runner
+needs the stereo module's new `SpidySlowMotionData` export and checks the
+new hook's entry, so the runner and the modules must come from the same
+build. The session report has `slow_motion` (presses, starts, refusals,
+empties, seconds in it, focus, the game's scale) and `slow_motion_samples`.
+204 core checks (5 new), the GPU test (new: both eyes recoloured, typed and
+typeless, the ring and the meter; debug layer clean), 16 launcher checks and
+the 5 Python suites pass. Not tried in the headset: how the look and the
+meter feel, the haptics, and the game's sound, which Spidy leaves alone (it
+may or may not slow with the game's time).
+
+**Preceding build (October 8, fourteenth build): the launcher says why a game
+version is not supported.** You passed on a player's report: Steam says their
+game is up to date, yet the launcher called it a different version. Steam's
+current version is still the one Spidy supports (build 23986256, version
+4.630.0.0, the July 8 update; Steam's app info checked today), so their
+`Spider-Man.exe` is not Steam's current file, and the launcher's "a game
+update needs a Spidy update" pointed the wrong way. The game line now names
+the file's version against 4.630.0.0 and the fix, from Steam's app manifest
+beside the game. If Steam is set to a beta (the game has two rollback betas,
+`previous_version` from October 2023 and `previous_version2`, v1.1212.0.0),
+it says to choose None under Properties > Betas. If an update is waiting, it
+says to let Steam install it. Otherwise, for an older or changed
+`Spider-Man.exe`, it says to verify the game's files in Steam, and for a copy
+Steam did not install, to choose the one in the Steam library. Only a newer
+version still says a game update needs a Spidy update.
+`tools/inspect_game.py` keeps the version as `EXPECTED_VERSION` beside the
+hash. No protocol change. 16 launcher checks pass (3 new: a block of Steam's
+text, the beta and the update in an app manifest, every message). The
+launcher's own scan, run on copies of the game's file set to 1.1212.0.0 on
+that beta, 3.618.0.0 with an update waiting, 4.630.0.0 with one byte changed,
+and that copy outside a Steam library, gave each message; the real file still
+reads as supported. Not in a release yet: players see it from the next one.
+
+**Preceding build (October 8, thirteenth build): flips are an experimental
 setting, off by default.** You asked to put the flips in the settings as an
 experimental option, off by default. The SPIDY VR tab in the game's Settings
 has a new last section, EXPERIMENTAL, with one switch: FLIPS, OFF until you

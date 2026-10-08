@@ -1,9 +1,11 @@
 // Frees props the web holds and moves them, and flings bots, inside
 // hknpWorld::preCollide on the main thread (see native_bodies.hpp).
 #include "spidy/native_bodies.hpp"
+#include "spidy/game_time.hpp"
 #include <MinHook.h>
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <initializer_list>
 #include <windows.h>
@@ -88,13 +90,13 @@ struct Followed {
     bool freed{};
     uint64_t step{};       // the snapshot's physics step, 0 before any
     Vec3 centre{};         // before that step
-    Vec3 measured{};       // real velocity before that step
-    Vec3 next{};           // real velocity through that step, contacts aside
+    Vec3 measured{};       // velocity in the world's time before that step
+    Vec3 next{};           // velocity in the world's time through that step, contacts aside
     Vec3 gravity{};        // its motion's gravity, metres per second squared
-    float dt{}, real{};    // the step's physics and real lengths
+    float dt{}, real{};    // the step's physics length and the world's time in it
     bool dynamic{}, driven{};
-    // Spidy keeps it in real time: the web moves it, or it flies free after
-    // the web, until it rests. Seconds flying free, and lying still.
+    // Spidy keeps it in the world's time: the web moves it, or it flies free
+    // after the web, until it rests. Seconds flying free, and lying still.
     bool owned{};
     float flying{}, resting{};
     // Steps the rebuilt prop has rested since the game started moving its
@@ -105,10 +107,12 @@ struct Followed {
 };
 Followed followed[16];
 Counters totals{};
-// Real time per physics step, smoothed over a few steps, and physics time per
-// real second (the physics step over it), for this step and the one before:
-// a body Spidy moved in that one has its velocity in that step's time.
-float realStep{}, scale = 1, previousScale = 1;
+// Real time per physics step, smoothed over a few steps; the world's time in
+// it (real time at the game's time scale: its own slow motions, and Spidy's);
+// and physics time per second of the world's (the physics step over it), for
+// this step and the one before: a body Spidy moved in that one has its
+// velocity in that step's time.
+float realStep{}, worldStep{}, scale = 1, previousScale = 1;
 LARGE_INTEGER lastStep{}, frequency{};
 
 bool read(uintptr_t p, void* out, size_t n) {
@@ -135,6 +139,15 @@ uintptr_t pointer(uintptr_t p) {
     uintptr_t v{};
     read(p, &v, sizeof(v));
     return v;
+}
+// The game's time per real second: the double its clock multiplies each
+// frame's real time by (game_time.hpp). 1 at normal speed, less while the
+// game or Spidy slows it; 1 if it cannot be read.
+float worldTime() {
+    double clock{};
+    if (!read(base + game_time::clockScaleRva, &clock, sizeof(clock)) || !std::isfinite(clock) || clock <= 0)
+        return 1;
+    return static_cast<float>(std::clamp(clock, .01, 4.));
 }
 template <class T> T value(uintptr_t p) {
     T v{};
@@ -415,8 +428,9 @@ void apply(uintptr_t world, const void* input) {
                                 : static_cast<float>(since);
     else if (!(realStep > 0))
         realStep = dt;
+    worldStep = realStep * worldTime();
     previousScale = scale;
-    scale = std::clamp(dt / realStep, .05f, 20.f);
+    scale = std::clamp(dt / worldStep, .05f, 20.f);
     for (auto& slot : table) {
         if (slot.actor && slot.controlling && now >= slot.deadline) {
             slot.controlling = false;
@@ -481,8 +495,8 @@ void apply(uintptr_t world, const void* input) {
             const bool web = slot && ready && (slot->controlling || slot->launching);
             f.owned |= web;
             const TargetCommand* law = !web ? nullptr : slot->launching ? &slot->launch : &slot->control;
-            const Vec3 next = limited(law ? advance(*law, f.centre, f.measured, realStep, f.gravity)
-                                          : f.measured + f.gravity * realStep,
+            const Vec3 next = limited(law ? advance(*law, f.centre, f.measured, worldStep, f.gravity)
+                                          : f.measured + f.gravity * worldStep,
                                       maxSpeed);
             if (f.owned && ready && finite(next) && finite(f.measured)) {
                 // What the web, or gravity alone, does to it in this step's
@@ -512,7 +526,7 @@ void apply(uintptr_t world, const void* input) {
                             limited(v * previousScale + change, maxSpeed) / scale - gravityOf(world, m) * dt;
                         const Vec3 spin = spinOf(m);
                         const Vec3 turned =
-                            (law ? advanceSpin(*law, spin * previousScale, realStep) : spin * previousScale) /
+                            (law ? advanceSpin(*law, spin * previousScale, worldStep) : spin * previousScale) /
                             scale;
                         if (!finite(linear) || !finite(turned))
                             continue;
@@ -531,10 +545,10 @@ void apply(uintptr_t world, const void* input) {
                     f.flying = f.resting = 0;
                 } else {
                     ++flying;
-                    f.flying += realStep;
+                    f.flying += worldStep;
                     const bool still = length(f.measured) < restSpeed &&
                                        length(spinOf(motion) * previousScale) < restSpin;
-                    f.resting = still ? f.resting + realStep : 0;
+                    f.resting = still ? f.resting + worldStep : 0;
                     if (f.resting >= restSeconds || f.flying >= maxFlight || !(drawn.flags & 8)) {
                         f.owned = false;
                         f.flying = f.resting = 0;
@@ -547,7 +561,7 @@ void apply(uintptr_t world, const void* input) {
             }
         }
         f.dt = dt;
-        f.real = realStep;
+        f.real = worldStep;
         f.step = totals.steps;
         // Long still and asleep: no longer watched.
         if (!f.owned && now >= f.until && !(primary.flags & 8))
@@ -641,7 +655,7 @@ uint32_t native_bodies::start(uintptr_t gameBase) {
         pendingDamages = 0;
         issuedTicket = nextTicket;
         totals = {};
-        realStep = 0;
+        realStep = worldStep = 0;
         scale = previousScale = 1;
         lastStep = {};
         QueryPerformanceFrequency(&frequency);
@@ -791,7 +805,7 @@ Counters native_bodies::counters() {
 uint64_t native_bodies::physicsSteps(float& dt) {
     AcquireSRWLockShared(&lock);
     const auto steps = totals.steps;
-    dt = realStep;
+    dt = worldStep;
     ReleaseSRWLockShared(&lock);
     return steps;
 }

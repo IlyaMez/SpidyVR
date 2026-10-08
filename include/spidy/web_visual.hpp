@@ -1,4 +1,5 @@
 #pragma once
+#include "slow_motion.hpp"
 #include "vertex.hpp"
 #include <cstdint>
 #include <vector>
@@ -147,4 +148,13 @@ class AimMarkerMotion {
 // points along until the next preview arrives. `point` itself when the ray
 // runs nearly along the plane or crosses it far from `point`.
 Vec3 onAimLine(Vec3 point, Vec3 normal, Vec3 origin, Vec3 direction);
+// Slow motion's focus meter (slow_motion.hpp) over the back of the left
+// wrist, facing the viewer: a cyan ring around an hourglass that empties
+// clockwise from the top as focus is spent and fills again as it refills. In
+// slow motion it brightens and pulses; a refused press or an empty meter
+// flashes it red. `hand` is the left hand's pose as the glove's (fingers
+// along -z, the back of the hand +y); `seconds` any running clock, for the
+// pulse. pixelAngle as for appendWeb.
+void appendSlowMotionMeter(std::vector<Vertex>& out, const SlowMotionView& view, Pose hand, Vec3 viewer,
+                           float pixelAngle, float seconds);
 } // namespace spidy

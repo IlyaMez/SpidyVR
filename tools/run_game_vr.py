@@ -34,7 +34,9 @@ GAME_HOOKS = (*HOOKS, 0x2e67010, 0x1fbe360, 0x1fbda50, 0xa7b3a0, 0x1f9db60,
               0x189e310, 0x189e3a0, 0x1873470, 0x17991a0, 0x1920310, 0x676dd0, 0x1920240,
               # The web shooter: the camera's update (shots go out on the main thread), the weapons' muzzle
               # and the shots' events (what they strike).
-              0x897d30, 0x2150c40, 0xd2a570)
+              0x897d30, 0x2150c40, 0xd2a570,
+              # Slow motion: the update of the game's time system (game_time.hpp).
+              0x19bb430)
 # What the game process commits in a VR session at 3072 x 3264 per eye (16.7-17.1 GB on October 5),
 # with Spidy's render memory ring and some room to grow.
 VR_COMMIT_MB = 19000
@@ -760,6 +762,33 @@ def timing_snapshot(game, address):
     return None
 
 
+# Slow motion's counters (SlowMotionData in game_xr.cpp); a change of one is a sample.
+SLOW_MOTION_COUNTS = ('starts', 'stops', 'refused', 'emptied', 'interrupted')
+
+
+def slow_motion_snapshot(game, address):
+    """Slow motion: the player's presses, focus and the game's time (status 0: the game's time is hooked)."""
+    for _ in range(8):
+        raw = game.read(address, 96)
+        if len(raw) != 96:
+            return None
+        if struct.unpack_from('<3I', raw) != (0x574f4c53, 1, 96):
+            raise RuntimeError('Slow motion protocol mismatch')
+        if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
+            continue
+        result = dict(status=struct.unpack_from('<I', raw, 12)[0])
+        counts = struct.unpack_from('<6I', raw, 24)
+        result.update(zip(SLOW_MOTION_COUNTS, counts[:5]), active=bool(counts[5]))
+        # Real seconds in it so far, focus and how far into it now (0-1), the time scale asked of the
+        # game; the game's own scale and its world's in its last time update, and Havok's step then.
+        result.update(zip(('seconds', 'focus', 'blend', 'wanted', 'game_scale', 'world_scale', 'physics_step'),
+                          (round(v, 6) for v in struct.unpack_from('<7f', raw, 48))))
+        result['physics_scaled'] = bool(struct.unpack_from('<I', raw, 76)[0])
+        result.update(zip(('updates', 'slowed_updates'), struct.unpack_from('<2Q', raw, 80)))
+        return result
+    return None
+
+
 def wait_for_renderer(game, process, render_data, timeout=180, problems=None, tell_every=20):
     """The game's graphics queue, as soon as the game draws frames (its intro, seconds after it starts).
 
@@ -1003,7 +1032,7 @@ def session(a, startup):
             ROOT/'reports/stereo-modules', ('SpidyXrStart', 'SpidyXrStop', 'SpidyXrKeepAlive', 'SpidyXrData',
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
-                                           'SpidyBodyData'))
+                                           'SpidyBodyData', 'SpidySlowMotionData'))
         config = struct.pack('<4I7Q2IfI', 0x53585243, 16, 640, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
@@ -1037,6 +1066,9 @@ def session(a, startup):
         # The web shooter: the latest, and a sample when a shot is asked for, fired or dropped.
         shooter = None
         shooter_samples = deque(maxlen=2000)
+        # Slow motion: the latest, and a sample when it starts, ends or a press is refused.
+        slow_motion = None
+        slow_motion_samples = deque(maxlen=2000)
         eye_jobs = None
         render_memory = None
         lowest_commit = start_commit = free_commit_mb()
@@ -1065,6 +1097,7 @@ def session(a, startup):
                         swing_samples=list(swing_samples), motion_samples=list(motion_samples),
                         grab_samples=list(grab_samples), body=body, punch=punch,
                         punch_samples=list(punch_samples), shooter=shooter, shooter_samples=list(shooter_samples),
+                        slow_motion=slow_motion, slow_motion_samples=list(slow_motion_samples),
                         ray_samples=list(ray_samples), appearance=appearance, eye_jobs=eye_jobs,
                         render_memory=render_memory,
                         free_commit_mb=dict(start=start_commit, lowest=lowest_commit),
@@ -1131,6 +1164,12 @@ def session(a, startup):
                                for k in ('requested', 'fired', 'dropped', 'error', 'collisions', 'webbed', 'pushed')):
                             shooter_samples.append(dict(shots, seconds=round(time.monotonic()-started, 3)))
                         shooter = shots
+                    slow = slow_motion_snapshot(game, xr['SpidySlowMotionData'])
+                    if slow:
+                        sample['slow_motion'] = {k: slow[k] for k in ('active', 'focus', 'wanted', 'world_scale')}
+                        if any(slow[k] != (slow_motion or {}).get(k) for k in SLOW_MOTION_COUNTS):
+                            slow_motion_samples.append(dict(slow, seconds=round(time.monotonic()-started, 3)))
+                        slow_motion = slow
                     # Eye job copies the game dropped unrendered (reclaimed by age).
                     eye_jobs = frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs
                     sample['eye_jobs_reclaimed'] = eye_jobs['reclaimed'] if eye_jobs else None
@@ -1242,6 +1281,8 @@ def session(a, startup):
             punch=punch_snapshot(game, rays['SpidyPunchData']) or punch, punch_samples=list(punch_samples),
             shooter=shooter_snapshot(game, rays['SpidyShooterData']) or shooter,
             shooter_samples=list(shooter_samples),
+            slow_motion=slow_motion_snapshot(game, xr['SpidySlowMotionData']) or slow_motion,
+            slow_motion_samples=list(slow_motion_samples),
             motion_samples=list(motion_samples), appearance=appearance_snapshot(game,xr['SpidyAppearanceData']),
             eye_jobs=frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs,
             render_memory=final_render_memory or render_memory, render_stop=render_stop,

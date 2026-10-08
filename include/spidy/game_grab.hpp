@@ -53,7 +53,7 @@ struct Data {
     uint32_t candidates{}, error{}, kinds{}, driveFailures{};
     Hand hands[2];
     Vec3 lastThrow{};  // launch velocity of the latest throw
-    float timeScale{}; // physics time per real second (native_bodies)
+    float timeScale{}; // physics time per second of the world's (native_bodies)
     // native_bodies: physics steps seen, props freed and rebuilt, body
     // velocities set, instance poses Spidy set, bots flung, flights steered,
     // requests the game refused, and leases that lapsed.

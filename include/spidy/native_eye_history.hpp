@@ -17,6 +17,8 @@ struct NativeEyeFrame {
     std::array<game_swing::Aim, 2> aims{};
     // The T-pose calibration's panel and controller rings (phase idle: none).
     body_calibration::View calibration{};
+    // Slow motion: the image's recolouring and the focus meter (none at rest).
+    SlowMotionView slow{};
     bool flatScreen{};
     Pose screenPose{};
     float screenAspect = 16.f / 9;

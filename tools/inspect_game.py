@@ -7,6 +7,9 @@ import struct
 import sys
 
 EXPECTED_SHA256 = "e297d4d94f1ffe4febf289745e79e7b6fa233a788e7a00f480fc77c55db81ad1"
+# That file's own version (its version resource; the game logs "Build: v4.630.0.0"), Steam build 23986256 of
+# July 8, 2026. The launcher names it when a copy differs.
+EXPECTED_VERSION = "4.630.0.0"
 # Research leads from ArkWeb 17ec697bd431fce96a60fff1075f7e399d296058.
 # These are byte/address facts, independently checked against the local PE.
 # A match does NOT establish a valid calling convention or render hook.

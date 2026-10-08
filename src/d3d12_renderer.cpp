@@ -1,5 +1,7 @@
 #include "spidy/d3d12_renderer.hpp"
+#include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstring>
 #include <d3dcompiler.h>
 #include <stdexcept>
@@ -320,7 +322,8 @@ void D3D12Renderer::render(ID3D12Resource* target, DXGI_FORMAT format, unsigned 
     renderViews(std::span(&view, 1), vertices, preserveColor, true, translucent);
 }
 void D3D12Renderer::renderViews(std::span<const ViewTarget> views, std::span<const Vertex> vertices,
-                                bool preserveColor, bool waitForCompletion, std::span<const Vertex> translucent) {
+                                bool preserveColor, bool waitForCompletion,
+                                std::span<const Vertex> translucent, const Grade* grade) {
     if (views.empty() || views.size() > 2)
         throw std::runtime_error("Overlay requires one or two views");
     const auto format = views[0].format;
@@ -331,6 +334,10 @@ void D3D12Renderer::renderViews(std::span<const ViewTarget> views, std::span<con
             throw std::runtime_error("Overlay view dimensions or formats differ");
     waitForSubmission();
     pipeline(format);
+    // Only an image that stays can be recoloured.
+    const bool grading = grade && preserveColor && grade->visible();
+    if (grading)
+        prepareGrade(format);
     if (!depth_ || width != width_ || height != height_) {
         depth_.Reset();
         width_ = width;
@@ -389,17 +396,19 @@ void D3D12Renderer::renderViews(std::span<const ViewTarget> views, std::span<con
     rv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
     const auto dsv = dsv_->GetCPUDescriptorHandleForHeapStart();
     const auto rtvStride = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-    list_->SetGraphicsRootSignature(root_.Get());
-    list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    if (bytes) {
-        D3D12_VERTEX_BUFFER_VIEW buffer{vertices_->GetGPUVirtualAddress(), static_cast<UINT>(bytes),
-                                        sizeof(Vertex)};
-        list_->IASetVertexBuffers(0, 1, &buffer);
-    }
     for (size_t eye = 0; eye < views.size(); ++eye) {
         auto rtv = rtv_->GetCPUDescriptorHandleForHeapStart();
         rtv.ptr += eye * rtvStride;
         device_->CreateRenderTargetView(views[eye].texture, &rv, rtv);
+        if (grading)
+            recordGrade(views[eye], rtv, *grade, static_cast<unsigned>(eye));
+        list_->SetGraphicsRootSignature(root_.Get());
+        list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        if (bytes) {
+            D3D12_VERTEX_BUFFER_VIEW buffer{vertices_->GetGPUVirtualAddress(), static_cast<UINT>(bytes),
+                                            sizeof(Vertex)};
+            list_->IASetVertexBuffers(0, 1, &buffer);
+        }
         // XR_KHR_D3D12_enable requires color images in RENDER_TARGET state on
         // acquire/release. We render directly and leave them in that state.
         const float clear[] = {.025f, .045f, .08f, 1};
@@ -559,6 +568,233 @@ void D3D12Renderer::blit(ID3D12Resource* source, DXGI_FORMAT sourceView, bool li
     ID3D12CommandList* lists[] = {list_.Get()};
     queue_->ExecuteCommandLists(1, lists);
     hr(queue_->Signal(fence_.Get(), ++fenceValue_), "Signal blit completion");
+}
+namespace {
+bool typeless(DXGI_FORMAT format) {
+    return format == DXGI_FORMAT_R8G8B8A8_TYPELESS || format == DXGI_FORMAT_B8G8R8A8_TYPELESS ||
+           format == DXGI_FORMAT_B8G8R8X8_TYPELESS;
+}
+// The typeless format of a format's family: a copy in it takes any of them.
+DXGI_FORMAT family(DXGI_FORMAT format) {
+    switch (format) {
+    case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+    case DXGI_FORMAT_R8G8B8A8_UNORM:
+    case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        return DXGI_FORMAT_R8G8B8A8_TYPELESS;
+    case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+        return DXGI_FORMAT_B8G8R8A8_TYPELESS;
+    case DXGI_FORMAT_B8G8R8X8_TYPELESS:
+    case DXGI_FORMAT_B8G8R8X8_UNORM:
+    case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+        return DXGI_FORMAT_B8G8R8X8_TYPELESS;
+    default:
+        return format;
+    }
+}
+D3D12_RESOURCE_BARRIER transition(ID3D12Resource* resource, D3D12_RESOURCE_STATES before,
+                                  D3D12_RESOURCE_STATES after) {
+    D3D12_RESOURCE_BARRIER b{};
+    b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b.Transition.pResource = resource;
+    b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore = before;
+    b.Transition.StateAfter = after;
+    return b;
+}
+} // namespace
+void D3D12Renderer::prepareGrade(DXGI_FORMAT targetFormat) {
+    if (!gradeRoot_) {
+        D3D12_DESCRIPTOR_RANGE range{D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, 0};
+        D3D12_ROOT_PARAMETER parameters[2]{};
+        parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        parameters[0].DescriptorTable = {1, &range};
+        parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        parameters[1].Constants.Num32BitValues = 12;
+        parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        D3D12_STATIC_SAMPLER_DESC sampler{};
+        sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+        sampler.MaxLOD = D3D12_FLOAT32_MAX;
+        sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        D3D12_ROOT_SIGNATURE_DESC rs{2, parameters, 1, &sampler, D3D12_ROOT_SIGNATURE_FLAG_NONE};
+        ComPtr<ID3DBlob> signature, error;
+        hr(D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error),
+           "Serialize grade root signature");
+        hr(device_->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(),
+                                        IID_PPV_ARGS(&gradeRoot_)),
+           "Create grade root signature");
+        D3D12_DESCRIPTOR_HEAP_DESC heap{};
+        heap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        heap.NumDescriptors = 1;
+        heap.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        hr(device_->CreateDescriptorHeap(&heap, IID_PPV_ARGS(&gradeHeap_)), "Create grade descriptor heap");
+    }
+    if (gradePipeline_ && gradeFormat_ == targetFormat)
+        return;
+    // Light values throughout: an sRGB view decodes what it reads and encodes
+    // what it writes; through a plain one the shader does it.
+    const char* shader = R"(
+Texture2D source : register(t0);
+SamplerState linearClamp : register(s0);
+cbuffer Grade : register(b0) {
+    float4 lens; // tangents of the view: left, right, up, down
+    float2 pixel;
+    float amount, ripple, rippleStrength, entering;
+    uint decodeSource, encodeTarget;
+};
+float4 vs(uint id : SV_VertexID) : SV_POSITION {
+    const float2 corner = float2((id << 1) & 2, id & 2);
+    return float4(corner * float2(2, -2) + float2(-1, 1), 0, 1);
+}
+float3 decode(float3 c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
+float3 encode(float3 c) { return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1 / 2.4) - 0.055; }
+float3 light(float2 uv) {
+    const float3 c = source.SampleLevel(linearClamp, uv, 0).rgb;
+    return decodeSource ? decode(saturate(c)) : c;
+}
+float4 ps(float4 position : SV_POSITION) : SV_TARGET {
+    const float2 uv = position.xy * pixel;
+    // The pixel's direction from the eye, in tangents right and up of its axis:
+    // the rim and the ring are round about the lens, whatever the image's shape.
+    const float2 t = float2(lerp(lens.x, lens.y, uv.x), lerp(lens.z, lens.w, uv.y));
+    const float r = length(t);
+    float3 c;
+    float ring = 0;
+    if (ripple >= 0 && ripple < 1) {
+        // Out from the middle of the view to past its edge, slowing as it goes.
+        const float travelled = 1 - (1 - ripple) * (1 - ripple);
+        const float d = (r - lerp(.05, 2.0, travelled)) / (.08 + .22 * ripple);
+        ring = exp(-d * d) * (1 - ripple) * rippleStrength;
+        // The image under it bends outward, under a degree at its crest, red a
+        // little more than blue.
+        const float2 along = r > 1e-4 ? t / r : float2(0, 0);
+        const float2 shift = along * ring * .014 / float2(lens.y - lens.x, lens.w - lens.z);
+        c = float3(light(uv - shift * 1.35).r, light(uv - shift).g, light(uv - shift * .65).b);
+    } else {
+        c = light(uv);
+    }
+    // Drained toward grey, cooler, darker toward the rim.
+    const float luma = dot(c, float3(.2126, .7152, .0722));
+    float3 graded = lerp(c, luma.xxx, .55 * amount);
+    graded *= lerp(float3(1, 1, 1), float3(.84, .96, 1.18), amount);
+    graded *= 1 - .55 * amount * smoothstep(.5, 1.7, r);
+    graded += ring * (entering > .5 ? float3(.08, .2, .3) : float3(.2, .22, .24));
+    if (encodeTarget)
+        graded = encode(saturate(graded));
+    return float4(graded, 1);
+}
+)";
+    ComPtr<ID3DBlob> vs, ps;
+    const auto compile = [&](const char* entry, const char* target, ComPtr<ID3DBlob>& out) {
+        ComPtr<ID3DBlob> error;
+        const auto result = D3DCompile(shader, std::strlen(shader), "spidy_grade", nullptr, nullptr, entry,
+                                       target, D3DCOMPILE_ENABLE_STRICTNESS, 0, &out, &error);
+        if (FAILED(result) && error)
+            throw std::runtime_error(std::string("Compile grade shader: ") +
+                                     static_cast<const char*>(error->GetBufferPointer()));
+        hr(result, "Compile grade shader");
+    };
+    compile("vs", "vs_5_0", vs);
+    compile("ps", "ps_5_0", ps);
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};
+    p.pRootSignature = gradeRoot_.Get();
+    p.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
+    p.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
+    p.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    p.NumRenderTargets = 1;
+    p.RTVFormats[0] = targetFormat;
+    p.SampleDesc.Count = 1;
+    p.SampleMask = UINT_MAX;
+    p.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    p.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    p.RasterizerState.DepthClipEnable = TRUE;
+    auto& blend = p.BlendState.RenderTarget[0];
+    blend.SrcBlend = blend.SrcBlendAlpha = D3D12_BLEND_ONE;
+    blend.DestBlend = blend.DestBlendAlpha = D3D12_BLEND_ZERO;
+    blend.BlendOp = blend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    blend.LogicOp = D3D12_LOGIC_OP_NOOP;
+    blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    gradePipeline_.Reset();
+    hr(device_->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&gradePipeline_)), "Create grade pipeline");
+    gradeFormat_ = targetFormat;
+}
+void D3D12Renderer::recordGrade(const ViewTarget& target, D3D12_CPU_DESCRIPTOR_HANDLE rtv, const Grade& grade,
+                                unsigned view) {
+    const auto desc = target.texture->GetDesc();
+    // A typeless image is read through the target's own view; a typed one as it is.
+    const DXGI_FORMAT viewFormat = typeless(desc.Format) ? target.format : desc.Format;
+    // One copy serves both views, typed or typeless (the views share a size
+    // and a view format), so it never changes while a list records with it.
+    bool fresh = !gradeCopy_ || gradeViewFormat_ != viewFormat;
+    if (!fresh) {
+        const auto copy = gradeCopy_->GetDesc();
+        fresh = copy.Width != desc.Width || copy.Height != desc.Height || copy.Format != family(desc.Format) ||
+                copy.DepthOrArraySize != desc.DepthOrArraySize || copy.MipLevels != desc.MipLevels;
+    }
+    if (fresh) {
+        gradeCopy_.Reset();
+        auto d = desc;
+        d.Format = family(desc.Format);
+        d.Alignment = 0;
+        d.Flags = D3D12_RESOURCE_FLAG_NONE;
+        auto h = heap(D3D12_HEAP_TYPE_DEFAULT);
+        hr(device_->CreateCommittedResource(&h, D3D12_HEAP_FLAG_NONE, &d, D3D12_RESOURCE_STATE_COPY_DEST,
+                                            nullptr, IID_PPV_ARGS(&gradeCopy_)),
+           "Create grade copy");
+        gradeCopyState_ = D3D12_RESOURCE_STATE_COPY_DEST;
+        D3D12_SHADER_RESOURCE_VIEW_DESC sv{};
+        sv.Format = viewFormat;
+        sv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        sv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        sv.Texture2D.MipLevels = 1;
+        device_->CreateShaderResourceView(gradeCopy_.Get(), &sv,
+                                          gradeHeap_->GetCPUDescriptorHandleForHeapStart());
+        gradeViewFormat_ = viewFormat;
+    }
+    // The image aside (the copy of the view before waits for its draw).
+    D3D12_RESOURCE_BARRIER barriers[2] = {
+        transition(target.texture, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE),
+        transition(gradeCopy_.Get(), gradeCopyState_, D3D12_RESOURCE_STATE_COPY_DEST)};
+    list_->ResourceBarrier(gradeCopyState_ == D3D12_RESOURCE_STATE_COPY_DEST ? 1 : 2, barriers);
+    list_->CopyResource(gradeCopy_.Get(), target.texture);
+    barriers[0] =
+        transition(target.texture, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    barriers[1] = transition(gradeCopy_.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+                             D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    list_->ResourceBarrier(2, barriers);
+    gradeCopyState_ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    const auto& lens = grade.tangents[view < 2 ? view : 0];
+    const auto value = [](float v, float lo, float hi) {
+        return std::bit_cast<UINT>(std::isfinite(v) ? std::clamp(v, lo, hi) : lo);
+    };
+    const UINT constants[12] = {value(lens[0], -8, 8),
+                                value(lens[1], -8, 8),
+                                value(lens[2], -8, 8),
+                                value(lens[3], -8, 8),
+                                std::bit_cast<UINT>(1.f / static_cast<float>(target.width)),
+                                std::bit_cast<UINT>(1.f / static_cast<float>(target.height)),
+                                value(grade.amount, 0, 1),
+                                value(grade.ripple, -1, 1),
+                                value(grade.rippleStrength, 0, 1),
+                                std::bit_cast<UINT>(grade.entering ? 1.f : 0.f),
+                                srgb(viewFormat) ? 0u : 1u,
+                                srgb(target.format) ? 0u : 1u};
+    list_->SetPipelineState(gradePipeline_.Get());
+    list_->SetGraphicsRootSignature(gradeRoot_.Get());
+    ID3D12DescriptorHeap* heaps[] = {gradeHeap_.Get()};
+    list_->SetDescriptorHeaps(1, heaps);
+    list_->SetGraphicsRootDescriptorTable(0, gradeHeap_->GetGPUDescriptorHandleForHeapStart());
+    list_->SetGraphicsRoot32BitConstants(1, 12, constants, 0);
+    list_->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+    D3D12_VIEWPORT viewport{0, 0, static_cast<float>(target.width), static_cast<float>(target.height), 0, 1};
+    D3D12_RECT rect{0, 0, static_cast<LONG>(target.width), static_cast<LONG>(target.height)};
+    list_->RSSetViewports(1, &viewport);
+    list_->RSSetScissorRects(1, &rect);
+    list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    list_->DrawInstanced(3, 1, 0, 0);
 }
 void addBox(std::vector<Vertex>& out, Vec3 lo, Vec3 hi, Vec3 color) {
     Vec3 p[] = {{lo.x, lo.y, lo.z}, {hi.x, lo.y, lo.z}, {hi.x, hi.y, lo.z}, {lo.x, hi.y, lo.z},

@@ -661,8 +661,9 @@ void App::setupCard(float width) {
                 mark = Mark::error;
                 detail = scan_.gameSource == "Epic Games Store"
                              ? "Epic Games Store version. Spidy works with the Steam version only.\n" + path
-                             : "A different game version than the one Spidy supports. Spidy reads the game's code at "
-                               "fixed places, so a game update needs a Spidy update.\n" + path;
+                             : spidy::launcher::unsupportedGame(scan_.gameVersion, scan_.expectedVersion,
+                                                                scan_.steamApp) +
+                                   "\n" + path;
                 break;
             case Build::unreadable:
                 mark = Mark::error;
