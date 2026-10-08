@@ -11,11 +11,13 @@ constexpr const char* snapChoices[] = {"OFF", "15\xC2\xB0", "30\xC2\xB0", "45\xC
 constexpr const char* smoothChoices[] = {"OFF",          "60\xC2\xB0/S",  "90\xC2\xB0/S",
                                          "120\xC2\xB0/S", "180\xC2\xB0/S", "240\xC2\xB0/S"};
 constexpr const char* hapticChoices[] = {"OFF", "25%", "50%", "75%", "100%"};
+constexpr const char* weightChoices[] = {"40%", "60%", "80%", "100%", "125%", "150%", "200%", "250%", "300%"};
 constexpr const char* screenChoices[] = {"SMALL", "MEDIUM", "LARGE"};
 constexpr int screenSizes[] = {0, 1, 2};
 static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(snapChoices) == std::size(snapTurns) &&
               std::size(smoothChoices) == std::size(smoothTurns) &&
-              std::size(hapticChoices) == std::size(hapticLevels) && std::size(screenChoices) == std::size(screenSizes));
+              std::size(hapticChoices) == std::size(hapticLevels) && std::size(screenChoices) == std::size(screenSizes) &&
+              std::size(weightChoices) == std::size(weights));
 // A list setting's steps, or none for a switch.
 std::span<const int> steps(Item item) {
     switch (item) {
@@ -29,6 +31,8 @@ std::span<const int> steps(Item item) {
         return hapticLevels;
     case Item::screenSize:
         return screenSizes;
+    case Item::weight:
+        return weights;
     default:
         return {};
     }
@@ -45,6 +49,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.haptics);
     case Item::screenSize:
         return static_cast<float>(v.screenSize);
+    case Item::weight:
+        return static_cast<float>(v.weight);
     default:
         return 0;
     }
@@ -76,11 +82,12 @@ Values sanitized(Values v) {
     v.smoothTurn = std::clamp(v.smoothTurn, 0, 360);
     v.haptics = std::clamp(v.haptics, 0, 100);
     v.screenSize = std::clamp(v.screenSize, 0, 2);
+    v.weight = std::clamp(v.weight, 40, 300);
     return v;
 }
-const std::array<Row, 14>& rows() {
+const std::array<Row, 15>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 14> all{{
+    static const std::array<Row, 15> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::aimMarkers, "AIM MARKERS", "Show where each web would land. X also switches them during play.", {}},
         {Item::webGrab, "WEBS CATCH PROPS AND THUGS", "Grab, yank and throw props and thugs with your webs.", {}},
@@ -88,6 +95,8 @@ const std::array<Row, 14>& rows() {
          "With nothing in reach, a web still holds in open air, 100 m out.", {}},
         {Item::webShooter, "WEB SHOOTER", "A free hand's trigger shoots web balls at thugs.", {}},
         {Item::swingSpeed, "SWING SPEED LIMIT", "How fast a swing can carry you.", swingChoices},
+        {Item::weight, "WEIGHT", "How heavy you are while swinging and after letting go. 100% is real gravity.",
+         weightChoices},
         {Item::none, "BODY", nullptr, {}},
         {Item::body, "YOUR OWN BODY", "Spider-Man's body and hands. Off: the hands are drawn as gloves.", {}},
         {Item::punch, "PUNCH THUGS", "A fist that hits hard enough knocks a thug back.", {}},
@@ -143,6 +152,9 @@ bool choose(Item item, int index, Values& v) {
         break;
     case Item::screenSize:
         v.screenSize = s[index];
+        break;
+    case Item::weight:
+        v.weight = s[index];
         break;
     default:
         return false;

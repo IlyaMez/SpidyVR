@@ -20,6 +20,10 @@ struct Values {
     // Degrees a second the right stick turns you while held over; 0: it snap
     // turns instead.
     int smoothTurn = 0;
+    // How heavy you are while webs fly you (swinging, and after letting go
+    // until you land), percent of real gravity: the swing's gravity. 60 is
+    // the 6 m/s^2 Spidy has flown at since October 5, to within 2%.
+    int weight = 60;
     bool operator==(const Values&) const = default;
 };
 // The steps the game's Settings offer. The launcher's slider sets any swing
@@ -28,6 +32,13 @@ inline constexpr int swingSpeeds[] = {10, 15, 20, 25, 32, 40, 48, 56, 65};
 inline constexpr int snapTurns[] = {0, 15, 30, 45, 60, 90};
 inline constexpr int smoothTurns[] = {0, 60, 90, 120, 180, 240};
 inline constexpr int hapticLevels[] = {0, 25, 50, 75, 100};
+inline constexpr int weights[] = {40, 60, 80, 100, 125, 150, 200, 250, 300};
+// Real gravity, m/s^2: a weight of 100% falls at it.
+inline constexpr float realGravity = 9.81f;
+// The swing's gravity for a weight, m/s^2.
+inline float gravity(int weight) {
+    return realGravity * static_cast<float>(weight) / 100;
+}
 // The game screen's width for each size, metres, at screenDistance.
 inline constexpr float screenWidths[] = {2.4f, 3.2f, 4.2f};
 inline float screenWidth(int size) {
@@ -38,7 +49,7 @@ inline float screenWidth(int size) {
 inline constexpr float screenDistance = 2.5f;
 // The values within the session's ranges: swing speed 1-65 m/s (what
 // run_game_vr.py accepts), snap turn 0-90 degrees, smooth turn 0-360 degrees
-// a second, vibration 0-100%.
+// a second, vibration 0-100%, weight 40-300%.
 Values sanitized(Values);
 
 enum class Item : uint8_t {
@@ -54,8 +65,9 @@ enum class Item : uint8_t {
     haptics,
     screenSize,
     smoothTurn,
+    weight,
 };
-inline constexpr Item lastItem = Item::smoothTurn;
+inline constexpr Item lastItem = Item::weight;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. A setting without choices is an ON/OFF switch, the game's own;
 // one with choices steps through them. Titles are upper case, as the game's
@@ -66,7 +78,7 @@ struct Row {
     const char* help{};
     std::span<const char* const> choices{};
 };
-const std::array<Row, 14>& rows();
+const std::array<Row, 15>& rows();
 // The choice a setting shows for these values: a switch 0 (off) or 1 (on), a
 // list its step nearest to the value (a launcher value between two steps
 // shows the nearer one, the lower on a tie).

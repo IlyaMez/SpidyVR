@@ -377,7 +377,7 @@ def start_settings(a):
     """The VR settings a session starts with, as its samples' vr_settings report them."""
     return dict(aim_markers=not a.no_aim_markers, web_grab=not a.no_web_grab, air_webs=not a.no_air_webs,
                 web_shooter=not a.no_web_shooter, punch=not a.no_punch, body=not a.no_body,
-                swing_speed=round(a.swing_speed, 1),
+                swing_speed=round(a.swing_speed, 1), weight=a.weight,
                 snap_turn=a.snap_turn, smooth_turn=a.smooth_turn, haptics=a.haptics, screen_size=a.screen_size)
 
 
@@ -412,10 +412,10 @@ def pad_ignored(watch, sample, quiet=5):
 
 def snapshot(game, address):
     for _ in range(8):
-        raw = game.read(address, 744)
-        if len(raw) != 744:
+        raw = game.read(address, 752)
+        if len(raw) != 752:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53585244, 13, 744):
+        if struct.unpack_from('<3I', raw) != (0x53585244, 14, 752):
             raise RuntimeError('Game XR protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -457,10 +457,11 @@ def snapshot(game, address):
         flags, snap_turn, haptics, screen_size = struct.unpack_from('<4I', raw, 664)
         swing_speed, changes = struct.unpack_from('<fI', raw, 680)
         smooth_turn, = struct.unpack_from('<I', raw, 704)
+        weight, = struct.unpack_from('<I', raw, 744)
         result.update(vr_settings=dict(aim_markers=bool(aim_markers), web_grab=bool(flags & 1),
                                        air_webs=bool(flags & 8), web_shooter=bool(flags & 16),
                                        punch=bool(flags & 2), body=bool(flags & 4),
-                                       swing_speed=round(swing_speed, 1), snap_turn=snap_turn,
+                                       swing_speed=round(swing_speed, 1), weight=weight, snap_turn=snap_turn,
                                        smooth_turn=smooth_turn, haptics=haptics, screen_size=screen_size),
                       setting_changes=changes)
         menu_tabs, menu_installed, menu_status = struct.unpack_from('<Q2I', raw, 688)
@@ -828,6 +829,8 @@ def main():
     p.add_argument('--stock-monitor-view', action='store_true',
                    help="Keep the stock camera as the game's active view; culling and shadows then follow it, not the head")
     p.add_argument('--swing-speed', type=float, default=32, help='Native swing speed cap in m/s (default 32)')
+    p.add_argument('--weight', type=int, default=60,
+                   help='How heavy you are while webs fly you, in percent of real gravity (40..300; default 60)')
     p.add_argument('--snap-turn', type=int, default=30,
                    help='Degrees a flick of the right stick turns you (0: no snap turning; default 30)')
     p.add_argument('--smooth-turn', type=int, default=0,
@@ -853,6 +856,8 @@ def main():
         p.error('Use a render scale of %d..%d%%, and not with --size' % RENDER_SCALES)
     if not 0 <= a.snap_turn <= 90 or not 0 <= a.smooth_turn <= 360 or not 0 <= a.haptics <= 100:
         p.error('Use 0..90 degrees of snap turn, 0..360 degrees a second of smooth turn and 0..100% vibration')
+    if not 40 <= a.weight <= 300:
+        p.error('Use a weight of 40..300% of real gravity')
     keep_console(a.output)
     startup = Startup(a.output)
     try:
@@ -953,7 +958,7 @@ def session(a, startup):
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
                                            'SpidyBodyData'))
-        config = struct.pack('<4I7Q2IfI', 0x53585243, 13, 632, game.pid, game.base, queue,
+        config = struct.pack('<4I7Q2IfI', 0x53585243, 14, 632, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
@@ -962,7 +967,7 @@ def session(a, startup):
                              (64 if a.no_punch else 0) | (128 if a.no_aim_markers else 0) |
                              (256 if a.no_air_webs else 0) | (512 if a.no_web_shooter else 0)) + \
             runtime_path(manifest) + struct.pack('<6I', a.snap_turn, a.haptics, a.screen_size, a.smooth_turn,
-                                                 a.render_scale, 0)
+                                                 a.render_scale, a.weight)
         startup.stage = 'starting VR'
         code = call_with_payload(process, xr['SpidyXrStart'], config)
         if code:

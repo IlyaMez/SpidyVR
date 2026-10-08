@@ -3,6 +3,7 @@ param(
     [ValidateRange(0,8192)][int]$Size=0,
     [ValidateRange(50,200)][int]$RenderScale=100,
     [ValidateRange(1,65)][float]$SwingSpeed=32,
+    [ValidateRange(40,300)][int]$Weight=60,
     [ValidateRange(0,90)][int]$SnapTurn=30,
     [ValidateRange(0,360)][int]$SmoothTurn=0,
     [ValidateRange(0,100)][int]$Haptics=100,
@@ -112,9 +113,10 @@ if(-not $AttachOnly) { $captureArgs+=@('--auto-launch') }
 if($XrRuntime) { $captureArgs+=@('--xr-runtime',$XrRuntime) }
 if($SnapTurn -ne 30) { Write-Host "Snap turn: $SnapTurn degrees (0: off)." }
 if($SmoothTurn -ne 0) { Write-Host "Smooth turn: $SmoothTurn degrees a second (replaces snap turning)." }
+if($Weight -ne 60) { Write-Host "Weight: $Weight% of real gravity while webs fly you." }
 if($Haptics -ne 100) { Write-Host "Controller vibration: $Haptics%." }
 $screenIndex=@{Small=0;Medium=1;Large=2}[$ScreenSize]
 $captureArgs+=@('--snap-turn',$SnapTurn,'--smooth-turn',$SmoothTurn,'--haptics',$Haptics,'--screen-size',$screenIndex,
-               '--render-scale',$RenderScale)
+               '--render-scale',$RenderScale,'--weight',$Weight)
 & $Python (Join-Path $PSScriptRoot 'run_game_vr.py') --seconds $Seconds --size $Size --swing-speed $SwingSpeed --output $report @captureArgs
 exit $LASTEXITCODE

@@ -730,6 +730,24 @@ int main() {
         s.update(.01f,open,w);s.update(.01f,in,w);
         check(s.webs()[0].attached&&s.webs()[0].airAnchor,"switched on again, open air did not hold the web");
     });
+    test("the VR settings' weight changes the swing's gravity during play", [] {
+        TestWorld w;w.enabled=false;
+        auto config=inert();config.gravity=vr_settings::gravity(vr_settings::Values{}.weight);
+        Swing s(config);
+        const Input none;
+        const Body flying{{0,50,0},{},false};
+        near(config.gravity,5.886f);
+        near(s.predictNativeStep(.02f,none,w,flying).velocity.y,-5.886f*.02f);
+        s.setGravity(vr_settings::gravity(150));
+        near(s.config().gravity,14.715f);
+        near(s.predictNativeStep(.02f,none,w,flying).velocity.y,-14.715f*.02f);
+        for(const float bad:{std::numeric_limits<float>::quiet_NaN(),-1.f,std::numeric_limits<float>::infinity()}){
+            bool threw=false;
+            try{s.setGravity(bad);}catch(const std::invalid_argument&){threw=true;}
+            check(threw,"an invalid gravity accepted");
+        }
+        near(s.config().gravity,14.715f);
+    });
     test("sky anchors respect body occlusion and later world obstruction", [] {
         struct Occluded : TestWorld {
             mutable unsigned queries{};
@@ -3313,8 +3331,9 @@ int main() {
             for (const char* c : row.choices)
                 check(c && *c, "an empty choice");
         }
-        check(headings == 3 && all[0].item == Item::none && all[6].item == Item::none && all[9].item == Item::none,
+        check(headings == 3 && all[0].item == Item::none && all[7].item == Item::none && all[10].item == Item::none,
               "the sections: webs, body, comfort");
+        check(all[5].item == Item::swingSpeed && all[6].item == Item::weight, "the weight under the swing speed");
         check(seen == (2u << static_cast<unsigned>(lastItem)) - 2, "a setting missing");
         auto choicesOf = [&](Item item) {
             return std::find_if(all.begin(), all.end(), [&](const Row& r) { return r.item == item; })->choices.size();
@@ -3322,6 +3341,7 @@ int main() {
         check(choicesOf(Item::swingSpeed) == std::size(swingSpeeds) && choicesOf(Item::snapTurn) == std::size(snapTurns) &&
                   choicesOf(Item::smoothTurn) == std::size(smoothTurns) &&
                   choicesOf(Item::haptics) == std::size(hapticLevels) && choicesOf(Item::screenSize) == 3 &&
+                  choicesOf(Item::weight) == std::size(weights) &&
                   choicesOf(Item::body) == 0 && choicesOf(Item::aimMarkers) == 0,
               "lists: one choice per step; switches: the game's own ON and OFF");
     });
@@ -3330,8 +3350,9 @@ int main() {
         const Values defaults;
         check(choice(Item::aimMarkers, defaults) == 1 && choice(Item::swingSpeed, defaults) == 4 &&
                   choice(Item::snapTurn, defaults) == 2 && choice(Item::smoothTurn, defaults) == 0 &&
-                  choice(Item::haptics, defaults) == 4 && choice(Item::screenSize, defaults) == 1,
-              "the defaults as the tab shows them: ON, 32 m/s, 30 degrees, no smooth turning, 100%, medium");
+                  choice(Item::haptics, defaults) == 4 && choice(Item::screenSize, defaults) == 1 &&
+                  choice(Item::weight, defaults) == 1,
+              "the defaults as the tab shows them: ON, 32 m/s, 30 degrees, no smooth turning, 100%, medium, 60%");
         Values v;
         check(choose(Item::swingSpeed, 5, v) && v.swingSpeed == 40, "faster");
         check(!choose(Item::swingSpeed, 5, v), "the same choice changed something");
@@ -3350,6 +3371,16 @@ int main() {
         v.smoothTurn = 100;
         check(choice(Item::smoothTurn, v) == 2, "a launcher speed shows the step nearest to it");
         check(choose(Item::haptics, 1, v) && v.haptics == 25, "a quarter of the vibration");
+        check(choose(Item::weight, 3, v) && v.weight == 100 && choice(Item::weight, v) == 3, "real gravity");
+        check(choose(Item::weight, 8, v) && v.weight == 300 && !choose(Item::weight, 9, v) &&
+                  choose(Item::weight, 0, v) && v.weight == 40 && !choose(Item::weight, -1, v),
+              "300% is the heaviest, 40% the lightest");
+        v.weight = 70;
+        check(choice(Item::weight, v) == 1, "a launcher weight halfway shows the lighter step");
+        v.weight = 71;
+        check(choice(Item::weight, v) == 2, "past halfway, the heavier one");
+        near(gravity(100), 9.81f);
+        near(gravity(300), 29.43f);
         check(choose(Item::screenSize, 2, v) && v.screenSize == 2 && !choose(Item::screenSize, 3, v),
               "the large screen is the last");
         check(choose(Item::body, 0, v) && !v.body && choice(Item::body, v) == 0 && !choose(Item::body, 2, v) &&
@@ -3368,6 +3399,11 @@ int main() {
         Values spun;
         spun.smoothTurn = 999;
         check(sanitized(spun).smoothTurn == 360, "smooth turning past a turn a second");
+        Values heavy, light;
+        heavy.weight = 999;
+        light.weight = 0;
+        check(sanitized(heavy).weight == 300 && sanitized(light).weight == 40, "weights past either end");
+        check(gravity(300) <= game_swing::maxGravity, "the heaviest weight is more than a swing takes");
         near(screenWidth(0), 2.4f);
         near(screenWidth(7), 4.2f);
     });

@@ -9,6 +9,8 @@ namespace spidy::game_swing {
 // Gravity and air steering are the strengths the October 4-5 test builds
 // actually applied. Those builds configured 18 and 12, but steered from
 // one-step-old state (see InFlightStep), which applied about a third of each.
+// The VR settings' weight sets the gravity, at start and during play
+// (Settings), up to maxGravity.
 struct Config {
     uint32_t magic = 0x53574346, version = 1, bytes = sizeof(Config), pid{};
     uint64_t base{}, record{}, mover{}, motionModule{};
@@ -130,15 +132,19 @@ static_assert(sizeof(Config) == 64 && sizeof(Hand) == 52 && sizeof(Command) == 1
 // them here); off lets go of what they hold. maxSpeed: the speed limit, up to
 // 65 m/s, which the movement module is started with for that reason.
 // airWebs: a web that meets nothing within reach holds in open air there;
-// off, it misses (Swing::allowAirAnchors).
+// off, it misses (Swing::allowAirAnchors). gravity: the swing's, m/s^2 (the
+// VR settings' weight), up to maxGravity.
 struct Settings {
-    uint32_t magic = 0x53575354, version = 2, bytes = sizeof(Settings), grab = 1;
+    uint32_t magic = 0x53575354, version = 3, bytes = sizeof(Settings), grab = 1;
     float maxSpeed = 32;
     uint32_t airWebs = 1;
+    float gravity = 6;
 };
-static_assert(sizeof(Settings) == 24);
+static_assert(sizeof(Settings) == 28);
 // The movement module's own limit: every speed the VR settings offer.
 constexpr float motionSpeedLimit = 65;
+// The most gravity a swing takes, m/s^2: every weight the VR settings offer.
+constexpr float maxGravity = 30;
 static_assert(sizeof(WebState) == 28 && sizeof(Data) == 240);
 // What a grip press would do now with each hand (SpidyAimSample), for the
 // headset's aim markers: worked out in the world-query callback with the rays

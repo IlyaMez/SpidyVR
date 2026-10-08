@@ -100,6 +100,9 @@ class Swing {
     // A new speed limit during play (the VR settings). A body
     // faster than it slows to it in the next step.
     void limitSpeed(float maxSpeed);
+    // A new gravity during play (the VR settings' weight), m/s^2, from the
+    // next step.
+    void setGravity(float gravity);
     // Whether a clear shot attaches in the air at maximum reach from now on
     // (the VR settings); off, it misses. Webs already attached
     // keep their anchors.

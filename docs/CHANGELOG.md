@@ -3,7 +3,40 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 8, fourth build): fingers no longer twist in a
+**Latest build (October 8, fifth build): a WEIGHT setting for swinging.** You
+said moving through the air feels too floaty and asked for a weight setting
+in the game's settings. While webs fly you (swinging, and after you let go,
+until you land) Spidy decides how fast you fall, not the game, and since
+October 5 it has pulled at 6 m/s², about 60% of real gravity. That is the
+floatiness. The number kept what the October 4 builds applied in practice
+(they were set to 18 but applied a third of it), the swing feel you approved
+then. Settings > SPIDY VR has a new row under SWING SPEED LIMIT, **WEIGHT**:
+40%, 60% (the default: the feel you have now), 80%, 100% (real gravity), 125%,
+150%, 200%, 250% or 300% (about the game's own falls, which pull at 30 m/s²).
+A change takes hold at once, mid-swing too. Heavier, you drop faster after
+letting go, and swings run faster and shorter. Jumps and falls without a web
+stay the game's own. The launcher's options have a matching "Weight" list,
+`Launch Spidy VR.cmd` takes `-Weight 150`, and the next session starts with
+whatever you left it at in the headset. A heavier weight reaches the swing
+speed limit sooner (at 300%, a fall from rest reaches 32 m/s in about a
+second), so raise that limit too if you feel it cap your falls.
+Checked in the game without a headset, on your save: the SPIDY VR tab showed
+the row, the left stick stepped it from 60% to 80%, and RESET ALL put it back
+(`tools/probe_menu.py`). A new probe (`tools/probe_weight.py`) jumped off your
+perch, swung up on a web, let go, and changed the weight mid-flight as the
+tab does: Spider-Man fell at 5.88 m/s² at 60%, 14.72 at 150% and 29.53 at
+300% (asked: 5.89, 14.72 and 29.43), with every physics step in the air under
+Spidy's control. Your save files were unchanged except `slot0-s.save`, which
+the game saved itself when the probe left the pause menu, before the jump.
+172 core checks (new: the swing taking a new gravity during play, the row and
+its steps), the launcher checks, 86 Python checks and the GPU test pass. This
+build changes the VR protocol (the XR config and the XR data are version 14),
+so it went into your play folder as the whole package, built from the
+repository as it is now (the fist fix below included). How each weight feels
+needs the headset. Details:
+[docs/VALIDATION.md](VALIDATION.md).
+
+**Preceding build (October 8, fourth build): fingers no longer twist in a
 fist.** You reported that your fingers in VR look twisted and tangled in
 most poses. They did whenever a hand made a fist: a squeezed grip (every
 web) or a hand moving faster than 1.2 m/s, so most of play. The hand

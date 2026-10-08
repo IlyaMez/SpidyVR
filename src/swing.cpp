@@ -57,6 +57,11 @@ void Swing::limitSpeed(float maxSpeed) {
         throw std::invalid_argument("Invalid swing speed limit");
     config_.maxSpeed = maxSpeed;
 }
+void Swing::setGravity(float gravity) {
+    if (!std::isfinite(gravity) || gravity < 0)
+        throw std::invalid_argument("Invalid swing gravity");
+    config_.gravity = gravity;
+}
 void Swing::allowAirAnchors(bool allowed) {
     config_.airAnchors = allowed;
 }

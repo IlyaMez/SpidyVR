@@ -498,18 +498,18 @@ namespace {
 // The settings as XrData reports them: flags 1 web grab, 2 punch, 4 body,
 // 8 webs in open air, 16 web shooter, 32 aim markers.
 struct ProbeSettings {
-    uint32_t magic = 0x554e4d53, version = 2, bytes = sizeof(ProbeSettings), flags{};
+    uint32_t magic = 0x554e4d53, version = 3, bytes = sizeof(ProbeSettings), flags{};
     uint32_t snapTurn{}, haptics{}, screenSize{};
     float swingSpeed{};
-    uint32_t smoothTurn{};
+    uint32_t smoothTurn{}, weight{};
 };
-static_assert(sizeof(ProbeSettings) == 36);
+static_assert(sizeof(ProbeSettings) == 40);
 struct ProbeSample {
-    uint32_t magic = 0x554e4d53, version = 2, bytes = sizeof(ProbeSample), installed{};
+    uint32_t magic = 0x554e4d53, version = 3, bytes = sizeof(ProbeSample), installed{};
     uint64_t tabs{}, changes{};
     uint32_t status{}, flags{}, snapTurn{}, haptics{}, screenSize{};
     float swingSpeed{};
-    uint32_t smoothTurn{}, reserved{};
+    uint32_t smoothTurn{}, weight{};
 };
 static_assert(sizeof(ProbeSample) == 64);
 } // namespace
@@ -537,6 +537,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMenuStart(void* input) {
     v.haptics = static_cast<int>(s.haptics);
     v.screenSize = static_cast<int>(s.screenSize);
     v.swingSpeed = s.swingSpeed;
+    v.weight = static_cast<int>(s.weight);
     if (const auto code = install(reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr))))
         return code;
     publish(vr_settings::sanitized(v));
@@ -559,6 +560,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMenuSample(void* output) {
     s.haptics = static_cast<uint32_t>(v.haptics);
     s.screenSize = static_cast<uint32_t>(v.screenSize);
     s.swingSpeed = v.swingSpeed;
+    s.weight = static_cast<uint32_t>(v.weight);
     __try {
         if (reinterpret_cast<uintptr_t>(output) < 0x10000)
             return 9601;

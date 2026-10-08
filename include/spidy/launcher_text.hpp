@@ -219,6 +219,7 @@ struct SessionOptions {
     int haptics = 100;  // controller vibration, percent
     int screenSize = 1; // the game screen in the headset: 0 small, 1 medium, 2 large
     int smoothTurn = 0; // degrees a second the right stick turns you while held over; 0: it snap turns
+    int weight = 60;    // how heavy you are while webs fly you, percent of real gravity
     bool operator==(const SessionOptions&) const = default;
 };
 
@@ -254,7 +255,8 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
         {std::clamp(options.snapTurn, 0, 90), {L"--snap-turn", 30}},
         {std::clamp(options.smoothTurn, 0, 360), {L"--smooth-turn", 0}},
         {std::clamp(options.haptics, 0, 100), {L"--haptics", 100}},
-        {std::clamp(options.screenSize, 0, 2), {L"--screen-size", 1}}};
+        {std::clamp(options.screenSize, 0, 2), {L"--screen-size", 1}},
+        {std::clamp(options.weight, 40, 300), {L"--weight", 60}}};
     for (const auto& [value, flag] : settings)
         if (value != flag.second) {
             args.emplace_back(flag.first);
@@ -319,6 +321,8 @@ inline bool headsetSettings(std::string_view line, SessionOptions& options) {
             next.haptics = std::clamp(number, 0, 100);
         else if (key == "screen_size")
             next.screenSize = std::clamp(number, 0, 2);
+        else if (key == "weight")
+            next.weight = std::clamp(number, 40, 300);
     }
     const bool changed = !(next == options);
     options = next;

@@ -435,7 +435,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStart(void* input) {
             config.base != reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) || config.grabKinds > 0xe ||
             (config.durationMs && config.durationMs < 1000) || config.durationMs > 30000 ||
             !std::isfinite(config.maxSpeed) || config.maxSpeed <= 0 || config.maxSpeed > 65 ||
-            !std::isfinite(config.gravity) || config.gravity < 0 || config.gravity > 30) {
+            !std::isfinite(config.gravity) || config.gravity < 0 || config.gravity > maxGravity) {
             result = 1001;
             break;
         }
@@ -513,13 +513,13 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingRetarget(void* input) {
     return result;
 }
 // The VR settings during play: the speed limit, whether webs catch props and
-// thugs, and whether they hold in open air. All apply from the next step; the
-// visit holds `simulation`.
+// thugs, whether they hold in open air, and the gravity (weight). All apply
+// from the next step; the visit holds `simulation`.
 extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
     Settings s;
-    if (!copy(&s, input, sizeof(s)) || s.magic != 0x53575354 || s.version != 2 || s.bytes != sizeof(s) ||
+    if (!copy(&s, input, sizeof(s)) || s.magic != 0x53575354 || s.version != 3 || s.bytes != sizeof(s) ||
         s.grab > 1 || !std::isfinite(s.maxSpeed) || s.maxSpeed <= 0 || s.maxSpeed > motionSpeedLimit ||
-        s.airWebs > 1)
+        s.airWebs > 1 || !std::isfinite(s.gravity) || s.gravity < 0 || s.gravity > maxGravity)
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
     DWORD result{};
@@ -528,7 +528,9 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
     } else {
         AcquireSRWLockExclusive(&simulation);
         config.maxSpeed = s.maxSpeed;
+        config.gravity = s.gravity;
         solver.limitSpeed(s.maxSpeed);
+        solver.setGravity(s.gravity);
         solver.allowAirAnchors(s.airWebs != 0);
         // A swing started without the grab (-NoWebGrab) offers it from now on.
         if (s.grab && !game_grab::offering() && driveMotion && sampleDriven) {

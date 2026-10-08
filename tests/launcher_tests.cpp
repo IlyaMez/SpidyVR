@@ -116,16 +116,21 @@ int main() {
         options.smoothTurn = 120;
         options.haptics = 0;
         options.screenSize = 7;
+        options.weight = 150;
         args = sessionArguments(options, L"r.json", L"", L"");
         const std::vector<std::wstring> settings{L"--auto-launch", L"--seconds", L"0", L"--swing-speed", L"32",
                                                  L"--output", L"r.json", L"--render-scale", L"125", L"--snap-turn",
                                                  L"45", L"--smooth-turn", L"120", L"--haptics", L"0",
-                                                 L"--screen-size", L"2"};
+                                                 L"--screen-size", L"2", L"--weight", L"150"};
         check(args == settings, "the VR settings, the screen size capped at large");
         options = {};
         options.renderScale = 10;
         args = sessionArguments(options, L"r.json", L"", L"");
         check(args.size() == 9 && args[7] == L"--render-scale" && args[8] == L"50", "the render scale at least 50%");
+        options = {};
+        options.weight = 999;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 9 && args[7] == L"--weight" && args[8] == L"300", "the weight at most 300%");
     });
     test("the headset check's eye size and the memory larger eyes take", [] {
         const char* probe = "Headset available: Oculus Quest3; position tracking=1; orientation tracking=1. No session "
@@ -144,22 +149,23 @@ int main() {
     test("what the VR settings were left at in the headset becomes the next session's options", [] {
         SessionOptions options;
         check(headsetSettings("VR settings from the headset: aim_markers=0 web_grab=1 air_webs=0 web_shooter=0 "
-                              "punch=0 body=1 swing_speed=48 snap_turn=45 smooth_turn=90 haptics=50 screen_size=2\r",
+                              "punch=0 body=1 swing_speed=48 weight=150 snap_turn=45 smooth_turn=90 haptics=50 "
+                              "screen_size=2\r",
                               options),
               "the line changed nothing");
         check(!options.aimMarkers && options.webGrab && !options.airWebs && !options.webShooter && !options.punch &&
-                  options.body && options.swingSpeed == 48 && options.snapTurn == 45 && options.smoothTurn == 90 &&
-                  options.haptics == 50 && options.screenSize == 2,
+                  options.body && options.swingSpeed == 48 && options.weight == 150 && options.snapTurn == 45 &&
+                  options.smoothTurn == 90 && options.haptics == 50 && options.screenSize == 2,
               "every value, the last one before a carriage return");
         const auto kept = options;
         check(!headsetSettings("VR settings from the headset: aim_markers=0 punch=0", options) && options == kept,
               "the same values again");
         check(!headsetSettings("Game closed. Session report: r.json", options) && options == kept, "another line");
         check(headsetSettings("VR settings from the headset: swing_speed=99 snap_turn=x smooth_turn=999 haptics=-4 "
-                              "colour=3",
+                              "weight=7 colour=3",
                               options) &&
                   options.swingSpeed == 65 && options.snapTurn == 45 && options.smoothTurn == 360 &&
-                  options.haptics == 0,
+                  options.haptics == 0 && options.weight == 40,
               "values outside their ranges, unreadable ones and unknown keys");
     });
     test("log lines are coloured by what they say", [] {

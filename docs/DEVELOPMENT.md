@@ -275,10 +275,13 @@ button), choose Settings, then **SPIDY VR**, after KEY MAPPING (Up from GAME
 reaches it; the list wraps). The game builds and draws it with its own option
 code, so it handles like its other tabs: switch the aim markers, web grabbing,
 webs in open air, the web shooter, your body and punching, or step the swing
-speed limit, snap turn, smooth turn, controller vibration and the game
+speed limit, weight, snap turn, smooth turn, controller vibration and the game
 screen's size with left and right; X resets a setting, Y the whole tab (to
 Spidy's defaults). Changes apply at once; Spidy Launcher starts your next
-session with them. Smooth turn (off by default) replaces snap turning while it
+session with them. Weight is the swing's gravity in percent of real gravity
+(40-300%, 60% by default: Spidy's 6 m/s² since October 5), while webs fly the
+player and after letting go until landing (`Swing::setGravity`, game_swing
+`Settings` version 3). Smooth turn (off by default) replaces snap turning while it
 is on: the right stick turns you about your head at up to the chosen degrees a
 second, in proportion to its tilt past a 0.2 dead zone (full from 0.9)
 (`GameTrackingRig::smoothTurn`).
@@ -399,6 +402,7 @@ reattaching after a stopped session or a rebuilt DLL.
 | Option | Effect |
 |---|---|
 | `-SwingSpeed 32` | Swing speed limit in m/s (1-65) |
+| `-Weight 100` | How heavy you are while webs fly you, in percent of real gravity (40-300; 60 by default) |
 | `-SnapTurn 30` | Snap turn angle in degrees; 0 turns it off |
 | `-SmoothTurn 120` | Smooth turning in degrees a second at full tilt, instead of snap turning (0-360; 0, the default, snap turns) |
 | `-Haptics 100` | Controller vibration in percent; 0 turns it off |

@@ -525,6 +525,7 @@ Settings loadSettings() {
         else if (key == "smooth_turn") o.smoothTurn = std::clamp(number(), 0, 360);
         else if (key == "haptics") o.haptics = std::clamp(number(), 0, 100);
         else if (key == "screen_size") o.screenSize = std::clamp(number(), 0, 2);
+        else if (key == "weight") o.weight = std::clamp(number(), 40, 300);
         else if (key == "hash_path") settings.hashPath = widen(value);
         else if (key == "hash_size") settings.hashSize = std::strtoull(value.c_str(), nullptr, 10);
         else if (key == "hash_time") settings.hashTime = std::strtoull(value.c_str(), nullptr, 10);
@@ -547,7 +548,8 @@ void saveSettings(const Settings& settings) {
          << "\nstock_monitor_view=" << o.stockMonitorView << "\nbody=" << o.body << "\npunch=" << o.punch
          << "\naim_markers=" << o.aimMarkers << "\nair_webs=" << o.airWebs << "\nweb_shooter=" << o.webShooter
          << "\nrender_scale=" << o.renderScale
-         << "\nswing_speed=" << o.swingSpeed << "\nsnap_turn=" << o.snapTurn << "\nsmooth_turn=" << o.smoothTurn
+         << "\nswing_speed=" << o.swingSpeed << "\nweight=" << o.weight << "\nsnap_turn=" << o.snapTurn
+         << "\nsmooth_turn=" << o.smoothTurn
          << "\nhaptics=" << o.haptics << "\nscreen_size=" << o.screenSize << "\nhash_path=" << narrow(settings.hashPath)
          << "\nhash_size=" << settings.hashSize << "\nhash_time=" << settings.hashTime
          << "\nhash=" << settings.hashValue << "\nshortcuts_asked=" << settings.shortcutsAsked << "\n";

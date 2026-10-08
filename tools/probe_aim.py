@@ -177,9 +177,9 @@ def main():
         if args.settings:
             # The VR settings during play: the prop aim with the grab off (as started), switched on (the
             # grab starts now, its hooks under the swing's lock), off (presses swing), on again; each with
-            # another speed limit. A limit above 65 m/s is refused.
-            def settings(grab, speed, air=1):
-                return struct.pack('<4IfI', 0x53575354, 2, 24, grab, speed, air)
+            # another speed limit. A limit above 65 m/s is refused. The gravity stays the swing's 6 m/s^2.
+            def settings(grab, speed, air=1, gravity=6.):
+                return struct.pack('<4IfIf', 0x53575354, 3, 28, grab, speed, air, gravity)
             report['refused_settings'] = call_with_payload(process, rays['SpidySwingSettings'], settings(1, 70.))
             report['settings'] = []
             if props:

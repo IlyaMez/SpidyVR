@@ -319,9 +319,9 @@ has Settings fifth): it starts the tab's hooks with test values
 (`SpidyMenuStart`: 33 m/s, the web shooter off), pauses with the virtual Xbox
 controller, moving with its left stick as the Touch controllers do, opens
 Settings, goes Up to SPIDY VR and opens it, then switches the aim markers off,
-steps the swing speed to 40 m/s, switches the body off and resets it with X,
-steps snap turn to 45 degrees, smooth turn to 60 degrees a second, and resets
-the tab with Y and A. After each step
+steps the swing speed to 40 m/s and the weight to 80%, switches the body off
+and resets it with X, steps snap turn to 45 degrees, smooth turn to 60 degrees
+a second, and resets the tab with Y and A (13 changes in all). After each step
 it reads `SpidyMenuSample` (what the tab holds, the tabs built, the changes)
 and captures the window. It fails if a step left other values than expected or
 a hooked function does not start with the game's own bytes after
@@ -348,6 +348,21 @@ not survive `hold`, a module did not stop, or a hook entry was not restored.
 `--modules DIR` takes `spidy_movement_bridge.dll` and `spidy_ray_bridge.dll`
 from another folder (a play folder's build) for a before-and-after. Report:
 `reports/air-handoff.json` (`--output`).
+
+### Weight
+
+`python tools/probe_weight.py` after `tools/probe_menu_pad.py start` and
+`pad a --until-player` (the same loaded save as the midair probe). It starts
+the swing at the default weight (60%, 5.886 m/s²), jumps, webs the most open
+direction 60 degrees up, reels, lets go, and in that flight changes the weight
+through `SpidySwingSettings` as the SPIDY VR tab does: 0.6 s at 60%, 0.6 s at
+150%, 0.4 s at 300%. For each it fits the vertical acceleration of the
+airborne steps on game time (their `dt`, the first 0.1 s left out: the mover
+applies a command a step late). It fails if a weight's fall is more than 5%
+off 9.81 m/s² × weight / 100, a step in the air ran without Spidy's command,
+the player landed within a window, a gravity over 30 m/s² was not refused
+(2001), a module did not stop, or a hook entry was not restored. Report:
+`reports/weight-probe.json` (`--output`).
 
 ### Walls the game sticks the player to
 

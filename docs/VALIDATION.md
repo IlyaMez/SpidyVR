@@ -1,6 +1,73 @@
 # Validation — 2026-10-08
 
-## Fingers in a fist — current build
+## Weight — current build
+
+The user, October 8: "the locomotion in the air feels too floaty, lets maybe
+add controllable weight setting to ingame settings?"
+
+**Cause.** Flight Spidy owns (a web attached, then released flight until the
+player lands) falls under the swing solver's gravity, `game_swing::Config`
+6 m/s² since October 5 (`physicsConfig`): 61% of real gravity, a fifth of the
+game's own airborne gravity (the movement module's `air_gravity` reads 30.0
+m/s² in `reports/weight-probe.json`). 6 was what the October 4 builds applied
+in practice (configured 18, a third reaching the body through the one-step-old
+steering that `InFlightStep` fixed).
+
+**What it does.** `vr_settings::Values::weight`, percent of real gravity
+(9.81 m/s², `vr_settings::gravity`), 60 by default (5.886 m/s², 2% under the
+old 6). The SPIDY VR tab has a WEIGHT row under SWING SPEED LIMIT in WEBS (row
+6, setting number 0x206; the tab now runs 0x200-0x20e, BODY and COMFORT one
+lower) with 40, 60, 80, 100, 125, 150, 200, 250 and 300% (nine, the most a row
+takes); `Item::weight` is the last item. `Swing::setGravity` changes the
+solver's gravity from its next step; `SpidySwingSettings` takes it
+(`game_swing::Settings` version 3, 28 bytes, `gravity` up to `maxGravity`,
+30 m/s², else 2001), and the XR worker starts the swing with it and sends it
+with every settings change. Coasting without input after a break falls at it
+too.
+
+**Protocol.** XrConfig version 14, still 632 bytes: the spare word after the
+render scale is now `weight` (40-300; anything else is 1001). XrData version
+14, 752 bytes: `weight` at 744, then a spare word; Python
+`vr_settings.weight`, and the settings line for the launcher carries
+`weight=`. The menu probe's `ProbeSettings`/`ProbeSample` are version 3 (40
+and 64 bytes) with `weight`. Launcher: `SessionOptions::weight`, `--weight`
+(left out at 60), `weight=` in launcher.ini (40-300), a "Weight" list;
+`launch-game-vr.ps1 -Weight`; `run_game_vr.py --weight` (40-300).
+
+**Checks.** 172 core checks pass, new: the swing's fall over 20 ms at the
+default weight and at 150% after `setGravity` (velocity within 0.001 of
+gravity × time), NaN, negative and infinite gravities refused with the old one
+kept; the row under the swing speed, its nine steps, a launcher weight between
+two steps (70 shows 60%, 71 shows 80%), the 40-300 range, the heaviest weight
+within `maxGravity`. The launcher checks (the argument, its 300 cap, the
+headset line and its 40 floor), 86 Python checks (XrData v14 with the weight,
+the settings line) and the GPU test pass.
+
+In the game without a headset (fresh game, the user's save, perched where it
+loads; `probe_menu_pad.py start` + `pad a --until-player`, player at 33 s):
+`tools/probe_menu.py` passed every step, WEIGHT stepping from 60% to 80% with
+the left stick (change 3) and back to 60% with RESET ALL (13 changes), hooks
+restored. `tools/probe_weight.py` jumped, webbed the open direction, reeled
+1.1 s, let go and in that flight fitted the vertical acceleration of every
+airborne step on game time (about 200 steps a second in the small window):
+
+| Weight | Asked (m/s²) | Measured (m/s²) | Steps | Vertical speed |
+|---|---|---|---|---|
+| 60% | 5.886 | 5.884 | 99 in 0.505 s | 11.13 to 8.18 m/s |
+| 150% | 14.715 | 14.716 | 100 in 0.501 s | 6.65 to -0.67 m/s |
+| 300% | 29.430 | 29.530 | 60 in 0.301 s | -3.72 to -12.47 m/s |
+
+Every airborne step ran Spidy's command; the player landed after the last
+window; a gravity of 31 m/s² was refused (2001); the modules stopped and the
+hook entries were restored. Save files byte-identical but `slot0-s.save`,
+which the game saved itself at 12:26:29 (`[Save] Request save type 0`, the
+probe leaving the pause menu, before the jump); backup in
+`reports/backups/save-before-weight-probe-20261008-122456`.
+
+How each weight feels, and the XR worker taking the tab's change during a
+headset session, need the headset. In the next report: `vr_settings.weight`.
+
+## Fingers in a fist — preceding build
 
 The user, October 8: "my fingers in vr appear twisted and tangled in most
 poses". The hand crops of their October 7 23:11 session
@@ -68,7 +135,7 @@ for now; `probe_game_body.py --phases rig,ik,eyes --fists 0.5,1` is ready for
 it. In the next report read the hand crops in `<report>-eyes/`, and ask how
 the hands sit on the controllers (the palm turned 30°).
 
-## Render resolution above the headset's — preceding build
+## Render resolution above the headset's — earlier build
 
 The user, October 8: "right now we can't change resolution to be above our
 current headset making the game look blurry\aliased, maybe add an option to

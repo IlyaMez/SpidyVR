@@ -120,8 +120,8 @@ VR settings
   Switch the aim markers, catching props and thugs, webs holding in open air
   (a web that meets nothing within 100 m holds there; off, it misses), the
   web shooter, your own body and punching on or off, or step the swing speed
-  limit, snap turn, smooth turn, controller vibration and the game screen's
-  size. Changes apply at once. The launcher starts your next session with
+  limit, your weight, snap turn, smooth turn, controller vibration and the
+  game screen's size. Changes apply at once. The launcher starts your next session with
   them; its options show them too.
   The title screen's Options have no SPIDY VR tab: load your save first, or
   set them in the launcher.
@@ -170,6 +170,10 @@ IF SOMETHING IS WRONG
   reeling.
 - Snap turning makes you uneasy, or the vibration is too strong: Settings >
   SPIDY VR has both.
+- Swinging feels floaty, or falls too hard: WEIGHT in Settings > SPIDY VR
+  (or "Weight" in the launcher's options) sets how heavy you are while
+  swinging and after letting go, until you land: 100% is real gravity, 60%
+  the default, up to 300%. Jumps and falls without a web are the game's own.
 - You would rather turn smoothly than in steps: SMOOTH TURN in Settings >
   SPIDY VR (or "Smooth turn" in the launcher's options). If it makes you
   uneasy, try a slower speed, or OFF for snap turning again.

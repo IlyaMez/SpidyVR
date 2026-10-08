@@ -63,6 +63,8 @@ constexpr int kSmoothValues[] = {0, 60, 90, 120, 180, 240};
 constexpr const char* kHaptics[] = {"Off", "25%", "50%", "75%", "100%"};
 constexpr int kHapticValues[] = {0, 25, 50, 75, 100};
 constexpr const char* kScreenSizes[] = {"Small", "Medium", "Large"};
+constexpr const char* kWeights[] = {"40%", "60%", "80%", "100%", "125%", "150%", "200%", "250%", "300%"};
+constexpr int kWeightValues[] = {40, 60, 80, 100, 125, 150, 200, 250, 300};
 
 } // namespace
 
@@ -976,6 +978,9 @@ void App::optionsCard(ImVec2 size) {
         }
         ImGui::PopFont();
     };
+    option("Weight", "How heavy you are while swinging and after letting go. 100% is real gravity.", S(150), [&] {
+        stepCombo("##weight", kWeights, kWeightValues, static_cast<int>(std::size(kWeightValues)), &o.weight);
+    });
     option("Snap turn", "How far a flick of the right stick turns you.", S(150), [&] {
         stepCombo("##snap", kSnapTurns, kSnapValues, static_cast<int>(std::size(kSnapValues)), &o.snapTurn);
     });
