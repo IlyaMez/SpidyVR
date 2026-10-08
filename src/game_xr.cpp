@@ -2,6 +2,7 @@
 #include "spidy/native_appearance.hpp"
 #include "spidy/native_body.hpp"
 // The input bridge remains a separately verified, separately stoppable module.
+#include "spidy/body_calibration.hpp"
 #include "spidy/eye_resolution.hpp"
 #include "spidy/eye_snapshot.hpp"
 #include "spidy/game_bridge_protocol.hpp"
@@ -24,6 +25,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <stdexcept>
@@ -31,7 +33,7 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 14, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 15, bytes = sizeof(XrConfig), pid{};
     // record and mover are no longer used: VR starts with the game, before
     // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
@@ -45,7 +47,9 @@ struct XrConfig {
     // bit 6: no punching (fists pass through thugs);
     // bit 7: aim markers start hidden (X shows them in VR);
     // bit 8: no webs in open air (a web that meets nothing within reach misses);
-    // bit 9: no web shooter (a free hand's trigger shoots nothing)
+    // bit 9: no web shooter (a free hand's trigger shoots nothing);
+    // bit 10: no T-pose calibration at the first gameplay of a session without
+    // one (the player skipped it before; the SPIDY VR tab still offers it)
     uint32_t options{};
     // OpenXR runtime manifest the launcher chose; empty: Virtual Desktop's if
     // installed, else Windows' active runtime.
@@ -59,8 +63,11 @@ struct XrConfig {
     // (eye_resolution.hpp; with eyeSize set, 100), and the player's weight
     // while webs fly them, in percent of real gravity (40-300).
     uint32_t renderScale = 100, weight = 60;
+    // The player's T-pose calibration (body_calibration.hpp): the eye height
+    // and arm length their body is sized to, millimetres. Both 0: none yet.
+    uint32_t eyeHeightMm{}, armLengthMm{};
 };
-static_assert(sizeof(XrConfig) == 632);
+static_assert(sizeof(XrConfig) == 640);
 // Why the last frame had no gameplay (XrData::gate bits).
 enum GateReason : uint32_t {
     gateNoPlayer = 1,     // no save loaded, or a level change in progress
@@ -70,7 +77,7 @@ enum GateReason : uint32_t {
     gateTracking = 16,    // the headset's pose or timing was not usable
 };
 struct XrData {
-    uint32_t magic = 0x53585244, version = 14, bytes = sizeof(XrData), status{};
+    uint32_t magic = 0x53585244, version = 15, bytes = sizeof(XrData), status{};
     int64_t sequence{};
     uint64_t frames{}, tracked{}, submitted{}, dropped{}, leftHands{}, rightHands{}, serial{}, generation{};
     uint32_t nativeKeys{}, error{};
@@ -125,8 +132,18 @@ struct XrData {
     // The weight now, percent of real gravity (the swing's gravity while webs
     // fly the player). spare is 0.
     uint32_t weight{}, spare{};
+    // The T-pose calibration (body_calibration.hpp): its phase now and what its
+    // panel asks for (Phase, Hint), how far the hold is (0-1); the eye height
+    // and arm length the body is sized to (mm; 0: the headset's running height
+    // and the hero's own arms); calibrations finished and skipped this session;
+    // calibrationFlags bit 0: a session without one asks for none at its first
+    // gameplay (skipped); each arm's reach at the last one (m, 0 the left).
+    uint32_t calibrationPhase{}, calibrationHint{};
+    float calibrationProgress{};
+    uint32_t eyeHeightMm{}, armLengthMm{}, calibrations{}, calibrationSkips{}, calibrationFlags{};
+    float calibrationReach[2]{};
 };
-static_assert(sizeof(XrData) == 752);
+static_assert(sizeof(XrData) == 792);
 extern "C" {
 __declspec(dllexport) XrData SpidyXrData;
 __declspec(dllexport) XrTimingData SpidyXrTimingData;
@@ -300,6 +317,8 @@ DWORD WINAPI run(void*) {
         bool aimSwitchHeld = true;
         uint64_t markersDrawn{};
         game_swing::AimData aims{};
+        // Each hand's aim marker, steadied from eye image to eye image.
+        std::array<AimMarkerMotion, 2> aimMotion;
         GameTrackingRig rig;
         GameMotionFrame motion;
         NativeEyeHistory history;
@@ -354,6 +373,27 @@ DWORD WINAPI run(void*) {
         uint32_t surfaceEntries{};
         uint64_t surfaceFrames{};
         bool wasOnSurface{};
+        // The player's size for the body: their T-pose calibration (the
+        // launch's, or one made in this session), else the headset's running
+        // height and the hero's own arms. A session with the body and without
+        // a calibration asks for one at its first gameplay unless the player
+        // skipped it before; the SPIDY VR tab asks again (CALIBRATE BODY: ON
+        // RESUME).
+        float calibratedEye = static_cast<float>(config.eyeHeightMm) / 1000;
+        float calibratedArm = static_cast<float>(config.armLengthMm) / 1000;
+        bool calibrationPrompt = !(config.options & 1024);
+        bool calibrationWanted = calibrationPrompt && !config.eyeHeightMm && values.body;
+        body_calibration::Calibration calibration;
+        body_calibration::Measurements lastCalibration{};
+        // The panel's place in the tracking space, ahead of where the player
+        // faced as it appeared; since when VR has shown play; when the result
+        // appeared.
+        Pose calibrationPanel{};
+        uint64_t immersiveSince{}, calibrationShownAt{};
+        // From the calibration's start until each is let go after it, the
+        // triggers, grips, A and B do nothing in the game (B skips it).
+        bool calibrationInput{}, skipHeld{};
+        uint32_t calibrations{}, calibrationSkips{};
         LARGE_INTEGER frequency{};
         QueryPerformanceFrequency(&frequency);
         // Puts the settings into effect: at once, or when the module they
@@ -577,6 +617,91 @@ DWORD WINAPI run(void*) {
                     }
                     wasGameplay = motion.active;
                     const bool controlsVisible = recentPresentation(lastNewImageMs, GetTickCount64());
+                    // The T-pose calibration: at the first gameplay of a session
+                    // without one, or when the SPIDY VR tab asks for it, once VR
+                    // has shown play for a moment and no web flies the player. It
+                    // goes on only while VR shows play (a pause or the flat
+                    // screen holds it), and B skips it.
+                    using CalibrationPhase = body_calibration::Phase;
+                    const bool immersive = viewing && motion.active && !flatScreen && controlsVisible;
+                    const uint64_t nowMs = GetTickCount64();
+                    if (!immersive)
+                        immersiveSince = 0;
+                    else if (!immersiveSince)
+                        immersiveSince = nowMs;
+                    const bool skipPressed = (frame.buttons & buttonB) && !skipHeld;
+                    skipHeld = (frame.buttons & buttonB) != 0;
+                    if (calibration.phase() == CalibrationPhase::idle && (calibrationWanted || values.calibrate) &&
+                        immersive && nowMs - immersiveSince >= 1500 && !swingState.owned) {
+                        calibration.start();
+                        calibrationPanel = body_calibration::panelPose(frame.head);
+                        calibrationInput = true;
+                        values.calibrate = false; // the tab shows NO again
+                        runtime.haptic(0, .3f);
+                        runtime.haptic(1, .3f);
+                        message(3, 0, "Body calibration: stand in a T-pose and hold both triggers (B skips)");
+                    } else if (calibration.phase() == CalibrationPhase::done) {
+                        if (nowMs - calibrationShownAt >= 3500)
+                            calibration.stop();
+                    } else if (calibration.phase() != CalibrationPhase::idle && immersive && skipPressed) {
+                        calibration.stop();
+                        ++calibrationSkips;
+                        // Nor at the next sessions' first gameplay (the launcher keeps it).
+                        calibrationWanted = calibrationPrompt = false;
+                        runtime.haptic(1, .25f);
+                        message(3, 0, "Body calibration skipped - Settings > SPIDY VR > CALIBRATE BODY does it later");
+                    } else if (calibration.phase() != CalibrationPhase::idle && immersive) {
+                        body_calibration::Sample sample;
+                        sample.headTracked = validTrackedPose(frame.head);
+                        sample.head = frame.head;
+                        for (unsigned i = 0; i < 2; ++i) {
+                            const auto& hand = frame.hands[i];
+                            sample.handTracked[i] = hand.valid && validTrackedPose(hand.grip);
+                            sample.grips[i] = hand.grip;
+                            sample.triggers[i] = hand.trigger;
+                        }
+                        sample.seconds = frame.seconds;
+                        // The hero's rig once the body has turned it, else Spider-Man's measured one.
+                        body_calibration::Proportions sizes;
+                        native_body::proportions(sizes);
+                        const auto before = calibration.phase();
+                        if (calibration.update(sample, sizes)) {
+                            lastCalibration = calibration.result();
+                            calibratedEye = std::clamp(lastCalibration.eyeHeight,
+                                                       body_calibration::minEyeHeightMm / 1000.f,
+                                                       body_calibration::maxEyeHeightMm / 1000.f);
+                            calibratedArm = std::clamp(lastCalibration.armLength,
+                                                       body_calibration::minArmLengthMm / 1000.f,
+                                                       body_calibration::maxArmLengthMm / 1000.f);
+                            ++calibrations;
+                            calibrationWanted = false;
+                            calibrationShownAt = nowMs;
+                            runtime.haptic(0, .7f);
+                            runtime.haptic(1, .7f);
+                            char text[160];
+                            sprintf_s(text, "Body calibrated: eye height %.2f m, arm length %.2f m (left %.2f, right %.2f)",
+                                      calibratedEye, calibratedArm, lastCalibration.reach[0], lastCalibration.reach[1]);
+                            message(3, 0, text);
+                        } else if (before == CalibrationPhase::waiting &&
+                                   calibration.phase() == CalibrationPhase::holding) {
+                            // The pose counts: a light tick in both hands.
+                            runtime.haptic(0, .15f);
+                            runtime.haptic(1, .15f);
+                        }
+                    }
+                    if (calibrationInput && calibration.phase() == CalibrationPhase::idle) {
+                        bool held = (frame.buttons & buttonB) || frame.jump;
+                        for (const auto& hand : frame.hands)
+                            held = held || hand.trigger > .2f || hand.squeeze > .2f;
+                        calibrationInput = held;
+                    }
+                    if (calibrationInput) {
+                        // The calibration has the controllers: no web, web ball or jump.
+                        motion.swing.jump = false;
+                        motion.nativeKeys &= ~swingJumpKey;
+                        for (auto& hand : motion.swing.hands)
+                            hand.trigger = hand.grip = 0;
+                    }
                     if (motion.active && !raysStarted) {
                         native_rays::Config rays;
                         rays.pid = config.pid;
@@ -733,8 +858,9 @@ DWORD WINAPI run(void*) {
                             walk.right = motion.walkRight;
                             walk.forward = motion.walkForward;
                             // B is the game's Y: interact, or web strike in a fight.
-                            // Not while a web carries the player.
-                            walk.interact = interactOrigin == Origin::play;
+                            // Not while a web carries the player, nor while it skips
+                            // the calibration.
+                            walk.interact = interactOrigin == Origin::play && !calibrationInput;
                         }
                         walk.jump = (keys & swingJumpKey) != 0;
                         auto pad = game_pad::fromControllers(frame, mapping, walk);
@@ -788,6 +914,17 @@ DWORD WINAPI run(void*) {
                             d.surfaceHeight = motion.surfaceHeight;
                             d.surfaceClearance = motion.surfaceClearance;
                         }
+                        const bool calibrating = calibration.phase() != body_calibration::Phase::idle;
+                        d.calibrationPhase = static_cast<uint32_t>(calibration.phase());
+                        d.calibrationHint = calibrating ? static_cast<uint32_t>(calibration.hint()) : 0u;
+                        d.calibrationProgress = calibrating ? calibration.progress() : 0.f;
+                        d.eyeHeightMm = static_cast<uint32_t>(std::lround(calibratedEye * 1000));
+                        d.armLengthMm = static_cast<uint32_t>(std::lround(calibratedArm * 1000));
+                        d.calibrations = calibrations;
+                        d.calibrationSkips = calibrationSkips;
+                        d.calibrationFlags = calibrationPrompt ? 0u : 1u;
+                        d.calibrationReach[0] = lastCalibration.reach[0];
+                        d.calibrationReach[1] = lastCalibration.reach[1];
                         std::memcpy(d.head, motion.head.data(), 64);
                         const Mat4 basis = {1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1};
                         for (unsigned i = 0; i < 2; ++i) {
@@ -861,7 +998,8 @@ DWORD WINAPI run(void*) {
                         native_body::Command pose;
                         pose.serial = serial;
                         pose.flags = (flatScreen || !values.body ? 0u : native_body::bodyOn) | native_body::hideHead |
-                                     native_body::handTurn | (swingState.owned ? native_body::airborne : 0u);
+                                     native_body::handTurn | (swingState.owned ? native_body::airborne : 0u) |
+                                     (calibratedEye > 0 ? native_body::calibrated : 0u);
                         pose.eyes = Vec3{(motion.eyes[0][12] + motion.eyes[1][12]) / 2,
                                          (motion.eyes[0][13] + motion.eyes[1][13]) / 2,
                                          (motion.eyes[0][14] + motion.eyes[1][14]) / 2} -
@@ -883,7 +1021,8 @@ DWORD WINAPI run(void*) {
                             pose.hands[i] = {motion.grips[i].position - motion.anchor, motion.grips[i].orientation,
                                              tracked ? 1u : 0u, fists[i]};
                         }
-                        pose.height = standingEye;
+                        pose.height = calibratedEye > 0 ? calibratedEye : standingEye;
+                        pose.armLength = calibratedArm;
                         pose.trackingYaw = motion.swing.trackingYaw;
                         native_body::submit(pose);
                     }
@@ -914,6 +1053,23 @@ DWORD WINAPI run(void*) {
                         saved.webs[i] = swingState.webs[i];
                         saved.webTimes[i] = webTimes[i];
                         saved.aims[i] = aims.hands[i];
+                    }
+                    if (calibration.phase() != body_calibration::Phase::idle) {
+                        // The panel stays where it appeared in the room; the tracking
+                        // space is where this frame's head puts it in the world.
+                        auto& view = saved.calibration;
+                        view.phase = calibration.phase();
+                        view.hint = calibration.hint();
+                        view.progress = calibration.progress();
+                        view.ready = calibration.armsReady();
+                        view.result = calibration.result();
+                        view.result.eyeHeight = calibratedEye;
+                        view.result.armLength = calibratedArm;
+                        view.panel = compose(compose(motion.headPose, inverse(frame.head)), calibrationPanel);
+                        for (unsigned i = 0; i < 2; ++i) {
+                            view.handTracked[i] = frame.hands[i].valid && validTrackedPose(frame.hands[i].grip);
+                            view.grips[i] = motion.grips[i];
+                        }
                     }
                     history.remember(saved);
                     const auto code = SpidySetEyes(&eyes);
@@ -1039,20 +1195,32 @@ DWORD WINAPI run(void*) {
                             }
                         }
                         // Aim markers: where each free hand's grip press would send its
-                        // web, on the line that hand points along in this image.
-                        for (unsigned hand = 0; !saved->flatScreen && hand < 2; ++hand) {
-                            const auto& aim = saved->aims[hand];
+                        // web, on the line that hand points along in this image, that
+                        // line steadied from image to image. Translucent, the farthest
+                        // drawn first.
+                        std::vector<AimMarker> marks;
+                        for (unsigned hand = 0; hand < 2; ++hand) {
+                            auto& steady = aimMotion[hand];
                             const auto& input = rendered.swing.hands[hand];
-                            const auto kind = static_cast<game_swing::AimKind>(aim.kind);
-                            if (kind == game_swing::AimKind::none || kind > game_swing::AimKind::character ||
-                                !input.tracked || saved->webs[hand].attached)
+                            if (saved->flatScreen) {
+                                steady.reset();
                                 continue;
+                            }
+                            steady.begin(shown);
+                            if (!input.tracked) {
+                                steady.markers(nullptr, {}, {}, marks);
+                                continue;
+                            }
+                            const auto& aim = saved->aims[hand];
+                            const auto kind = static_cast<game_swing::AimKind>(aim.kind);
                             // The hand moved with the player to this image, as its glove does.
                             const Vec3 origin = input.aim.position + travel;
-                            const Vec3 direction = normalized(input.aim.orientation.rotate({0, 0, -1}));
+                            const Vec3 direction = steady.aim(normalized(input.aim.orientation.rotate({0, 0, -1})),
+                                                              rendered.swing.trackingYaw);
                             const float reach = length(aim.point - input.aim.position);
                             AimMarker marker;
                             marker.squeeze = input.grip;
+                            marker.hand = hand;
                             switch (kind) {
                             case game_swing::AimKind::prop:
                             case game_swing::AimKind::character:
@@ -1079,10 +1247,26 @@ DWORD WINAPI run(void*) {
                             const float nearest = marker.kind == AimMark::target    ? .5f
                                                   : marker.kind == AimMark::blocked ? 3.f
                                                                                     : 2.f;
-                            if (!(away >= nearest))
-                                continue;
-                            appendAimMarker(vertices, marker, viewer, pixelAngle * markerPixels);
-                            ++markersDrawn;
+                            const bool wanted = kind != game_swing::AimKind::none &&
+                                                kind <= game_swing::AimKind::character &&
+                                                !saved->webs[hand].attached && away >= nearest;
+                            steady.markers(wanted ? &marker : nullptr, origin, direction, marks);
+                            markersDrawn += wanted;
+                        }
+                        std::sort(marks.begin(), marks.end(), [&](const AimMarker& a, const AimMarker& b) {
+                            return length(a.point - viewer) > length(b.point - viewer);
+                        });
+                        std::vector<Vertex> translucent;
+                        for (const auto& mark : marks)
+                            appendAimMarker(translucent, mark, viewer, pixelAngle * markerPixels);
+                        // The T-pose calibration's panel and controller rings, moved with
+                        // the player to this image as the hands are.
+                        if (!saved->flatScreen && saved->calibration.phase != body_calibration::Phase::idle) {
+                            auto view = saved->calibration;
+                            view.panel.position += travel;
+                            for (auto& grip : view.grips)
+                                grip.position += travel;
+                            body_calibration::appendView(vertices, view, viewer);
                         }
                         std::array<D3D12Renderer::ViewTarget, 2> overlayViews;
                         for (unsigned eye = 0; eye < 2; ++eye) {
@@ -1098,7 +1282,7 @@ DWORD WINAPI run(void*) {
                                                  vp};
                         }
                         if (!saved->flatScreen)
-                            overlay.renderViews(overlayViews, vertices, true, false);
+                            overlay.renderViews(overlayViews, vertices, true, false, translucent);
                         overlayMs = std::chrono::duration<double, std::milli>(
                                         std::chrono::steady_clock::now() - overlayStart)
                                         .count();
@@ -1270,16 +1454,22 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 14 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 15 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
-        !config.motionModule || config.options > 1023 || config.snapTurn > 90 || config.haptics > 100 ||
+        !config.motionModule || config.options > 2047 || config.snapTurn > 90 || config.haptics > 100 ||
         config.screenSize > 2 || config.smoothTurn > 360 ||
         !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 || config.swingSpeed > 65 ||
         (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||
         (config.eyeSize && !validEyeSize(config.eyeSize)) || !validRenderScale(config.renderScale) ||
         (config.eyeSize && config.renderScale != 100) || config.weight < 40 || config.weight > 300)
+        return 1001;
+    // A calibration is both measurements or neither.
+    if ((config.eyeHeightMm == 0) != (config.armLengthMm == 0) ||
+        (config.eyeHeightMm &&
+         (config.eyeHeightMm < body_calibration::minEyeHeightMm || config.eyeHeightMm > body_calibration::maxEyeHeightMm ||
+          config.armLengthMm < body_calibration::minArmLengthMm || config.armLengthMm > body_calibration::maxArmLengthMm)))
         return 1001;
     auto module = reinterpret_cast<HMODULE>(config.bridgeModule);
     submitInput = reinterpret_cast<BridgeCall>(GetProcAddress(module, "SpidySubmit"));

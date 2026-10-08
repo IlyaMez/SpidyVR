@@ -102,13 +102,12 @@ int main() {
                                                  L"--output", L"r.json", L"--xr-runtime", L"vd.json",
                                                  L"--stop-event", L"Local\\Stop"};
         check(args == defaults, "defaults");
-        options = {false, true, false, true, 2048, 90, false, false, false, false, false};
+        options = {false, true, 2048, 90, false, false};
         args = sessionArguments(options, L"r.json", L"", L"");
         const std::vector<std::wstring> changed{L"--auto-launch", L"--seconds", L"0", L"--swing-speed", L"65",
-                                                L"--output", L"r.json", L"--overlay-webs", L"--no-web-grab",
-                                                L"--full-desktop-view", L"--stock-monitor-view", L"--no-body",
-                                                L"--no-punch", L"--no-aim-markers", L"--no-air-webs",
-                                                L"--no-web-shooter", L"--render-scale", L"200"};
+                                                L"--output", L"r.json", L"--full-desktop-view",
+                                                L"--stock-monitor-view", L"--no-aim-markers", L"--no-air-webs",
+                                                L"--render-scale", L"200"};
         check(args == changed, "every flag, speed capped at 65 and the render scale at 200%");
         options = {};
         options.renderScale = 125;
@@ -153,13 +152,16 @@ int main() {
                               "screen_size=2\r",
                               options),
               "the line changed nothing");
-        check(!options.aimMarkers && options.webGrab && !options.airWebs && !options.webShooter && !options.punch &&
-                  options.body && options.swingSpeed == 48 && options.weight == 150 && options.snapTurn == 45 &&
-                  options.smoothTurn == 90 && options.haptics == 50 && options.screenSize == 2,
+        check(!options.aimMarkers && !options.airWebs && options.swingSpeed == 48 && options.weight == 150 &&
+                  options.snapTurn == 45 && options.smoothTurn == 90 && options.haptics == 50 &&
+                  options.screenSize == 2,
               "every value, the last one before a carriage return");
         const auto kept = options;
-        check(!headsetSettings("VR settings from the headset: aim_markers=0 punch=0", options) && options == kept,
+        check(!headsetSettings("VR settings from the headset: aim_markers=0 air_webs=0", options) && options == kept,
               "the same values again");
+        check(!headsetSettings("VR settings from the headset: web_grab=0 web_shooter=0 punch=0 body=0", options) &&
+                  options == kept,
+              "web grab, the web shooter, punching and the body are no options");
         check(!headsetSettings("Game closed. Session report: r.json", options) && options == kept, "another line");
         check(headsetSettings("VR settings from the headset: swing_speed=99 snap_turn=x smooth_turn=999 haptics=-4 "
                               "weight=7 colour=3",
@@ -167,6 +169,45 @@ int main() {
                   options.swingSpeed == 65 && options.snapTurn == 45 && options.smoothTurn == 360 &&
                   options.haptics == 0 && options.weight == 40,
               "values outside their ranges, unreadable ones and unknown keys");
+    });
+    test("a T-pose calibration in the headset sizes every next session, until Redo", [] {
+        SessionOptions options;
+        check(!calibrated(options) && options.calibrationPrompt, "a new launcher has one");
+        // Calibrated in the headset: eyes 1.63 m high, arms 0.59 m.
+        check(headsetSettings("VR settings from the headset: aim_markers=1 air_webs=1 swing_speed=32 weight=60 "
+                              "snap_turn=30 smooth_turn=0 haptics=100 screen_size=1 eye_height_mm=1630 "
+                              "arm_length_mm=590 calibration_prompt=1",
+                              options) &&
+                  calibrated(options) && options.eyeHeightMm == 1630 && options.armLengthMm == 590,
+              "the calibration did not come back from the headset");
+        auto args = sessionArguments(options, L"r.json", L"", L"");
+        const std::vector<std::wstring> sized{L"--auto-launch", L"--seconds", L"0",    L"--swing-speed",
+                                              L"32",            L"--output",  L"r.json", L"--eye-height",
+                                              L"1630",          L"--arm-length", L"590"};
+        check(args == sized, "the next session is not sized");
+        // Half a calibration, or one out of range, keeps the one there was.
+        const auto kept = options;
+        check(!headsetSettings("VR settings from the headset: eye_height_mm=1700 arm_length_mm=0", options) &&
+                  options == kept,
+              "half a calibration replaced it");
+        check(!headsetSettings("VR settings from the headset: eye_height_mm=99999 arm_length_mm=590", options) &&
+                  options == kept,
+              "an eye height out of range replaced it");
+        options.armLengthMm = 1300;
+        check(!calibrated(options), "an arm out of range counted");
+        // Skipped in the headset: no calibration, and none asked for at the next sessions' first gameplay.
+        options = {};
+        check(headsetSettings("VR settings from the headset: eye_height_mm=0 arm_length_mm=0 calibration_prompt=0",
+                              options) &&
+                  !calibrated(options) && !options.calibrationPrompt,
+              "skipping it did not come back");
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 8 && args[7] == L"--no-calibration-prompt", "the next session still asks");
+        // A calibration made from the SPIDY VR tab after a skip counts; the skip says nothing then.
+        options.eyeHeightMm = 1500;
+        options.armLengthMm = 520;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 11 && args[7] == L"--eye-height" && args[8] == L"1500", "the later calibration");
     });
     test("log lines are coloured by what they say", [] {
         check(classifyLine("WARNING: render memory module unavailable") == LineKind::warning, "warning");

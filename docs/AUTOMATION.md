@@ -157,6 +157,23 @@ remain unverified. Stereo/head movement and visible hands have user confirmation
 Left Y resets the lab position in the lab; in the game it is Back (the game
 menu), and the left menu button is Start (pause).
 
+The first time a session shows immersive play (1.5 s of it, no web flying
+the player) without a T-pose calibration, the worker asks for one
+(`src/body_calibration.cpp`): a panel 1.4 m ahead, a ring at each controller,
+and the hold's bar fill while the player stands with both arms straight out to
+the sides and holds both triggers for 1.5 s. From its start until each is let
+go after it, the triggers, grips, A and B do nothing in the game; B skips it.
+`run_game_vr.py --eye-height MM --arm-length MM` (the launcher passes the last
+calibration) sizes the body without asking; `--no-calibration-prompt` (the
+player skipped it) asks for none; Settings > SPIDY VR > CALIBRATE BODY: ON
+RESUME asks again. Samples carry `calibration` (`phase`: none, waiting,
+holding, done; `hint`: what the panel asks for; `progress`; `done` and
+`skipped` this session; `reach_m`, each arm at the last one) and, in
+`vr_settings`, `eye_height_mm`, `arm_length_mm` and `calibration_prompt`, so
+the session's last line hands a calibration made or skipped to the launcher;
+`body` has `arm_scale`. XrConfig and XrData are version 15 (640 and 792
+bytes); the body's status is version 2 (144 bytes).
+
 The test report rejects intermediate XR/swing faults, incomplete GPU work, failed
 stop calls, and any checked game entry left patched. Its success flag validates
 these recorded checks; it does not establish visual quality, comfort, or completion
@@ -270,6 +287,13 @@ VR launcher's way: `probe_menu_pad.py start`, then `pad a --until-player`):
   screenshot; the left eye's image looking down at the body, and with the body
   off; a scripted fist through the nearest bot's chest through the swing
   module's input, with the punch, the request and the bot's health.
+- `tpose`: a T-pose as the calibration takes it: eyes 1.66 m up (a calibrated
+  eye height), both wrists straight out 0.62 m from where the hero's rest pose
+  puts his shoulders at that size, past his own arms. Driven with his own
+  arms, then with that arm length: the body's and the arms' scale, each
+  wrist's distance from its controller (near zero only with the arm length
+  when the game's pose holds the shoulders where the rest pose does), the
+  shoulders in the world, and a screenshot of each.
 - `walk`: the hero walks about under the body with the virtual pad's stick (a
   perched hero ignores a light stick), for the turn between pose job and
   render. `punch`: one blow straight to the DamageSystem; `--punch-hero` also
@@ -319,9 +343,12 @@ has Settings fifth): it starts the tab's hooks with test values
 (`SpidyMenuStart`: 33 m/s, the web shooter off), pauses with the virtual Xbox
 controller, moving with its left stick as the Touch controllers do, opens
 Settings, goes Up to SPIDY VR and opens it, then switches the aim markers off,
-steps the swing speed to 40 m/s and the weight to 80%, switches the body off
-and resets it with X, steps snap turn to 45 degrees, smooth turn to 60 degrees
-a second, and resets the tab with Y and A (13 changes in all). After each step
+switches webs in open air off and resets them with X, steps the swing speed to
+40 m/s and the weight to 80%, sets CALIBRATE BODY to ON RESUME (a calibration
+asked for; without a headset nothing calibrates), snap turn to 45 degrees,
+smooth turn to 60 degrees a second, and resets the tab with Y and A (14
+changes in all; the web shooter, which the tab does not offer, stays off).
+After each step
 it reads `SpidyMenuSample` (what the tab holds, the tabs built, the changes)
 and captures the window. It fails if a step left other values than expected or
 a hooked function does not start with the game's own bytes after

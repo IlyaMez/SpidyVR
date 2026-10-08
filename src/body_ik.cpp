@@ -360,6 +360,10 @@ bool prepare(Rig& rig, std::span<const float> restPose) {
     const Vec3 offset = eyes - head;
     rig.eyesFromHead = {dot(offset, forward), dot(offset, up), dot(offset, left)};
     rig.eyeHeight = eyes.y;
+    for (int i = 0; i < 2; ++i) {
+        const Vec3 shoulder = rest.position(rig.arms[i].upper) - eyes;
+        rig.shoulders[i] = {dot(shoulder, forward), dot(shoulder, up), dot(shoulder, left)};
+    }
     for (const Vec3 v : {rig.pelvisForward, rig.pelvisUp, rig.headForward, rig.headUp})
         if (length(v) < .5f)
             return false;
@@ -368,7 +372,7 @@ bool prepare(Rig& rig, std::span<const float> restPose) {
 }
 
 Result solve(Pose& pose, const Rig& rig, const Targets& t, const Config& c, State& state, bool wanted, float dt,
-             float scale) {
+             float scale, float armScale) {
     Result r;
     dt = std::isfinite(dt) ? std::clamp(dt, 0.f, .1f) : 0.f;
     state.weight = approach(state.weight, wanted ? 1.f : 0.f, c.blendSpeed * dt);
@@ -380,6 +384,7 @@ Result solve(Pose& pose, const Rig& rig, const Targets& t, const Config& c, Stat
     if (length(F) < .5f || length(U) < .5f)
         return r;
     const float s = 1 + (std::clamp(std::isfinite(scale) ? scale : 1.f, .5f, 2.f) - 1) * w;
+    const float arms = 1 + (std::clamp(std::isfinite(armScale) ? armScale : 1.f, .5f, 2.f) - 1) * w;
     // The world's up in the model: the hero may crawl on a wall, the body
     // stands as the player does. Yaw turns about it, from the model's forward
     // (or, facing straight up or down a wall, its left).
@@ -408,6 +413,10 @@ Result solve(Pose& pose, const Rig& rig, const Targets& t, const Config& c, Stat
     const auto& bodyJoints = rig.below[static_cast<size_t>(rig.pelvis)];
     if (s != 1)
         pose.scale(bodyJoints, s, {});
+    // The player's arms: each arm, hand and all, about its shoulder.
+    if (arms != 1)
+        for (const auto& arm : rig.arms)
+            pose.scale(rig.below[static_cast<size_t>(arm.upper)], arms, pose.position(arm.upper));
     // Which way the body faces: the headset's, once it turns far enough.
     Vec3 look = level(F);
     if (length(look) < .2f)
@@ -488,7 +497,7 @@ Result solve(Pose& pose, const Rig& rig, const Targets& t, const Config& c, Stat
         const Vec3 right = normalized(hand.orientation.rotate({1, 0, 0}));
         const Vec3 offset{i == 0 ? -c.wristFromGrip.x : c.wristFromGrip.x, c.wristFromGrip.y, c.wristFromGrip.z};
         const Vec3 wrist = hand.grip + hand.orientation.rotate(offset);
-        const float length2 = (rig.upperArm[i] + rig.forearm[i]) * s;
+        const float length2 = (rig.upperArm[i] + rig.forearm[i]) * s * arms;
         if (arm.clavicle >= 0) {
             const Vec3 base = pose.position(arm.clavicle), shoulder = pose.position(arm.upper);
             const float stretch = std::clamp((length(wrist - shoulder) - .8f * length2) / (.4f * length2), 0.f, 1.f);
@@ -553,7 +562,7 @@ Result solve(Pose& pose, const Rig& rig, const Targets& t, const Config& c, Stat
         if (thumb.size() < 4 || !middles)
             continue;
         const Vec3 palm = normalized(pose.direction(arm.hand, rig.handPalm[i]));
-        onto = onto / static_cast<float>(middles) + palm * (c.thumbRest * s);
+        onto = onto / static_cast<float>(middles) + palm * (c.thumbRest * s * arms);
         bendTo(thumb, 2, rig.thumbHinges[i][1], c.thumbBend, fist);
         const Vec3 base = pose.position(thumb[0]), knuckle = pose.position(thumb[1]);
         Vec3 hinge;

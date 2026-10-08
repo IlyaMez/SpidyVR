@@ -379,35 +379,6 @@ bool App::toggle(const char* id, bool* value) {
     return clicked;
 }
 
-bool App::segmented(const char* id, const char* const* labels, int count, int* value, float width) {
-    const ImVec2 at = ImGui::GetCursorScreenPos();
-    const float h = ImGui::GetFrameHeight(), part = width / count;
-    auto* draw = ImGui::GetWindowDrawList();
-    draw->AddRectFilled(at, ImVec2(at.x + width, at.y + h), col(kPanelHigh), S(9));
-    bool changed = false;
-    ImGui::PushID(id);
-    for (int i = 0; i < count; ++i) {
-        const ImVec2 cell(at.x + part * i, at.y);
-        ImGui::SetCursorScreenPos(cell);
-        ImGui::PushID(i);
-        if (ImGui::InvisibleButton("part", ImVec2(part, h)) && *value != i) {
-            *value = i;
-            changed = true;
-        }
-        handCursor();
-        const bool hovered = ImGui::IsItemHovered();
-        ImGui::PopID();
-        if (*value == i)
-            draw->AddRectFilled(ImVec2(cell.x + S(3), cell.y + S(3)), ImVec2(cell.x + part - S(3), cell.y + h - S(3)),
-                                col({58, 66, 88}), S(7));
-        const ImVec2 size = measure(fonts_.semibold, S(13.5f), labels[i]);
-        draw->AddText(fonts_.semibold, S(13.5f), ImVec2(cell.x + (part - size.x) * 0.5f, cell.y + (h - size.y) * 0.5f),
-                      col(*value == i || hovered ? kText : kMuted), labels[i]);
-    }
-    ImGui::PopID();
-    return changed;
-}
-
 bool App::link(const char* label) {
     ImGui::PushStyleColor(ImGuiCol_Text, vec({125, 168, 255}));
     ImGui::TextUnformatted(label);
@@ -921,26 +892,27 @@ void App::optionsCard(ImVec2 size) {
     ImGui::BeginDisabled(running);
     auto& o = settings_.options;
     bool changed = false;
-    option("Webs catch props and thugs", "Grab, yank and throw props and thugs with your webs.", S(40),
-           [&] { changed |= toggle("##grab", &o.webGrab); });
-    option("Webs hold in open air", "With nothing in reach, a web still holds 100 m out; off, it misses.", S(40),
-           [&] { changed |= toggle("##air", &o.airWebs); });
-    option("Web shooter", "The trigger of a hand without a web shoots web balls at thugs.", S(40),
-           [&] { changed |= toggle("##shooter", &o.webShooter); });
-    option("Your own body", "See Spider-Man's body and hands as yours; off draws gloves.", S(40),
-           [&] { changed |= toggle("##body", &o.body); });
-    option("Punch thugs", "A fist that hits a thug hard enough knocks him back.", S(40),
-           [&] { changed |= toggle("##punch", &o.punch); });
-    option("Aim markers", "Show where each hand's web would land; X switches them in VR.", S(40),
-           [&] { changed |= toggle("##aim", &o.aimMarkers); });
-    option("Webs drawn by", "Spidy's own strands, if the game's look off.", S(150), [&] {
-        static constexpr const char* labels[] = {"Game", "Spidy"};
-        int value = o.overlayWebs ? 1 : 0;
-        if (segmented("##webs", labels, 2, &value, S(150))) {
-            o.overlayWebs = value == 1;
+    // The T-pose calibration made in the headset; Redo forgets it, and the next session asks for it again.
+    const bool calibrated = spidy::launcher::calibrated(o);
+    const std::string calibration =
+        calibrated ? format("Eye height %.2f m, arm %.2f m, from your T-pose in the headset. Redo asks again when VR "
+                            "starts.",
+                            o.eyeHeightMm / 1000.0, o.armLengthMm / 1000.0)
+        : o.calibrationPrompt
+            ? std::string("When VR starts, stand in a T-pose and hold both triggers: Spider-Man takes your height and "
+                          "arms.")
+            : std::string("Skipped: your height comes from the headset. Ask again to get the T-pose when VR starts.");
+    option("Body calibration", calibration.c_str(), S(98), [&] {
+        if ((calibrated || !o.calibrationPrompt) && secondaryButton(calibrated ? "Redo" : "Ask again", S(98))) {
+            o.eyeHeightMm = o.armLengthMm = 0;
+            o.calibrationPrompt = true;
             changed = true;
         }
     });
+    option("Webs hold in open air", "With nothing in reach, a web still holds 100 m out; off, it misses.", S(40),
+           [&] { changed |= toggle("##air", &o.airWebs); });
+    option("Aim markers", "Show where each hand's web would land; X switches them in VR.", S(40),
+           [&] { changed |= toggle("##aim", &o.aimMarkers); });
     // Percent of the headset's own size, so no choice looks sharper than it is; with the headset checked,
     // the pixels it makes.
     std::string resolutionHelp = "Of the headset's own, per side. Higher is sharper; lower is faster.";
@@ -1000,7 +972,12 @@ void App::optionsCard(ImVec2 size) {
     option("Normal camera on the monitor", "Off: the monitor shows your head's view.", S(40),
            [&] { changed |= toggle("##stock", &o.stockMonitorView); });
     if (link("Reset options")) {
+        // Your body's measurements are not options: they stay.
+        const SessionOptions kept = o;
         o = SessionOptions{};
+        o.eyeHeightMm = kept.eyeHeightMm;
+        o.armLengthMm = kept.armLengthMm;
+        o.calibrationPrompt = kept.calibrationPrompt;
         changed = true;
     }
     ImGui::EndDisabled();
@@ -1260,9 +1237,10 @@ void App::controls(ImVec2 origin, ImVec2 size) {
         ImGui::TextUnformatted("The keyboard does not move the player once the VR controllers have pressed a button; a "
                                "real gamepad keeps working.");
         ImGui::Dummy(ImVec2(0, S(10)));
-        ImGui::TextUnformatted("Aim markers: a white ring where a web would hold, a faint dashed ring where it would "
-                               "hold in open air, a red cross where it would miss, and amber corners around a prop or "
-                               "thug it would catch. The marker tightens as you squeeze the grip.");
+        ImGui::TextUnformatted("Aim markers, blue for the left hand and orange for the right: a ring where a web would "
+                               "hold, a faint dashed ring where it would hold in open air, a red cross where it would "
+                               "miss, and a turning ring of three arcs around a prop or thug it would catch. The marker "
+                               "tightens as you squeeze the grip.");
         ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
     }

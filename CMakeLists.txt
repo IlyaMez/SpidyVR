@@ -10,7 +10,8 @@ option(SPIDY_BUILD_XR "Build the Windows OpenXR / D3D12 swing lab" ${WIN32})
 option(SPIDY_BUILD_OBSERVER "Build the opt-in camera diagnostic DLL" OFF)
 option(SPIDY_BUILD_LAUNCHER "Build the Spidy launcher window (Dear ImGui from tools/bootstrap.ps1)" ${SPIDY_BUILD_XR})
 add_library(spidy_core src/swing.cpp src/web_grab.cpp src/lab_world.cpp src/lab_props.cpp src/game_tracking.cpp
-            src/web_visual.cpp src/body_ik.cpp src/punch.cpp src/shooter.cpp src/vr_settings.cpp)
+            src/web_visual.cpp src/body_ik.cpp src/punch.cpp src/shooter.cpp src/vr_settings.cpp
+            src/body_calibration.cpp src/overlay_text.cpp)
 target_include_directories(spidy_core PUBLIC include)
 if(MSVC)
   target_compile_options(spidy_core PRIVATE /W4 /permissive-)

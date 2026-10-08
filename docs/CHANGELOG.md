@@ -3,7 +3,111 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 8, fifth build): a WEIGHT setting for swinging.** You
+**Latest build (October 8, eighth build): steadier aim markers, a colour per
+hand, a new target ring.** You said the aim markers felt jerky and jittery,
+asked for a different colour shade per hand, and called the square target
+marker ugly. The jitter came from the controller: a hand held still still
+trembles and the tracking is a little noisy, which swings the aim ray by
+about 0.4 degrees peak to peak with a typical tremor, about as much as the
+ring is wide in the headset. On top of that the markers' hard pixel edges
+crawled as they moved, a marker swapped shape the moment the game's preview
+changed, and a target's corners moved in the game's own steps.
+Now the hand's aim ray is steadied before the marker goes on it, by a
+speed-adaptive filter (the "1 euro filter"): it smooths hard while you hold
+still and less the faster you move. Simulated with that tremor, the wobble
+drops from 0.4 to 0.1 degree; aiming slowly the marker trails by about 0.1
+degree, sweeping fast by about 0.3, and it settles within 30 ms of stopping.
+It works in your tracking space, so snap and smooth turns do not make it
+swim. A marker eases to a new distance in about 30 ms, a target's ring
+slides to the next target, and a marker of another kind fades in (it shows
+at once and is whole within 25 ms) while the old one fades out (80 ms), so
+an edge where the aim flickers between two kinds no longer pops.
+The markers have soft edges over a soft dark shadow (the overlay gained a
+translucent pass), the left hand's in sky blue and the right hand's in
+orange; a miss stays a red cross. The amber corners are gone: a prop or thug
+you would catch gets a ring of three arcs with claws pointing in, turning
+slowly (faster as you squeeze) and closing in from wider as it locks on. The
+right hand's ring is a little wider and turned between the left's, so both
+hands on one thug stay apart.
+181 core checks (2 new: the steadying against tremor, sweeps, turns and
+gaps; the fades and eases; and the marker check reworked for shadows first,
+soft edges, each hand's colour, fading, and a round target ring that closes
+in), the launcher's checks, 87 Python checks and the GPU test (both hands'
+markers on the dark scene, a bright sky and a lit wall, each in its colour,
+shadowed on the bright panels; D3D12 debug layer clean) pass. Not seen in
+the headset yet: tell me if they still wobble when you hold still, lag when
+you sweep, or if the colours or sizes want changing.
+
+**Preceding build (October 8, seventh build): calibrate your body in a T-pose.**
+You asked for an in-game calibration on first start, and as an option in the
+VR menu, where the player stands in a T-pose and holds the triggers so the
+avatar is scaled to their measurements. Until now Spider-Man's body took its
+size from the highest your headset had been and kept his own arms: with
+longer arms than his, your controllers ran ahead of his hands; with shorter
+ones, his elbows stayed bent.
+Now, the first time VR shows the game, a panel appears ahead of you: BODY
+CALIBRATION, stand tall and look ahead, arms straight out to the sides, hold
+both triggers. A line under it says what to fix (an arm not out to the side
+or bent, the head turned, a trigger let go, moving), a figure's arms and a
+ring around each controller turn green when that arm is right, and a bar
+fills while you hold the pose. After a second and a half it says CALIBRATED
+with your eye height and arm length, both controllers buzz, and Spider-Man
+is resized at once: his height from your eye height, then each arm about its
+shoulder, so his wrists reach yours when your arms are straight. B skips it.
+While it shows, the triggers, grips, A and B do nothing in the game, so
+holding the triggers shoots no web balls, until you let go after it.
+Settings > SPIDY VR has a BODY section again, with one row, **CALIBRATE
+BODY**: set it to ON RESUME and resume to calibrate again. The launcher keeps
+your measurements and starts every next session with them, so the panel comes
+once; its options show them, and Redo forgets them so the next session asks
+again. A skip is remembered as well. `Launch Spidy VR.cmd` takes
+`-EyeHeight 1630 -ArmLength 590` (the console's last settings line has your
+numbers) or `-NoCalibrationPrompt`.
+The panel's text is a new stroke font in Spidy's overlay; I checked how the
+panel reads on the GPU test's eye image. 179 core checks (7 new: arms scaled
+about their shoulders reaching farther controllers, the hero's proportions
+and the scales' ranges, a T-pose measured, every panel line, the hold pausing
+and starting over, the panel and the font), 13 launcher checks, 87 Python
+checks and the GPU test (the panel and the result drawn) pass. Checked in
+the game without a headset, on your save: the SPIDY VR tab showed the BODY
+section and CALIBRATE BODY, and `tools/probe_menu.py` switched it to ON RESUME
+and RESET ALL back to NO (its help then wrapped "T-pose" at the hyphen, so I
+reworded it). A new T-pose phase of `tools/probe_game_body.py` posed
+Spider-Man's real body as the calibration would for eyes 1.66 m up and arms
+0.62 m long: with his own arms his wrists stopped 7-8.5 cm short of the
+controllers, with your arm length 0.8-2.7 cm from them (his standing pose
+holds the shoulders a little higher than his rest pose, which the measurement
+assumes). Your save files were unchanged except `slot0-s.save`, which the
+game saved itself. This build changes the VR protocol (the XR config and data
+are version 15, the body's status version 2), so it can only go into your
+play folder as the whole package; you said not yet. The panel itself needs
+the headset. Details: [docs/VALIDATION.md](VALIDATION.md),
+[docs/BODY.md](BODY.md).
+
+**Preceding build (October 8, sixth build): five options removed.** You asked to
+remove "Webs catch props and thugs", "Web shooter", "Your own body", "Punch
+thugs" and "Webs drawn by" from the options. All five are gone from the
+launcher's options, and the four that Settings > SPIDY VR had are gone from
+there too, with its BODY heading. The tab now has two sections: WEBS (aim
+markers, webs hold in open air, swing speed limit, weight) and COMFORT (snap
+turn, smooth turn, controller vibration, game screen size). Catching props
+and thugs, the web shooter, your body and punching are always on, and the
+game draws the webs. If you had switched one of them off, the launcher
+forgets that: it no longer reads, saves or passes them on, and ignores them
+in the settings a session ends with. `Launch Spidy VR.cmd` keeps `-NoWebGrab`,
+`-NoWebShooter`, `-NoBody`, `-NoPunch` and `-OverlayWebs` for testing, and
+RESET ALL in the tab leaves those as the session started. The VR protocol is
+unchanged (version 14), so only the launcher and the XR module change.
+172 core checks, 12 launcher checks and 86 Python checks pass. Checked in
+the game without a headset, on your save: the SPIDY VR tab showed the new
+rows, and `tools/probe_menu.py` passed every step through them (12 changes;
+RESET ALL left the web shooter as the probe started it). Your save files
+were unchanged except `slot0-s.save`, which the game saved itself when the
+probe left the pause menu. It is in your play folder (`dist\Spidy-0.2.2`):
+the launcher, the XR module and README.txt. Details:
+[docs/VALIDATION.md](VALIDATION.md).
+
+**Preceding build (October 8, fifth build): a WEIGHT setting for swinging.** You
 said moving through the air feels too floaty and asked for a weight setting
 in the game's settings. While webs fly you (swinging, and after you let go,
 until you land) Spidy decides how fast you fall, not the game, and since

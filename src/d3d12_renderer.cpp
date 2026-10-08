@@ -241,10 +241,10 @@ void D3D12Renderer::pipeline(DXGI_FORMAT format) {
         return;
     const char* shader = R"(
 cbuffer Eye : register(b0) { row_major float4x4 vp; };
-struct In { float3 position:POSITION; float3 color:COLOR; };
-struct Out { float4 position:SV_POSITION; float3 color:COLOR; };
+struct In { float3 position:POSITION; float4 color:COLOR; };
+struct Out { float4 position:SV_POSITION; float4 color:COLOR; };
 Out vs(In i) { Out o; o.position=mul(vp,float4(i.position,1)); o.color=i.color; return o; }
-float4 ps(Out i):SV_TARGET { return float4(i.color,1); }
+float4 ps(Out i):SV_TARGET { return i.color; }
 )";
     ComPtr<ID3DBlob> vs, ps, error;
     hr(D3DCompile(shader, std::strlen(shader), "spidy_lab", nullptr, nullptr, "vs", "vs_5_0",
@@ -270,7 +270,8 @@ float4 ps(Out i):SV_TARGET { return float4(i.color,1); }
        "Create root signature");
     D3D12_INPUT_ELEMENT_DESC layout[] = {
         {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
-        {"COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
+        {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
+    static_assert(sizeof(Vertex) == 28, "the overlay's input layout reads position, colour and opacity");
     D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};
     p.pRootSignature = root_.Get();
     p.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
@@ -285,12 +286,15 @@ float4 ps(Out i):SV_TARGET { return float4(i.color,1); }
     p.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
     p.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
     p.RasterizerState.DepthClipEnable = TRUE;
+    // A vertex's opacity blends it over the image (soft marker edges); at 1,
+    // as nearly everything is drawn, it replaces the pixel as before.
     auto& blend = p.BlendState.RenderTarget[0];
-    blend.SrcBlend = D3D12_BLEND_ONE;
-    blend.DestBlend = D3D12_BLEND_ZERO;
+    blend.BlendEnable = TRUE;
+    blend.SrcBlend = D3D12_BLEND_SRC_ALPHA;
+    blend.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
     blend.BlendOp = D3D12_BLEND_OP_ADD;
     blend.SrcBlendAlpha = D3D12_BLEND_ONE;
-    blend.DestBlendAlpha = D3D12_BLEND_ZERO;
+    blend.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
     blend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
     blend.LogicOp = D3D12_LOGIC_OP_NOOP;
     blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
@@ -303,15 +307,20 @@ float4 ps(Out i):SV_TARGET { return float4(i.color,1); }
     p.DepthStencilState.BackFace = p.DepthStencilState.FrontFace;
     pipeline_.Reset();
     hr(device_->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&pipeline_)), "Create graphics pipeline");
+    // Translucent geometry is tested against the depth, never written to it.
+    p.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+    translucent_.Reset();
+    hr(device_->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&translucent_)), "Create translucent pipeline");
     format_ = format;
 }
 void D3D12Renderer::render(ID3D12Resource* target, DXGI_FORMAT format, unsigned width, unsigned height,
-                           const Mat4& vp, std::span<const Vertex> vertices, bool preserveColor) {
+                           const Mat4& vp, std::span<const Vertex> vertices, bool preserveColor,
+                           std::span<const Vertex> translucent) {
     const ViewTarget view{target, format, width, height, vp};
-    renderViews(std::span(&view, 1), vertices, preserveColor);
+    renderViews(std::span(&view, 1), vertices, preserveColor, true, translucent);
 }
 void D3D12Renderer::renderViews(std::span<const ViewTarget> views, std::span<const Vertex> vertices,
-                                bool preserveColor, bool waitForCompletion) {
+                                bool preserveColor, bool waitForCompletion, std::span<const Vertex> translucent) {
     if (views.empty() || views.size() > 2)
         throw std::runtime_error("Overlay requires one or two views");
     const auto format = views[0].format;
@@ -344,7 +353,8 @@ void D3D12Renderer::renderViews(std::span<const ViewTarget> views, std::span<con
            "Create depth target");
         device_->CreateDepthStencilView(depth_.Get(), nullptr, dsv_->GetCPUDescriptorHandleForHeapStart());
     }
-    const auto bytes = vertices.size_bytes();
+    // One buffer: the depth-writing vertices, then the translucent ones.
+    const auto bytes = vertices.size_bytes() + translucent.size_bytes();
     if (bytes > capacity_) {
         vertices_.Reset();
         capacity_ = std::max<std::size_t>(bytes, 1024 * 1024);
@@ -365,7 +375,11 @@ void D3D12Renderer::renderViews(std::span<const ViewTarget> views, std::span<con
         void* data{};
         D3D12_RANGE read{0, 0};
         hr(vertices_->Map(0, &read, &data), "Map vertices");
-        std::memcpy(data, vertices.data(), bytes);
+        if (!vertices.empty())
+            std::memcpy(data, vertices.data(), vertices.size_bytes());
+        if (!translucent.empty())
+            std::memcpy(static_cast<char*>(data) + vertices.size_bytes(), translucent.data(),
+                        translucent.size_bytes());
         vertices_->Unmap(0, nullptr);
     }
     hr(allocator_->Reset(), "Reset allocator");
@@ -398,8 +412,13 @@ void D3D12Renderer::renderViews(std::span<const ViewTarget> views, std::span<con
         list_->RSSetViewports(1, &viewport);
         list_->RSSetScissorRects(1, &rect);
         list_->SetGraphicsRoot32BitConstants(0, 16, views[eye].viewProjection.data(), 0);
-        if (bytes) {
+        if (!vertices.empty()) {
+            list_->SetPipelineState(pipeline_.Get());
             list_->DrawInstanced(static_cast<UINT>(vertices.size()), 1, 0, 0);
+        }
+        if (!translucent.empty()) {
+            list_->SetPipelineState(translucent_.Get());
+            list_->DrawInstanced(static_cast<UINT>(translucent.size()), 1, static_cast<UINT>(vertices.size()), 0);
         }
     }
     hr(list_->Close(), "Close render list");

@@ -1,3 +1,4 @@
+#include "spidy/body_calibration.hpp"
 #include "spidy/copy_eye_texture.hpp"
 #include "spidy/d3d12_renderer.hpp"
 #include "spidy/lab_world.hpp"
@@ -301,33 +302,72 @@ int main(int argc, char** argv) {
             std::cout << "PASS game-style web overlay: " << drawn << " pixels, " << white << " bright.\n";
         }
         {
-            // Aim markers over the left eye, on sky and on walls: each shows its
-            // colour inside a dark outline. Saved for visual inspection.
+            // Aim markers over the left eye, translucent and farthest first as
+            // the headset draws them, some on the dark scene and some on a
+            // bright sky and a lit wall drawn far behind: each shows its hand's
+            // colour (the left's blue, the right's orange; a miss red), and on
+            // the bright panels a soft shadow darkens the panel around it. Both
+            // hands' rings on one target stay apart. Saved for visual inspection.
             const Pose camera{{-.032f, 19.7f, 19}, {}};
             const auto vp = multiply(projection(-.8f, .8f, -.65f, .65f), viewMatrix(camera));
             const float pixelAngle = 2 * std::tan(.8f) / width;
+            // A panel 169 m ahead over the image's share u0..u1 across, v0..v1 down.
+            std::vector<Vertex> panels;
+            const auto panel = [&](float u0, float u1, float v0, float v1, Vec3 colour) {
+                const float d = 169;
+                const auto at = [&](float u, float v) {
+                    return Vertex{camera.position + Vec3{(2 * u - 1) * std::tan(.8f) * d, (1 - 2 * v) * std::tan(.65f) * d, -d},
+                                  colour};
+                };
+                panels.insert(panels.end(), {at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v0), at(u1, v1), at(u0, v1)});
+            };
+            panel(0, 1, 0, .456f, {.5f, .68f, .92f});        // sky above
+            panel(.586f, 1, .521f, 1, {.75f, .68f, .55f});   // a lit wall at the lower right
+            overlay.render(copied[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, width, height, vp, panels, true);
+            using Colour = bool (*)(const unsigned char*);
+            const Colour blue = [](const unsigned char* p) { return p[0] < 150 && p[1] > 160 && p[1] < 230 && p[2] > 230; };
+            const Colour orange = [](const unsigned char* p) { return p[0] > 230 && p[1] > 140 && p[1] < 200 && p[2] < 110; };
+            const Colour faintBlue = [](const unsigned char* p) { return p[2] > 170 && p[2] > p[0] + 60; };
+            const Colour faintOrange = [](const unsigned char* p) { return p[0] > 170 && p[0] > p[2] + 60; };
+            const Colour red = [](const unsigned char* p) { return p[0] > 200 && p[1] < 110 && p[2] < 110; };
             struct Expected {
                 AimMarker marker;
-                bool (*colour)(const unsigned char*);
+                Colour colour;
                 const char* name;
+                bool onPanel{};
+            };
+            const auto marker = [](AimMark kind, Vec3 point, unsigned hand, float radius = 0, float squeeze = 0) {
+                AimMarker m;
+                m.kind = kind;
+                m.point = point;
+                m.hand = hand;
+                m.radius = radius;
+                m.squeeze = squeeze;
+                return m;
             };
             const Expected expected[] = {
-                {{AimMark::anchor, {-6, 22, 0}}, [](const unsigned char* p) { return p[0] > 220 && p[1] > 220 && p[2] > 230; },
-                 "anchor"},
-                {{AimMark::anchor, {-2, 18.5f, 8}, 0, .5f}, [](const unsigned char* p) { return p[0] > 220 && p[1] > 220 && p[2] > 230; },
-                 "squeezed anchor"},
-                {{AimMark::air, {8, 40, -79}}, [](const unsigned char* p) { return p[0] > 140 && p[0] < 205 && p[2] > p[0]; },
-                 "open air"},
-                {{AimMark::blocked, {4, 18, 4}}, [](const unsigned char* p) { return p[0] > 200 && p[1] < 110 && p[2] < 110; },
-                 "miss"},
-                {{AimMark::target, {.8f, 18.6f, 11}, .45f}, [](const unsigned char* p) { return p[0] > 230 && p[1] > 170 && p[1] < 235 && p[2] < 130; },
-                 "catch"},
+                {marker(AimMark::anchor, {-6, 22, 0}, 0), blue, "left anchor on the sky", true},
+                {marker(AimMark::anchor, {-2, 18.5f, 8}, 1, 0, .5f), orange, "right squeezed anchor"},
+                {marker(AimMark::air, {8, 40, -79}, 0), faintBlue, "left open air on the sky", true},
+                {marker(AimMark::air, {-14, 34, -60}, 1), faintOrange, "right open air on the sky", true},
+                {marker(AimMark::blocked, {4, 18, 4}, 1), red, "miss on the wall", true},
+                {marker(AimMark::target, {.8f, 18.6f, 11}, 0, .45f), blue, "left catch"},
+                {marker(AimMark::target, {.8f, 18.6f, 11}, 1, .45f), orange, "right catch, same target"},
             };
-            std::vector<Vertex> marks;
+            std::vector<AimMarker> order;
             for (const auto& e : expected)
-                appendAimMarker(marks, e.marker, camera.position, pixelAngle);
-            overlay.render(copied[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, width, height, vp, marks, true);
+                order.push_back(e.marker);
+            std::sort(order.begin(), order.end(), [&](const AimMarker& a, const AimMarker& b) {
+                return length(a.point - camera.position) > length(b.point - camera.position);
+            });
+            std::vector<Vertex> marks;
+            for (const auto& m : order)
+                appendAimMarker(marks, m, camera.position, pixelAngle);
+            const auto before = overlay.readback(copied[0].Get());
+            overlay.render(copied[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, width, height, vp, {}, true, marks);
             const auto image = overlay.readback(copied[0].Get());
+            if (argc >= 2)
+                saveBmp(std::filesystem::path(argv[1]) / "aim-markers.bmp", image, width, height);
             for (const auto& e : expected) {
                 const auto& p = e.marker.point;
                 const float clip[4] = {vp[0] * p.x + vp[1] * p.y + vp[2] * p.z + vp[3],
@@ -335,23 +375,78 @@ int main(int argc, char** argv) {
                                        vp[12] * p.x + vp[13] * p.y + vp[14] * p.z + vp[15]};
                 const int cx = static_cast<int>((clip[0] / clip[3] * .5f + .5f) * width);
                 const int cy = static_cast<int>((.5f - clip[1] / clip[3] * .5f) * height);
-                size_t coloured{}, dark{};
-                // The catch target has a size in metres: its corners lie about
-                // 52 pixels out per 1536 of width.
+                size_t coloured{}, shaded{};
+                // The catch target has a size in metres: the right hand's ring
+                // lies about 55 pixels out per 1536 of width.
                 const int reach = 60 * static_cast<int>(width) / 1536 + 30;
                 for (int y = std::max(cy - reach, 0); y < std::min(cy + reach, static_cast<int>(height)); ++y)
                     for (int x = std::max(cx - reach, 0); x < std::min(cx + reach, static_cast<int>(width)); ++x) {
-                        const auto* pixel = image.data() + (static_cast<size_t>(y) * width + x) * 4;
-                        coloured += e.colour(pixel);
-                        dark += pixel[0] < 45 && pixel[1] < 45 && pixel[2] < 50;
+                        const size_t at = (static_cast<size_t>(y) * width + x) * 4;
+                        coloured += e.colour(image.data() + at);
+                        const int was = before[at] + before[at + 1] + before[at + 2];
+                        const int now = image[at] + image[at + 1] + image[at + 2];
+                        shaded += was > 60 && now < was * 85 / 100;
                     }
-                if (coloured < 20 || dark < 20)
-                    throw std::runtime_error(std::string("Aim marker missing its colour or outline: ") + e.name);
+                if (coloured < 20 || (e.onPanel && shaded < 20))
+                    throw std::runtime_error(std::string("Aim marker missing its colour or shadow: ") + e.name +
+                                             " (" + std::to_string(coloured) + " coloured, " +
+                                             std::to_string(shaded) + " shaded pixels)");
             }
-            if (argc >= 2)
-                saveBmp(std::filesystem::path(argv[1]) / "aim-markers.bmp", image, width, height);
-            std::cout << "PASS aim markers: anchor, squeezed anchor, open air, miss and catch drawn in colour "
-                         "inside a dark outline.\n";
+            std::cout << "PASS aim markers: both hands' anchors, open air, a miss and two rings on one target, "
+                         "each in its colour, shadowed on the bright sky and wall.\n";
+        }
+        {
+            // The T-pose calibration's panel ahead of the left eye, the hold 60% full, and once measured: a
+            // dark panel with white text, the hold's green bar and a ring at each controller. Saved for visual
+            // inspection.
+            const Pose camera{{-.032f, 19.7f, 19}, {}};
+            const auto vp = multiply(projection(-.8f, .8f, -.65f, .65f), viewMatrix(camera));
+            body_calibration::View view;
+            view.phase = body_calibration::Phase::holding;
+            view.progress = .6f;
+            view.ready = {true, true};
+            view.panel = body_calibration::panelPose(camera);
+            view.handTracked = {true, true};
+            view.grips[0] = {{-.42f, 19.38f, 18.45f}, {}};
+            view.grips[1] = {{.38f, 19.38f, 18.45f}, {}};
+            const auto pixelOf = [&](Vec3 p) {
+                const float x = vp[0] * p.x + vp[1] * p.y + vp[2] * p.z + vp[3],
+                            y = vp[4] * p.x + vp[5] * p.y + vp[6] * p.z + vp[7],
+                            w = vp[12] * p.x + vp[13] * p.y + vp[14] * p.z + vp[15];
+                return std::array<int, 2>{static_cast<int>((x / w * .5f + .5f) * width),
+                                          static_cast<int>((.5f - y / w * .5f) * height)};
+            };
+            // The panel's inner part on the image (1.2 by 0.6 m, an edge left out).
+            const auto low = pixelOf(view.panel.position + Vec3{-.55f, -.27f, 0}),
+                       high = pixelOf(view.panel.position + Vec3{.55f, .27f, 0});
+            for (const auto phase : {body_calibration::Phase::holding, body_calibration::Phase::done}) {
+                view.phase = phase;
+                view.result = {1.63f, .59f, {.59f, .585f}};
+                std::vector<Vertex> panel;
+                body_calibration::appendView(panel, view, camera.position);
+                overlay.render(copied[0].Get(), DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, width, height, vp, panel, true);
+                const auto image = overlay.readback(copied[0].Get());
+                size_t dark{}, white{}, green{}, area{};
+                for (int y = std::max(high[1], 0); y < std::min(low[1], static_cast<int>(height)); ++y)
+                    for (int x = std::max(low[0], 0); x < std::min(high[0], static_cast<int>(width)); ++x) {
+                        const auto* p = image.data() + (static_cast<size_t>(y) * width + x) * 4;
+                        ++area;
+                        dark += p[0] < 45 && p[1] < 45 && p[2] < 55;
+                        white += p[0] > 200 && p[1] > 200 && p[2] > 200;
+                        green += p[1] > 150 && p[0] < 120 && p[2] < 140;
+                    }
+                if (area < 1000 || dark < area / 2 || white < 300 || green < 200)
+                    throw std::runtime_error("Calibration panel missing its background, text or green: " +
+                                             std::to_string(dark) + " dark, " + std::to_string(white) + " white, " +
+                                             std::to_string(green) + " green of " + std::to_string(area));
+                if (argc >= 2)
+                    saveBmp(std::filesystem::path(argv[1]) /
+                                (phase == body_calibration::Phase::done ? "calibration-done.bmp"
+                                                                        : "calibration-panel.bmp"),
+                            image, width, height);
+            }
+            std::cout << "PASS calibration panel: dark panel, white text, green hold bar and rings, and the "
+                         "result.\n";
         }
         {
             // The game screen: the game's presented frame drawn into an eye

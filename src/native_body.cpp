@@ -74,6 +74,10 @@ uint32_t rigSwitches{};
 // body's yaw is the model's, and turns back by as much as the actor turns.
 float actorHeading{};
 bool actorHeadingSet{};
+// The proportions of the rig the body last used (solveLock), for the T-pose
+// calibration.
+body_calibration::Proportions heroProportions{};
+bool heroProportionsSet{};
 // The tracking space's yaw at the last command the body followed.
 float trackingYaw{};
 bool trackingYawSet{};
@@ -363,7 +367,7 @@ void solveHero(float* out, uintptr_t job, uintptr_t instance) {
     if (!problem && !turned)
         problem = native_body::badInstance;
     body::Result result;
-    float scale = 1;
+    float scale = 1, armScale = 1;
     const bool capture = captureWanted.exchange(false);
     const uint32_t joints = cache.joints;
     if (capture && joints <= native_body::maxJoints)
@@ -403,13 +407,20 @@ void solveHero(float* out, uintptr_t job, uintptr_t instance) {
         body::Config config;
         config.hideHead = wanted.flags & native_body::hideHead;
         config.handOrientation = wanted.flags & native_body::handTurn;
+        // The player's size: their T-pose calibration's eye height and arm,
+        // or the headset's running height and the hero's own arms.
+        heroProportions = body_calibration::proportions(cache.ik);
+        heroProportionsSet = true;
         if (wanted.height > 1 && wanted.height < 2.5f && cache.ik.eyeHeight > 1)
-            scale = std::clamp(wanted.height / cache.ik.eyeHeight, .85f, 1.2f);
+            scale = wanted.flags & native_body::calibrated
+                        ? body_calibration::bodyScale(wanted.height, heroProportions)
+                        : std::clamp(wanted.height / cache.ik.eyeHeight, .85f, 1.2f);
+        armScale = body_calibration::armScale(wanted.armLength, scale, heroProportions);
         const float dt = lastSolve.QuadPart ? static_cast<float>(now.QuadPart - lastSolve.QuadPart) / frequency.QuadPart
                                             : 0.f;
         lastSolve = now;
         body::Pose pose(out, static_cast<int>(joints));
-        result = body::solve(pose, cache.ik, lastTargets, config, state, on, dt, scale);
+        result = body::solve(pose, cache.ik, lastTargets, config, state, on, dt, scale, armScale);
     } else {
         lastSolve = now;
     }
@@ -451,6 +462,8 @@ void solveHero(float* out, uintptr_t job, uintptr_t instance) {
         d.state = problem ? native_body::failed : result.solved ? native_body::active : native_body::waiting;
         d.weight = result.weight;
         d.scale = scale;
+        d.armScale = armScale;
+        d.calibrated = (wanted.flags & native_body::calibrated) != 0;
         d.yaw = result.yaw;
         d.grounded = result.grounded;
         d.handError[0] = result.handError[0];
@@ -578,6 +591,14 @@ native_body::Status native_body::status() {
     ReleaseSRWLockShared(&statusLock);
     return out;
 }
+bool native_body::proportions(body_calibration::Proportions& out) {
+    AcquireSRWLockShared(&solveLock);
+    const bool set = heroProportionsSet;
+    if (set)
+        out = heroProportions;
+    ReleaseSRWLockShared(&solveLock);
+    return set;
+}
 uint32_t native_body::stop() {
     AcquireSRWLockExclusive(&lifecycle);
     // Blend back to the game's pose for a moment, then let go of it.
@@ -611,7 +632,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyBodyStart(void* input) {
 extern "C" __declspec(dllexport) DWORD WINAPI SpidyBodySubmit(void* input) {
     Command c{};
     if (!read(reinterpret_cast<uintptr_t>(input), &c, sizeof(c)) || c.magic != 0x53424443 || c.version != 1 ||
-        c.bytes != sizeof(c) || c.leaseMs > 500 || !finite(c.eyes) || !std::isfinite(c.height))
+        c.bytes != sizeof(c) || c.leaseMs > 500 || !finite(c.eyes) || !std::isfinite(c.height) ||
+        !(c.armLength >= 0 && c.armLength <= 2))
         return 7502;
     native_body::submit(c);
     return 0;

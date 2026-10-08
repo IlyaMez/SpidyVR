@@ -255,9 +255,10 @@ pull.
 [docs/WEB-GRAB.md](WEB-GRAB.md).
 
 Each hand without a web shows an aim marker where its grip would send the
-web now: a white ring where the web would hold, a faint dashed ring where it
+web now, in its hand's colour (the left's sky blue, the right's orange): a
+ring around a dot where the web would hold, a faint dashed ring where it
 would hold in open air (no marker there with webs in open air switched off),
-a red cross where it would miss, amber corners around
+a red cross where it would miss, a turning ring of three arcs with claws around
 a prop or thug it would catch. It tightens as you squeeze. **X** hides or
 shows the markers; `Launch Spidy VR.cmd -NoAimMarkers` starts with them hidden.
 
@@ -266,18 +267,21 @@ from that wrist where the controller points: the game's own web-shooter shot.
 Aimed within about 7 degrees of a thug, with nothing in between, it goes to
 him; otherwise it splats on the first thing in its way, or ends in open air
 about 60 m out. One ball per pull; the hand ticks as it leaves. A trigger held
-from a reel or a menu shoots only after a release. Switch **Web shooter** off
-(VR settings, the launcher's options) or start with
-`Launch Spidy VR.cmd -NoWebShooter` to keep the trigger for reeling only.
+from a reel or a menu shoots only after a release. Start with
+`Launch Spidy VR.cmd -NoWebShooter` to keep the trigger for reeling only;
+since October 8 neither the VR settings nor the launcher's options have that
+switch.
 
 **VR settings** are a tab of the game's own Settings: pause (the menu
 button), choose Settings, then **SPIDY VR**, after KEY MAPPING (Up from GAME
 reaches it; the list wraps). The game builds and draws it with its own option
-code, so it handles like its other tabs: switch the aim markers, web grabbing,
-webs in open air, the web shooter, your body and punching, or step the swing
-speed limit, weight, snap turn, smooth turn, controller vibration and the game
-screen's size with left and right; X resets a setting, Y the whole tab (to
-Spidy's defaults). Changes apply at once; Spidy Launcher starts your next
+code, so it handles like its other tabs: switch the aim markers and webs in
+open air, or step the swing speed limit, weight, snap turn, smooth turn,
+controller vibration and the game screen's size with left and right; X resets
+a setting, Y the whole tab (to Spidy's defaults). Web grabbing, the web
+shooter, your body and punching are not in it or in the launcher's options
+(since October 8): they are always on unless a launch option below turns
+them off, and the game draws the webs unless `-OverlayWebs`. Changes apply at once; Spidy Launcher starts your next
 session with them. Weight is the swing's gravity in percent of real gravity
 (40-300%, 60% by default: Spidy's 6 m/s² since October 5), while webs fly the
 player and after letting go until landing (`Swing::setGravity`, game_swing
@@ -413,6 +417,8 @@ reattaching after a stopped session or a rebuilt DLL.
 | `-NoAirWebs` | A web that meets nothing within 100 m misses instead of holding in open air |
 | `-NoWebShooter` | The trigger only reels |
 | `-NoAimMarkers` | Start with the aim markers hidden (X shows them) |
+| `-EyeHeight 1630 -ArmLength 590` | Your T-pose calibration in millimetres (the console's last "VR settings from the headset" line has it): Spider-Man's body takes your eye height and arm length, and the first gameplay asks for none |
+| `-NoCalibrationPrompt` | Without a calibration, do not ask for the T-pose at the first gameplay (Settings > SPIDY VR > CALIBRATE BODY still does it) |
 | `-NoBody` | Hide the hero and draw gloves |
 | `-NoPunch` | Fists pass through thugs |
 | `-OverlayWebs` | Spidy's overlay strands instead of the game's web lines |
@@ -614,6 +620,7 @@ still requires a running game or headset.
 | `src/native_webs.cpp` | The game's own web lines, started at the tracked wrists |
 | `src/web_grab.cpp`, `src/lab_props.cpp` | Web grab: catching, yanking, carrying and throwing props and characters; the lab's props |
 | `src/body_ik.cpp`, `src/native_body.cpp` | The player's body: the solver, and the hero's joints turned after the game's pose writer |
+| `src/body_calibration.cpp`, `src/overlay_text.cpp` | The T-pose calibration (the player's eye height and arm length, and its panel in the headset); the overlay's stroke font |
 | `src/punch.cpp`, `src/game_punch.cpp` | Punching: fists against characters, and the game's own melee damage for each punch |
 | `src/shooter.cpp`, `src/game_shooter.cpp` | The web shooter: trigger pulls and their aim, and the game's own web-shooter shot fired from the hand |
 | `src/game_grab.cpp`, `src/native_bodies.cpp`, `src/game_targets.cpp` | Web grab in the game: candidates, freed Havok props, flung bots |

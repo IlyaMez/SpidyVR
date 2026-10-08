@@ -8,6 +8,8 @@ param(
     [ValidateRange(0,360)][int]$SmoothTurn=0,
     [ValidateRange(0,100)][int]$Haptics=100,
     [ValidateSet('Small','Medium','Large')][string]$ScreenSize='Medium',
+    [ValidateRange(0,2500)][int]$EyeHeight=0,
+    [ValidateRange(0,1200)][int]$ArmLength=0,
     [string]$Python,
     [switch]$CaptureImages,
     [switch]$OverlayWebs,
@@ -17,6 +19,7 @@ param(
     [switch]$NoPunch,
     [switch]$NoWebShooter,
     [switch]$NoAimMarkers,
+    [switch]$NoCalibrationPrompt,
     [switch]$NoEyeOcclusion,
     [switch]$StockMonitorView,
     [switch]$FullDesktopView,
@@ -41,6 +44,9 @@ foreach($name in @('spidy_headset_probe.exe','spidy_bridge.dll','spidy_render_pr
 }
 if($Seconds -eq 1 -or ($Size -gt 0 -and $Size -lt 64)) { throw 'Use 0 or 2..25 seconds and 0 or 64..8192 pixels.' }
 if($Size -and $RenderScale -ne 100) { throw 'Use -Size or -RenderScale, not both.' }
+if(($EyeHeight -eq 0) -ne ($ArmLength -eq 0) -or ($EyeHeight -and ($EyeHeight -lt 1000 -or $ArmLength -lt 250))) {
+    throw 'Give both -EyeHeight (1000..2500 mm) and -ArmLength (250..1200 mm) from a T-pose calibration, or neither.'
+}
 Write-Host 'Spidy VR - connect your headset before starting (Quest 3: Virtual Desktop or Steam Link; SteamVR headsets: start SteamVR).'
 if($XrRuntime) { Write-Host "VR runtime: $XrRuntime." }
 else { Write-Host 'VR runtime: the one your headset is connected to (add -XrRuntime <manifest> to choose).' }
@@ -56,8 +62,8 @@ Write-Host "In VR B is the game's interact button (its Y: backpacks, doors, prom
 Write-Host 'Keep the game window in front on the desktop: the game pauses while another window is.'
 Write-Host 'Click both thumbsticks to switch between immersive VR and a flat game screen in the headset.'
 Write-Host "VR settings are in the game's own Settings: pause, Settings, then SPIDY VR (Up from GAME reaches it)."
-Write-Host 'There change the aim markers, web grab, webs in open air, the web shooter, swing speed, body,'
-Write-Host 'punching, snap turn, vibration and screen size during play.'
+Write-Host 'There change the aim markers, webs in open air, swing speed, weight, your body calibration,'
+Write-Host 'snap turn, smooth turn, vibration and screen size during play.'
 Write-Host "Squeeze a grip to shoot that hand's web. Keep it held to swing; release it to let go."
 Write-Host "Swing speed cap: $SwingSpeed m/s. Pull the trigger while a web is attached to reel in."
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -93,6 +99,18 @@ if($NoAimMarkers) {
     Write-Host "Aim markers hidden at the start: X shows where each hand's web would land."
 }
 else { Write-Host "Aim markers show where each hand's web would land; X hides them (add -NoAimMarkers to start hidden)." }
+if($EyeHeight) {
+    $captureArgs+=@('--eye-height',$EyeHeight,'--arm-length',$ArmLength)
+    Write-Host "Your body: eye height $EyeHeight mm, arm $ArmLength mm from a T-pose calibration."
+}
+elseif($NoCalibrationPrompt) {
+    $captureArgs+=@('--no-calibration-prompt')
+    Write-Host "Your size comes from the headset's height (Settings > SPIDY VR > CALIBRATE BODY asks for a T-pose)."
+}
+else {
+    Write-Host 'At the first gameplay stand in a T-pose and hold both triggers: Spider-Man takes your height and'
+    Write-Host 'arm length (B skips it; Settings > SPIDY VR > CALIBRATE BODY does it again).'
+}
 if($NoEyeOcclusion) {
     $captureArgs+=@('--no-eye-occlusion')
     Write-Host 'Eye occlusion off: each eye draws everything in view, hidden or not (about half the frame rate).'

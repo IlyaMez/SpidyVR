@@ -46,7 +46,8 @@ coming. Questions, bugs, clips: come say hi on
 - 🪢 **Grab and throw.** Web a prop or a thug, reel or yank it in, swing it on
   the web and let go to throw it. Heavy things feel heavy.
 - 🦸 **You are Spider-Man.** Look down and see his body; his arms and hands
-  follow your controllers.
+  follow your controllers. A quick T-pose the first time sizes him to your
+  height and arm length.
 - 👊 **Real punches.** A fast fist into a thug lands the game's own melee hit,
   harder the faster you swing.
 - ⚙️ **VR settings in the game's menu.** A SPIDY VR tab in the game's own
@@ -108,9 +109,9 @@ Spidy changes nothing in the game's folder.
 | Show or hide aim markers | **X** |
 | Switch between VR and a flat screen | Click **both sticks** |
 
-**Aim markers** show where each free hand's web would go: a white ring holds,
-a dashed ring holds in open air, a red cross misses, amber corners catch a prop
-or thug.
+**Aim markers** show where each free hand's web would go, blue for the left
+hand and orange for the right: a ring holds, a dashed ring holds in open air,
+a red cross misses, a turning ring of three arcs catches a prop or thug.
 
 ## Troubleshooting
 
@@ -122,7 +123,7 @@ or thug.
 | Low frame rate | Lower *Render resolution* in the launcher, or the streaming quality in Virtual Desktop. 90 Hz paces more evenly than 120 Hz. |
 | Blurry or jagged edges | Raise *Render resolution* in the launcher above 100% (try 125%); it costs frame rate and memory. |
 | A memory warning before start | Close big programs (browsers, chat apps), or [give Windows a larger page file](docs/DEVELOPMENT.md#memory-for-a-vr-session). |
-| Web balls fly when you meant to reel | The trigger reels only while that hand's web is attached. Switch *Web shooter* off to keep it for reeling. |
+| Web balls fly when you meant to reel | The trigger reels only while that hand's web is attached; on a hand without a web it shoots. |
 
 More fixes are in the [players' guide](docs/PLAYERS.md). When you report a
 problem, attach the session's report from the `reports` folder, on

@@ -110,6 +110,10 @@ struct Rig {
     // forward, up and left, in model units; its height above the feet.
     Vec3 eyesFromHead{};
     float eyeHeight{};
+    // Each shoulder joint (the upper arm's) from the point between the eyes,
+    // along the character's forward, up and left, model units: where the T-pose
+    // calibration (body_calibration.hpp) measures the player's arms from.
+    std::array<Vec3, 2> shoulders{};
     std::array<float, 2> upperArm{}, forearm{}, thigh{}, shin{};
     bool ready{};
 };
@@ -205,8 +209,9 @@ struct Result {
 };
 // One frame. `wanted` turns the body on (it blends in) or off (it blends
 // out, toward the same targets); `dt` seconds since the last call. `scale`
-// sizes the body about the feet (1 the game's size). Leaves the pose as it
-// was while the weight is 0.
+// sizes the body about the feet (1 the game's size), and `armScale` its arms
+// on top of that, each about its shoulder (the player's arms, measured by
+// the T-pose calibration). Leaves the pose as it was while the weight is 0.
 Result solve(Pose& pose, const Rig& rig, const Targets& targets, const Config& config, State& state, bool wanted,
-             float dt, float scale = 1);
+             float dt, float scale = 1, float armScale = 1);
 } // namespace spidy::body

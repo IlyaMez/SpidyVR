@@ -1,4 +1,5 @@
 #pragma once
+#include "body_calibration.hpp"
 #include "game_swing.hpp"
 #include "game_tracking.hpp"
 #include "presentation_gate.hpp"
@@ -14,6 +15,8 @@ struct NativeEyeFrame {
     // What each hand's grip press would do (game_swing::AimKind none while
     // the aim markers are off).
     std::array<game_swing::Aim, 2> aims{};
+    // The T-pose calibration's panel and controller rings (phase idle: none).
+    body_calibration::View calibration{};
     bool flatScreen{};
     Pose screenPose{};
     float screenAspect = 16.f / 9;

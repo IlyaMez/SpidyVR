@@ -19,6 +19,8 @@
 #include "spidy/web_grab.hpp"
 #include "spidy/lab_props.hpp"
 #include "spidy/body_ik.hpp"
+#include "spidy/body_calibration.hpp"
+#include "spidy/overlay_text.hpp"
 #include "spidy/punch.hpp"
 #include "spidy/shooter.hpp"
 #include <algorithm>
@@ -274,13 +276,14 @@ Vec3 wristOf(const body::Targets::Hand& h,int side,const body::Config& c={}){
 // Solves a fresh copy of the game's pose each frame, as the game hands one
 // over, until the body has fully taken over.
 std::vector<float> solved(const TestBody& b,const body::Targets& t,body::State& s,const body::Config& c={},
-                          float scale=1,body::Result* result=nullptr,const std::vector<float>* from=nullptr){
+                          float scale=1,body::Result* result=nullptr,const std::vector<float>* from=nullptr,
+                          float armScale=1){
     std::vector<float> pose;
     body::Result r;
     for(int i=0;i<4;++i){
         pose=from?*from:b.rest;
         body::Pose view(pose.data(),static_cast<int>(b.rig.parent.size()));
-        r=body::solve(view,b.rig,t,c,s,true,.1f,scale);
+        r=body::solve(view,b.rig,t,c,s,true,.1f,scale,armScale);
     }
     if(result)*result=r;
     return pose;
@@ -303,6 +306,37 @@ GameMotionFrame playFor(GameTrackingRig& rig, XrFrame& f, Vec3 feet, Vec3 up, fl
         out = rig.update(f, feet, {0, 0, -1}, true, up);
     }
     return out;
+}
+// A player in a T-pose in the tracking space (OpenXR axes: -z ahead, +x right, +y up from the floor): eyes
+// `eyes` high, each wrist `arm` (the left) and `rightArm` (the right; 0: the same) from the avatar's shoulder
+// at the player's size (Spider-Man's proportions), straight out to its side; both triggers at `trigger`.
+body_calibration::Sample tPose(float eyes,float arm,float rightArm=0,float trigger=1){
+    body_calibration::Sample s;
+    s.headTracked=true;
+    s.head={{0,eyes,0},{}};
+    const body_calibration::Proportions p;
+    const float scale=body_calibration::bodyScale(eyes,p);
+    const Vec3 forward{0,0,-1},up{0,1,0},left{-1,0,0};
+    for(int i=0;i<2;++i){
+        const Vec3 sh=p.shoulders[i];
+        const Vec3 shoulder=s.head.position+(forward*sh.x+up*sh.y+left*sh.z)*scale;
+        const Vec3 side=i==0?left:left*-1.f;
+        const Vec3 wrist=shoulder+side*(i==1&&rightArm>0?rightArm:arm);
+        // Knuckles (the grip's -y) out along the arm, thumb up (-z).
+        const Vec3 y=side*-1.f,z{0,-1,0};
+        const Quat grip=body::fromAxes(cross(y,z),y,z);
+        s.grips[i]={wrist-grip.rotate({i==0?-.02f:.02f,.09f,0}),grip};
+        s.handTracked[i]=true;
+        s.triggers[i]=trigger;
+    }
+    s.seconds=1.f/90;
+    return s;
+}
+// Feeds `sample` for `frames` frames; true when the calibration finished on one of them.
+bool hold(body_calibration::Calibration& c,const body_calibration::Sample& sample,int frames){
+    bool finished=false;
+    for(int i=0;i<frames;++i)finished=c.update(sample)||finished;
+    return finished;
 }
 int main() {
     int total = 0, failed = 0;
@@ -1585,19 +1619,160 @@ int main() {
         }
         check(spread(AimMark::anchor,{0,1.7f,-10},.6f)<spread(AimMark::anchor,{0,1.7f,-10})*.8f,
               "squeezing the grip did not tighten the ring");
-        check(spread(AimMark::target,{0,1.7f,-10},0,1.5f)*10>1.5f,"corners inside a large target");
-        // The dark outline lies behind the colour, which wins the depth test.
-        std::vector<Vertex> v;AimMarker m;m.point={0,1.7f,-10};appendAimMarker(v,m,viewer,.001f);
-        float dark=1e9f,bright=1e9f;
-        for(const auto& p:v){
-            float& nearest=p.color.x<.1f?dark:bright;
-            nearest=std::min(nearest,length(p.position-viewer));
+        check(spread(AimMark::target,{0,1.7f,-10},0,1.5f)*10>1.5f,"ring inside a large target");
+        // Translucent and painted in order: a marker's soft dark shadows
+        // first, then its colours, every edge fading out.
+        auto dark=[](const Vertex& p){return p.color.x<.05f&&p.color.y<.05f&&p.color.z<.05f;};
+        for(const auto kind:{AimMark::anchor,AimMark::air,AimMark::blocked,AimMark::target})
+            for(const unsigned hand:{0u,1u}){
+                std::vector<Vertex> v;AimMarker m;m.kind=kind;m.point={0,1.7f,-10};m.hand=hand;
+                appendAimMarker(v,m,viewer,.001f);
+                size_t lastDark=0,firstColour=v.size(),faded=0;
+                for(size_t i=0;i<v.size();++i){
+                    if(dark(v[i]))lastDark=i;else firstColour=std::min(firstColour,i);
+                    check(v[i].alpha>=0&&v[i].alpha<=1,"marker opacity out of range");
+                    faded+=v[i].alpha==0;
+                }
+                check(firstColour<v.size()&&lastDark<firstColour,"a shadow drawn over the marker's colour");
+                check(faded>v.size()/4,"marker edges do not fade out");
+            }
+        // Each hand its own colour: the left hand's blue, the right hand's orange.
+        auto hue=[&](unsigned hand){
+            std::vector<Vertex> v;AimMarker m;m.point={0,1.7f,-10};m.hand=hand;appendAimMarker(v,m,viewer,.001f);
+            float warm=0;size_t coloured=0;
+            for(const auto& p:v)if(!dark(p)){warm+=p.color.x-p.color.z;++coloured;}
+            return warm/static_cast<float>(std::max<size_t>(coloured,1));
+        };
+        check(hue(0)<-.5f&&hue(1)>.5f,"the hands' markers share a colour");
+        // A fading marker is as translucent as it is faded; a gone one draws nothing.
+        {
+            std::vector<Vertex> v;AimMarker m;m.point={0,1.7f,-10};m.opacity=.5f;appendAimMarker(v,m,viewer,.001f);
+            float most=0;for(const auto& p:v)most=std::max(most,p.alpha);
+            near(most,.5f,1e-4f);
         }
-        check(bright<dark,"outline drawn in front of the marker");
-        v.clear();m.point=viewer;appendAimMarker(v,m,viewer,.001f);
+        // The target's ring is round: its outer edge runs along most of a
+        // circle (square corners would only reach out at four places), and
+        // it closes in from wider while it locks on. The right hand's ring
+        // is wider than the left's, so both on one target stay apart.
+        auto outerAngles=[&](AimMarker m){
+            std::vector<Vertex> v;appendAimMarker(v,m,viewer,.001f);
+            float widest=0;for(const auto& p:v)widest=std::max(widest,length(p.position-m.point));
+            std::array<bool,36> bins{};
+            for(const auto& p:v){
+                const Vec3 d=p.position-m.point;
+                if(length(d)>=widest*.97f)bins[static_cast<size_t>((std::atan2(d.y,d.x)+3.1415927f)/(2*3.1415927f)*36)%36]=true;
+            }
+            return std::count(bins.begin(),bins.end(),true);
+        };
+        AimMarker t;t.kind=AimMark::target;t.point={0,1.7f,-10};t.radius=.6f;
+        check(outerAngles(t)>=18,"the target's ring is not round");
+        auto ringSize=[&](AimMarker m){
+            std::vector<Vertex> v;appendAimMarker(v,m,viewer,.001f);
+            float widest=0;for(const auto& p:v)widest=std::max(widest,length(p.position-m.point));
+            return widest;
+        };
+        const float settled=ringSize(t);
+        t.lock=0;check(ringSize(t)>settled*1.5f,"the target's ring does not close in");
+        t.lock=1;t.hand=1;check(ringSize(t)>settled*1.1f,"both hands' rings on one target coincide");
+        std::vector<Vertex> v;AimMarker m;m.point=viewer;appendAimMarker(v,m,viewer,.001f);
         m.point={0,std::numeric_limits<float>::quiet_NaN(),0};appendAimMarker(v,m,viewer,.001f);
         m.point={0,1.7f,-10};appendAimMarker(v,m,viewer,0);
+        m.opacity=0;appendAimMarker(v,m,viewer,.001f);
         check(v.empty(),"invalid marker drew geometry");
+    });
+    test("aim marker motion steadies hand tremor, keeps up with a sweep and ignores turns", [] {
+        constexpr float dt=1.f/72,degree=3.1415927f/180;
+        auto ray=[](float yaw){return Quat::yaw(yaw).rotate({0,0,-1});};
+        auto angle=[](Vec3 a,Vec3 b){return std::acos(std::clamp(dot(normalized(a),normalized(b)),-1.f,1.f));};
+        // A hand held still with a 9 Hz tremor of 0.15 degrees.
+        AimMarkerMotion motion;
+        float lowest=1e9f,highest=-1e9f;
+        for(int i=0;i<108;++i){
+            motion.begin(1'000'000'000+static_cast<int64_t>(i*dt*1e9));
+            const float wobble=.15f*degree*std::sin(2*3.1415927f*9*i*dt);
+            const Vec3 d=motion.aim(ray(wobble),0);
+            if(i>=36){const float yaw=std::atan2(-d.x,-d.z);lowest=std::min(lowest,yaw);highest=std::max(highest,yaw);}
+        }
+        check(highest-lowest<.5f*.3f*degree,"tremor not steadied");
+        // A sweep at 2 radians a second: a few tenths of a degree behind.
+        motion.reset();
+        Vec3 last{};float yaw=0;
+        for(int i=0;i<30;++i){
+            motion.begin(1'000'000'000+static_cast<int64_t>(i*dt*1e9));
+            yaw=i<6?0.f:2*(i-6)*dt;
+            last=motion.aim(ray(yaw),0);
+        }
+        check(angle(last,ray(yaw))<.6f*degree,"the marker lags a sweep");
+        // A snap turn turns the world and the aim with it: no motion.
+        const int64_t t=1'000'000'000+static_cast<int64_t>(30*dt*1e9);
+        motion.begin(t);
+        const Vec3 turned=motion.aim(ray(yaw+.5236f),.5236f);
+        check(angle(turned,ray(yaw+.5236f))<angle(last,ray(yaw))+.01f*degree,"a snap turn swung the marker");
+        // The same image again changes nothing; after a long gap it starts afresh.
+        motion.begin(t);
+        check(angle(motion.aim(ray(yaw+.5236f),.5236f),turned)<1e-6f,"the same image moved the marker");
+        motion.begin(t+500'000'000);
+        check(angle(motion.aim(ray(1.f),0),ray(1.f))<1e-6f,"a gap did not restart the steadying");
+        // Bad input passes through, untouched.
+        const Vec3 bad{0,std::numeric_limits<float>::quiet_NaN(),0};
+        check(!finite(motion.aim(bad,0)),"a bad direction was steadied");
+    });
+    test("aim marker motion fades markers in and out and eases them to new places", [] {
+        constexpr float dt=1.f/72;
+        const Vec3 origin{0,1.5f,0},ahead{0,0,-1};
+        AimMarkerMotion motion;
+        int frame=0;
+        auto step=[&](const AimMarker* wanted,Vec3 direction=Vec3{0,0,-1}){
+            motion.begin(2'000'000'000+static_cast<int64_t>(frame++*dt*1e9));
+            std::vector<AimMarker> out;motion.markers(wanted,origin,direction,out);return out;
+        };
+        auto find=[](const std::vector<AimMarker>& v,AimMark kind)->const AimMarker*{
+            for(const auto& m:v)if(m.kind==kind)return &m;
+            return nullptr;
+        };
+        AimMarker anchor;anchor.point=origin+ahead*10;anchor.hand=1;
+        auto shown=step(&anchor);
+        check(shown.size()==1&&shown[0].opacity>.3f&&shown[0].opacity<.5f&&shown[0].hand==1,"a new marker did not show at once");
+        near(length(shown[0].point-origin),10,1e-3f);
+        for(int i=0;i<3;++i)shown=step(&anchor);
+        near(shown[0].opacity,1);
+        // A new distance along the ray: eased, not a jump, and there soon.
+        anchor.point=origin+ahead*40;
+        shown=step(&anchor);
+        const float between=length(shown[0].point-origin);
+        check(between>10.5f&&between<39,"the marker jumped to its new distance");
+        for(int i=0;i<11;++i)shown=step(&anchor);
+        near(length(shown[0].point-origin),40,.4f);
+        // Another kind, the hand turned: the new one fades in on the new ray
+        // while the old one fades out where it was.
+        const Vec3 anchorAt=shown[0].point,turned=normalized(Vec3{.2f,0,-1});
+        AimMarker air;air.kind=AimMark::air;air.point=origin+turned*100;
+        shown=step(&air,turned);
+        check(find(shown,AimMark::anchor)&&find(shown,AimMark::air),"a switch of kind did not fade across");
+        check(find(shown,AimMark::anchor)->opacity<1&&find(shown,AimMark::air)->opacity<.5f,"the switch did not fade");
+        check(length(find(shown,AimMark::anchor)->point-anchorAt)<1e-4f,"a fading marker followed the hand");
+        near(length(cross(find(shown,AimMark::air)->point-origin,turned)),0,1e-3f);
+        for(int i=0;i<7;++i)shown=step(&air,turned);
+        check(!find(shown,AimMark::anchor)&&find(shown,AimMark::air)->opacity==1,"the old kind did not fade out");
+        // A target: its ring locks on from wider and slides to the next target.
+        AimMarker target;target.kind=AimMark::target;target.point={2,1,-8};target.radius=.4f;
+        shown=step(&target);
+        check(find(shown,AimMark::target)->lock<.1f,"the target's ring did not start wide");
+        const float spin=find(shown,AimMark::target)->spin;
+        for(int i=0;i<10;++i)shown=step(&target);
+        near(find(shown,AimMark::target)->lock,1);
+        check(find(shown,AimMark::target)->spin!=spin,"the target's ring does not turn");
+        target.point={4,1,-8};
+        shown=step(&target);
+        const float slid=find(shown,AimMark::target)->point.x;
+        check(slid>2.05f&&slid<3.5f,"the target's ring jumped to the next target");
+        for(int i=0;i<14;++i)shown=step(&target);
+        near(find(shown,AimMark::target)->point.x,4,.02f);
+        // Nothing wanted: every marker fades out.
+        shown=step(nullptr);
+        check(!shown.empty()&&shown[0].opacity<1,"a marker vanished instead of fading");
+        for(int i=0;i<6;++i)shown=step(nullptr);
+        check(shown.empty(),"a marker did not fade out");
     });
     test("a surface marker follows the aim line across the surface's plane", [] {
         // A wall facing +z at z = -20, met at its origin; the hand now aims a little to the right.
@@ -3088,6 +3263,207 @@ int main() {
         check(r.headError<1e-3f&&r.handError[0]<1e-3f,"the scaled body missed its targets");
         check(r.grounded&&std::abs(b.at(pose,23).y-b.at(b.rest,23).y*1.1f)<1e-3f,"the scaled feet left the ground");
     });
+    test("body: a player's longer arms reach their controllers, each arm scaled about its shoulder", [] {
+        auto b=testBody();
+        body::Config c;c.hideHead=false;
+        // Where the shoulders end up under these eyes, without controllers.
+        auto t=lookingAhead({0,1.7f,.08f});
+        body::State s;
+        const auto free=solved(b,t,s,c);
+        // Both wrists straight out to the sides 0.65 m from the shoulders: past the rig's 0.56.
+        for(int i=0;i<2;++i){
+            const Vec3 side{i==0?1.f:-1.f,0,0};
+            const Vec3 wrist=b.at(free,b.rig.arms[i].upper)+side*.65f;
+            // Knuckles (the grip's -y) out along the arm, thumb up (-z).
+            const Vec3 y=side*-1.f,z{0,-1,0};
+            const Quat grip=body::fromAxes(cross(y,z),y,z);
+            t.hands[i]={true,wrist-grip.rotate({i==0?-c.wristFromGrip.x:c.wristFromGrip.x,c.wristFromGrip.y,0}),grip};
+        }
+        body::Result r;
+        s={};
+        solved(b,t,s,c,1,&r);
+        check(r.handError[0]>.05f&&r.handError[1]>.05f,"the rig's own arms reached 0.65 m");
+        s={};
+        const float longer=.65f/.56f;
+        const auto pose=solved(b,t,s,c,1,&r,nullptr,longer);
+        check(r.handError[0]<1e-3f&&r.handError[1]<1e-3f&&r.headError<1e-3f,"the longer arms missed their controllers");
+        for(const auto& arm:b.rig.arms){
+            near(length(b.at(pose,arm.lower)-b.at(pose,arm.upper)),.26f*longer,1e-3f);
+            near(length(b.at(pose,arm.hand)-b.at(pose,arm.lower)),.30f*longer,1e-3f);
+        }
+        near(length(b.at(pose,13)-b.at(pose,12)),.09f*longer,1e-3f); // the hand grows with its arm
+        check(length(b.at(pose,1)-b.at(free,1))<1e-3f,"the arms moved the hips");
+    });
+    test("calibration: the rig's proportions, and the body's and arms' scales within their ranges", [] {
+        auto b=testBody();
+        const auto p=body_calibration::proportions(b.rig);
+        near(p.eyeHeight,1.7f);
+        // The test rig's shoulders: 0.08 m behind the eyes, 0.24 below, 0.18 out; arms of 0.56 m.
+        near(p.shoulders[0].x,-.08f);near(p.shoulders[0].y,-.24f);near(p.shoulders[0].z,.18f);
+        near(p.shoulders[1].z,-.18f);near(p.arms[0],.56f);near(p.arms[1],.56f);
+        const body::Rig unready;
+        near(body_calibration::proportions(unready).eyeHeight,body_calibration::Proportions{}.eyeHeight);
+        near(body_calibration::bodyScale(1.87f,p),1.1f);
+        near(body_calibration::bodyScale(.9f,p),body_calibration::minBodyScale);
+        near(body_calibration::bodyScale(2.6f,p),body_calibration::maxBodyScale);
+        near(body_calibration::bodyScale(std::numeric_limits<float>::quiet_NaN(),p),1);
+        near(body_calibration::armScale(0,1.1f,p),1);
+        near(body_calibration::armScale(.6f,1,p),.6f/.56f);
+        near(body_calibration::armScale(.6f,1.1f,p),.6f/(.56f*1.1f));
+        near(body_calibration::armScale(.2f,1,p),body_calibration::minArmScale);
+        near(body_calibration::armScale(1.2f,1,p),body_calibration::maxArmScale);
+        // Spider-Man's own (the defaults): his eyes 1.697 m high, his shoulder joints 0.27 m below them and his
+        // arms 0.56 m from them to the wrists.
+        const body_calibration::Proportions hero;
+        near(hero.eyeHeight,1.697f,1e-3f);near(hero.shoulders[0].y,-.266f,1e-3f);near(hero.arms[0],.559f,1e-3f);
+    });
+    test("calibration: a T-pose held a second and a half measures the eyes and the arms", [] {
+        body_calibration::Calibration c;
+        check(!c.update(tPose(1.62f,.6f))&&c.phase()==body_calibration::Phase::idle,"it ran before it started");
+        c.start();
+        check(c.phase()==body_calibration::Phase::waiting,"the instructions did not show");
+        check(!hold(c,tPose(1.62f,.6f),134),"it finished early");
+        check(c.phase()==body_calibration::Phase::holding&&c.hint()==body_calibration::Hint::none&&
+                  c.armsReady()[0]&&c.armsReady()[1],"the pose did not count");
+        near(c.progress(),134.f/135,1e-3f);
+        check(c.update(tPose(1.62f,.6f)),"it did not finish at a second and a half");
+        check(c.phase()==body_calibration::Phase::done&&c.progress()==1,"not shown as done");
+        const auto& r=c.result();
+        near(r.eyeHeight,1.62f);near(r.armLength,.6f);near(r.reach[0],.6f);near(r.reach[1],.6f);
+        check(!c.update(tPose(1.8f,.7f))&&c.result().eyeHeight==r.eyeHeight,"a finished calibration measured again");
+        c.stop();
+        check(c.phase()==body_calibration::Phase::idle&&c.result().armLength>.59f,"stopping lost the result");
+        // The longer arm counts: the other is a little bent.
+        c.start();
+        check(hold(c,tPose(1.75f,.62f,.58f),136),"a slightly bent arm kept it from finishing");
+        near(c.result().armLength,.62f);near(c.result().eyeHeight,1.75f);
+    });
+    test("calibration: the first thing wrong with the pose is what the panel asks for", [] {
+        using body_calibration::Hint;
+        const auto hintFor=[](body_calibration::Sample s){
+            body_calibration::Calibration c;c.start();
+            c.update(s);
+            return c.hint();
+        };
+        auto s=tPose(1.62f,.6f);
+        s.handTracked[1]=false;
+        check(hintFor(s)==Hint::tracking,"an untracked controller");
+        check(hintFor(tPose(.9f,.6f))==Hint::standUp,"a seated player");
+        // Arms hanging down: the wrists 0.6 m under the shoulders.
+        s=tPose(1.62f,.6f);
+        for(auto& grip:s.grips)grip.position+=Vec3{grip.position.x<0?.6f:-.6f,-.6f,0};
+        check(hintFor(s)==Hint::armsOut,"arms down");
+        // Crossed arms: the left wrist on the right.
+        s=tPose(1.62f,.6f);
+        std::swap(s.grips[0].position,s.grips[1].position);
+        check(hintFor(s)==Hint::armsOut,"crossed arms");
+        check(hintFor(tPose(1.62f,.3f))==Hint::straight,"bent arms");
+        check(hintFor(tPose(1.62f,.6f,.47f))==Hint::straight,"one arm much shorter");
+        s=tPose(1.62f,.6f);
+        s.head.orientation=body::axisAngle({1,0,0},-.7f);
+        check(hintFor(s)==Hint::lookAhead,"looking down");
+        s.head.orientation=Quat::yaw(.87f);
+        check(hintFor(s)==Hint::lookAhead,"looking to the side");
+        check(hintFor(tPose(1.62f,.6f,0,.3f))==Hint::triggers,"triggers let go");
+        // Moving: a hand 1 cm a frame (0.9 m/s).
+        body_calibration::Calibration c;c.start();
+        s=tPose(1.62f,.6f);
+        c.update(s);
+        s.grips[1].position+=Vec3{0,.01f,0};
+        c.update(s);
+        check(c.hint()==Hint::still,"a moving hand held still");
+        for(int h=0;h<=static_cast<int>(Hint::still);++h)
+            check(body_calibration::hintText(static_cast<Hint>(h))[0]!=0,"a hint without text");
+    });
+    test("calibration: a short lapse pauses the hold, a longer one starts it over", [] {
+        body_calibration::Calibration c;c.start();
+        hold(c,tPose(1.62f,.6f),45);
+        near(c.progress(),1.f/3,1e-3f);
+        // 0.2 s with the triggers let go: paused.
+        hold(c,tPose(1.62f,.6f,0,0),18);
+        check(c.phase()==body_calibration::Phase::holding,"a short lapse ended the hold");
+        near(c.progress(),1.f/3,1e-3f);
+        // Back in the pose, it goes on; once the triggers count, a lighter squeeze (down to 0.35) keeps counting.
+        hold(c,tPose(1.62f,.6f),1);
+        check(!hold(c,tPose(1.62f,.6f,0,.4f),80),"it finished early");
+        check(c.hint()==body_calibration::Hint::none,"a lighter squeeze stopped counting");
+        check(hold(c,tPose(1.62f,.6f),10),"the hold did not go on after the lapse");
+        // That lighter squeeze does not start the hold: a trigger counts from 0.6 on.
+        c.start();
+        hold(c,tPose(1.62f,.6f,0,.5f),10);
+        check(c.hint()==body_calibration::Hint::triggers&&c.progress()==0,"a light squeeze started the hold");
+        // A lapse past a quarter of a second starts over.
+        c.start();
+        hold(c,tPose(1.62f,.6f),45);
+        hold(c,tPose(1.62f,.3f),27);
+        check(c.phase()==body_calibration::Phase::waiting&&c.progress()==0,"a long lapse kept the hold");
+    });
+    test("calibration panel: ahead of the head, facing it; drawn while the calibration shows", [] {
+        const auto panel=body_calibration::panelPose({{.2f,1.6f,.1f},Quat::yaw(1.5707963f)});
+        // Looking along -x: the panel 1.4 m that way, a little below the eyes, its front toward the head.
+        near(panel.position.x,-1.2f);near(panel.position.y,1.48f);near(panel.position.z,.1f);
+        const Vec3 front=panel.orientation.rotate({0,0,1});
+        near(front.x,1);near(front.y,0);near(front.z,0);
+        body_calibration::View view;
+        std::vector<Vertex> out;
+        body_calibration::appendView(out,view,{0,1.6f,0});
+        check(out.empty(),"an idle calibration drew something");
+        view.phase=body_calibration::Phase::waiting;
+        view.hint=body_calibration::Hint::armsOut;
+        view.panel=body_calibration::panelPose({{0,1.6f,0},{}});
+        view.handTracked={true,true};
+        view.grips[0].position={-.7f,1.4f,-.1f};
+        view.grips[1].position={.7f,1.4f,-.1f};
+        body_calibration::appendView(out,view,{0,1.6f,0});
+        check(out.size()>1000&&out.size()%3==0,"the panel's text and figure are missing");
+        float farthest=0;
+        for(const auto& v:out){
+            check(finite(v.position)&&finite(v.color),"a vertex not finite");
+            farthest=std::min(farthest,v.position.z);
+        }
+        check(farthest>-1.401f,"something drawn behind the panel");
+        // Done: the measurements show instead.
+        const size_t waiting=out.size();
+        out.clear();
+        view.phase=body_calibration::Phase::done;
+        view.result={1.63f,.59f,{.59f,.58f}};
+        body_calibration::appendView(out,view,{0,1.6f,0});
+        check(!out.empty()&&out.size()!=waiting,"the result did not show");
+    });
+    test("overlay text: capitals, digits and punctuation in strokes on the text's plane", [] {
+        for(const char* text:{"BODY CALIBRATION","STAND TALL, LOOK AHEAD","ARMS STRAIGHT OUT TO THE SIDES",
+                              "PRESS B TO SKIP","EYE HEIGHT 1.63 M","SPIDER-MAN NOW HAS YOUR SIZE",
+                              "REDO IT IN SETTINGS, SPIDY VR","0123456789%:()!?+=/<>'"})
+            for(const char* c=text;*c;++c)check(*c==' '||drawable(*c),"a character the panel uses has no glyph");
+        for(int h=0;h<=static_cast<int>(body_calibration::Hint::still);++h)
+            for(const char* c=body_calibration::hintText(static_cast<body_calibration::Hint>(h));*c;++c)
+                check(*c==' '||drawable(*c),"a hint uses a character without a glyph");
+        check(drawable('a')&&!drawable('#')&&!drawable('~'),"lower case or unknown characters");
+        near(textWidth("calibrate",.04f),textWidth("CALIBRATE",.04f));
+        // A glyph 4 units wide in a cell 6 tall; a space 2; 1.5 between glyphs.
+        near(textWidth("O",.06f),.04f);
+        near(textWidth("OO",.06f),.04f*2+.015f);
+        near(textWidth("O O",.06f),.04f*2+.015f*2+.02f);
+        near(textWidth("O#O",.06f),textWidth("O O",.06f));
+        near(textWidth("",.06f),0);
+        near(fittedHeight("OO",.06f,1),.06f);
+        near(textWidth("OOOO",fittedHeight("OOOO",.06f,.1f)),.1f);
+        std::vector<Vertex> out;
+        TextStyle style;style.height=.06f;style.color={1,0,0};
+        appendText(out,"H I",{1,2,3},{1,0,0},{0,1,0},style);
+        // H: three bars; I: three; two triangles each.
+        check(out.size()==6*6,"not one bar per stroke");
+        const float half=style.height*style.weight/2,wide=textWidth("H I",.06f);
+        for(const auto& v:out){
+            check(v.color.x==1&&v.color.y==0,"the text's colour");
+            near(v.position.z,3);
+            check(v.position.x>=1-half-1e-5f&&v.position.x<=1+wide+half+1e-5f&&v.position.y>=2-half-1e-5f&&
+                      v.position.y<=2.06f+half+1e-5f,"a stroke outside the text's box");
+        }
+        out.clear();
+        appendText(out,"X",{0,0,0},{1,0,0},{1,0,0},style);
+        check(out.empty(),"text along a degenerate plane");
+    });
     // A right fist driven along `path` at 90 Hz; `relative` is the hand
     // relative to the player (the world position minus the player's travel).
     struct Swing {
@@ -3331,9 +3707,12 @@ int main() {
             for (const char* c : row.choices)
                 check(c && *c, "an empty choice");
         }
-        check(headings == 3 && all[0].item == Item::none && all[7].item == Item::none && all[10].item == Item::none,
+        check(headings == 3 && all[0].item == Item::none && all[5].item == Item::none && all[7].item == Item::none,
               "the sections: webs, body, comfort");
-        check(all[5].item == Item::swingSpeed && all[6].item == Item::weight, "the weight under the swing speed");
+        check(all[3].item == Item::swingSpeed && all[4].item == Item::weight, "the weight under the swing speed");
+        check(all[6].item == Item::calibrate && all[6].choices.size() == 2 &&
+                  std::strcmp(all[6].choices[1], "ON RESUME") == 0,
+              "the body's calibration: NO, or ON RESUME");
         check(seen == (2u << static_cast<unsigned>(lastItem)) - 2, "a setting missing");
         auto choicesOf = [&](Item item) {
             return std::find_if(all.begin(), all.end(), [&](const Row& r) { return r.item == item; })->choices.size();
@@ -3342,8 +3721,9 @@ int main() {
                   choicesOf(Item::smoothTurn) == std::size(smoothTurns) &&
                   choicesOf(Item::haptics) == std::size(hapticLevels) && choicesOf(Item::screenSize) == 3 &&
                   choicesOf(Item::weight) == std::size(weights) &&
-                  choicesOf(Item::body) == 0 && choicesOf(Item::aimMarkers) == 0,
+                  choicesOf(Item::airWebs) == 0 && choicesOf(Item::aimMarkers) == 0,
               "lists: one choice per step; switches: the game's own ON and OFF");
+        check(choicesOf(Item::calibrate) == 2, "the calibration's switch names its two choices");
     });
     test("VR settings choices: switches and lists round-trip, launcher values show the nearest step", [] {
         using namespace vr_settings;
@@ -3383,16 +3763,25 @@ int main() {
         near(gravity(300), 29.43f);
         check(choose(Item::screenSize, 2, v) && v.screenSize == 2 && !choose(Item::screenSize, 3, v),
               "the large screen is the last");
-        check(choose(Item::body, 0, v) && !v.body && choice(Item::body, v) == 0 && !choose(Item::body, 2, v) &&
-                  choose(Item::body, 1, v) && v.body,
+        check(choose(Item::airWebs, 0, v) && !v.airWebs && choice(Item::airWebs, v) == 0 &&
+                  !choose(Item::airWebs, 2, v) && choose(Item::airWebs, 1, v) && v.airWebs,
               "a switch switches back, and takes only OFF and ON");
-        check(choose(Item::airWebs, 0, v) && !v.airWebs && choose(Item::webShooter, 0, v) && !v.webShooter,
-              "webs in open air and the web shooter off");
+        check(choose(Item::aimMarkers, 0, v) && !v.aimMarkers, "the aim markers off");
+        check(choice(Item::calibrate, defaults) == 0 && defaultChoice(Item::calibrate) == 0 &&
+                  choose(Item::calibrate, 1, v) && v.calibrate && choice(Item::calibrate, v) == 1 &&
+                  !choose(Item::calibrate, 2, v),
+              "a calibration asked for: ON RESUME, after NO by default");
         check(choice(Item::none, v) == 0 && !choose(Item::none, 0, v), "a heading holds no value");
         // RESET: each setting's default choice puts its default back.
         for (const auto& row : rows())
             choose(row.item, defaultChoice(row.item), v);
         check(v == defaults, "every default choice together is Spidy's defaults");
+        // What the tab does not offer (run_game_vr.py's switches set it) stays as the session started.
+        v.webGrab = v.punch = v.body = v.webShooter = false;
+        for (const auto& row : rows())
+            choose(row.item, defaultChoice(row.item), v);
+        check(!v.webGrab && !v.punch && !v.body && !v.webShooter,
+              "RESET ALL switched on web grab, punching, the body or the web shooter");
         const auto clean = sanitized({true, true, true, true, 90, 120, -5, 7});
         check(clean.swingSpeed == 65 && clean.snapTurn == 90 && clean.haptics == 0 && clean.screenSize == 2,
               "values outside the ranges");

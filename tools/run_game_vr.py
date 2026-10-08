@@ -43,6 +43,9 @@ VR_COMMIT_MB = 19000
 EYE_COMMIT_BYTES = 110
 # The render scale's range in percent (spidy::minimumRenderScale and maximumRenderScale).
 RENDER_SCALES = (50, 200)
+# What a session takes as a T-pose calibration, millimetres (body_calibration.hpp): the eye height and the arm
+# length (from Spider-Man's shoulder at the player's size to the wrist) the body is sized to.
+EYE_HEIGHTS_MM, ARM_LENGTHS_MM = (1000, 2500), (250, 1200)
 # Eye snapshots kept per session (the newest), and the header fields saved with each.
 EYE_SHOTS = 72
 EYE_SHOT_FIELDS = ('count', 'generation', 'serial', 'width', 'height', 'flat_screen', 'speed_mps',
@@ -374,11 +377,14 @@ SETTINGS_LINE = 'VR settings from the headset: '
 
 
 def start_settings(a):
-    """The VR settings a session starts with, as its samples' vr_settings report them."""
+    """The VR settings a session starts with, as its samples' vr_settings report them; with them the player's T-pose
+    calibration (millimetres, 0: none) and whether a session without one asks for it at its first gameplay."""
     return dict(aim_markers=not a.no_aim_markers, web_grab=not a.no_web_grab, air_webs=not a.no_air_webs,
                 web_shooter=not a.no_web_shooter, punch=not a.no_punch, body=not a.no_body,
                 swing_speed=round(a.swing_speed, 1), weight=a.weight,
-                snap_turn=a.snap_turn, smooth_turn=a.smooth_turn, haptics=a.haptics, screen_size=a.screen_size)
+                snap_turn=a.snap_turn, smooth_turn=a.smooth_turn, haptics=a.haptics, screen_size=a.screen_size,
+                eye_height_mm=a.eye_height, arm_length_mm=a.arm_length,
+                calibration_prompt=not a.no_calibration_prompt)
 
 
 def settings_line(start, sample):
@@ -410,12 +416,18 @@ def pad_ignored(watch, sample, quiet=5):
     return False
 
 
+# The T-pose calibration's phases and what its panel asks for (body_calibration.hpp Phase, Hint).
+CALIBRATION_PHASES = {0: 'none', 1: 'waiting', 2: 'holding', 3: 'done'}
+CALIBRATION_HINTS = {0: None, 1: 'tracking', 2: 'stand_up', 3: 'arms_out', 4: 'straight', 5: 'look_ahead',
+                     6: 'triggers', 7: 'still'}
+
+
 def snapshot(game, address):
     for _ in range(8):
-        raw = game.read(address, 752)
-        if len(raw) != 752:
+        raw = game.read(address, 792)
+        if len(raw) != 792:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53585244, 14, 752):
+        if struct.unpack_from('<3I', raw) != (0x53585244, 15, 792):
             raise RuntimeError('Game XR protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -458,12 +470,24 @@ def snapshot(game, address):
         swing_speed, changes = struct.unpack_from('<fI', raw, 680)
         smooth_turn, = struct.unpack_from('<I', raw, 704)
         weight, = struct.unpack_from('<I', raw, 744)
+        # The T-pose calibration: its phase and what its panel asks for, the hold (0-1), the eye height and arm
+        # length the body is sized to (mm, 0: the headset's running height and Spider-Man's own arms),
+        # calibrations finished and skipped this session, whether a session without one asks for none at its
+        # first gameplay (bit 0), and each arm's reach at the last one.
+        phase, hint, progress = struct.unpack_from('<2If', raw, 752)
+        eye_height, arm_length, calibrations, skips, calibration_flags = struct.unpack_from('<5I', raw, 764)
+        reach = struct.unpack_from('<2f', raw, 784)
         result.update(vr_settings=dict(aim_markers=bool(aim_markers), web_grab=bool(flags & 1),
                                        air_webs=bool(flags & 8), web_shooter=bool(flags & 16),
                                        punch=bool(flags & 2), body=bool(flags & 4),
                                        swing_speed=round(swing_speed, 1), weight=weight, snap_turn=snap_turn,
-                                       smooth_turn=smooth_turn, haptics=haptics, screen_size=screen_size),
-                      setting_changes=changes)
+                                       smooth_turn=smooth_turn, haptics=haptics, screen_size=screen_size,
+                                       eye_height_mm=eye_height, arm_length_mm=arm_length,
+                                       calibration_prompt=not calibration_flags & 1),
+                      setting_changes=changes,
+                      calibration=dict(phase=CALIBRATION_PHASES.get(phase, phase),
+                                       hint=CALIBRATION_HINTS.get(hint, hint), progress=round(progress, 3),
+                                       done=calibrations, skipped=skips, reach_m=[round(r, 3) for r in reach]))
         menu_tabs, menu_installed, menu_status = struct.unpack_from('<Q2I', raw, 688)
         result.update(menu_tabs=menu_tabs, menu_installed=bool(menu_installed), menu_status=menu_status)
         # Walls and ceilings the game held the player on (its wall crawl): the stretches and frames of play
@@ -495,23 +519,25 @@ BODY_PROBLEMS = {0: None, 1: 'no_hero', 2: 'no_rig', 3: 'unknown_rig', 4: 'bad_r
 def body_snapshot(game, address):
     """The player's body on the hero (native_body::Status): whether it turns the hero's joints, how far each
     wrist and the head joint land from the controllers and the headset (metres), how far the hero turned
-    between its pose job and the render (radians), which the body is off by while the hero turns, and how often
-    the hero's pose jobs changed rig (the body's blend restarted at each change before October 6 evening)."""
+    between its pose job and the render (radians), which the body is off by while the hero turns, how often
+    the hero's pose jobs changed rig (the body's blend restarted at each change before October 6 evening), the
+    body's scale and its arms' on top of it, and whether those are from the player's T-pose calibration."""
     for _ in range(8):
-        raw = game.read(address, 136)
-        if len(raw) != 136:
+        raw = game.read(address, 144)
+        if len(raw) != 144:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53424453, 1, 136):
+        if struct.unpack_from('<3I', raw) != (0x53424453, 2, 144):
             raise RuntimeError('Body protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
-        v = struct.unpack('<4Iq3Q2I2Q3fI2ff2fIQ2Id', raw)
+        v = struct.unpack('<4Iq3Q2I2Q3fI2ff2fIQ2IdfI', raw)
         return dict(state=BODY_STATES.get(v[3], v[3]), jobs=v[5], hero_jobs=v[6], solved=v[7],
                     problem=BODY_PROBLEMS.get(v[8], v[8]), joints=v[9], weight=round(v[12], 3),
                     scale=round(v[13], 4), yaw=round(v[14], 4), grounded=bool(v[15]),
                     hand_error_m=[round(v[16], 4), round(v[17], 4)], head_error_m=round(v[18], 4),
                     turn_last=round(v[19], 5), turn_max=round(v[20], 5), rig=hex(v[10]), rig_switches=v[21],
-                    renders=v[22], hero_jobs_last_frame=v[23], hero_jobs_max=v[24], solve_ms=round(v[25], 3))
+                    renders=v[22], hero_jobs_last_frame=v[23], hero_jobs_max=v[24], solve_ms=round(v[25], 3),
+                    arm_scale=round(v[26], 4), calibrated=bool(v[27]))
     return None
 
 
@@ -831,6 +857,15 @@ def main():
     p.add_argument('--swing-speed', type=float, default=32, help='Native swing speed cap in m/s (default 32)')
     p.add_argument('--weight', type=int, default=60,
                    help='How heavy you are while webs fly you, in percent of real gravity (40..300; default 60)')
+    p.add_argument('--eye-height', type=int, default=0,
+                   help="Your eye height in millimetres from a T-pose calibration (with --arm-length): Spider-Man's "
+                        'body is sized to it. 0 (default): none yet, the first gameplay asks for one')
+    p.add_argument('--arm-length', type=int, default=0,
+                   help="Your arm in millimetres from a T-pose calibration, from Spider-Man's shoulder at your size "
+                        'to the wrist (with --eye-height)')
+    p.add_argument('--no-calibration-prompt', action='store_true',
+                   help='Without a calibration, do not ask for the T-pose at the first gameplay (the SPIDY VR tab '
+                        'in the game\'s Settings still offers it)')
     p.add_argument('--snap-turn', type=int, default=30,
                    help='Degrees a flick of the right stick turns you (0: no snap turning; default 30)')
     p.add_argument('--smooth-turn', type=int, default=0,
@@ -858,6 +893,11 @@ def main():
         p.error('Use 0..90 degrees of snap turn, 0..360 degrees a second of smooth turn and 0..100% vibration')
     if not 40 <= a.weight <= 300:
         p.error('Use a weight of 40..300% of real gravity')
+    if (a.eye_height == 0) != (a.arm_length == 0) or a.eye_height and (
+            not EYE_HEIGHTS_MM[0] <= a.eye_height <= EYE_HEIGHTS_MM[1] or
+            not ARM_LENGTHS_MM[0] <= a.arm_length <= ARM_LENGTHS_MM[1]):
+        p.error('Give both --eye-height (%d..%d mm) and --arm-length (%d..%d mm), or neither'
+                % (*EYE_HEIGHTS_MM, *ARM_LENGTHS_MM))
     keep_console(a.output)
     startup = Startup(a.output)
     try:
@@ -958,16 +998,17 @@ def session(a, startup):
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
                                            'SpidyBodyData'))
-        config = struct.pack('<4I7Q2IfI', 0x53585243, 14, 632, game.pid, game.base, queue,
+        config = struct.pack('<4I7Q2IfI', 0x53585243, 15, 640, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
                              (4 if a.stock_monitor_view else 0) | (8 if a.no_web_grab else 0) |
                              (16 if a.no_eye_occlusion else 0) | (32 if a.no_body else 0) |
                              (64 if a.no_punch else 0) | (128 if a.no_aim_markers else 0) |
-                             (256 if a.no_air_webs else 0) | (512 if a.no_web_shooter else 0)) + \
-            runtime_path(manifest) + struct.pack('<6I', a.snap_turn, a.haptics, a.screen_size, a.smooth_turn,
-                                                 a.render_scale, a.weight)
+                             (256 if a.no_air_webs else 0) | (512 if a.no_web_shooter else 0) |
+                             (1024 if a.no_calibration_prompt else 0)) + \
+            runtime_path(manifest) + struct.pack('<8I', a.snap_turn, a.haptics, a.screen_size, a.smooth_turn,
+                                                 a.render_scale, a.weight, a.eye_height, a.arm_length)
         startup.stage = 'starting VR'
         code = call_with_payload(process, xr['SpidyXrStart'], config)
         if code:
@@ -1066,7 +1107,7 @@ def session(a, startup):
                     if body:
                         sample['body'] = {k: body[k] for k in ('state', 'problem', 'weight', 'hand_error_m',
                                                                'head_error_m', 'turn_last', 'grounded', 'scale',
-                                                               'rig', 'rig_switches')}
+                                                               'arm_scale', 'rig', 'rig_switches')}
                     landed = punch_snapshot(game, rays['SpidyPunchData'])
                     if landed:
                         # Thugs within reach of a fist, and each fist's speed relative to the head.

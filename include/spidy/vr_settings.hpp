@@ -10,7 +10,11 @@
 // launcher starts the next session with them.
 namespace spidy::vr_settings {
 struct Values {
-    bool aimMarkers = true, webGrab = true, punch = true, body = true;
+    bool aimMarkers = true;
+    // Webs catching props and thugs, punching and your own body, like the web
+    // shooter below: on unless run_game_vr.py's switches turn them off; the
+    // tab and the launcher do not offer them.
+    bool webGrab = true, punch = true, body = true;
     float swingSpeed = 32; // the swing's speed limit, m/s
     int snapTurn = 30;     // degrees per flick of the right stick; 0: no snap turning
     int haptics = 100;     // controller vibration, percent
@@ -24,6 +28,10 @@ struct Values {
     // until you land), percent of real gravity: the swing's gravity. 60 is
     // the 6 m/s^2 Spidy has flown at since October 5, to within 2%.
     int weight = 60;
+    // A T-pose calibration of your body is wanted at the next gameplay (the
+    // tab's CALIBRATE BODY: ON RESUME); the XR worker clears it once the
+    // calibration starts (body_calibration.hpp).
+    bool calibrate = false;
     bool operator==(const Values&) const = default;
 };
 // The steps the game's Settings offer. The launcher's slider sets any swing
@@ -55,19 +63,16 @@ Values sanitized(Values);
 enum class Item : uint8_t {
     none,
     aimMarkers,
-    webGrab,
     airWebs,
-    webShooter,
     swingSpeed,
-    body,
-    punch,
     snapTurn,
     haptics,
     screenSize,
     smoothTurn,
     weight,
+    calibrate,
 };
-inline constexpr Item lastItem = Item::weight;
+inline constexpr Item lastItem = Item::calibrate;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. A setting without choices is an ON/OFF switch, the game's own;
 // one with choices steps through them. Titles are upper case, as the game's
@@ -78,7 +83,7 @@ struct Row {
     const char* help{};
     std::span<const char* const> choices{};
 };
-const std::array<Row, 15>& rows();
+const std::array<Row, 12>& rows();
 // The choice a setting shows for these values: a switch 0 (off) or 1 (on), a
 // list its step nearest to the value (a launcher value between two steps
 // shows the nearer one, the lower on a tie).

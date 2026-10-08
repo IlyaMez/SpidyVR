@@ -73,6 +73,11 @@ struct Pose {
 inline Pose compose(Pose a, Pose b) {
     return {a.position + a.orientation.rotate(b.position), a.orientation * b.orientation};
 }
+// The pose that undoes `p` (a unit orientation): compose(p, inverse(p)) is the identity.
+inline Pose inverse(Pose p) {
+    const Quat back = p.orientation.conjugate();
+    return {back.rotate(-p.position), back};
+}
 // Row-major matrices, multiplied by column vectors. D3D depth range [0,1].
 using Mat4 = std::array<float, 16>;
 inline Mat4 multiply(const Mat4& a, const Mat4& b) {

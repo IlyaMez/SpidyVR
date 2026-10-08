@@ -17,7 +17,8 @@ class D3D12Renderer {
     void initialize(LUID adapter, D3D_FEATURE_LEVEL minimum);
     void initialize(ID3D12Device* device, ID3D12CommandQueue* queue);
     void render(ID3D12Resource* target, DXGI_FORMAT format, unsigned width, unsigned height,
-                const Mat4& viewProjection, std::span<const Vertex> vertices, bool preserveColor = false);
+                const Mat4& viewProjection, std::span<const Vertex> vertices, bool preserveColor = false,
+                std::span<const Vertex> translucent = {});
     struct ViewTarget {
         ID3D12Resource* texture{};
         DXGI_FORMAT format{};
@@ -26,8 +27,11 @@ class D3D12Renderer {
     };
     // One upload, command list, and submission for a complete eye pair. When
     // asynchronous, the next reuse waits for this submission's own fence only.
+    // `translucent` is drawn after the other vertices, in its own order, each
+    // vertex blended by its opacity: nearer overlay geometry hides it, but it
+    // never hides anything itself (it leaves the depth buffer alone).
     void renderViews(std::span<const ViewTarget>, std::span<const Vertex>, bool preserveColor,
-                     bool waitForCompletion = true);
+                     bool waitForCompletion = true, std::span<const Vertex> translucent = {});
     // Scales `source` (read as `sourceView`, in PIXEL_SHADER_RESOURCE state)
     // over the whole target, which enters and leaves in RENDER_TARGET state.
     // A display-encoded source reaches an sRGB target with its stored values
@@ -70,7 +74,7 @@ class D3D12Renderer {
     ComPtr<ID3D12GraphicsCommandList> list_;
     ComPtr<ID3D12DescriptorHeap> rtv_, dsv_;
     ComPtr<ID3D12RootSignature> root_;
-    ComPtr<ID3D12PipelineState> pipeline_;
+    ComPtr<ID3D12PipelineState> pipeline_, translucent_;
     ComPtr<ID3D12Resource> depth_, vertices_;
     ComPtr<ID3D12Fence> fence_;
     HANDLE fenceEvent_{};

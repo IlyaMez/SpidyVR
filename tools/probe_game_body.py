@@ -8,6 +8,10 @@ Phases:
          game starts its web lines from, and the joints the body takes for hips, spine, head, arms and legs
   ik     the body turns the hero's joints toward a scripted headset and controllers (the left hand raised, the
          right one punching ahead): how far each wrist and the head land from their targets, and a screenshot
+  tpose  a T-pose calibration as the body takes it: eyes 1.66 m up (a calibrated eye height), both wrists straight
+         out from the hero's shoulders (where his rest pose has them, at that size) 0.62 m, past his own arms;
+         driven with his own arms and with that arm length: the body's and the arms' scale, how far each wrist
+         lands from its controller, and a screenshot
   eyes   two eye views at the hero's head, as in VR, looking down at the body: the left eye's image
   walk   the hero walks about under the body (the virtual pad's stick): how far he turns between his pose job
          and the render, and the eyes' image meanwhile
@@ -40,13 +44,13 @@ OUTPUT = ROOT/'reports/body-probe'
 STEREO_DLL = ROOT/'build/windows-ninja/spidy_stereo_probe.dll'
 RAY_DLL = ROOT/'build/windows-ninja/spidy_ray_bridge.dll'
 MAX_JOINTS = 256
-STATUS_SIZE, POSES_SIZE = 136, 56 + 64 + 3*MAX_JOINTS*64
+STATUS_SIZE, POSES_SIZE = 144, 56 + 64 + 3*MAX_JOINTS*64
 PROBLEMS = {0: 'none', 1: 'no hero', 2: 'no rig yet', 3: 'unknown rig', 4: 'bad rest pose', 5: 'bad instance'}
 STATES = {0: 'off', 1: 'waiting', 2: 'active', 3: 'failed'}
 SYNC_MACHINE, HEALTH, BOT_HEALTH = 0x4f843d0, 0x3839e08, 0x3839e98
 HERO_HEALTH = 0x38a6df0
 # Bits of native_body::Flags.
-BODY_ON, HIDE_HEAD, HAND_TURN, AIRBORNE = 1, 2, 4, 8
+BODY_ON, HIDE_HEAD, HAND_TURN, AIRBORNE, CALIBRATED = 1, 2, 4, 8, 16
 
 
 def crc(name, table=[]):
@@ -77,15 +81,16 @@ def body_status(game, address):
     raw = seqlock(game, address, STATUS_SIZE)
     if not raw:
         return None
-    if struct.unpack_from('<3I', raw) != (0x53424453, 1, STATUS_SIZE):
+    if struct.unpack_from('<3I', raw) != (0x53424453, 2, STATUS_SIZE):
         raise RuntimeError('Body status protocol mismatch')
-    v = struct.unpack('<4Iq3Q2I2Q3fI2ff2fIQ2Id', raw)
+    v = struct.unpack('<4Iq3Q2I2Q3fI2ff2fIQ2IdfI', raw)
     return dict(state=STATES.get(v[3], v[3]), jobs=v[5], hero_jobs=v[6], solved=v[7],
                 problem=PROBLEMS.get(v[8], v[8]), joints=v[9], rig=v[10], instance=v[11], weight=round(v[12], 3),
                 scale=round(v[13], 4), yaw=round(v[14], 4), grounded=v[15],
                 hand_error=[round(v[16], 4), round(v[17], 4)], head_error=round(v[18], 4),
                 turn_last=round(v[19], 5), turn_max=round(v[20], 5), rig_switches=v[21], renders=v[22],
-                hero_jobs_last_frame=v[23], hero_jobs_max=v[24], solve_ms=round(v[25], 3))
+                hero_jobs_last_frame=v[23], hero_jobs_max=v[24], solve_ms=round(v[25], 3),
+                arm_scale=round(v[26], 4), calibrated=bool(v[27]))
 
 
 def body_poses(game, address):
@@ -333,11 +338,12 @@ def roles_payload(roles, joints):
     return struct.pack('<4I4h2h8h8h12h6h', 0x53424452, 1, 96, joints, *values)
 
 
-def command(serial, flags, eyes, facing, hands, height=0., lease=250):
+def command(serial, flags, eyes, facing, hands, height=0., lease=250, arm_length=0.):
+    """A native_body::Command; `arm_length` (m) is a T-pose calibration's, 0 the hero's own arms."""
     raw = struct.pack('<4IQ2I3f4f', 0x53424443, 1, 144, flags, serial, lease, 0, *eyes, *facing)
     for grip, orientation, tracked, fist in hands:
         raw += struct.pack('<3f4fIf', *grip, *orientation, tracked, fist)
-    return raw+struct.pack('<2fI', height, 0, 0)
+    return raw+struct.pack('<3f', height, 0, arm_length)
 
 
 def hero_frame(game, record):
@@ -668,6 +674,66 @@ def main():
             result['screenshot'] = screenshot(game, 'ik-third-person')
             report['ik'] = result
             print('IK:', json.dumps(result), flush=True)
+        if 'tpose' in phases:
+            result = {}
+            if roles and rest and status['problem'] == 'none':
+                def at(joint):
+                    return column(rest[joint], 3)
+                # The rest pose in model axes: +x the hero's left, +y up, +z forward. Between the eyes as the body
+                # takes it: the eye joints by name, else the solver's typical head.
+                index = {n: i for i, n in enumerate(names or [])}
+                eye_joints = [j for j in roles['eyes'] if j >= 0] or \
+                    [index[n] for n in ('LF_middle_eye_deform', 'RT_middle_eye_deform') if n in index]
+                eyes_rest = scale(add(at(eye_joints[0]), at(eye_joints[1])), .5) if len(eye_joints) == 2 else \
+                    add(at(roles['head']), [0, .07, .09])
+                result['eyes_rest'] = [round(v, 4) for v in eyes_rest]
+                size, reach = 1.66/eyes_rest[1], .62
+                tpose = []
+                for side, arm in enumerate(roles['arms']):
+                    d = sub(at(arm['upper']), eyes_rest)
+                    shoulder = add(eyes_rel, add(add(scale(left, d[0]*size), scale(up, d[1]*size)),
+                                                 scale(forward, d[2]*size)))
+                    out = left if side == 0 else scale(left, -1)
+                    wrist = add(shoulder, scale(out, reach))
+                    # Knuckles (the grip's -y) out along the arm, thumb (-z) ahead.
+                    y, z = scale(out, -1), scale(forward, -1)
+                    orientation = quat_from_axes(cross(y, z), y, z)
+                    tpose.append((sub(wrist, wrist_of([0, 0, 0], orientation, side)), orientation, wrist))
+                result['hero_arm_m'] = [round(math.dist(at(a['upper']), at(a['lower'])) +
+                                              math.dist(at(a['lower']), at(a['hand'])), 4) for a in roles['arms']]
+                result['reach_m'] = reach
+                for label, arm_length in (('own_arms', 0.), ('calibrated', reach)):
+                    def hold(seconds):
+                        nonlocal serial
+                        end = time.monotonic()+seconds
+                        while time.monotonic() < end:
+                            serial += 1
+                            hands = [(grip, orientation, 1, 0.) for grip, orientation, _ in tpose]
+                            code = call_with_payload(process, stereo['SpidyBodySubmit'],
+                                                     command(serial, BODY_ON | HIDE_HEAD | HAND_TURN | CALIBRATED,
+                                                             eyes_rel, facing, hands, 1.66, arm_length=arm_length))
+                            if code:
+                                raise RuntimeError(f'Body command: {code}')
+                            time.sleep(.02)
+                    hold(1.5)
+                    now = body_status(game, stereo['SpidyBodyData'])
+                    last = body_poses(game, stereo['SpidyBodyPoses'])
+                    solved = capture(game, process, stereo, last['captured'] if last else 0)
+                    hold(.1)
+                    entry = dict(scale=now['scale'], arm_scale=now['arm_scale'], calibrated=now['calibrated'],
+                                 hand_error_m=now['hand_error'])
+                    if solved:
+                        transform = solved['transform']
+                        entry['wrist_error_m'] = [
+                            round(math.dist(to_world(transform, column(solved['body'][arm['hand']], 3)),
+                                            add(feet, tpose[side][2])), 4)
+                            for side, arm in enumerate(roles['arms'])]
+                        entry['shoulders'] = [[round(v, 3) for v in sub(to_world(transform, column(
+                            solved['body'][arm['upper']], 3)), feet)] for arm in roles['arms']]
+                    entry['screenshot'] = screenshot(game, f'tpose-{label}')
+                    result[label] = entry
+            report['tpose'] = result
+            print('T-pose:', json.dumps(result), flush=True)
         if 'eyes' in phases:
             from probe_stereo_gpu import discover_queue, snapshot as gpu_snapshot
             queue = discover_queue(game, process)

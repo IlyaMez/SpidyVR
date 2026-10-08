@@ -59,7 +59,6 @@ private:
     bool bigButton(const char* id, const char* icon, const char* label, ImVec2 size, bool primary, bool enabled = true);
     bool secondaryButton(const char* label, float width);
     bool toggle(const char* id, bool* value);
-    bool segmented(const char* id, const char* const* labels, int count, int* value, float width);
     bool link(const char* label);
     void badge(ImDrawList* draw, ImVec2 center, float radius);
     void web(ImDrawList* draw, ImVec2 corner, float radius);

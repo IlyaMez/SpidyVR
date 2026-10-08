@@ -13,6 +13,9 @@ constexpr const char* smoothChoices[] = {"OFF",          "60\xC2\xB0/S",  "90\xC
 constexpr const char* hapticChoices[] = {"OFF", "25%", "50%", "75%", "100%"};
 constexpr const char* weightChoices[] = {"40%", "60%", "80%", "100%", "125%", "150%", "200%", "250%", "300%"};
 constexpr const char* screenChoices[] = {"SMALL", "MEDIUM", "LARGE"};
+// CALIBRATE BODY, a switch with names of its own: ON RESUME asks for the T-pose
+// as soon as play resumes.
+constexpr const char* calibrateChoices[] = {"NO", "ON RESUME"};
 constexpr int screenSizes[] = {0, 1, 2};
 static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(snapChoices) == std::size(snapTurns) &&
               std::size(smoothChoices) == std::size(smoothTurns) &&
@@ -60,16 +63,10 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
     switch (item) {
     case Item::aimMarkers:
         return &v.aimMarkers;
-    case Item::webGrab:
-        return &v.webGrab;
     case Item::airWebs:
         return &v.airWebs;
-    case Item::webShooter:
-        return &v.webShooter;
-    case Item::body:
-        return &v.body;
-    case Item::punch:
-        return &v.punch;
+    case Item::calibrate:
+        return &v.calibrate;
     default:
         return nullptr;
     }
@@ -85,21 +82,19 @@ Values sanitized(Values v) {
     v.weight = std::clamp(v.weight, 40, 300);
     return v;
 }
-const std::array<Row, 15>& rows() {
+const std::array<Row, 12>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 15> all{{
+    static const std::array<Row, 12> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::aimMarkers, "AIM MARKERS", "Show where each web would land. X also switches them during play.", {}},
-        {Item::webGrab, "WEBS CATCH PROPS AND THUGS", "Grab, yank and throw props and thugs with your webs.", {}},
         {Item::airWebs, "WEBS HOLD IN OPEN AIR",
          "With nothing in reach, a web still holds in open air, 100 m out.", {}},
-        {Item::webShooter, "WEB SHOOTER", "A free hand's trigger shoots web balls at thugs.", {}},
         {Item::swingSpeed, "SWING SPEED LIMIT", "How fast a swing can carry you.", swingChoices},
         {Item::weight, "WEIGHT", "How heavy you are while swinging and after letting go. 100% is real gravity.",
          weightChoices},
         {Item::none, "BODY", nullptr, {}},
-        {Item::body, "YOUR OWN BODY", "Spider-Man's body and hands. Off: the hands are drawn as gloves.", {}},
-        {Item::punch, "PUNCH THUGS", "A fist that hits hard enough knocks a thug back.", {}},
+        {Item::calibrate, "CALIBRATE BODY", "Fit Spider-Man to you: pick ON RESUME, then hold both triggers in a T-pose.",
+         calibrateChoices},
         {Item::none, "COMFORT", nullptr, {}},
         {Item::snapTurn, "SNAP TURN", "How far a flick of the right stick turns you. Off: no snap turning.",
          snapChoices},

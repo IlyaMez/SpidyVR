@@ -35,35 +35,86 @@ void glob(std::vector<Vertex>& out, Vec3 center, Vec3 viewer, float radius, Vec3
         out.insert(out.end(), {{center, color}, {p0, color * .8f}, {p1, color * .8f}});
     }
 }
-// A flat ring around c in the plane of unit axes a and b; with dashes, that
-// many dashes with gaps between them.
-void ring(std::vector<Vertex>& out, Vec3 c, Vec3 a, Vec3 b, float inner, float outer, Vec3 color, int dashes = 0) {
-    constexpr int segments = 32;
-    for (int i = 0; i < segments; ++i) {
-        if (dashes && (i * dashes * 2 / segments) % 2)
-            continue;
-        const float t0 = 2 * pi * i / segments, t1 = 2 * pi * (i + 1) / segments;
-        const Vec3 d0 = a * std::cos(t0) + b * std::sin(t0), d1 = a * std::cos(t1) + b * std::sin(t1);
-        quad(out, {c + d0 * inner, color}, {c + d0 * outer, color}, {c + d1 * outer, color},
-             {c + d1 * inner, color});
+// Soft-edged shapes for the aim markers: at `alpha` inside, fading to nothing
+// across `soft` metres at every edge, so their outlines stay smooth without
+// multisampling while they move by fractions of a pixel.
+//
+// An arc of a flat ring around c in the plane of unit axes a and b, from
+// angle t0 to t1 (a whole ring when they span 2 pi) in `segments` pieces a
+// whole turn, between radii inner and outer (0: a disc); its inner edge
+// fades across `innerSoft` instead when that is given.
+void softArc(std::vector<Vertex>& out, Vec3 c, Vec3 a, Vec3 b, float inner, float outer, float t0, float t1,
+             Vec3 color, float alpha, float soft, int segments, float innerSoft = -1) {
+    const bool whole = t1 - t0 > 2 * pi - 1e-3f;
+    const int pieces = std::max(2, static_cast<int>(std::ceil((t1 - t0) / (2 * pi) * segments)));
+    const float radii[4] = {std::max(inner - (innerSoft >= 0 ? innerSoft : soft), 0.f), inner, outer, outer + soft};
+    const float alphas[4] = {inner > 0 ? 0.f : alpha, alpha, alpha, 0};
+    const auto at = [&](float t, int k, float opacity) {
+        return Vertex{c + (a * std::cos(t) + b * std::sin(t)) * radii[k], color, opacity};
+    };
+    const int first = inner > 0 ? 0 : 1; // a disc has no inner edge
+    for (int i = 0; i < pieces; ++i) {
+        const float u0 = t0 + (t1 - t0) * i / pieces, u1 = t0 + (t1 - t0) * (i + 1) / pieces;
+        for (int k = first; k < 3; ++k)
+            quad(out, at(u0, k, alphas[k]), at(u1, k, alphas[k]), at(u1, k + 1, alphas[k + 1]),
+                 at(u0, k + 1, alphas[k + 1]));
     }
-}
-void disc(std::vector<Vertex>& out, Vec3 c, Vec3 a, Vec3 b, float radius, Vec3 color) {
-    constexpr int sides = 12;
-    for (int i = 0; i < sides; ++i) {
-        const float t0 = 2 * pi * i / sides, t1 = 2 * pi * (i + 1) / sides;
-        out.insert(out.end(), {{c, color},
-                               {c + (a * std::cos(t0) + b * std::sin(t0)) * radius, color},
-                               {c + (a * std::cos(t1) + b * std::sin(t1)) * radius, color}});
+    if (whole)
+        return;
+    // Each end fades out along the ring.
+    const float cap = soft / std::max((inner + outer) / 2, 1e-6f);
+    for (const float end : {t0, t1}) {
+        const float beyond = end == t0 ? t0 - cap : t1 + cap;
+        for (int k = first; k < 3; ++k)
+            quad(out, at(end, k, alphas[k]), at(beyond, k, 0), at(beyond, k + 1, 0), at(end, k + 1, alphas[k + 1]));
     }
 }
 // A flat bar from p to q across the line of sight `view`, its ends squared
 // off half its width beyond them so two bars close a corner.
-void bar(std::vector<Vertex>& out, Vec3 p, Vec3 q, Vec3 view, float halfWidth, Vec3 color) {
-    const Vec3 along = normalized(q - p) * halfWidth, side = normalized(cross(q - p, view)) * halfWidth;
-    quad(out, {p - along - side, color}, {q + along - side, color}, {q + along + side, color},
-         {p - along + side, color});
+void softBar(std::vector<Vertex>& out, Vec3 p, Vec3 q, Vec3 view, float halfWidth, Vec3 color, float alpha,
+             float soft) {
+    const Vec3 along = normalized(q - p), side = normalized(cross(q - p, view));
+    const float span = length(q - p);
+    const float x[4] = {-halfWidth - soft, -halfWidth, span + halfWidth, span + halfWidth + soft};
+    const float y[4] = {-halfWidth - soft, -halfWidth, halfWidth, halfWidth + soft};
+    const auto at = [&](int i, int j) {
+        return Vertex{p + along * x[i] + side * y[j], color, i % 3 && j % 3 ? alpha : 0.f};
+    };
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            quad(out, at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
 }
+// A flat triangle across the line of sight `view`, grown `grow` past its
+// corners' edges and then fading out across `soft`.
+void softTriangle(std::vector<Vertex>& out, std::array<Vec3, 3> p, Vec3 view, Vec3 color, float alpha, float grow,
+                  float soft) {
+    const Vec3 centre = (p[0] + p[1] + p[2]) / 3;
+    std::array<Vec3, 3> outward{}, mitre{};
+    for (int i = 0; i < 3; ++i) {
+        const Vec3 normal = normalized(cross(p[(i + 1) % 3] - p[i], view));
+        outward[i] = dot(normal, (p[i] + p[(i + 1) % 3]) * .5f - centre) < 0 ? -normal : normal;
+    }
+    // A corner moves out along the bisector of its edges' normals, far
+    // enough to move both edges out by one unit, but no more than three.
+    for (int i = 0; i < 3; ++i) {
+        const Vec3 bisector = normalized(outward[(i + 2) % 3] + outward[i]);
+        mitre[i] = bisector / std::max(dot(bisector, outward[i]), 1.f / 3);
+    }
+    std::array<Vec3, 3> inside{}, edge{};
+    for (int i = 0; i < 3; ++i) {
+        inside[i] = p[i] + mitre[i] * grow;
+        edge[i] = p[i] + mitre[i] * (grow + soft);
+    }
+    out.insert(out.end(), {{inside[0], color, alpha}, {inside[1], color, alpha}, {inside[2], color, alpha}});
+    for (int i = 0; i < 3; ++i) {
+        const int j = (i + 1) % 3;
+        quad(out, {inside[i], color, alpha}, {inside[j], color, alpha}, {edge[j], color, 0}, {edge[i], color, 0});
+    }
+}
+// Each hand's aim markers in their own colour (linear RGB): sky blue for the
+// left hand, orange for the right. A miss is red for either.
+constexpr Vec3 handColors[2] = {{.13f, .55f, 1.f}, {1.f, .4f, .05f}};
+constexpr Vec3 missColor{.9f, .07f, .05f}, shadowColor{.01f, .012f, .018f};
 // Tapered camera-facing strand for the impact splat.
 void strand(std::vector<Vertex>& out, Vec3 from, Vec3 to, Vec3 viewer, float pixelAngle, const WebLook& look,
             float rootRadius) {
@@ -155,8 +206,9 @@ void appendWeb(std::vector<Vertex>& out, const WebLine& web, Vec3 viewer, float 
 }
 void appendAimMarker(std::vector<Vertex>& out, const AimMarker& marker, Vec3 viewer, float pixelAngle) {
     const float distance = length(viewer - marker.point);
+    const float opacity = std::isfinite(marker.opacity) ? std::clamp(marker.opacity, 0.f, 1.f) : 0.f;
     if (!finite(marker.point) || !finite(viewer) || !std::isfinite(pixelAngle) || pixelAngle <= 0 ||
-        !(distance >= .3f && distance <= 1000))
+        !(distance >= .3f && distance <= 1000) || opacity <= 0)
         return;
     // Level and upright across the line of sight, so the marker never rolls.
     const Vec3 view = (viewer - marker.point) / distance;
@@ -166,54 +218,81 @@ void appendAimMarker(std::vector<Vertex>& out, const AimMarker& marker, Vec3 vie
     // Metres per pixel at the marker, and how far the grip has closed toward a shot.
     const float px = pixelAngle * distance;
     const float squeeze = std::isfinite(marker.squeeze) ? std::clamp(marker.squeeze / .65f, 0.f, 1.f) : 0.f;
-    // Each shape twice: a dark outline behind, wider by `grow`, keeps it
-    // readable on the sky and on a lit wall; the colour in front.
-    const Vec3 front = marker.point + view * (distance * .002f), back = marker.point - view * (distance * .002f);
-    const auto layers = [&](const auto& shape, Vec3 color) {
-        shape(back, 1.5f * px, Vec3{.01f, .012f, .018f});
-        shape(front, 0.f, color);
+    const Vec3 c = marker.point;
+    const Vec3 color = handColors[marker.hand ? 1 : 0], light = mix(color, {1, 1, 1}, .6f);
+    // Every shape is drawn twice, first all of a marker's shadows, then its
+    // colours: a soft dark shadow reaching `shade` past the shape keeps it
+    // readable on the sky and on a lit wall.
+    const float shade = 1.3f * px, shadowSoft = 1.8f * px, soft = .8f * px, shadowAlpha = .6f;
+    const auto segments = [&](float radius) { return std::clamp(static_cast<int>(radius / px) + 12, 16, 72); };
+    // An arc's shadow lies mostly outside it, a thin edge within, and
+    // reaches past its ends by `lengthen` metres.
+    const auto arc = [&](bool shadow, Vec3 tint, float alpha, float r, float halfWidth, float from = 0,
+                         float to = 2 * pi, float lengthen = 0) {
+        const float grow = shadow ? shade : 0, beyond = shadow ? lengthen / r : 0;
+        softArc(out, c, right, up, std::max(r - halfWidth - grow * .4f, 0.f), r + halfWidth + grow, from - beyond,
+                to + beyond, shadow ? shadowColor : tint, alpha * opacity * (shadow ? shadowAlpha : 1),
+                shadow ? shadowSoft : soft, segments(r), shadow ? shadowSoft * .6f : soft);
+    };
+    // A dot's shadow is a thin dark edge: a wider one would read as a second ring.
+    const auto dot = [&](bool shadow, Vec3 tint, float alpha, float r) {
+        softArc(out, c, right, up, 0, r + (shadow ? shade * .5f : 0), 0, 2 * pi, shadow ? shadowColor : tint,
+                alpha * opacity * (shadow ? shadowAlpha : 1), shadow ? shadowSoft * .7f : soft, segments(r));
     };
     switch (marker.kind) {
     case AimMark::anchor: {
-        const float r = 13 * px * (1 - .35f * squeeze);
-        layers(
-            [&](Vec3 c, float grow, Vec3 color) {
-                ring(out, c, right, up, r - 3 * px - grow, r + grow, color);
-                disc(out, c, right, up, 2 * px + grow, color);
-            },
-            {.9f, .93f, 1});
+        const float r = 10.5f * px * (1 - .4f * squeeze);
+        for (const bool shadow : {true, false}) {
+            arc(shadow, color, 1, r, 1.15f * px);
+            dot(shadow, light, 1, 2 * px);
+        }
         break;
     }
     case AimMark::air: {
-        const float r = 9 * px * (1 - .35f * squeeze);
-        layers([&](Vec3 c, float grow, Vec3 color) { ring(out, c, right, up, r - 2.2f * px - grow, r + grow, color, 8); },
-               {.42f, .46f, .52f});
+        // Faint: short translucent dashes, their shadows lighter and no
+        // longer than they are, so the gaps stay open on a bright sky.
+        const float r = 8.5f * px * (1 - .4f * squeeze);
+        constexpr int dashes = 8;
+        for (const bool shadow : {true, false})
+            for (int i = 0; i < dashes; ++i) {
+                const float from = 2 * pi * i / dashes;
+                arc(shadow, color, shadow ? .7f : .75f, r, .9f * px, from, from + 2 * pi / dashes * .45f);
+            }
         break;
     }
     case AimMark::blocked: {
-        const Vec3 rising = (right + up) * (7 * px * .7071f), falling = (right - up) * (7 * px * .7071f);
-        layers(
-            [&](Vec3 c, float grow, Vec3 color) {
-                bar(out, c - rising, c + rising, view, 1.6f * px + grow, color);
-                bar(out, c - falling, c + falling, view, 1.6f * px + grow, color);
-            },
-            {.85f, .06f, .04f});
+        const Vec3 rising = (right + up) * (5.5f * px * .7071f), falling = (right - up) * (5.5f * px * .7071f);
+        for (const bool shadow : {true, false})
+            for (const Vec3 arm : {rising, falling})
+                softBar(out, c - arm, c + arm, view, .95f * px + (shadow ? shade : 0), shadow ? shadowColor : missColor,
+                        opacity * (shadow ? shadowAlpha : .95f), shadow ? shadowSoft : soft);
         break;
     }
     case AimMark::target: {
-        const float size = std::isfinite(marker.radius) ? marker.radius * 1.25f : 0.f;
-        const float half = std::max(size, 12 * px) * (1 - .3f * squeeze), arm = half * .45f;
-        layers(
-            [&](Vec3 c, float grow, Vec3 color) {
-                for (const float sx : {-1.f, 1.f})
-                    for (const float sy : {-1.f, 1.f}) {
-                        const Vec3 corner = c + right * (sx * half) + up * (sy * half);
-                        bar(out, corner, corner - right * (sx * arm), view, 1.6f * px + grow, color);
-                        bar(out, corner, corner - up * (sy * arm), view, 1.6f * px + grow, color);
-                    }
-                disc(out, c, right, up, 2 * px + grow, color);
-            },
-            {1, .62f, .08f});
+        // Three arcs around the target, turning, each with a claw pointing in
+        // at it; while the ring locks on it closes in from wider. The right
+        // hand's ring is a little wider and turned between the left's arcs,
+        // so both hands' rings on one target stay apart.
+        const float lock = std::isfinite(marker.lock) ? std::clamp(marker.lock, 0.f, 1.f) : 1.f;
+        const float closing = lock * lock * (3 - 2 * lock);
+        const float size = std::max(std::isfinite(marker.radius) ? marker.radius * 1.15f : 0.f, 13 * px);
+        const float r = size * (marker.hand ? 1.15f : 1.f) * (1 - .25f * squeeze) * (1 + .8f * (1 - closing));
+        const float spin = (std::isfinite(marker.spin) ? marker.spin : 0.f) + (marker.hand ? pi / 3 : 0.f);
+        const float halfWidth = 1.2f * px, claw = std::clamp(r * .2f, 4.5f * px, 10 * px);
+        constexpr float span = 75 * pi / 180;
+        for (const bool shadow : {true, false}) {
+            for (int i = 0; i < 3; ++i) {
+                const float middle = pi / 2 + spin + 2 * pi * i / 3;
+                arc(shadow, color, 1, r, halfWidth, middle - span / 2, middle + span / 2, shade);
+                const Vec3 outward = right * std::cos(middle) + up * std::sin(middle);
+                const Vec3 across = right * -std::sin(middle) + up * std::cos(middle);
+                const Vec3 base = c + outward * (r - halfWidth);
+                softTriangle(out, {base + across * (claw * .55f), base - outward * claw, base - across * (claw * .55f)},
+                             view, shadow ? shadowColor : color, opacity * (shadow ? shadowAlpha : 1),
+                             shadow ? shade : 0, shadow ? shadowSoft : soft);
+            }
+            dot(shadow, light, 1, 1.8f * px);
+        }
         break;
     }
     }
@@ -229,5 +308,87 @@ Vec3 onAimLine(Vec3 point, Vec3 normal, Vec3 origin, Vec3 direction) {
     return along > 0 && finite(crossing) && length(crossing - point) <= .25f * length(point - origin) + .25f
                ? crossing
                : point;
+}
+void AimMarkerMotion::reset() {
+    *this = {};
+}
+void AimMarkerMotion::begin(int64_t timeNs) {
+    seconds_ = 0;
+    if (timeNs <= time_)
+        return; // the same image again
+    if (time_ && static_cast<double>(timeNs - time_) * 1e-9 > gapSeconds)
+        reset();
+    else if (time_)
+        seconds_ = static_cast<float>(static_cast<double>(timeNs - time_) * 1e-9);
+    time_ = timeNs;
+}
+Vec3 AimMarkerMotion::aim(Vec3 direction, float yaw) {
+    if (!finite(direction) || length(direction) < .5f || !std::isfinite(yaw))
+        return direction;
+    const Quat turn = Quat::yaw(yaw);
+    const Vec3 raw = turn.conjugate().rotate(normalized(direction));
+    if (!filtering_) {
+        steady_ = raw;
+        speed_ = {};
+        filtering_ = true;
+    } else if (seconds_ > 0) {
+        // The share of the way to the raw direction a low-pass at `hz` takes
+        // in this image's time; the cutoff rises with the aim's speed.
+        const auto share = [dt = seconds_](float hz) { return dt / (dt + 1 / (2 * pi * hz)); };
+        speed_ += ((raw - steady_) / seconds_ - speed_) * share(speedCutoffHz);
+        const float cutoff = minCutoffHz + speedCutoff * std::max(length(speed_) - speedDeadband, 0.f);
+        steady_ = normalized(steady_ + (raw - steady_) * share(cutoff));
+    }
+    return turn.rotate(steady_);
+}
+void AimMarkerMotion::markers(const AimMarker* wanted, Vec3 origin, Vec3 direction, std::vector<AimMarker>& out) {
+    const bool ray = finite(origin) && finite(direction) && length(direction) > .5f;
+    if (wanted && (wanted->kind > AimMark::target || !finite(wanted->point) || (wanted->kind != AimMark::target && !ray)))
+        wanted = nullptr;
+    direction = normalized(direction);
+    const float dt = seconds_;
+    // The share of the way to a new value an ease over `seconds` takes now.
+    const auto ease = [dt](float seconds) { return 1 - std::exp(-dt / seconds); };
+    for (unsigned k = 0; k < kinds_.size(); ++k) {
+        auto& shown = kinds_[k];
+        const bool target = k == static_cast<unsigned>(AimMark::target);
+        if (wanted && static_cast<unsigned>(wanted->kind) == k) {
+            const bool fresh = shown.weight <= 0;
+            const AimMarker before = shown.marker;
+            shown.marker = *wanted;
+            if (target && !fresh) {
+                // The ring slides to where the target is now, or to the next one.
+                shown.marker.point = mix(before.point, wanted->point, ease(targetSeconds));
+                shown.marker.radius = before.radius + (wanted->radius - before.radius) * ease(targetSeconds);
+            } else if (!target) {
+                // A marker on the ray eases to a new distance (its depth).
+                const float distance = std::max(length(wanted->point - origin), .01f);
+                shown.distance = fresh || !(shown.distance > 0)
+                                     ? distance
+                                     : std::exp(std::log(shown.distance) +
+                                                (std::log(distance) - std::log(shown.distance)) * ease(distanceSeconds));
+                shown.marker.point = origin + direction * shown.distance;
+            }
+            // A new marker shows at once, faintly, and is whole within fadeInSeconds.
+            shown.weight = fresh ? .35f : std::min(1.f, shown.weight + dt / fadeInSeconds);
+            shown.lock = fresh ? 0.f : std::min(1.f, shown.lock + dt / lockSeconds);
+        } else if (shown.weight > 0) {
+            shown.weight = std::max(0.f, shown.weight - dt / fadeOutSeconds);
+            shown.lock = std::min(shown.lock, shown.weight); // a target's ring widens as it goes
+        }
+        if (shown.weight <= 0)
+            continue;
+        // A marker fading out stays where it was last wanted: where the web
+        // just went, or where the aim left it.
+        AimMarker marker = shown.marker;
+        marker.opacity = shown.weight;
+        marker.lock = target ? shown.lock : 1.f;
+        marker.spin = spin_;
+        out.push_back(marker);
+    }
+    // The target's ring turns, faster as the grip closes.
+    const float squeeze = kinds_[static_cast<unsigned>(AimMark::target)].marker.squeeze;
+    spin_ = std::fmod(spin_ + dt * (.8f + 2.4f * std::clamp(std::isfinite(squeeze) ? squeeze : 0.f, 0.f, 1.f)),
+                      2 * pi);
 }
 } // namespace spidy

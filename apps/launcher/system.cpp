@@ -508,15 +508,12 @@ Settings loadSettings() {
         // Virtual Desktop when installed: such settings start on Automatic.
         if (key == "game") settings.gameExe = widen(value);
         else if (key == "xr_runtime") settings.runtime = value.empty() ? kAutoRuntime : widen(value);
-        else if (key == "web_grab") o.webGrab = number() != 0;
-        else if (key == "overlay_webs") o.overlayWebs = number() != 0;
+        // web_grab, overlay_webs, body, punch and web_shooter (options before October 8's sixth build) are no
+        // longer read: those features are always on, so one switched off there comes back on.
         else if (key == "small_window") o.smallWindow = number() != 0;
         else if (key == "stock_monitor_view") o.stockMonitorView = number() != 0;
-        else if (key == "body") o.body = number() != 0;
-        else if (key == "punch") o.punch = number() != 0;
         else if (key == "aim_markers") o.aimMarkers = number() != 0;
         else if (key == "air_webs") o.airWebs = number() != 0;
-        else if (key == "web_shooter") o.webShooter = number() != 0;
         // eye_size (a square size, before October 8) is no longer read: 2048 x 2048 rendered one player's game
         // below the 2496 x 2688 their headset asked for, and it looked blurry.
         else if (key == "render_scale") o.renderScale = spidy::validRenderScale(number()) ? number() : 100;
@@ -526,12 +523,18 @@ Settings loadSettings() {
         else if (key == "haptics") o.haptics = std::clamp(number(), 0, 100);
         else if (key == "screen_size") o.screenSize = std::clamp(number(), 0, 2);
         else if (key == "weight") o.weight = std::clamp(number(), 40, 300);
+        else if (key == "eye_height_mm") o.eyeHeightMm = number();
+        else if (key == "arm_length_mm") o.armLengthMm = number();
+        else if (key == "calibration_prompt") o.calibrationPrompt = number() != 0;
         else if (key == "hash_path") settings.hashPath = widen(value);
         else if (key == "hash_size") settings.hashSize = std::strtoull(value.c_str(), nullptr, 10);
         else if (key == "hash_time") settings.hashTime = std::strtoull(value.c_str(), nullptr, 10);
         else if (key == "hash") settings.hashValue = value;
         else if (key == "shortcuts_asked") settings.shortcutsAsked = number() != 0;
     }
+    // A calibration is both measurements within their ranges, or none.
+    if (!text::calibrated(settings.options))
+        settings.options.eyeHeightMm = settings.options.armLengthMm = 0;
     return settings;
 }
 
@@ -544,13 +547,14 @@ void saveSettings(const Settings& settings) {
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
     const auto& o = settings.options;
     file << "game=" << narrow(settings.gameExe) << "\nxr_runtime=" << narrow(settings.runtime)
-         << "\nweb_grab=" << o.webGrab << "\noverlay_webs=" << o.overlayWebs << "\nsmall_window=" << o.smallWindow
-         << "\nstock_monitor_view=" << o.stockMonitorView << "\nbody=" << o.body << "\npunch=" << o.punch
-         << "\naim_markers=" << o.aimMarkers << "\nair_webs=" << o.airWebs << "\nweb_shooter=" << o.webShooter
+         << "\nsmall_window=" << o.smallWindow << "\nstock_monitor_view=" << o.stockMonitorView
+         << "\naim_markers=" << o.aimMarkers << "\nair_webs=" << o.airWebs
          << "\nrender_scale=" << o.renderScale
          << "\nswing_speed=" << o.swingSpeed << "\nweight=" << o.weight << "\nsnap_turn=" << o.snapTurn
          << "\nsmooth_turn=" << o.smoothTurn
-         << "\nhaptics=" << o.haptics << "\nscreen_size=" << o.screenSize << "\nhash_path=" << narrow(settings.hashPath)
+         << "\nhaptics=" << o.haptics << "\nscreen_size=" << o.screenSize << "\neye_height_mm=" << o.eyeHeightMm
+         << "\narm_length_mm=" << o.armLengthMm << "\ncalibration_prompt=" << o.calibrationPrompt
+         << "\nhash_path=" << narrow(settings.hashPath)
          << "\nhash_size=" << settings.hashSize << "\nhash_time=" << settings.hashTime
          << "\nhash=" << settings.hashValue << "\nshortcuts_asked=" << settings.shortcutsAsked << "\n";
 }

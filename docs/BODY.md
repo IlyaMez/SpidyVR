@@ -22,6 +22,7 @@ The body is the game's own hero model, its joints turned every frame
 | Look down | Spider-Man's body under you: arms to your controllers, legs on the ground |
 | Turn your head | The body follows once you look more than 34 degrees away from it, and drifts after your head meanwhile; a snap turn (right stick) turns it at once, a smooth turn along with you |
 | Crouch, lean | The knees bend and standing feet stay where they were; the torso bends a quarter of the way you pitch your head |
+| Stand in a T-pose and hold both triggers | The calibration: Spider-Man takes your eye height and your arms' length ([below](#your-size-the-t-pose-calibration-october-8)); the first time VR shows the game, and from Settings > SPIDY VR > CALIBRATE BODY |
 | Walk around your room | The feet stay put until your hips are 15 cm from over them, then follow |
 | Swing, fall, jump | The legs keep the game's pose (a swing's tuck, a fall's flail) under your upright body |
 | Squeeze a grip | That hand closes into a fist (it still shoots its web) |
@@ -102,10 +103,14 @@ everything under it, a move of the whole body, or a scale about a point (so
 skinning, helper joints and joint scales keep what the game animated; joint
 frames may be mirrored, so no joint orientation is ever taken as a rotation):
 
-1. The body scales about the feet to the player: standing eye height over the
-   rig's (1.697 m, between `LF_` and `RT_middle_eye_deform`), within 0.85-1.2.
-   The standing height rises at once to a higher head and sinks 1 cm a second,
-   so crouching does not shrink the body.
+1. The body scales about the feet to the player: their eye height over the
+   rig's (1.697 m, between `LF_` and `RT_middle_eye_deform`). With a T-pose
+   calibration it is the eye height measured then, within 0.7-1.3; without
+   one, the standing eye height, within 0.85-1.2, which rises at once to a
+   higher head and sinks 1 cm a second, so crouching does not shrink the body.
+   A calibration's arm length then scales each arm, hand and all, about its
+   shoulder (within 0.8-1.25): the player's arm from the hero's shoulder at
+   their size to their wrist, over the hero's 0.559 m at that size.
 2. The hips stand upright in the world (the world's up in model space: a hero
    crawling on a wall still gets a standing body), facing the body's yaw. The
    yaw follows the headset past a 0.6 rad dead zone at up to 6 rad/s and
@@ -152,6 +157,84 @@ body is wanted, so the eyes never see it from inside. While the body is not
 turning the hero's joints (another writer, a paused job, an unknown rig, no
 command), the eyes hide the hero with the game's visibility switch, as before,
 and the overlay draws gloves.
+
+## Your size: the T-pose calibration (October 8)
+
+You asked for an in-game calibration on first start, and as an option in the
+VR menu, where the player stands in a T-pose and holds the triggers so the
+avatar is scaled to their measurements. Before it, the body took its size
+from the highest the headset had been (step 1 above) and kept the hero's own
+arms, so a player with longer arms than his reached past his hands, and one
+with shorter arms kept him bending his elbows.
+
+The first time a session shows immersive play without a calibration (after
+1.5 s of it, and not while a web flies the player), a panel appears 1.4 m
+ahead and 12 cm below the eyes, where the player faces then; it stays in the
+room. It says BODY CALIBRATION: stand tall, look ahead, arms straight out to
+the sides, hold both triggers. A line under it says what to change, a bar
+fills while the pose is held, a figure's arms and a ring around each
+controller turn green while that arm is in place, and the rings fill with
+the bar. After 1.5 s held, the panel says CALIBRATED with the eye height and
+arm length for 3.5 s and both controllers buzz. B skips it. From its start
+until each is let go after it, the triggers, grips, A and B do nothing in the
+game (no web, web ball, jump or interact); the sticks, the menu button and Y
+work. A pause, a cutscene or the flat screen holds it until play returns.
+Settings > SPIDY VR > CALIBRATE BODY: ON RESUME asks for it again when play
+resumes (the row shows NO again once it starts).
+
+**What counts as the pose** (`body_calibration::Calibration`, the first that
+fails is what the panel asks for):
+
+| Check | Panel line |
+|---|---|
+| Headset and both controllers tracked | KEEP BOTH CONTROLLERS IN VIEW |
+| Eyes at least 1 m up | PLEASE STAND UP |
+| Each arm, from the hero's shoulder at the player's size to the wrist, within 41 degrees of straight out to its side (crossed arms fail too) | STRETCH YOUR ARMS OUT TO THE SIDES |
+| Each arm at least 72% of the hero's at that size; the two within 12% of the longer | STRAIGHTEN BOTH ARMS |
+| The head within 26 degrees of level and 34 degrees of square to the arms | LOOK STRAIGHT AHEAD |
+| Both triggers past 0.6 (then past 0.35) | HOLD BOTH TRIGGERS |
+| The head under 0.3 m/s, each wrist under 0.35 m/s | HOLD STILL |
+
+A lapse shorter than a quarter of a second pauses the hold; a longer one
+starts it over.
+
+**What is measured**, in the tracking space (the floor at 0) over the hold:
+the eye height is the head's mean height. Each wrist is where the solver puts
+it for that controller (9 cm from the grip toward the forearm, 2 cm toward the
+back of the hand). The body faces square to the line between the wrists; the
+hero's shoulder there is where his rest pose holds it from the point between
+his eyes (0.111 m behind, 0.266 m below and 0.170 m to the side, times eye
+height / 1.697: `body::Rig::shoulders`, `body_calibration::Proportions`, read
+from the hero's rig once the body has run). Each arm's reach is from that
+shoulder to its wrist, averaged; the arm length is the longer arm's (the
+straighter one). A player with eyes 1.62 m up and wrists 0.60 m from those
+shoulders gets a body at 0.955 of the hero's size and arms 1.124 times longer
+on top (0.60 / (0.559 x 0.955)).
+
+**Where it is kept.** The session reports the eye height and arm length in
+millimetres (XrData `eyeHeightMm`, `armLengthMm`; the session's last line
+`eye_height_mm=` and `arm_length_mm=`), and the launcher keeps them in
+launcher.ini and passes them to every next session (`--eye-height`,
+`--arm-length`), which then asks for none. Skipped, the session reports
+`calibration_prompt=0` and the launcher passes `--no-calibration-prompt`. The
+launcher's "Body calibration" row shows the measurements, and its Redo (or Ask
+again) forgets them so the next session asks. "Reset options" keeps them.
+
+In the game without a headset (`tools/probe_game_body.py --phases tpose`,
+October 8, `reports/body-probe-tpose.json`): eyes 1.66 m up as a calibrated
+height (body 0.978) and both wrists 0.62 m straight out from the rest pose's
+shoulders. With the hero's own arms they stopped 8.5 and 7.1 cm short of their
+controllers (left, right); with that arm length his arms scaled 1.135 and
+ended 2.7 and 0.8 cm from them. The rest comes from his standing pose: its
+shoulders sat 3-7 cm higher than the rest pose puts them, the far reach
+lifting the clavicles. A few percent more arm would close that gap at the cost
+of slightly bent elbows when the player's arms are straight; how it feels
+needs the headset.
+
+The panel's text is a stroke font of capitals, digits and punctuation drawn
+as flat bars in the panel's plane (`src/overlay_text.cpp`), opaque over the
+eye images like the rest of the overlay. Measured on the GPU test's eye image
+(1536 pixels for 92 degrees, below a Quest 3's density): every line reads.
 
 ## How punching works
 
@@ -311,6 +394,10 @@ fist from the eyes.
   something behind a fast-moving hand for a frame (compare `-NoEyeOcclusion`);
   the game's "Non Occluder" instance flag would keep the body out of it.
 - The lab has neither a body nor punching yet.
+- The T-pose calibration in the headset: how the panel reads and the pose
+  holds, and how the measured arms feel. The calibration takes the hero's
+  shoulders from his rest pose; in his standing pose they sit 3-7 cm higher,
+  which leaves straight arms up to 2.7 cm short of the controllers.
 
 ## Tuning
 
@@ -335,7 +422,12 @@ frames), each palm facing its controller's, every finger joint closing a
 quarter, half or all of the way to its bend and never back (from straight
 fingers, fingers bent back and the game's own fist) with the fingertips side
 by side in the palm, and the thumb bending in one plane onto the fingers; a
-taller player's body scaled about the feet; and for punching, one
+taller player's body scaled about the feet; a player's longer arms reaching
+their controllers, each scaled about its shoulder; the calibration's
+proportions from a rig and its scales' ranges, a T-pose held 1.5 s measuring
+the eye height and the longer arm, each check's panel line, a short lapse
+pausing the hold and a longer one restarting it, the panel's place and
+drawing; and for punching, one
 punch per swing as hard as the fist went in, no punch for touches, grazes, a
 busy hand or a fist carried along by flight, uppercuts and very hard blows, a
 short punch from within reach, the capsule's side and caps, and configuration.

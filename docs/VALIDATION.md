@@ -1,6 +1,225 @@
 # Validation — 2026-10-08
 
-## Weight — current build
+## Steadier aim markers, a colour per hand, a new target ring — current build
+
+The user, October 8: "lets make the aim markers nicer (diffirent color shade
+per hand maybe) and they feel very jerky\jittery rn can we smooth them a bit
+while staying snappy. also the square target marker is ugly as heck"
+
+**Why they jittered.** The marker sat on the raw aim ray of the image's
+input sample. A held hand's tremor (about 8-12 Hz) and the controller's
+tracking noise swing that ray by about 0.4 degrees peak to peak (a typical
+tremor, simulated: 0.1 + 0.05 degree sines at 9.5 and 7.1 Hz plus 0.03
+degree noise per frame at 72 Hz), as wide as the ring at 20-25 pixels a
+degree, at any distance. The shapes were aliased (no multisampling, opaque),
+so their edges crawled by whole pixels as they moved by fractions of one; a
+change in the preview's kind swapped the shape at once (at an edge, every
+few frames); and a target's centre moved in the game's steps.
+
+**What changed.** `AimMarkerMotion` (src/web_visual.cpp, spidy_core), one per
+hand in the XR worker's overlay callback (src/game_xr.cpp):
+- `begin(t)` per eye image, `t` its predicted display time: the same image
+  again changes nothing; a gap over 0.25 s starts afresh.
+- `aim(direction, yaw)` turns the aim direction into the tracking space
+  (`Quat::yaw(-trackingYaw)`, so snap and smooth turns are no motion) and
+  filters it: a 1 euro filter, cutoff 1 Hz + 60 x max(speed - 0.06 rad/s, 0),
+  the speed taken from the step off the last filtered direction and
+  low-passed at 4 Hz. Simulated (the tremor above, 5 seeds): at rest 0.40 to
+  0.10 degree peak to peak; at a constant 2.3-8.6 deg/s, 0.06-0.10 degree
+  behind; sweeps at 0.3, 1 and 3 rad/s at most 0.28, 0.31 and 0.35 behind;
+  within 0.05 degree 19-31 ms after stopping. (Without the dead band rest
+  kept about twice the wobble; textbook settings, 10 per rad/s and a 1 Hz
+  speed low-pass, trailed sweeps by up to 1-1.5 degrees.)
+- `markers(wanted, origin, direction, out)`: per kind a weight (new: 0.35 at
+  once, +1 per 40 ms; unwanted: -1 per 80 ms), for anchor, air and blocked a
+  distance along the steadied ray (eased in log space, 30 ms), for a target
+  its centre and radius (eased, 35 ms) and a lock (0 to 1 in 120 ms; the ring
+  starts 1.8 times wider, and widens again as it fades). Each kind still
+  fading is drawn too, at its weight's opacity, where it was last wanted (a
+  fired web's ring fades where the web went, not along the moving hand).
+- The placement rules (onAimLine for surfaces, the preview's reach for air,
+  the 2 / 3 / 0.5 m hide distances) are unchanged, on the steadied ray. Off
+  (X), untracked, or with the hand's web attached, the marker fades out; the
+  flat screen resets it.
+
+`appendAimMarker` draws soft-edged shapes (`softArc`, `softBar`,
+`softTriangle`: edges fade over 0.8 px), every shadow first (60% dark, 1.3 px
+past the shape outside and 0.5 px inside, fading over 1.8 px; a dot's half
+that), then the colours. Linear RGB: left (0.13, 0.55, 1), right (1, 0.40,
+0.05), miss (0.9, 0.07, 0.05), centre dots 60% toward white. At 100%: anchor
+ring 10.5 px radius, 2.3 px wide, dot 2 px (the ring shrinks 40% as the grip
+closes); air 8.5 px, eight dashes of 45%, 75% opaque; the cross's arms 5.5
+px; the target ring max(1.15 x radius, 13 px), the right hand's 15% wider and
+turned 60 degrees, three 75-degree arcs with claws 20% of the radius (4.5-10
+px) and a dot, turning 0.8 rad/s plus 2.4 x grip.
+
+Renderer: `Vertex::alpha` (default 1, so every `{position, color}` stays
+opaque); the overlay blends (source alpha / inverse source alpha; at 1 the
+pixels are as before); `renderViews(..., translucent)` draws a second span
+after the first with a pipeline that tests depth but never writes it, so
+soft edges and shadows never cut holes in each other. The worker sorts the
+markers farthest first.
+
+**Checks.** `spidy_tests`: 181/181. New: "aim marker motion steadies hand
+tremor, keeps up with a sweep and ignores turns" (a 0.15-degree 9 Hz tremor
+to under half; a 2 rad/s sweep under 0.6 degree behind; a 30-degree snap
+turn no motion; the same image no change; a gap restarts; a bad direction
+passes) and "... fades markers in and out and eases them to new places".
+Reworked: "aim markers keep their size on screen and stand out on any
+background" (shadows painted before colours, a quarter of the vertices at
+opacity 0, each hand's colour, opacity, the target ring round (its outer edge
+in at least 18 of 36 directions), closing in, both hands' rings apart).
+`spidy_graphics_test` 1536x1536: both hands' anchors, open air, a miss and two
+rings on one target over the dark scene, a bright sky and a lit wall drawn
+169 m out: each marker's colour, and on the panels pixels darkened at least
+15% by its shadow; D3D12 debug layer clean. ctest (core, launcher) and the
+five Python suites (87) pass. The saved `aim-markers.bmp` was looked at.
+
+**Not checked.** The headset: how the steadying feels (the tremor is a
+model, not the user's controllers), the colours on the game's own scenes,
+the ring's turning. The game was not run: the markers are drawn only in the
+XR worker's eye images, through the same renderer the GPU test runs.
+
+## Body calibration in a T-pose — preceding build
+
+The user, October 8: "lets add an in game calibration section on first start
+(and as an option in the vr menu) where we ask the players to stand in a t
+pose and hold triggers to get correct measurements to scale the avatar."
+
+**What changed.** `src/body_calibration.cpp` (spidy_core, engine
+independent): `Calibration` takes the headset and controllers in the
+tracking space each frame and, after 1.5 s of a held T-pose (both
+controllers tracked, eyes at least 1 m up, each arm within 41 degrees of
+straight out to its side from the hero's shoulder at the player's size and at
+least 72% of his arm, the two within 12%, the head within 26 degrees of level
+and 34 of square to the arms, both triggers past 0.6 then 0.35, head under 0.3
+and wrists under 0.35 m/s; a lapse under 0.25 s pauses), measures the eye
+height (mean head height) and each arm's reach from that shoulder to the wrist
+the solver places for the grip; the arm length is the longer. `Proportions`
+(the hero's rest pose: eyes 1.697 m up, shoulder joints 0.111 m behind, 0.266
+below and 0.170 to the side of them, arms 0.559 m) come from
+`body::Rig::shoulders` (new, from `prepare`) through
+`native_body::proportions`, with Spider-Man's numbers until the body has run.
+`bodyScale` (0.7-1.3 calibrated) and `armScale` (0.8-1.25) size the body;
+`body::solve` takes `armScale` and scales each arm's subtree about its
+shoulder after the body's scale. `appendView` draws the panel (1.2 x 0.6 m,
+1.4 m ahead, 12 cm under the eyes, where the player faced; it stays in the
+tracking space) and a ring at each controller; `src/overlay_text.cpp` is the
+stroke font. The XR worker starts it at the first 1.5 s of immersive play
+without a calibration (not while Spidy's swing owns the player, and only with
+the body on) or when `vr_settings::Values::calibrate` is set by the tab's
+CALIBRATE BODY (`Item::calibrate`, a switch named NO / ON RESUME, row 6 under
+a BODY heading: 12 rows, 0x200-0x20b), and clears that flag as it starts.
+From its start until each is let go afterwards, the swing's triggers and grips
+and the jump are zeroed and B is no interact; B skips. Done, the body command
+carries the eye height (with the new `calibrated` flag for the wider range)
+and the arm length (`Command::armLength`, the old spare word).
+
+**Protocol.** XrConfig version 15, 640 bytes: `eyeHeightMm`, `armLengthMm`
+(both 0, or 1000-2500 and 250-1200; else 1001) and options bit 10 (no prompt
+at the first gameplay). XrData version 15, 792 bytes: from 752 the
+calibration's phase, hint, progress, eye height and arm length (mm), done and
+skipped counts, flags (bit 0: no prompt) and each arm's reach. The body's
+status is version 2, 144 bytes (`armScale`, `calibrated`). The menu probe's
+flags gain 64 (a calibration asked for). Python: `--eye-height`,
+`--arm-length`, `--no-calibration-prompt`; samples' `calibration` and
+`vr_settings` `eye_height_mm`, `arm_length_mm`, `calibration_prompt`, which the
+settings line carries; `body.arm_scale`. Launcher: `SessionOptions`
+`eyeHeightMm`, `armLengthMm`, `calibrationPrompt`; launcher.ini
+`eye_height_mm`, `arm_length_mm`, `calibration_prompt`; a "Body calibration"
+row with Redo / Ask again; "Reset options" keeps the measurements.
+`launch-game-vr.ps1 -EyeHeight -ArmLength -NoCalibrationPrompt`.
+`probe_game_body.py --phases tpose` drives the body with a T-pose and the arm
+length; `probe_menu.py` steps CALIBRATE BODY (14 changes in all).
+
+**Checks.** 179 core checks pass (new: arms 0.65 m from the shoulders
+reached only with the arm scale, every bone 1.16 times longer and the hips
+unmoved; the test rig's proportions, the scales and their clamps; a T-pose
+measured at 134/135 frames, the eye height and 0.6 m arms exact, the longer
+of two arms taken; each check's panel line, crossed and hanging arms
+included; a 0.2 s lapse pausing and a 0.3 s one restarting, the trigger's
+hysteresis; the panel's place and drawing; the font's glyphs for every panel
+text, its widths and bars), 13 launcher checks (the calibration round trip,
+half or out-of-range values refused, the skip) and 87 Python checks (XrData
+v15's calibration, the body's status v2, the settings line). The GPU test
+draws the panel holding at 60% and the result over the left eye
+(`calibration-panel.bmp`, `calibration-done.bmp`): every line legible at 1536
+pixels for 92 degrees, the rings filling clockwise from the top.
+
+In the game without a headset (the user's save, `probe_menu_pad.py start` +
+`pad a --until-player`, two fresh games, with the user's OK):
+
+- `tools/probe_menu.py` (player at 28.5 s) passed every step: BODY and
+  CALIBRATE BODY between WEIGHT and COMFORT, NO stepped to ON RESUME
+  (`calibrate` true, 6 changes), RESET ALL back to NO (14 changes), every
+  hook restored. The capture (`reports/menu-probe/calibrate_on_resume.png`)
+  shows the row like the game's own; its help wrapped "T-pose" at the
+  hyphen, so the help was reworded afterwards ("Fit Spider-Man to you: pick
+  ON RESUME, then hold both triggers in a T-pose.").
+- `tools/probe_game_body.py --phases rig,tpose` (player at 35 s; report
+  `reports/body-probe-tpose.json`): the hero's rig gave the proportions the
+  defaults hold (eyes 1.6969 m up, arms 0.5586 m). Eyes 1.66 m up as a
+  calibrated height (body 0.9782), both wrists 0.62 m straight out from the
+  rest pose's shoulders: with the hero's own arms they ended 8.5 and 7.1 cm
+  short of their controllers (left, right); with the arm length the body's
+  arms scaled 1.1346 (0.62 / (0.5586 x 0.9782)) and ended 2.7 and 0.8 cm from
+  them. What is left is the game's standing pose holding the shoulders 3-7 cm
+  higher than the rest pose, with the far reach lifting the clavicles
+  (shoulders at 1.47 m against 1.40 estimated). The screenshot
+  (`reports/body-probe/tpose-calibrated.png`) shows him in a T-pose with the
+  longer arms.
+
+Save files unchanged except `slot0-s.save` (the game's own save when the menu
+probe left the pause menu). The calibration itself runs only in the XR
+worker, so the panel in the headset, the pose's thresholds against real
+players, and how the scaled arms feel need the headset. Not in the play
+folder (the user said not yet).
+
+## Five options removed — preceding build
+
+The user, October 8: "lets remove web catch props, web shooter, your own body,
+punch thugst, webs drawn by from options".
+
+**What changed.** The launcher's OPTIONS card lost "Webs catch props and
+thugs", "Web shooter", "Your own body", "Punch thugs" and "Webs drawn by"
+(`App::segmented`, used only by the last, is gone). `SessionOptions` lost
+`webGrab`, `overlayWebs`, `body`, `punch` and `webShooter`:
+`sessionArguments` never passes `--no-web-grab`, `--overlay-webs`,
+`--no-body`, `--no-punch` or `--no-web-shooter`; launcher.ini's `web_grab`,
+`overlay_webs`, `body`, `punch` and `web_shooter` are no longer read or
+written; `headsetSettings` ignores those keys on the session's settings line.
+The SPIDY VR tab lost WEBS CATCH PROPS AND THUGS, WEB SHOOTER, the BODY
+heading, YOUR OWN BODY and PUNCH THUGS: 10 rows, setting numbers 0x200-0x209
+(WEBS: aim markers, webs hold in open air, swing speed limit, weight; COMFORT:
+snap turn, smooth turn, controller vibration, game screen size).
+`vr_settings::Item` lost `webGrab`, `webShooter`, `body` and `punch`; `Values`
+keeps their fields, which only run_game_vr.py's switches set, so RESET ALL
+leaves them as the session started.
+
+**Protocol.** Unchanged: XrConfig and XrData version 14, the menu probe's
+structs version 3; run_game_vr.py and its `--no-*` switches as before.
+
+**Checks.** 172 core checks pass (the tab's two sections and ten rows, a
+switch's round trip on WEBS HOLD IN OPEN AIR, RESET ALL leaving web grab,
+punching, the body and the web shooter off when a session started them off),
+12 launcher checks (the arguments without the removed flags, the headset line
+ignoring their keys) and 86 Python checks. `tools/probe_menu.py` follows the
+new rows (aim markers off; webs in open air off and back with X; swing speed
+40 m/s; weight 80%; past the COMFORT heading to snap turn 45 degrees and
+smooth turn 60 degrees a second; RESET ALL: 12 changes, the web shooter still
+off).
+
+In the game without a headset (fresh game, the user's save,
+`probe_menu_pad.py start` + `pad a --until-player`, player at 31 s):
+`tools/probe_menu.py` passed every step, 12 changes, every hook restored; the
+captures show WEBS with its four rows, then COMFORT. Save files unchanged
+except `slot0-s.save` (the game's own `[Save] Request save type 0` when the
+probe left the pause menu). Deployed in place to `dist\Spidy-0.2.2`: Spidy
+Launcher.exe, spidy_stereo_probe.dll, spidy_ray_bridge.dll (relinked) and
+README.txt replaced, 29 files hash-verified, import check 42; previous files
+in `reports\backups\play-folder-before-options-20261008-130334`.
+
+## Weight — earlier build
 
 The user, October 8: "the locomotion in the air feels too floaty, lets maybe
 add controllable weight setting to ingame settings?"
@@ -67,7 +286,7 @@ probe leaving the pause menu, before the jump); backup in
 How each weight feels, and the XR worker taking the tab's change during a
 headset session, need the headset. In the next report: `vr_settings.weight`.
 
-## Fingers in a fist — preceding build
+## Fingers in a fist — earlier build
 
 The user, October 8: "my fingers in vr appear twisted and tangled in most
 poses". The hand crops of their October 7 23:11 session

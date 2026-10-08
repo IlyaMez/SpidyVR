@@ -1,4 +1,5 @@
 #pragma once
+#include "body_calibration.hpp"
 #include "math.hpp"
 #include <cstdint>
 
@@ -33,6 +34,9 @@ enum Flags : uint32_t {
     hideHead = 2,    // the head shrinks away (the eyes are inside it)
     handTurn = 4,    // the hands take the controllers' orientation
     airborne = 8,    // the player is in the air: the legs keep the game's pose
+    // height is from the T-pose calibration (body_calibration.hpp), not the
+    // headset's running height: the body takes it over a wider range.
+    calibrated = 16,
 };
 struct Command {
     uint32_t magic = 0x53424443, version = 1, bytes = sizeof(Command), flags{};
@@ -47,7 +51,9 @@ struct Command {
     // The tracking space's yaw in the world (game_tracking's Rig): a snap
     // turn changes it, and turns the body with the player at once.
     float trackingYaw{};
-    uint32_t reserved2{};
+    // The player's arm from the hero's shoulder at their size to the wrist,
+    // metres (the T-pose calibration; 0: the hero's own arms).
+    float armLength{};
 };
 static_assert(sizeof(Hand) == 36 && sizeof(Command) == 144);
 
@@ -62,7 +68,7 @@ enum Problem : uint32_t {
     badInstance = 5, // the hero's instance transform is not a rotation
 };
 struct Status {
-    uint32_t magic = 0x53424453, version = 1, bytes = sizeof(Status), state{};
+    uint32_t magic = 0x53424453, version = 2, bytes = sizeof(Status), state{};
     int64_t sequence{};
     // Pose jobs seen, the hero's among them, and those the body changed.
     uint64_t jobs{}, heroJobs{}, solved{};
@@ -83,8 +89,12 @@ struct Status {
     uint64_t renders{};
     uint32_t heroJobsLastFrame{}, heroJobsMax{};
     double solveMs{}; // time spent solving, total
+    // The arms' scale on top of the body's (the player's arm length), and
+    // whether the body's size is from the T-pose calibration (Flags).
+    float armScale = 1;
+    uint32_t calibrated{};
 };
-static_assert(sizeof(Status) == 136);
+static_assert(sizeof(Status) == 144);
 
 uint32_t start(uintptr_t base);
 // The local player became another actor (zero: none).
@@ -96,6 +106,9 @@ void renderFrame();
 // the eyes may draw the hero. Otherwise they hide it, as before the body.
 bool drawn();
 Status status();
+// Where the hero's shoulders and wrists are at his own size, from the rig of
+// his latest pose job; false (and `out` untouched) before one was read.
+bool proportions(body_calibration::Proportions& out);
 uint32_t stop();
 
 // Wire formats of the probe exports (SpidyBodyStart, SpidyBodySubmit,

@@ -2,6 +2,7 @@
 // Text handling for the Spidy launcher: Steam's VDF files, constants read from
 // the Python tools, command lines, and log lines. No Windows calls, so the
 // checks in tests/launcher_tests.cpp run anywhere.
+#include "body_calibration.hpp"
 #include "eye_resolution.hpp"
 #include <algorithm>
 #include <array>
@@ -203,25 +204,37 @@ inline std::wstring quoteArgument(std::wstring_view argument) {
     return quoted + L'"';
 }
 
+// Webs catching props and thugs, the web shooter, your own body and punching
+// are always on, and the game draws the webs: the launcher has not offered
+// them since October 8 (run_game_vr.py's switches still turn them off).
 struct SessionOptions {
-    bool webGrab = true;
-    bool overlayWebs = false;
     bool smallWindow = true;
     bool stockMonitorView = false;
     int renderScale = 100; // eye resolution in percent of the headset's recommendation, per side
     int swingSpeed = 32;
-    bool body = true;  // your own body (Spider-Man's) instead of gloves
-    bool punch = true; // fists punch thugs
     bool aimMarkers = true; // markers where each hand's web would land (X switches them in VR)
     bool airWebs = true;    // a web that meets nothing within reach holds in open air there
-    bool webShooter = true; // a free hand's trigger shoots web balls
     int snapTurn = 30;  // degrees per flick of the right stick; 0: no snap turning
     int haptics = 100;  // controller vibration, percent
     int screenSize = 1; // the game screen in the headset: 0 small, 1 medium, 2 large
     int smoothTurn = 0; // degrees a second the right stick turns you while held over; 0: it snap turns
     int weight = 60;    // how heavy you are while webs fly you, percent of real gravity
+    // Your T-pose calibration in the headset (body_calibration.hpp): the eye height and arm length Spider-Man's
+    // body is sized to, millimetres. Both 0: none yet, and VR asks for one at the first gameplay unless
+    // calibrationPrompt is off (you skipped it).
+    int eyeHeightMm = 0, armLengthMm = 0;
+    bool calibrationPrompt = true;
     bool operator==(const SessionOptions&) const = default;
 };
+
+// Whether `options` hold a T-pose calibration a session takes: both measurements, each within its range.
+inline bool calibrated(const SessionOptions& options) {
+    const auto within = [](int value, unsigned low, unsigned high) {
+        return value >= static_cast<int>(low) && value <= static_cast<int>(high);
+    };
+    return within(options.eyeHeightMm, body_calibration::minEyeHeightMm, body_calibration::maxEyeHeightMm) &&
+           within(options.armLengthMm, body_calibration::minArmLengthMm, body_calibration::maxArmLengthMm);
+}
 
 // Arguments after the script for tools/run_game_vr.py, for an untimed session
 // that starts the game itself (or uses the one already running).
@@ -230,24 +243,22 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
     std::vector<std::wstring> args{L"--auto-launch", L"--seconds", L"0", L"--swing-speed",
                                    std::to_wstring(std::clamp(options.swingSpeed, 1, 65)), L"--output",
                                    std::wstring(report)};
-    if (options.overlayWebs)
-        args.emplace_back(L"--overlay-webs");
-    if (!options.webGrab)
-        args.emplace_back(L"--no-web-grab");
     if (!options.smallWindow)
         args.emplace_back(L"--full-desktop-view");
     if (options.stockMonitorView)
         args.emplace_back(L"--stock-monitor-view");
-    if (!options.body)
-        args.emplace_back(L"--no-body");
-    if (!options.punch)
-        args.emplace_back(L"--no-punch");
     if (!options.aimMarkers)
         args.emplace_back(L"--no-aim-markers");
     if (!options.airWebs)
         args.emplace_back(L"--no-air-webs");
-    if (!options.webShooter)
-        args.emplace_back(L"--no-web-shooter");
+    if (calibrated(options)) {
+        args.emplace_back(L"--eye-height");
+        args.emplace_back(std::to_wstring(options.eyeHeightMm));
+        args.emplace_back(L"--arm-length");
+        args.emplace_back(std::to_wstring(options.armLengthMm));
+    } else if (!options.calibrationPrompt) {
+        args.emplace_back(L"--no-calibration-prompt");
+    }
     // The game's Settings offer these too (SPIDY VR), all but the render scale; the defaults go unsaid.
     const std::pair<int, std::pair<const wchar_t*, int>> settings[] = {
         {std::clamp(options.renderScale, static_cast<int>(minimumRenderScale), static_cast<int>(maximumRenderScale)),
@@ -275,9 +286,10 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
 
 // The line tools/run_game_vr.py prints when a session ends with other VR
 // settings than it began with (the SPIDY VR tab in the game's Settings,
-// or X for the aim markers):
-//   VR settings from the headset: aim_markers=1 web_grab=0 punch=1 ...
-// Applies them to `options` for the next session; false when the line is
+// X for the aim markers, a T-pose calibration made or skipped):
+//   VR settings from the headset: aim_markers=1 web_grab=1 air_webs=0 ...
+// Applies the ones the launcher offers to `options` for the next session
+// (web_grab, web_shooter, punch and body it ignores); false when the line is
 // another one, or changes nothing.
 inline bool headsetSettings(std::string_view line, SessionOptions& options) {
     constexpr std::string_view prefix = "VR settings from the headset: ";
@@ -301,16 +313,8 @@ inline bool headsetSettings(std::string_view line, SessionOptions& options) {
             continue;
         if (key == "aim_markers")
             next.aimMarkers = number != 0;
-        else if (key == "web_grab")
-            next.webGrab = number != 0;
         else if (key == "air_webs")
             next.airWebs = number != 0;
-        else if (key == "web_shooter")
-            next.webShooter = number != 0;
-        else if (key == "punch")
-            next.punch = number != 0;
-        else if (key == "body")
-            next.body = number != 0;
         else if (key == "swing_speed")
             next.swingSpeed = std::clamp(number, 10, 65);
         else if (key == "snap_turn")
@@ -323,6 +327,17 @@ inline bool headsetSettings(std::string_view line, SessionOptions& options) {
             next.screenSize = std::clamp(number, 0, 2);
         else if (key == "weight")
             next.weight = std::clamp(number, 40, 300);
+        else if (key == "eye_height_mm")
+            next.eyeHeightMm = number;
+        else if (key == "arm_length_mm")
+            next.armLengthMm = number;
+        else if (key == "calibration_prompt")
+            next.calibrationPrompt = number != 0;
+    }
+    // A calibration is both measurements within their ranges, or none at all; anything else keeps the old one.
+    if (!calibrated(next) && (next.eyeHeightMm || next.armLengthMm)) {
+        next.eyeHeightMm = options.eyeHeightMm;
+        next.armLengthMm = options.armLengthMm;
     }
     const bool changed = !(next == options);
     options = next;

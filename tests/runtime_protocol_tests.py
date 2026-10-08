@@ -135,7 +135,8 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(packed.decode('utf-16-le').rstrip('\0'),
                          r'C:\Program Files\Virtual Desktop Streamer\OpenXR\virtualdesktop-openxr.json')
         self.assertEqual(struct.calcsize('<4I7Q2IfI')+len(packed),608)  # game_xr.cpp's XrConfig
-        self.assertEqual(608+struct.calcsize('<6I'),632)  # its v14 tail, ending in the render scale and the weight
+        # Its v15 tail: the render scale, the weight and the T-pose calibration's eye height and arm length.
+        self.assertEqual(608+struct.calcsize('<8I'),640)
         self.assertEqual(run_game_vr.runtime_path('x'*259)[-2:],b'\0\0')
         with self.assertRaisesRegex(RuntimeError,'too long'):
             run_game_vr.runtime_path('x'*260)
