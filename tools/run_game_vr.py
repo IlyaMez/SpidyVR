@@ -32,8 +32,9 @@ import xr_runtime
 GAME_HOOKS = (*HOOKS, 0x2e67010, 0x1fbe360, 0x1fbda50, 0xa7b3a0, 0x1f9db60,
               0x18a0bb0, 0x189bd30, 0x186cc00, 0x1846c20, 0x19223e0,
               0x189e310, 0x189e3a0, 0x1873470, 0x17991a0, 0x1920310, 0x676dd0, 0x1920240,
-              # The web shooter: the camera's update (shots go out on the main thread) and the weapons' muzzle.
-              0x897d30, 0x2150c40)
+              # The web shooter: the camera's update (shots go out on the main thread), the weapons' muzzle
+              # and the shots' events (what they strike).
+              0x897d30, 0x2150c40, 0xd2a570)
 # What the game process commits in a VR session at 3072 x 3264 per eye (16.7-17.1 GB on October 5),
 # with Spidy's render memory ring and some room to grow.
 VR_COMMIT_MB = 19000
@@ -572,12 +573,13 @@ def punch_snapshot(game, address):
 def shooter_snapshot(game, address):
     """Web-shooter shots (game_shooter::Data): pulls that asked for a shot, shots the game fired and requests it
     dropped, those aimed at a thug and those whose target the game took, the hero's gadget, the main-thread frames
-    the module saw, shots per hand, and the latest shot."""
+    the module saw, shots per hand, the latest shot, and what the shots struck (v2): shots that hit anything,
+    webbing blows dealt to thugs, props knocked, and the latest actor hit (0x0: the world)."""
     for _ in range(8):
-        raw = game.read(address, 160)
-        if len(raw) != 160:
+        raw = game.read(address, 192)
+        if len(raw) != 192:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53484f44, 1, 160):
+        if struct.unpack_from('<3I', raw) != (0x53484f44, 2, 192):
             raise RuntimeError('Shooter protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -587,11 +589,13 @@ def shooter_snapshot(game, address):
         hands = [dict(shots=shots, last_target=hex(target))
                  for shots, target in (struct.unpack_from('<2Q', raw, 96+i*16) for i in range(2))]
         origin, aim_point = struct.unpack_from('<3f', raw, 128), struct.unpack_from('<3f', raw, 140)
+        collisions, webbed, pushed, last_hit = struct.unpack_from('<4Q', raw, 160)
         return dict(status=status, samples=samples, requested=requested, fired=fired, dropped=dropped,
                     targeted=targeted, resolved=resolved, weapon=hex(weapon), frames=frames, bots=bots, error=error,
                     hands=hands, last_origin=[round(x, 3) for x in origin],
                     last_aim_point=[round(x, 3) for x in aim_point],
-                    last_shot=hex(struct.unpack_from('<Q', raw, 152)[0]))
+                    last_shot=hex(struct.unpack_from('<Q', raw, 152)[0]), collisions=collisions, webbed=webbed,
+                    pushed=pushed, last_hit=hex(last_hit))
     return None
 
 
@@ -1119,8 +1123,10 @@ def session(a, startup):
                         punch = landed
                     shots = shooter_snapshot(game, rays['SpidyShooterData'])
                     if shots:
-                        sample['shooter'] = {k: shots[k] for k in ('status', 'fired', 'dropped', 'bots')}
-                        if any(shots[k] != (shooter or {}).get(k) for k in ('requested', 'fired', 'dropped', 'error')):
+                        sample['shooter'] = {k: shots[k] for k in ('status', 'fired', 'dropped', 'bots', 'collisions',
+                                                                   'webbed')}
+                        if any(shots[k] != (shooter or {}).get(k)
+                               for k in ('requested', 'fired', 'dropped', 'error', 'collisions', 'webbed', 'pushed')):
                             shooter_samples.append(dict(shots, seconds=round(time.monotonic()-started, 3)))
                         shooter = shots
                     # Eye job copies the game dropped unrendered (reclaimed by age).
@@ -1164,7 +1170,8 @@ def session(a, startup):
                     if grab:
                         grab['seconds'] = round(time.monotonic()-started, 3)
                         key = [grab[k] for k in ('grabs', 'yanks', 'catches', 'throws', 'releases', 'lost', 'landed',
-                                                 'flings', 'refused', 'drive_failures', 'error')]
+                                                 'flings', 'refused', 'drive_failures', 'error', 'launches',
+                                                 'impacts', 'struck')]
                         key += [h['phase'] for h in grab['hands']]
                         last = grab_samples[-1] if grab_samples else None
                         if not last or last['key'] != key or grab['seconds']-last['seconds'] >= 1:

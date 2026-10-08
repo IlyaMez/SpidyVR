@@ -75,6 +75,9 @@ Grabbing
   Grip aimed at a prop or thug ... catch it with your web
   Trigger / sharp pull ........... reel it in / yank it to your hand
   Release the grip ............... throw it (swing harder to throw faster)
+  A thug you pull flies off his feet, flailing, and lands hard when thrown.
+  Slammed into a wall or the ground he gets hurt, and thrown into another
+  thug, or hit by a prop you throw, that thug goes down too.
 
 Web shooter
   Trigger of a hand ...... shoot a web ball where that hand points: the
@@ -82,6 +85,7 @@ Web shooter
                            thug, it goes to him; otherwise it splats on the
                            first thing in its way. One ball per pull; the
                            other hand can shoot while one hand swings.
+                           Three quick hits web a thug up.
 
 Aim markers (where each hand's web would go if you squeezed its grip now;
 the left hand's are blue, the right hand's orange)

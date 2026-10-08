@@ -231,4 +231,70 @@ float rayMiss(Vec3 origin, Vec3 direction, float distance, Vec3 centre, float ra
 std::optional<Vec3> aimThrow(Vec3 from, Vec3 velocity, Vec3 target, float cone, float gravity);
 // The launch velocity whose arc from `from` reaches `to` after `time`.
 Vec3 arcVelocity(Vec3 from, Vec3 to, float time, Vec3 gravity);
+
+// Strikes. A target the webs fling or throw hurts what it strikes and is hurt
+// by it; in the game through its damage system (game_grab). These say when
+// and how hard. Damage is in the game's hit points before its own difficulty
+// scaling, which about doubled it on the normal setting (October 8: 3 took 6
+// of a street thug's 60).
+struct StrikeConfig {
+    // A flying target struck something when it kept less than `kept` of the
+    // speed it was given (by the web, or by its flight under gravity), from
+    // impactSpeed up. A flight let go of that the game ends (it lands the
+    // target) at landSpeed or faster struck the ground.
+    float impactSpeed = 7, kept = .45f, landSpeed = 8;
+    // A target flying at strikeSpeed or faster strikes a standing character
+    // its sphere touches: from his feet up to characterHeight, within
+    // characterRadius of his axis.
+    float strikeSpeed = 6, characterHeight = 1.8f, characterRadius = .35f;
+    // A blow does minDamage at its threshold speed and damagePerSpeed more
+    // for each metre per second beyond it, up to maxDamage. An impact from
+    // knockdownSpeed up knocks the one flying down (slower, he staggers); a
+    // character struck by a flying body is knocked down, or flung from
+    // flingSpeed (the game's kFlyBack with an impulse).
+    float minDamage = 2, damagePerSpeed = .7f, maxDamage = 15;
+    float knockdownSpeed = 14, flingSpeed = 9;
+    // After a blow, a target is not hurt again for this long.
+    float cooldown = .8f;
+};
+struct StrikeBlow {
+    float damage{};
+    int knockback{}; // the game's levels: 2 kStagger, 4 kKnockdown, 5 kFlyBack
+    float knockbackAmount{};
+    bool fling{}; // with an impact impulse: the game flings the one it hits
+};
+// The speed a flying target lost to what it struck: it flew at `before`
+// metres per second and moves at `now`. 0 when it struck nothing (it flew
+// slower than impactSpeed, or kept `kept` of its speed).
+float impactLoss(float before, float now, const StrikeConfig& = {});
+// The blow to a target that struck something at `speed` (the speed it lost,
+// or the speed it landed at).
+StrikeBlow impactBlow(float speed, const StrikeConfig& = {});
+// The blow a target flying at `speed` deals a character it strikes.
+StrikeBlow strikeBlow(float speed, const StrikeConfig& = {});
+// Whether a sphere of `radius` at `centre` touches a character standing with
+// his feet at `feet`.
+bool touches(Vec3 centre, float radius, Vec3 feet, const StrikeConfig& = {});
+
+// Pulls. A character the webs pull in is knocked off his feet into a flight
+// (in the game, its own flung reaction) that starts with a launch to the
+// hand; one a web only keeps from walking off stays on his feet (game_grab).
+struct PullConfig {
+    // A web pulls him in when it is `stretch` shorter than his distance from
+    // the hand (a reel winds it in; a hand pulls away faster than he follows)
+    // or the hand moves away from him at `speed`; a yank's jerk always does.
+    // In the session of October 8, 15:36, every taut web knocked thugs, as
+    // the hand began its yank, and they dropped where they stood.
+    float stretch = .25f, speed = 3;
+    // A pull that is no yank launches him onto an arc to the hand at
+    // launchSpeed (the reel's), taking minLaunchTime to maxLaunchTime (a
+    // yank's longest flight).
+    float launchSpeed = 12, minLaunchTime = .25f, maxLaunchTime = 2.5f;
+};
+// Whether the command pulls a character at `position` in.
+bool pullsIn(const TargetCommand&, Vec3 position, const PullConfig& = {});
+// The velocity that pull launches him with: a yank's jerk keeps its own arc,
+// a web an arc to its hand (between both hands, for two). Nothing for a
+// command that pulls from no hand.
+Vec3 pullLaunch(const TargetCommand&, Vec3 position, Vec3 gravity, const PullConfig& = {});
 } // namespace spidy

@@ -48,6 +48,7 @@ bool game_targets::scan(uintptr_t base, uint32_t kinds, std::vector<Candidate>& 
         if (kinds & (1u << k))
             vtables[k] = base + marker(static_cast<Kind>(k));
     std::unordered_map<uint64_t, uint64_t> physics, machines;
+    std::unordered_map<uint64_t, uint32_t> traits;
     for (uint32_t i = 0; i < static_cast<uint32_t>(count); ++i) {
         struct Entry {
             uintptr_t address;
@@ -67,6 +68,16 @@ bool game_targets::scan(uintptr_t base, uint32_t kinds, std::vector<Candidate>& 
             physics[head.record] = entry.address;
         else if (head.vtable == base + syncStaticStateMachine)
             machines[head.record] = entry.address;
+        else if (head.vtable == base + thugBot)
+            traits[head.record] |= thug;
+        else if (head.vtable == base + civilianBot)
+            traits[head.record] |= civilian;
+        else if (head.vtable == base + allyBot || head.vtable == base + missionFollowBot)
+            traits[head.record] |= ally;
+        else if (head.vtable == base + webbedTracker)
+            traits[head.record] |= webbable;
+        else if (head.vtable == base + breakableSystem)
+            traits[head.record] |= breakable;
         for (unsigned k = 1; k < 4; ++k)
             if (vtables[k] && head.vtable == vtables[k])
                 out.push_back({entry.address, head.record, head.handle, static_cast<Kind>(k)});
@@ -76,6 +87,8 @@ bool game_targets::scan(uintptr_t base, uint32_t kinds, std::vector<Candidate>& 
             c.physics = p->second;
         if (const auto m = machines.find(c.record); m != machines.end())
             c.machine = m->second;
+        if (const auto t = traits.find(c.record); t != traits.end())
+            c.traits = t->second;
     }
     return true;
 }

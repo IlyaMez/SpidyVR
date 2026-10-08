@@ -33,13 +33,32 @@
 // target, whose aim point then replaces it; +0x3b 1, as the game sets it;
 // +0x3c and +0x40 the web shooter's own options, which it fills itself
 // (vtable +0x100, 0xe55310). Spidy's shots take no gadget ammo.
+//
+// The hit. A shot fired this way does nothing where it lands (measured
+// October 8 at a street crime): its damage action, from the shot's own
+// DamageData, carries no damage, type and status, and its handler
+// (ShotWebShooter vtable +0xd8, 0xd2a570) webs a limb only for the hero's
+// melee web shots (the anim event HeroAnimWebShooterFireEvent sets the
+// weapon's options, +0x6ac/+0x6a8, around its fire at 0xe55800). So Spidy
+// hooks that handler: when one of its own shots (the ShotWebShooter keeps
+// its registry handle at +0x14 and its shot id at +0x104) collides
+// (event 0xd930bcb2), the event's HitActor (0x21eb297b), HitPosition
+// (0x568973e3) and HitNormal (0xc3272bc7) say what it struck, read as the
+// handler reads them (1bcf3e0, 1f9db60, 1f7b760). A thug the game webs up
+// takes the webbing the game's web hits deal: a kWebImpact blow with
+// webbingPerHit of kWebEncase (native_bodies::Damage), enough at the third
+// hit in quick succession to web a street thug up (his threshold is 30).
+// A throwable prop that is no breakable is knocked along the shot
+// (native_bodies, as a throw launches it).
 namespace spidy::game_shooter {
+// What a hit does.
+constexpr float webbingPerHit = 11, webDamage = .5f, pushSpeed = 3.5f, pushLift = 1;
 struct Hand {
     uint64_t shots{};      // fired by this hand
     uint64_t lastTarget{}; // the actor record its latest shot went to, 0 for none
 };
 struct Data {
-    uint32_t magic = 0x53484f44, version = 1, bytes = sizeof(Data), status{};
+    uint32_t magic = 0x53484f44, version = 2, bytes = sizeof(Data), status{};
     int64_t sequence{};
     // Input samples seen; pulls that asked for a shot; shots the game fired;
     // requests dropped (no web shooter, no player, stale, refused); shots
@@ -54,8 +73,12 @@ struct Data {
     // component the game spawned for it.
     Vec3 lastOrigin{}, lastAimPoint{};
     uint64_t lastShot{};
+    // Spidy's shots that struck something, the webbing blows they dealt
+    // thugs, the props they knocked, and the actor record the latest struck
+    // (0: the world).
+    uint64_t collisions{}, webbed{}, pushed{}, lastHit{};
 };
-static_assert(sizeof(Hand) == 16 && sizeof(Data) == 160);
+static_assert(sizeof(Hand) == 16 && sizeof(Data) == 192);
 // Starts the bot and gadget watches and the main-thread hooks.
 uint32_t start(uintptr_t base);
 uint32_t stop();

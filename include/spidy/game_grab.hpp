@@ -12,11 +12,20 @@
 //   them, and the web's law moves their Havok bodies from their actual
 //   motion, contacts included (native_bodies). Let go, they fly, bounce,
 //   slide and come to rest by the game's physics, in real time.
-// - Bots are flung (BotStateFlung, the game's launched reaction) on the first
-//   pull, and steered through their own MoverStandard while the web holds
-//   them (native movement Drive). When the web stops steering, the flight
-//   takes the bot's velocity and the game flies and lands it. A bot the game
-//   would not fling falls under Spidy's rays instead, until it is down.
+// - Thugs fly the game's own launched reaction, BotStateFlung, flailing.
+//   The web's first pull deals one the kinetic blow the game answers with
+//   that flight (a direct request for the state is overridden by a fighting
+//   thug's AI: until October 8 webbed thugs just slid along on their movers),
+//   and from the next step on the web steers the flight it brings, its pull
+//   written as the flight's velocity every step. Let go of, the game flies it
+//   on and lands it (BotStateGroundFlop, then BotStateStunned). A thug the
+//   game would not fling, or a civilian, is steered through his own
+//   MoverStandard instead (native movement Drive), and let go of, falls
+//   under Spidy's rays until he is down.
+// - What flies hurts what it strikes, as the game's thrown bodies do: a thug
+//   whose flight is stopped by the world, or who lands hard, takes a kinetic
+//   blow by how much speed he lost; a thug or a thrown prop striking another
+//   thug knocks him down or flings him (web_grab's StrikeConfig).
 //
 // Pedestrians are kinematic crowd agents with no physics or flung state;
 // they are not offered.
@@ -37,7 +46,7 @@ struct Hand {
 // How long a web let go of is reported trailing its target.
 constexpr float trailSeconds = 1.5f;
 struct Data {
-    uint32_t magic = 0x53475244, version = 2, bytes = sizeof(Data), status{};
+    uint32_t magic = 0x53475244, version = 3, bytes = sizeof(Data), status{};
     int64_t sequence{};
     uint64_t steps{}, commands{}, grabs{}, yanks{}, catches{}, throws{}, releases{}, lost{}, flights{},
         landed{};
@@ -54,8 +63,12 @@ struct Data {
     // the latest grab step and the physics length of the game's step.
     Vec3 commanded{}, observed{};
     float tickDt{}, stepDt{};
+    // Thugs the web knocked into the game's flight (kinetic blows sent),
+    // steps it steered such a flight, blows to flying thugs for what they
+    // struck or landed on, and thugs struck by a flying thug or a thrown prop.
+    uint64_t launches{}, flown{}, impacts{}, struck{};
 };
-static_assert(sizeof(Hand) == 48 && sizeof(Data) == 336);
+static_assert(sizeof(Hand) == 48 && sizeof(Data) == 368);
 using Call = unsigned long(__stdcall*)(void*);
 // drive and driven: the movement module's SpidyMotionDrive and
 // SpidyMotionDrivenSample. kinds: bits 1 << game_targets::Kind to offer.
@@ -85,8 +98,9 @@ bool holds(unsigned hand);
 // per physics step, each from the state that step left. Ticking twice per
 // step restarted twice from the same state and gave targets half the pull.
 bool due(float& dt);
-// One grab step, of the length due() gave.
-void step(float dt, const WorldQueries&);
+// One grab step, of the length due() gave. player: the player's actor
+// record, who deals the web's blows.
+void step(float dt, const WorldQueries&, uint64_t player);
 // Lets every web go; a bot on a flight the web steered is handed to the game.
 void cancel();
 Data data();

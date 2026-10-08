@@ -42,9 +42,11 @@ coming. Questions, bugs, clips: come say hi on
   point, swing on it, reel in with the trigger, pull sharply to zip. Webs hold on
   buildings, the ground, or open air.
 - 🎯 **Web shooter.** The trigger of a hand without a web fires the game's own
-  web ball from your wrist, with aim assist on thugs.
+  web ball from your wrist, with aim assist on thugs. Three quick hits web a
+  thug up.
 - 🪢 **Grab and throw.** Web a prop or a thug, reel or yank it in, swing it on
-  the web and let go to throw it. Heavy things feel heavy.
+  the web and let go to throw it. Heavy things feel heavy. Pulled thugs fly
+  flailing, and get hurt when they slam into walls, the ground or each other.
 - 🦸 **You are Spider-Man.** Look down and see his body; his arms and hands
   follow your controllers. A quick T-pose the first time sizes him to your
   height and arm length.

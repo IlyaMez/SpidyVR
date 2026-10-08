@@ -71,15 +71,22 @@ void release(uint64_t actor);
 // freed and seen in a step.
 bool predicted(uint64_t actor, Vec3& centre, Vec3& velocity, Vec3& measured);
 // Bots on a web. BotStateFlung is the game's own launched reaction: the bot
-// flails through the air at a velocity, then lands. It is requested through
-// the bot's SyncStaticStateMachine (RequestState, vtable slot 13, 20e51c0)
-// with the launch velocity in its parameters (+0x44; constructor 556040,
-// state type 300440), on the main thread at the next step. While the bot
-// flies, the mover drive steers it; asked again while it flies, this only
-// replaces the flight's velocity (BotStateFlungLocal +0x94), which is how a
-// throw hands the bot back to the game. machine: the bot's
+// flails through the air at a velocity, then lands (BotStateGroundFlop, then
+// BotStateStunned). While it flies, its driver BotStateFlungLocal (the
+// machine's layer 1, +0x98) carries it at the velocity at its +0x94, the
+// game colliding it with the world; written every frame, that velocity
+// steers the flight (measured October 8: a thug pulled 7 m toward the hero,
+// another held 2.4 m up for 4 s). At the next step on the main thread, this
+// replaces the velocity of the flight the bot is on; when it is on none and
+// `request` is set, it asks for one through the bot's SyncStaticStateMachine
+// (RequestState, vtable slot 13, 20e51c0; parameters from 556040 with the
+// velocity at +0x44, state type 300440). A fighting thug's own AI overrides
+// that request (it returns accepted, and the thug keeps aiming): the web
+// grab gets a thug onto a flight with a kinetic blow instead (damage(), type
+// 7 kKinetic with kFlyBack and an impact impulse, which the game answers
+// with BotStateFlung away from the damager). machine: the bot's
 // SyncStaticStateMachine; record: its actor record.
-bool fling(uint64_t machine, uint64_t record, Vec3 velocity);
+bool fling(uint64_t machine, uint64_t record, Vec3 velocity, bool request = true);
 // Whether the machine's state is BotStateFlung now.
 bool flung(uint64_t machine);
 // Damage dealt through the game's own DamageSystem (the static object at
@@ -106,6 +113,13 @@ struct Damage {
     int32_t knockback = -1;
     float knockbackAmount = -1, impulse = -1;
     uint32_t hash{}; // DamageHash; 0 leaves it unset
+    // A status the blow carries (the request's StatusData, added by 1ed20e0:
+    // type, amount, duration), -1 for none. Webbing is type 19 kWebEncase on
+    // a kWebImpact (20) blow: a bot's StatusEffectTrackerWebbed adds it up
+    // (+0x50) to its threshold (+0x54, 30 for street thugs) and webs him up
+    // (BotStateWebStruggle) there; the sum decays to nothing within seconds.
+    int32_t statusType = -1;
+    float statusAmount{}, statusDuration{};
 };
 // Queues one for the next physics step. Returns its ticket, 0 when the
 // module is off or the queue is full.

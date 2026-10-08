@@ -2,7 +2,7 @@
 running game, without a headset.
 
     python tools/probe_game_grab.py              the nearest throwable prop in sight
-    python tools/probe_game_grab.py --bots       the nearest bot in sight (a thug, or a scripted civilian)
+    python tools/probe_game_grab.py --bots       the nearest enemy in sight (never a civilian or the police)
     python tools/probe_game_grab.py --yank       pull it over with the zip gesture instead of reeling
 
 It needs a freshly started game in free roam (Spidy's ray and movement modules start once per process) and
@@ -33,11 +33,13 @@ from vr_launcher import bring_to_front
 OUTPUT = ROOT/'reports/grab-probe'
 REGISTRY, REGISTRY_COUNT = 0x7a44320, 0x7a44340
 HERO_LOCAL, HERO_MOVERS, BOT_MOVERS, THROWABLE = 0x38a93c8, 0x38b2c98, 0x38533e0, 0x38489c0
+# Bots the webs leave alone (game_targets::enemy): CivilianBot, AllyBot (the police), MissionFollowBot.
+FRIENDLY = (0x383c480, 0x3835e80, 0x38ecc00)
 # Hooks the probe's modules install: castRay, mover prequery and gravity, hknpWorld::preCollide.
 ENTRIES = (0x2e67010, 0x1fbe360, 0x1fbda50, 0x2e54300)
 LIFT = {'throwable': .45, 'bot': .95}
 PHASES = {0: 'none', 1: 'tethered', 2: 'yanked', 3: 'held'}
-GRAB_SIZE = 336
+GRAB_SIZE = 368
 # Hero::HeroRopeManager: 16 rope slots of 0x7c8 bytes from +0x50; in a slot, +0x70c bit 0 in use, bit 1 released,
 # +0x6b8 seconds since released, +0x67c the target position SetRopeTargetPosition writes, +0x720 the anchor drawn.
 ROPE_MANAGER = 0x38b3df8
@@ -116,7 +118,7 @@ def grab_snapshot(game, address):
         raw = game.read(address, GRAB_SIZE)
         if len(raw) != GRAB_SIZE:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53475244, 2, GRAB_SIZE):
+        if struct.unpack_from('<3I', raw) != (0x53475244, 3, GRAB_SIZE):
             raise RuntimeError('Grab protocol mismatch')
         if struct.unpack_from('<q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -140,6 +142,9 @@ def grab_snapshot(game, address):
                      struct.unpack_from('<9Q', raw, 232)))
         d['commanded'], d['observed'] = struct.unpack_from('<3f', raw, 304), struct.unpack_from('<3f', raw, 316)
         d['tick_dt'], d['step_dt'] = struct.unpack_from('<2f', raw, 328)
+        # Thugs knocked into the game's flight, steps the web steered one, blows for what a flying thug
+        # struck or landed on, thugs struck by a flying thug or a thrown prop (v3).
+        d.update(zip(('launches', 'flown', 'impacts', 'struck'), struct.unpack_from('<4Q', raw, 336)))
         return d
     return None
 
@@ -352,9 +357,10 @@ def main():
         feet = game.transform(game.pointer(record))['position']
         hand = (feet[0], feet[1]+1.2, feet[2])
         marker = BOT_MOVERS if args.bots else THROWABLE
+        friendly = {r for a, v, r, _ in components if v in FRIENDLY}
         targets = []
         for a, v, r, _ in components:
-            if v == marker:
+            if v == marker and r not in friendly:
                 t = game.transform(game.pointer(r))
                 if t:
                     centre = (t['position'][0], t['position'][1]+LIFT[kind], t['position'][2])

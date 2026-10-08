@@ -88,6 +88,24 @@ its own gadget, then fired by Spidy:
 | Camera manager's update, once a frame on the main thread | `0x897d30` | Spidy fires its shots after it; 1,692 calls during the probe |
 | `ShotWebShooter`, the shot | vtable `0x3907d30` | Flew 52-61 m/s to its aim point, ended there, at a surface or after 1 s |
 
+For what web balls and web pulls do to thugs (October 8;
+`include/spidy/game_shooter.hpp`, `include/spidy/game_grab.hpp`,
+`include/spidy/native_bodies.hpp`), found from RTTI, reflection and
+disassembly, then traced and tried at a street crime with a research DLL:
+
+| Fact | RVA | Verification |
+|---|---:|---|
+| `ShotWebShooter` event handler (shot, name hash, event); Collision `0xd930bcb2` | `0xd2a570` (vtable `0x3907d30` +0xd8) | Hooked: Spidy's shots collided with their target thug |
+| Collision fields HitActor `0x21eb297b` (8), HitPosition `0x568973e3` (12), HitNormal `0xc3272bc7` (12): index by name hash, read, actor reference to record | `0x1bcf3e0`, `0x1f9db60`, `0x1f7b760` | Decoded the struck thug's and trash can's records |
+| A shot's id and registry handle | ShotWebShooter +0x104, +0x14 | Equal to the fired id and the weapon's shot handle |
+| `ShotActionDamage::Apply`, its collision entry (skips an action with no damage, knockback or custom data) | `0x20b7200`, `0x20b6d70` | Never called for Spidy's shots (all-zero DamageData); called for the game's Impact Web |
+| Web shooter options from the hero's melee web shots (`HeroAnimWebShooterFireEvent`: FireFromRightHand, TargetLimb, ShotEffect) set at weapon +0x6ac/+0x6a8, filled into the event +0x3c/+0x40 | `0xe55800`, `0xe55310` | Options 3 + limb 0 made a hit spawn a `WebBlanket` (`0xd4ea30`) |
+| A request's status entry (request, amount, type, duration, count) | `0x1ed20e0` | kWebImpact + type 19 at 25-100 webbed thugs (BotStateWebStruggle) |
+| `StatusEffectTrackerWebbed`: amount +0x50, threshold +0x54 (30 for street thugs), adds webbing | vtable `0x390bf28`, `0xd5b860` | Read during the hits; decays to 0 within seconds |
+| DamageType names (0 kNone ... 7 kKinetic ... 19 kWebEncase, 20 kWebImpact ...) | names at `0x5e07b50` | Read from the image |
+| `BotStateFlungLocal`, the flight's velocity +0x94 | vtable `0x386c448`; machine +0x98 | Written every frame, it steered the flight |
+| Thug, civilian, breakable components | `ThugBot` `0x384b010`, `CivilianBot` `0x383c480`, `BreakableSystemComponent` `0x3871018` | Registry scans at the crime and near the save |
+
 For the SPIDY VR tab in the game's Settings (October 7;
 `include/spidy/game_menu.hpp`), found from the executable's strings, RTTI and
 reflection tables, then traced in the running game with a research DLL that

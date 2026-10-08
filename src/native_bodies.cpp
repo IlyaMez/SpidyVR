@@ -35,6 +35,10 @@ constexpr uintptr_t worldGlobal = 0x78939e8, physicsGlobal = 0x609a570, recordTa
 constexpr uintptr_t damageSystem = 0x62a4ec0, directDamageRva = 0x1eb6d60, spareRequest = 0x123868,
                     actorRecords = 0x7a44380, actorRecordCount = 0x7a4439c;
 using DirectDamage = uint8_t* (*)(void*, const uint32_t*, const Vec3*, const Vec3*, const Vec3*);
+// A status entry in a request's StatusData (request, amount, type, duration,
+// action count; -1 leaves the count unset), as the game's shot damage adds one.
+constexpr uintptr_t addStatusRva = 0x1ed20e0;
+using AddStatus = void (*)(void*, float, int32_t, float, float);
 constexpr uint16_t debris = 3; // the mode the game's own throws use
 constexpr int activate = 0;    // hknpActivationMode::ACTIVATE
 constexpr unsigned maxSystemBodies = 16;
@@ -62,11 +66,11 @@ struct Slot {
     bool controlling{}, launching{};
 };
 Slot table[slots];
-// A bot to fling, or whose flight to steer, at the next step.
+// A bot whose flight to steer at the next step, or to fling when `request`.
 struct Fling {
     uint64_t machine{}, record{};
     Vec3 velocity{};
-    bool pending{};
+    bool pending{}, request{};
 };
 Fling flings[slots];
 // Damage to issue at the next step, in order, with its ticket.
@@ -193,6 +197,14 @@ bool damageNow(const Damage& d) {
         set(0x19c, &d.hash, 26);
     *reinterpret_cast<uint64_t*>(request + 8) |= fields;
     *reinterpret_cast<uint64_t*>(request + 0x18) |= fields;
+    if (d.statusType >= 0 && d.statusAmount > 0 && std::isfinite(d.statusAmount) && std::isfinite(d.statusDuration)) {
+        __try {
+            reinterpret_cast<AddStatus>(base + addStatusRva)(request, d.statusAmount, d.statusType,
+                                                             d.statusDuration, -1.f);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            // The request goes out without its status.
+        }
+    }
     return true;
 }
 // A registered component of this vtable whose record is `record`.
@@ -330,6 +342,8 @@ void flingNow(const Fling& f) {
         ++totals.steers;
         return;
     }
+    if (!f.request)
+        return;
     alignas(16) uint8_t params[0x120]{};
     reinterpret_cast<MakeParams>(base + flungParamsRva)(params);
     std::memcpy(params + 0x44, &f.velocity, sizeof(Vec3));
@@ -596,6 +610,8 @@ uint32_t native_bodies::start(uintptr_t gameBase) {
                                   0x8b, 0x04, 0x25, 0x58}) ||
             !entry(directDamageRva, {0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10, 0x48, 0x89,
                                      0x74, 0x24, 0x18, 0x48}) ||
+            !entry(addStatusRva, {0x48, 0x89, 0x5c, 0x24, 0x10, 0x57, 0x48, 0x83, 0xec, 0x40, 0x0f, 0x29, 0x74,
+                                  0x24, 0x30, 0x41}) ||
             pointer(base + damageSystem) != base + 0x4f5db58) {
             result = 8001;
             break;
@@ -727,7 +743,7 @@ bool native_bodies::predicted(uint64_t actor, Vec3& centre, Vec3& velocity, Vec3
     ReleaseSRWLockShared(&lock);
     return found;
 }
-bool native_bodies::fling(uint64_t machine, uint64_t record, Vec3 velocity) {
+bool native_bodies::fling(uint64_t machine, uint64_t record, Vec3 velocity, bool request) {
     if (!enabled || !machine || !record || !finite(velocity))
         return false;
     AcquireSRWLockExclusive(&lock);
@@ -739,7 +755,7 @@ bool native_bodies::fling(uint64_t machine, uint64_t record, Vec3 velocity) {
         if (!slot && !f.pending)
             slot = &f;
     if (slot)
-        *slot = {machine, record, limited(velocity, 45), true};
+        *slot = {machine, record, limited(velocity, 45), true, request};
     ReleaseSRWLockExclusive(&lock);
     return slot != nullptr;
 }

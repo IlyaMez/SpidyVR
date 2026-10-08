@@ -1,8 +1,10 @@
 // Runs the web grab against the game's actors, inside the swing's world-query
 // callback: picks come from the candidate watch, props move by their Havok
-// bodies (native_bodies), bots fly the game's own flung reaction and are
-// steered through their movers, and the game's rays keep a steered bot out of
-// walls and the ground.
+// bodies (native_bodies), an enemy a web pulls in is knocked into the game's
+// own flung reaction, launched toward the hand and steered there, and what
+// flies hurts what it strikes. An enemy the web only holds, or one the game
+// would not fling, is steered through his mover, the game's rays keeping him
+// out of walls and the ground.
 #include "spidy/game_grab.hpp"
 #include "spidy/native_bodies.hpp"
 #include "spidy/native_movement.hpp"
@@ -38,6 +40,29 @@ Shape shape(Kind kind) {
 // A command lasts long enough for one slow frame, like the swing's.
 constexpr uint32_t leaseMs = 150;
 constexpr float maxDriveSpeed = 40, landingSpeed = 1.5f;
+// The kinetic blow that knocks an enemy into the game's flight (measured
+// October 8: kKinetic, kFlyBack, KnockbackAmount 10, ImpactImpulse 30 gave
+// BotStateFlung every time; kMelee and kExplosion only a stagger). A web that
+// pulls him in deals it, and once he came down, a pull reknockSeconds after
+// the last blow. It lands within a step or two; one that has not flung him by
+// knockWait never will (a heavy, a scripted scene), and his mover is steered
+// instead.
+constexpr float knockDamage = 2, knockAmount = 10, knockImpulse = 30, knockWait = .25f, reknockSeconds = 1.5f;
+// Which webs pull him in, and the launch his flight starts with (web_grab's
+// PullConfig). In the session of October 8, 15:36, the first taut step
+// knocked thugs while the hand began its yank, and the flight took the web's
+// pull from his standing pace instead of a launch: they dropped where they
+// stood and lay there. The launch waits launchSeconds for its flight. A throw
+// of more than throwKnockSpeed knocks one lying where the web laid him into
+// the flight the throw gives.
+constexpr float launchSeconds = .6f, throwKnockSpeed = 4;
+// A new launch reverses the motion the flight had (the game's own blow sends
+// him away from the player): for settleSeconds after one, a change of pace is
+// no impact and a flight that ends is no landing.
+constexpr float settleSeconds = .15f;
+// A bot let go of is watched for its landing for this long; a thrown prop
+// for what it strikes.
+constexpr float freeFlightSeconds = 6, thrownSeconds = 4;
 struct Tracked {
     Candidate who{};
     uint64_t actor{}, mover{};
@@ -45,12 +70,40 @@ struct Tracked {
     bool seen{}, gone{};
     // Props: the web gave it a command in the latest step.
     bool driven{};
-    // Bots. steering: its mover takes the web's velocity. flingAsked: the
-    // game was asked to fling it. falling: the game would not fling it, so
-    // Spidy brings it down along `flight`.
-    bool steering{}, flingAsked{}, falling{};
+    // Bots. flying: the web steers the game's own flight (BotStateFlungLocal);
+    // flew: it did since the web caught it. steering: its mover takes the
+    // web's velocity (on his feet on a web that only holds him, or a bot the
+    // game would not fling); grounded: standing on the ground at the latest
+    // such step. flingAsked: the game was asked to fling it. falling: let go
+    // of off the ground on its mover, Spidy brings it down along `flight`.
+    bool flying{}, flew{}, steering{}, grounded{}, flingAsked{}, falling{};
     Vec3 flight{};
     float airborne{};
+    // Knocked off his feet, his flight starts with `launch` (a yank's arc, an
+    // arc to the hand, a throw) while `launching`, for up to launchSeconds
+    // (launchAge so far). settle: seconds since a launch or a throw last set
+    // the flight's velocity anew.
+    Vec3 launch{};
+    bool launching{};
+    float launchAge{}, settle{};
+    // Seconds since the web knocked it into a flight (negative: never), since
+    // the game took a flight the web let go of (negative: none), since a prop
+    // was let go of (negative: held, or never).
+    float knocked = -1, free = -1, thrown = -1;
+    // What it struck. `expected`: the velocity it was given for this step (by
+    // the web, or its flight under gravity). The web's velocity reaches the
+    // game a frame later, and the game draws a bot a frame late or early now
+    // and then, so a flight is measured over two steps (`paced`, from where it
+    // was two steps before), and struck something when it stops short of the
+    // fastest it went in the three steps before (`cruise`).
+    Vec3 expected{}, paced{}, back1{}, back2{};
+    float dt1{}, cruise{};
+    float speeds[3]{};
+    uint32_t seenSteps{};
+};
+// Bots a strike hurt lately: no other blow before `until` (GetTickCount64).
+struct Shield {
+    uint64_t record{}, until{};
 };
 uintptr_t base{};
 Call driveCall{}, drivenCall{};
@@ -61,8 +114,13 @@ game_targets::Watch watch;
 std::vector<Candidate> candidates;
 std::vector<Tracked> tracked;
 std::vector<TargetCommand> commands;
+std::vector<Shield> shields;
 WebGrab core{GrabConfig{}};
+const StrikeConfig strikes{};
 uint64_t driveSerial{}, stepped{}, botsLanded{};
+// The player's actor record at the latest step: the one who deals the web's
+// blows.
+uint64_t hero{};
 size_t counted{};
 // The target each hand's web last let go of, until when its web is drawn
 // trailing it (GetTickCount64). Left where the target was when let go, the
@@ -85,6 +143,11 @@ bool read(uintptr_t p, void* out, size_t n) {
 }
 bool offers(Kind kind) {
     return offered & (1u << static_cast<unsigned>(kind));
+}
+// What the webs catch: props, and the enemies among the bots. On October 8,
+// 15:36, pulls took civilians: every bot was offered.
+bool takes(const Candidate& c) {
+    return offers(c.kind) && (c.kind != Kind::bot || game_targets::enemy(c));
 }
 Tracked* track(uint64_t record) {
     for (auto& t : tracked)
@@ -130,7 +193,7 @@ const Candidate* nearest(Vec3 origin, Vec3 direction, float distance, float cone
     const Candidate* best{};
     float bestMiss = cone, bestDistance = 1e9f;
     for (const auto& c : candidates) {
-        if (!offers(c.kind))
+        if (!takes(c))
             continue;
         Vec3 at{};
         if (!game_targets::position(c, at))
@@ -170,7 +233,7 @@ class Targets final : public TargetQueries {
             // A web struck it directly (owner): take it up like a pick.
             for (const auto& c : candidates) {
                 Vec3 at{};
-                if (c.record == id && offers(c.kind) && movable(c) && game_targets::live(base, c) &&
+                if (c.record == id && takes(c) && movable(c) && game_targets::live(base, c) &&
                     game_targets::position(c, at)) {
                     t = follow(c, at + Vec3{0, shape(c.kind).lift, 0});
                     break;
@@ -196,15 +259,16 @@ class Targets final : public TargetQueries {
             if (!t.gone && actorHandle(t.who.record) == handle)
                 return t.who.record;
         for (const auto& c : candidates)
-            if (offers(c.kind) && actorHandle(c.record) == handle)
+            if (takes(c) && actorHandle(c.record) == handle)
                 return c.record;
         return {};
     }
+    // The enemies a throw may be aimed at.
     void characters(std::vector<GrabTarget>& out) const override {
         for (const auto& c : candidates) {
             const auto s = shape(c.kind);
             Vec3 at{};
-            if (s.core == TargetKind::Character && offers(c.kind) && game_targets::position(c, at))
+            if (s.core == TargetKind::Character && takes(c) && game_targets::position(c, at))
                 out.push_back({c.record, s.core, at + Vec3{0, s.lift, 0}, {}, s.mass, s.radius});
         }
     }
@@ -226,7 +290,7 @@ class Glance final : public TargetQueries {
             return t->seen && !t->gone ? std::optional{described(t->who, t->position, t->velocity)} : std::nullopt;
         for (const auto& c : candidates) {
             Vec3 at{};
-            if (c.record == id && offers(c.kind) && movable(c) && game_targets::live(base, c) &&
+            if (c.record == id && takes(c) && movable(c) && game_targets::live(base, c) &&
                 game_targets::position(c, at))
                 return described(c, at + Vec3{0, shape(c.kind).lift, 0}, {});
         }
@@ -289,6 +353,245 @@ void handOff(Tracked& t, Vec3 velocity) {
     t.flight = velocity;
     t.airborne = 0;
 }
+bool shielded(uint64_t record) {
+    const auto now = GetTickCount64();
+    return std::any_of(shields.begin(), shields.end(),
+                       [&](const Shield& s) { return s.record == record && now < s.until; });
+}
+void shield(uint64_t record) {
+    const auto now = GetTickCount64();
+    shields.erase(std::remove_if(shields.begin(), shields.end(), [&](const Shield& s) { return now >= s.until; }),
+                  shields.end());
+    shields.push_back({record, now + static_cast<uint64_t>(strikes.cooldown * 1000)});
+}
+// One blow through the game's damage system, `damager` the actor it comes
+// from (the game knocks the one it hits away from it). Kinetic: what a
+// thrown body deals.
+bool blow(uint64_t victim, uint64_t damager, Vec3 point, Vec3 direction, const StrikeBlow& b) {
+    if (!victim || shielded(victim))
+        return false;
+    native_bodies::Damage d;
+    d.victim = victim;
+    d.damager = damager;
+    d.point = point;
+    d.direction = length(direction) > .5f ? normalized(direction) : Vec3{0, 0, 1};
+    d.normal = d.direction * -1.f;
+    d.amount = b.damage;
+    d.type = 7; // kKinetic
+    d.knockback = b.knockback;
+    d.knockbackAmount = b.knockbackAmount;
+    if (b.fling)
+        d.impulse = knockImpulse;
+    if (!native_bodies::damage(d))
+        return false;
+    shield(victim);
+    return true;
+}
+// An enemy off his feet into the game's own flight, which the web then steers.
+void knock(Tracked& t, Vec3 pull) {
+    native_bodies::Damage d;
+    d.victim = t.who.record;
+    d.damager = hero;
+    d.point = t.position;
+    d.direction = length(pull) > .1f ? normalized(pull) : Vec3{0, 0, 1};
+    d.normal = d.direction * -1.f;
+    d.amount = knockDamage;
+    d.type = 7;      // kKinetic
+    d.knockback = 5; // kFlyBack
+    d.knockbackAmount = knockAmount;
+    d.impulse = knockImpulse;
+    t.knocked = 0;
+    if (native_bodies::damage(d)) {
+        AcquireSRWLockExclusive(&output);
+        ++SpidyGrabData.launches;
+        ReleaseSRWLockExclusive(&output);
+    }
+}
+// A pull that is no yank launches him at the reel's speed, for no longer than
+// a yank's flight.
+PullConfig pulling() {
+    PullConfig p;
+    p.launchSpeed = core.config().reelSpeed;
+    p.maxLaunchTime = core.config().maxYankTime;
+    return p;
+}
+// Off his feet onto `velocity`: the blow knocks him into the game's flight,
+// which takes the launch at its first step.
+void launchInto(Tracked& t, Vec3 velocity) {
+    if (t.steering) {
+        steer(t, false, {});
+        t.steering = false;
+    }
+    knock(t, velocity);
+    t.launch = velocity;
+    t.launching = true;
+    t.launchAge = 0;
+    t.flingAsked = false;
+}
+// The velocity of the flight the game carries him on, from the next step:
+// `anew` for a launch or a throw, not the web's law carrying it on.
+void fly(Tracked& t, Vec3 v, bool anew) {
+    native_bodies::fling(t.who.machine, t.who.record, v, false);
+    t.expected = v;
+    if (anew)
+        t.settle = 0;
+    AcquireSRWLockExclusive(&output);
+    ++SpidyGrabData.flown;
+    ReleaseSRWLockExclusive(&output);
+}
+// An enemy on the web's command `c` (a throw is release()'s): his flight
+// steered, a pull knocking him into one, or his mover.
+void pull(Tracked& t, const TargetCommand& c, float dt, const WorldQueries& world, bool flung, Vec3 gravity) {
+    t.free = -1;
+    if (flung) {
+        if (t.steering) {
+            steer(t, false, {});
+            t.steering = false;
+        }
+        // The flight's first step takes the launch the web knocked him into
+        // it with; from then on the web's law runs from the velocity it gave
+        // him, which the flight keeps. From his measured pace, which lags the
+        // flight by a step or two, the law lost the launch.
+        if (t.launching)
+            fly(t, t.launch, true);
+        else if (c.mode == TargetCommand::Mode::Launch)
+            fly(t, c.velocity, true);
+        else
+            fly(t, advance(c, t.position, t.flying ? t.expected : t.paced, dt, gravity), false);
+        t.launching = false;
+        t.flying = t.flew = true;
+        t.falling = false;
+        return;
+    }
+    t.flying = false;
+    if (pullsIn(c, t.position, pulling()) && (t.knocked < 0 || t.knocked > reknockSeconds)) {
+        launchInto(t, limited(pullLaunch(c, t.position, gravity, pulling()), maxDriveSpeed));
+        return;
+    }
+    // The blow lands within a step or two; meanwhile he keeps still.
+    if (t.knocked >= 0 && t.knocked < knockWait)
+        return;
+    // He flew and came down: he lies where he fell (the game flops and stuns
+    // him) until a pull may knock him off his feet again.
+    if (t.flew && t.knocked <= reknockSeconds)
+        return;
+    // On his feet on a web that only holds him, or one the game would not
+    // fling (a heavy, a scripted scene): his mover, as the web steered every
+    // bot before October 8. One the blow did not fling is asked for the
+    // flight once, at the launch's velocity: asked for at the web's own, a
+    // fling dropped him where he stood.
+    if (t.launching && !t.flingAsked) {
+        native_bodies::fling(t.who.machine, t.who.record, t.launch);
+        t.flingAsked = true;
+    }
+    Vec3 v = advance(c, t.position, t.velocity, dt, gravity);
+    t.grounded = guard(t, v, dt, world);
+    steer(t, true, v);
+    t.steering = true;
+    t.falling = false;
+}
+// The web lets go of an enemy: `thrown` at `velocity`, or let go of.
+void release(Tracked& t, bool thrown, Vec3 velocity, bool flung) {
+    if (thrown && t.launching) {
+        t.launch = velocity; // thrown before his flight began: it starts with the throw
+        return;
+    }
+    if (flung && (t.flying || thrown)) {
+        // The game flies him on from here and lands him (BotStateGroundFlop,
+        // then BotStateStunned): thrown, at the throw's velocity; let go of,
+        // as the web left him.
+        if (thrown)
+            fly(t, velocity, true);
+        t.flying = false;
+        t.free = 0;
+        return;
+    }
+    t.flying = false;
+    if (thrown && length(velocity) >= throwKnockSpeed) {
+        // Thrown from his feet, or from where the web laid him down: knocked
+        // into the flight the throw gives.
+        launchInto(t, velocity);
+        return;
+    }
+    if (t.steering) {
+        // On his mover: standing, he stands; off the ground, he falls.
+        if (t.grounded) {
+            steer(t, false, {});
+            t.steering = false;
+        } else {
+            handOff(t, velocity);
+        }
+    }
+}
+// What a flying bot struck: the world it lost its speed to, another enemy in
+// its way, the ground it landed on at speed.
+void strike(Tracked& t, float dt, bool flung, const Vec3& gravity) {
+    const bool flight = t.flying || t.free >= 0;
+    if (!flight)
+        return;
+    uint64_t impacts{}, struck{};
+    const float speed = length(t.paced);
+    const bool settled = t.settle >= settleSeconds;
+    if (flung) {
+        // Seen flying fast, it stopped short, and not because the web asked.
+        if (const float loss = impactLoss(t.cruise, speed, strikes);
+            settled && loss > 0 && length(t.expected) >= strikes.kept * t.cruise) {
+            impacts += blow(t.who.record, hero, t.position, length(t.expected) > .1f ? t.expected : t.paced,
+                            impactBlow(loss, strikes));
+            // What stopped him stops the flight the web carries on.
+            t.expected = t.paced;
+        }
+        if (speed >= strikes.strikeSpeed)
+            for (const auto& c : candidates) {
+                Vec3 feet{};
+                if (!game_targets::enemy(c) || c.record == t.who.record || !game_targets::position(c, feet) ||
+                    !touches(t.position, shape(Kind::bot).radius, feet, strikes))
+                    continue;
+                // The one struck is knocked away from the one flying into him.
+                if (blow(c.record, t.who.record, feet + Vec3{0, shape(Kind::bot).lift, 0}, t.paced,
+                         strikeBlow(speed, strikes))) {
+                    ++struck;
+                    impacts += blow(t.who.record, hero, t.position, t.paced * -1.f, impactBlow(speed * .6f, strikes));
+                }
+            }
+        // Let go of, the flight falls freely from here.
+        if (t.free >= 0)
+            t.expected = t.paced + gravity * dt;
+    } else {
+        // The game ended the flight, let go of or on the web: it landed, as
+        // hard as it came down.
+        const float landed = std::max(t.cruise, length(t.expected));
+        if (settled && landed >= strikes.landSpeed)
+            impacts += blow(t.who.record, hero, t.position, t.expected, impactBlow(landed, strikes));
+        t.free = -1;
+    }
+    if (impacts || struck) {
+        AcquireSRWLockExclusive(&output);
+        SpidyGrabData.impacts += impacts;
+        SpidyGrabData.struck += struck;
+        ReleaseSRWLockExclusive(&output);
+    }
+}
+// A thrown prop striking an enemy: kinetic, as the game's own thrown objects.
+void strikeWith(const Tracked& t) {
+    const float speed = length(t.velocity);
+    if (t.thrown < 0 || speed < strikes.strikeSpeed)
+        return;
+    uint64_t struck{};
+    for (const auto& c : candidates) {
+        Vec3 feet{};
+        if (!game_targets::enemy(c) || !game_targets::position(c, feet) ||
+            !touches(t.position, shape(t.who.kind).radius, feet, strikes))
+            continue;
+        struck += blow(c.record, hero, feet + Vec3{0, shape(Kind::bot).lift, 0}, t.velocity,
+                       strikeBlow(speed, strikes));
+    }
+    if (struck) {
+        AcquireSRWLockExclusive(&output);
+        SpidyGrabData.struck += struck;
+        ReleaseSRWLockExclusive(&output);
+    }
+}
 void count(size_t from) {
     const auto& events = core.events();
     AcquireSRWLockExclusive(&output);
@@ -341,7 +644,9 @@ void observe(float dt) {
             // before the step in flight, carried through that step.
             at = centre;
             velocity = moving;
-        } else if (haveDriven) {
+        } else if (haveDriven && t.steering) {
+            // Its mover, as the web steered it; a flight the game carries is
+            // measured from where it went.
             for (const auto& m : driven.movers)
                 if (t.mover && m.mover == t.mover && m.steps && finite(m.achievedVelocity))
                     velocity = m.achievedVelocity;
@@ -394,8 +699,11 @@ void game_grab::cancel() {
     for (auto& t : tracked) {
         if (t.who.kind == Kind::throwable)
             native_bodies::release(t.actor);
+        else if (t.steering && t.grounded)
+            steer(t, false, {}); // on his feet: he stands
         else if (t.steering || t.falling)
             handOff(t, t.velocity); // the game's flight brings it down now
+        // A flight the web steered goes on as the game flies it.
     }
     tracked.clear();
     commands.clear();
@@ -452,9 +760,10 @@ std::optional<GrabTarget> game_grab::preview(unsigned hand, Pose aim, const Worl
 bool game_grab::holds(unsigned hand) {
     return hand < 2 && core.grabs()[hand].phase != GrabPhase::None;
 }
-void game_grab::step(float dt, const WorldQueries& world) {
+void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
     if (!offered || !std::isfinite(dt) || dt <= 0 || dt > .05f)
         return;
+    hero = player;
     observe(dt);
     commands.clear();
     core.step(dt, world, targets, commands);
@@ -476,6 +785,7 @@ void game_grab::step(float dt, const WorldQueries& world) {
             if (command) {
                 native_bodies::drive(t.actor, t.who.physics, *command, leaseMs);
                 t.driven = true;
+                t.thrown = command->thrown ? 0.f : -1.f;
                 Vec3 centre{}, next{}, measured{};
                 if (native_bodies::predicted(t.actor, centre, next, measured)) {
                     AcquireSRWLockExclusive(&output);
@@ -486,29 +796,58 @@ void game_grab::step(float dt, const WorldQueries& world) {
             } else if (t.driven) {
                 native_bodies::release(t.actor); // slack or let go: physics has it
                 t.driven = false;
+                t.thrown = 0;
+            }
+            // Flying, it hurts the thugs it strikes.
+            if (t.thrown >= 0) {
+                strikeWith(t);
+                t.thrown += dt;
             }
             continue;
         }
+        const bool flung = native_bodies::flung(t.who.machine);
+        if (t.knocked >= 0)
+            t.knocked += dt;
+        if (t.free >= 0)
+            t.free += dt;
+        t.settle += dt;
+        if (t.launching && (t.launchAge += dt) > launchSeconds)
+            t.launching = false; // the blow brought no flight
+        // Its pace over the last two steps, and the fastest it went over the
+        // three before this one.
+        t.paced = t.seenSteps >= 2 && t.dt1 + dt > 0 ? (t.position - t.back2) / (t.dt1 + dt) : t.velocity;
+        if (!finite(t.paced))
+            t.paced = {};
+        t.cruise = std::max({t.speeds[0], t.speeds[1], t.speeds[2]});
+        // What it struck since the step before, under what it was given then.
+        strike(t, dt, flung, gravity);
+        t.speeds[2] = t.speeds[1];
+        t.speeds[1] = t.speeds[0];
+        t.speeds[0] = length(t.paced);
+        t.back2 = t.back1;
+        t.back1 = t.position;
+        t.dt1 = dt;
+        ++t.seenSteps;
         if (command && !command->thrown) {
-            // The web's law, from the bot as the mover last moved it.
-            Vec3 v = advance(*command, t.position, t.velocity, dt, gravity);
-            // The first pull flings the bot: the game plays it flying.
-            if (!t.flingAsked) {
-                native_bodies::fling(t.who.machine, t.who.record, v);
-                t.flingAsked = true;
-            }
-            guard(t, v, dt, world);
-            steer(t, true, v);
-            t.steering = true;
-            t.falling = false;
+            pull(t, *command, dt, world, flung, gravity);
             continue;
         }
         if (command) {
-            handOff(t, command->velocity); // thrown: the game's flight from here
+            release(t, true, command->velocity, flung); // thrown: the game's flight from here
             continue;
         }
-        if (t.steering) {
-            handOff(t, t.velocity); // a slack web or let go: the game's flight
+        if (t.launching) {
+            // Knocked into a flight the web no longer holds (a throw, a let
+            // go): it starts with the launch, and the game flies him on.
+            if (flung) {
+                fly(t, t.launch, true);
+                t.launching = false;
+                t.free = 0;
+            }
+            continue;
+        }
+        if (t.flying || t.steering) {
+            release(t, false, t.velocity, flung); // a slack web or let go: the game's flight
             continue;
         }
         if (t.falling) {
@@ -533,18 +872,23 @@ void game_grab::step(float dt, const WorldQueries& world) {
             continue;
         }
         // On the ground again: the next pull flings it anew.
-        if (!native_bodies::flung(t.who.machine))
+        if (!flung)
             t.flingAsked = false;
     }
-    // Forget targets nothing acts on any longer, nor a web trails.
+    // Forget targets nothing acts on any longer, nor a web trails, nor flies
+    // where it may strike something.
     tracked.erase(std::remove_if(tracked.begin(), tracked.end(),
                                  [](const Tracked& t) {
                                      const bool held = std::any_of(
                                          core.grabs().begin(), core.grabs().end(), [&](const Grab& g) {
                                              return g.phase != GrabPhase::None && g.target == t.who.record;
                                          });
-                                     return t.gone ||
-                                            (!held && !t.steering && !t.falling && !trailing(t.who.record));
+                                     const bool flying = t.flying || t.launching ||
+                                                         (t.free >= 0 && t.free < freeFlightSeconds) ||
+                                                         (t.thrown >= 0 && t.thrown < thrownSeconds &&
+                                                          length(t.velocity) > 1);
+                                     return t.gone || (!held && !t.steering && !t.falling && !flying &&
+                                                       !trailing(t.who.record));
                                  }),
                   tracked.end());
     const auto bodies = native_bodies::counters();
@@ -556,9 +900,10 @@ void game_grab::step(float dt, const WorldQueries& world) {
     SpidyGrabData.stepDt = SpidyGrabData.timeScale * dt;
     ++SpidyGrabData.steps;
     SpidyGrabData.commands += commands.size();
-    SpidyGrabData.flights = bodies.flying + static_cast<uint64_t>(std::count_if(
-                                                tracked.begin(), tracked.end(),
-                                                [](const Tracked& t) { return t.steering || t.falling; }));
+    SpidyGrabData.flights =
+        bodies.flying + static_cast<uint64_t>(std::count_if(tracked.begin(), tracked.end(), [](const Tracked& t) {
+            return t.steering || t.falling || t.flying || t.free >= 0;
+        }));
     SpidyGrabData.landed = botsLanded + bodies.rested;
     SpidyGrabData.candidates = static_cast<uint32_t>(candidates.size());
     SpidyGrabData.bodySteps = bodies.steps;

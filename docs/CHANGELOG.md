@@ -3,7 +3,58 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 8, ninth build): A in the air no longer shoots the
+**Latest build (October 8, tenth build): web balls web thugs up, pulled
+thugs fly and get hurt.** You said web balls at enemies and objects did
+nothing, and that pulled enemies came along without reacting to the web or
+taking collision damage. Your 13:50 session and a headless game at a street
+crime showed why. The web balls did hit: 30 of your 58 shots went at thugs,
+and in the game every one of Spidy's shots at a thug struck him. But a web
+ball carries nothing of its own: its damage is empty, and the game webs an
+enemy only through its own firing code, which Spidy's shots go around. Pulls
+asked the game for its "flung" reaction, which it accepts and then ignores
+for a thug who is fighting (his AI keeps him aiming), so the web slid him
+along on his feet.
+Now a web ball that strikes a thug deals him the webbing the game's own web
+hits deal (a kWebImpact blow carrying 11 of webbing). A street thug is webbed
+up at 30, so three quick hits web him up and he struggles in his webs, the
+game's own reaction; the webbing wears off within seconds, so slow single
+shots do not add up. The first pull on a thug deals him the game's kinetic
+knock-back, which throws him into the flailing flight it uses for thrown
+enemies, and from the next frame the web steers that flight: yanked, he
+flies flailing to your hand; held, he hangs and swings on the web; thrown,
+the game flies him on and lands him (a flop, then dazed on the ground). If
+he comes down while still on your web, he lies there until the next pull
+knocks him up again (1.5 s at the soonest). What flies now hurts what it
+strikes: a thug whose flight is stopped short by a wall or a car (flying 7
+m/s or faster, then keeping under 45% of it, and not because the web braked
+him), or who lands at 8 m/s or faster, takes a blow by the speed he lost
+(14 m/s and up knocks him down); a flung thug or a prop you throw that
+strikes another thug at 6 m/s or more knocks him down, or from 9 m/s flings
+him. Blows are 2 to 15 of the game's damage, which it doubles on its normal
+difficulty (a street thug has 60). Civilians, and thugs the game will not
+fling (scripted scenes, heavies), are moved on their feet as before.
+Objects: still no. All 147 throwable props near your save are breakables
+(trash cans and the like): the game's damage does not reach them (a kinetic
+blow of 30 was dropped), and pushing one shows the sinking-bin glitch. A web
+ball knocks only a throwable that is not breakable, and none was found.
+Measured with a research DLL at a crime with 7 thugs (each tried several
+ways, see VALIDATION.md): the webbing webbed thugs up; the kinetic
+knock-back flung a fighting thug every time while melee or explosion
+knock-backs only staggered him; steering the flight pulled a thug 7 m toward
+the hero and held another 2.4 m up for 4 s. Then with Spidy's own modules:
+its web balls struck a thug and a trash can, said so in their telemetry and
+named what they hit. The reports gained the shots' collisions, webbing
+blows, props knocked and the latest actor hit, and the grab's knock-backs,
+steered flight steps, impacts and thugs struck (the shooter's and the grab's
+telemetry changed: the ray and XR modules and the Python tools must come
+from the same build). 185 core checks (2 new: when a flight struck
+something and how hard, and what a flying body touches) and the 5 Python
+suites pass. Not tried yet: Spidy's own pulls on thugs in the game (no thugs
+came near on the second run) and the headset. Tell me how webbed thugs look,
+whether three hits feels right, and whether pulled thugs fly, land and get
+hurt the way you expect.
+
+**Preceding build (October 8, ninth build): A in the air no longer shoots the
 game's web zip.** You asked to turn off the game's own web shooting when you
 press A in the air or mid-jump. That is the game's web zip: in the air its
 jump button shoots a web from Spider-Man's wrist and zips him forward,

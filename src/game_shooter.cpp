@@ -1,8 +1,9 @@
 // The web shooter in the game: pulls from the swing's input samples, the
 // game's own web-shooter shots fired through the hero's gadget on the main
-// thread (game_shooter.hpp).
+// thread, and what they do where they land (game_shooter.hpp).
 #include "spidy/game_shooter.hpp"
 #include "spidy/game_targets.hpp"
+#include "spidy/native_bodies.hpp"
 #include <MinHook.h>
 #include <algorithm>
 #include <atomic>
@@ -29,8 +30,19 @@ constexpr uintptr_t weaponEventRva = 0xe3bd80, fillEventRva = 0xe55310, spawnSho
                     newShotIdRva = 0x215f040, makeRefRva = 0x1f7b8e0;
 constexpr uintptr_t webShooter = 0x391c950, shotTable = 0x656d9f0, registryTable = 0x7a44320,
                     registryCount = 0x7a44340, actorRecords = 0x7a44380, actorRecordCount = 0x7a4439c;
+// The shot's event handler (ShotWebShooter vtable +0xd8) and the readers it
+// takes a collision's fields with: a field's index by its name hash, the
+// field, and the actor record an actor reference names.
+constexpr uintptr_t shotWebShooter = 0x3907d30, shotEventRva = 0xd2a570, findFieldRva = 0x1bcf3e0,
+                    readFieldRva = 0x1f9db60, refRecordRva = 0x1f7b760;
+constexpr uint32_t collisionEvent = 0xd930bcb2, hitActorField = 0x21eb297b, hitPositionField = 0x568973e3,
+                   hitNormalField = 0xc3272bc7;
 using Frame = uint64_t (*)(void*, float, uint64_t, uint64_t);
 using Muzzle = float* (*)(void*, float*, uint32_t);
+using ShotEvent = void* (*)(void*, uint64_t, void*, uint64_t);
+using FindField = uint8_t* (*)(void*, uint32_t);
+using ReadField = bool (*)(void*, uint32_t, void*, uint32_t);
+using RefRecord = uint64_t (*)(const uint64_t*);
 using FillEvent = uint32_t (*)(void*, uint8_t*);
 using FireEvent = void* (*)(void*, uint8_t*);
 using NewShotId = uint32_t (*)(void*);
@@ -44,6 +56,8 @@ constexpr uint64_t leaseMs = 250;
 constexpr float chest = 1.15f, botRadius = .45f;
 // The gadget belongs to the player: its actor is this close to the player's.
 constexpr float gadgetReach = 10;
+// A shot flies at most a second (60 m); one older is gone.
+constexpr uint64_t flightMs = 1500;
 
 uintptr_t base{};
 std::atomic<bool> enabled{};
@@ -51,9 +65,25 @@ std::atomic<unsigned> active{};
 std::atomic<uint64_t> frames{};
 SRWLOCK lifecycle = SRWLOCK_INIT, updating = SRWLOCK_INIT, queueLock = SRWLOCK_INIT, output = SRWLOCK_INIT;
 bool hooked{};
-void* hooks[2]{};
+void* hooks[3]{};
 Frame originalFrame{};
 Muzzle originalMuzzle{};
+ShotEvent originalShotEvent{};
+// The player's actor record, as the latest input sample named it: the
+// damager of the webbing a shot deals.
+std::atomic<uint64_t> heroRecord{};
+// Spidy's shots that may still be flying: the ShotWebShooter, its registry
+// handle and shot id (+0x104), what it was aimed at, along which line, and
+// when it left. A collision consumes its entry.
+struct Flying {
+    uint64_t shot{}, target{}, firedMs{};
+    uint32_t handle{}, id{};
+    Vec3 direction{};
+};
+constexpr unsigned flyingSize = 16;
+Flying flying[flyingSize];
+unsigned flyingNext{};
+SRWLOCK flyingLock = SRWLOCK_INIT;
 // The shot the main thread fires now: that weapon's muzzle, asked on that
 // thread, is the hand's.
 std::atomic<uint64_t> firingWeapon{};
@@ -83,6 +113,19 @@ template <class T> T value(uintptr_t p) {
 bool entry(uintptr_t rva, std::initializer_list<uint8_t> expected) {
     uint8_t actual[16]{};
     return read(base + rva, actual, expected.size()) && std::memcmp(actual, expected.begin(), expected.size()) == 0;
+}
+// A function another module may have hooked first: its own bytes, or a
+// hook's jump over its first `covered` bytes (whole instructions) and its own
+// bytes after them. The movement bridge hooks the event field reader for its
+// air sync (native_movement); called through that hook it reads as before.
+// Its check of the whole entry kept the shooter from starting (9601) in the
+// session of October 8, 15:36.
+bool entryOrHooked(uintptr_t rva, size_t covered, std::initializer_list<uint8_t> expected) {
+    uint8_t actual[16]{};
+    return entry(rva, expected) ||
+           (covered >= 5 && covered < expected.size() && read(base + rva, actual, expected.size()) &&
+            actual[0] == 0xe9 &&
+            std::memcmp(actual + covered, expected.begin() + covered, expected.size() - covered) == 0);
 }
 // The component a registry handle names, if it is still registered.
 uintptr_t resolve(uint32_t handle) {
@@ -229,6 +272,9 @@ class GadgetWatch {
 GadgetWatch gadgets;
 game_targets::Watch watch;
 std::vector<game_targets::Candidate> bots;
+// The targets a collision is matched against, taken on the thread the
+// collision comes in on (the main thread).
+std::vector<game_targets::Candidate> struck;
 std::vector<ShooterTarget> targets;
 Shooter shooter;
 struct Pending {
@@ -359,8 +405,120 @@ bool fireNow(const Pending& p, Fired& out) {
     if (!fire(weapon, event))
         return false;
     out.resolved = ref && (value<uint32_t>(weapon + 0x68) & 1);
-    out.shot = resolve(value<uint32_t>(weapon + 0x518 + 4ull * emitter));
+    const auto handle = value<uint32_t>(weapon + 0x518 + 4ull * emitter);
+    out.shot = resolve(handle);
+    if (out.shot) {
+        AcquireSRWLockExclusive(&flyingLock);
+        flying[flyingNext++ % flyingSize] = {out.shot, p.shot.target, GetTickCount64(), handle, id, forward};
+        ReleaseSRWLockExclusive(&flyingLock);
+    }
     return true;
+}
+// One of Spidy's own shots, still flying: its entry, taken off the list.
+bool ours(uintptr_t shot, Flying& out) {
+    const auto now = GetTickCount64();
+    bool found{};
+    AcquireSRWLockExclusive(&flyingLock);
+    for (auto& f : flying)
+        if (f.shot && f.shot == shot && now - f.firedMs < flightMs && value<uint32_t>(shot + 0x14) == f.handle &&
+            value<uint32_t>(shot + 0x104) == f.id) {
+            out = f;
+            f = {};
+            found = true;
+            break;
+        }
+    ReleaseSRWLockExclusive(&flyingLock);
+    return found;
+}
+// A collision event's field, as the shot's own handler reads it.
+bool field(uintptr_t event, uint32_t name, void* out, uint32_t size) {
+    __try {
+        const auto descriptor = pointer(event);
+        if (!descriptor)
+            return false;
+        const auto index =
+            reinterpret_cast<FindField>(base + findFieldRva)(reinterpret_cast<void*>(descriptor + 0x10), name);
+        return index && reinterpret_cast<ReadField>(base + readFieldRva)(reinterpret_cast<void*>(event), *index,
+                                                                          out, size);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+uint64_t recordOf(uint64_t reference) {
+    __try {
+        return reinterpret_cast<RefRecord>(base + refRecordRva)(&reference);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+// What one of Spidy's shots struck: an enemy the game webs up takes a web
+// hit's webbing, a prop that is no breakable is knocked along the shot.
+void collided(uintptr_t shot, uintptr_t event) {
+    Flying f{};
+    if (!ours(shot, f))
+        return;
+    uint64_t reference{};
+    Vec3 point{}, normal{};
+    const uint64_t record = field(event, hitActorField, &reference, sizeof(reference)) ? recordOf(reference) : 0;
+    const bool placed = field(event, hitPositionField, &point, sizeof(point)) && finite(point);
+    if (!field(event, hitNormalField, &normal, sizeof(normal)) || !finite(normal) || length(normal) < .5f)
+        normal = f.direction * -1.f;
+    bool webbed{}, pushed{};
+    if (record) {
+        watch.current(struck);
+        for (const auto& c : struck) {
+            if (c.record != record)
+                continue;
+            Vec3 at{};
+            if (!placed && game_targets::position(c, at))
+                point = at + Vec3{0, chest, 0};
+            if (game_targets::enemy(c) && (c.traits & game_targets::webbable)) {
+                native_bodies::Damage d;
+                d.victim = record;
+                d.damager = heroRecord.load(std::memory_order_relaxed);
+                d.point = point;
+                d.direction = f.direction;
+                d.normal = normalized(normal);
+                d.amount = webDamage;
+                d.type = 20;     // kWebImpact
+                d.knockback = 1; // kTwitch
+                d.knockbackAmount = 1;
+                d.statusType = 19; // kWebEncase
+                d.statusAmount = webbingPerHit;
+                webbed = native_bodies::damage(d) != 0;
+            } else if (c.kind == game_targets::Kind::throwable && c.physics &&
+                       !(c.traits & game_targets::breakable)) {
+                // As a throw launches it: once, along the shot, tumbling.
+                TargetCommand push;
+                push.id = record;
+                push.kind = TargetKind::Object;
+                push.mode = TargetCommand::Mode::Launch;
+                push.thrown = true;
+                push.velocity =
+                    normalized(Vec3{f.direction.x, 0, f.direction.z}) * pushSpeed + Vec3{0, pushLift, 0};
+                push.spins = true;
+                push.spin = cross(Vec3{0, 1, 0}, f.direction) * 3.f;
+                pushed = native_bodies::drive(pointer(record), c.physics, push, 150);
+            }
+            break;
+        }
+    }
+    publish([&](Data& d) {
+        ++d.collisions;
+        d.webbed += webbed;
+        d.pushed += pushed;
+        d.lastHit = record;
+    });
+}
+void* shotEvent(void* shot, uint64_t hash, void* event, uint64_t r9) {
+    // Before the shot's own handler, which may end the shot.
+    if (static_cast<uint32_t>(hash) == collisionEvent && enabled.load(std::memory_order_relaxed)) {
+        ++active;
+        if (enabled)
+            collided(reinterpret_cast<uintptr_t>(shot), reinterpret_cast<uintptr_t>(event));
+        --active;
+    }
+    return originalShotEvent(shot, hash, event, r9);
 }
 // The pulls waiting for the main thread, in order.
 void fireQueued() {
@@ -443,8 +601,26 @@ uint32_t game_shooter::start(uintptr_t gameBase) {
             !entry(spawnShotRva, {0x48, 0x89, 0x5c, 0x24, 0x10, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41,
                                   0x56, 0x41, 0x57}) ||
             !slot(0x100, fillEventRva) || !slot(0x108, weaponEventRva) || !slot(0x110, spawnShotRva) ||
-            !slot(0x160, muzzleRva)) {
+            !slot(0x160, muzzleRva) ||
+            !entry(shotEventRva, {0x40, 0x53, 0x56, 0x57, 0x48, 0x83, 0xec, 0x50, 0x49, 0x8b, 0xf0, 0x8b, 0xda,
+                                  0x48, 0x8b, 0xf9}) ||
+            pointer(base + shotWebShooter + 0xd8) != base + shotEventRva ||
+            !entry(findFieldRva, {0x48, 0x89, 0x5c, 0x24, 0x08, 0x44, 0x8b, 0xd2, 0x4c, 0x8b, 0xc9, 0x85, 0xd2,
+                                  0x74, 0x62, 0x4c}) ||
+            // sub rsp, 28h; movsxd rax, edx: the 7 bytes a hook's jump covers.
+            !entryOrHooked(readFieldRva, 7,
+                           {0x48, 0x83, 0xec, 0x28, 0x48, 0x63, 0xc2, 0x4d, 0x8b, 0xd0, 0x80, 0xbc, 0x08, 0x10,
+                            0x04, 0x00}) ||
+            !entry(refRecordRva, {0x40, 0x53, 0x48, 0x83, 0xec, 0x20, 0x8b, 0x59, 0x04, 0x8b, 0x01, 0x48, 0xc1,
+                                  0xe3, 0x20, 0x48})) {
             result = 9601;
+            break;
+        }
+        // The webbing and the pushes go out through the damage system's and
+        // the props' main-thread hook; the web grab or the fists may have
+        // started it already.
+        if (const auto bodies = native_bodies::start(base)) {
+            result = bodies;
             break;
         }
         if (!hooked) {
@@ -468,6 +644,15 @@ uint32_t game_shooter::start(uintptr_t gameBase) {
                 result = 9740 + c;
                 break;
             }
+            hooks[2] = reinterpret_cast<void*>(base + shotEventRva);
+            if (const auto c = MH_CreateHook(hooks[2], reinterpret_cast<void*>(shotEvent),
+                                             reinterpret_cast<void**>(&originalShotEvent));
+                c != MH_OK) {
+                MH_RemoveHook(hooks[1]);
+                MH_RemoveHook(hooks[0]);
+                result = 9750 + c;
+                break;
+            }
             hooked = true;
         }
         AcquireSRWLockExclusive(&updating);
@@ -476,10 +661,17 @@ uint32_t game_shooter::start(uintptr_t gameBase) {
         AcquireSRWLockExclusive(&queueLock);
         queued = 0;
         ReleaseSRWLockExclusive(&queueLock);
+        AcquireSRWLockExclusive(&flyingLock);
+        for (auto& f : flying)
+            f = {};
+        ReleaseSRWLockExclusive(&flyingLock);
         gadgets.start();
-        watch.start(base, 1u << static_cast<unsigned>(game_targets::Kind::bot));
-        // The muzzle first: a frame may fire as soon as it is hooked.
-        for (auto* hook : {hooks[1], hooks[0]})
+        // Thugs to aim at and to web; props a shot may knock.
+        watch.start(base, 1u << static_cast<unsigned>(game_targets::Kind::bot) |
+                              1u << static_cast<unsigned>(game_targets::Kind::throwable));
+        // The muzzle and the collisions first: a frame may fire as soon as
+        // it is hooked.
+        for (auto* hook : {hooks[1], hooks[2], hooks[0]})
             if (const auto s = MH_EnableHook(hook); s != MH_OK && !result)
                 result = 9770 + s;
         if (result) {
@@ -546,6 +738,8 @@ void game_shooter::update(float seconds, const Input& in, uint32_t busy, uint64_
         return;
     if (finite(feet))
         gadgets.around(feet);
+    if (record)
+        heroRecord.store(record, std::memory_order_relaxed);
     std::array<ShooterHand, 2> hands{};
     for (int i = 0; i < 2; ++i) {
         const auto& h = in.hands[static_cast<size_t>(i)];
@@ -554,11 +748,12 @@ void game_shooter::update(float seconds, const Input& in, uint32_t busy, uint64_
     const auto pulls = shooter.update(seconds, hands);
     uint64_t requested{}, dropped{};
     if (pulls) {
-        // The thugs a pull may aim at, where they stand now.
+        // The enemies a pull may aim at, where they stand now: never a
+        // civilian or the police.
         watch.current(bots);
         targets.clear();
         for (const auto& b : bots)
-            if (Vec3 at{}; game_targets::position(b, at))
+            if (Vec3 at{}; game_targets::enemy(b) && game_targets::position(b, at))
                 targets.push_back({b.record, at + Vec3{0, chest, 0}, botRadius});
         for (int i = 0; i < 2; ++i) {
             if (!((pulls >> i) & 1))

@@ -11,9 +11,10 @@ The system has an engine-independent core (`include/spidy/web_grab.hpp`,
 `src/web_grab.cpp`), a playable version in the VR lab (`src/lab_props.cpp`,
 `apps/xr_lab.cpp`), and a game adapter (`src/game_grab.cpp`,
 `src/native_bodies.cpp`, `src/game_targets.cpp`). In the game it works on
-throwable props, measured without a headset; bots are built but not yet
-verified there, and pedestrians are not offered (see
-[In the game](#in-the-game)).
+throwable props, measured without a headset; thugs fly the game's own flung
+reaction, steered by the web, and what flies hurts what it strikes (the
+game's side measured, Spidy's pulls on thugs not yet seen); pedestrians are
+not offered (see [In the game](#in-the-game)).
 
 ## Controls
 
@@ -315,25 +316,50 @@ before the first sync) drew the can upright where it stood, and it never moved.
 The game's own web yank busts breakables (`BustBreakablesWhileWebYanked`);
 freeing a prop the way it does, base included, is the open fix.
 
-### Bots (built, not yet verified in the game)
+### Bots (the game's flight measured; Spidy's pulls on thugs not yet seen)
 
-A bot moves with its own MoverStandard, which its `BotMoverManagerGame` names at
-+0xdb4, as the player's manager does. The first pull asks the game to fling it:
-`BotStateFlung`, its launched reaction, requested through the bot's
-`SyncStaticStateMachine` (`RequestState`, vtable slot 13, 20e51c0; parameters
-from 556040 with the velocity at +0x44, state type from 300440). While the web
-holds it, Spidy steers it through its mover with leased velocities, as it
-steers the player (`SpidyMotionDrive`; a bot standing about has a mover that
-does not sweep, so rays keep it out of walls and the ground). When the web stops
-steering (thrown, let go, a slack web), the flight takes the bot's velocity
-(BotStateFlungLocal +0x94) and the game flies and lands it. A bot the game would
-not fling falls under Spidy's rays until it is down.
+Until October 8 the first pull asked the game to fling a bot (`BotStateFlung`
+through `RequestState`, vtable slot 13, 20e51c0; parameters from 556040 with
+the velocity at +0x44) and the web steered it through its own MoverStandard
+with leased velocities. A fighting thug's AI overrides that request (it
+returns accepted; the thug keeps aiming), so pulled thugs slid along on their
+feet: "they get pulled but dont really react to the web". Measured at a
+street crime, the game's own answer to a kinetic blow is the flight:
 
-Measured so far: the bot classes and the mover link in a live game, the
-RequestState slot and the entry points offline. No bot came within reach in
-this session's free roam (bots spawn with crimes; the one present was 160 m away
-and its mover did not step). `tools/probe_game_grab.py --bots` and
-`--fling-test` check them when a crime is near.
+- The first pull on a thug (`ThugBot`) deals him kKinetic 2, kFlyBack,
+  KnockbackAmount 10 and ImpactImpulse 30 from the player, through the
+  damage system (native_bodies). The game flings him away from the player
+  (BotStateFlung, flailing). kMelee and kExplosion knock-backs only stagger
+  a thug from 15-20 m.
+- While he flies, his driver BotStateFlungLocal (machine +0x98) carries him
+  at its +0x94 velocity, colliding him with the world. The web writes its
+  pull there every step from the one after the blow: in the game a thug
+  steered so went 7 m toward the player and another hung 2.4 m up for 4 s.
+- Thrown or let go of, his flight gets the velocity once and the game flies
+  him on and lands him (BotStateGroundFlop, then BotStateStunned). Come down
+  while still on the web, he lies there until the web may knock him again,
+  1.5 s after the last blow.
+- A thug not flung 0.25 s after the blow (a heavy, a scripted scene), and a
+  civilian, is steered through his mover as before (`SpidyMotionDrive`, rays
+  keeping him out of walls and the ground), and let go of, falls under
+  Spidy's rays until he is down.
+
+### Strikes
+
+What flies hurts what it strikes, through the game's damage system, as its
+own thrown bodies do (web_grab's `StrikeConfig`, decided by `impactLoss`,
+`impactBlow`, `strikeBlow` and `touches`; game_grab deals the blows):
+
+| Strike | When | Blow |
+|---|---|---|
+| A flying thug stopped short | his pace over two steps drops under 45% of the fastest of the three steps before, from 7 m/s, while the web asked no such stop | kKinetic, 2 + 0.7 per m/s lost over 7, up to 15; kStagger, kKnockdown from 14 m/s |
+| A thrown thug landing | his flight ends at 8 m/s or faster | as above, by his landing speed |
+| A flying thug or a thrown prop touching another thug | 6 m/s or faster; a capsule from his feet to 1.8 m, 0.35 m around | 2 + 0.7 per m/s over 6, kKnockdown; from 9 m/s kFlyBack with an impulse, knocked away from the flying thug (from the player, for a prop) |
+
+The game doubled requested damage on its normal difficulty (a street thug has
+60). A bot is not hurt again within 0.8 s. The two-step pace and the web's
+own command keep a frame the game drew late, and a yank's launch, from
+reading as a stop.
 
 ### Pedestrians (not offered)
 
@@ -368,8 +394,11 @@ swings; walls cut the web after 0.3 s; tracking and focus loss; two-handed
 carrying, and one hand letting go leaves it in the other; configuration checks;
 and in the lab, a thrown crate knocks a thug over and it gets up, props come to
 rest without creeping, and the grab reels a lab crate in until it hangs from
-the hand. `tests/game_vr_protocol_tests.py` checks the grab telemetry's layout
-(version 2: tension and the trailing web per hand). The user tried the rope
-build in the headset and found it good but for the sinking bins (open, see
-above); the web let go of was measured in the game; bots in the game are
-unconfirmed.
+the hand; when a flight struck something and how hard, and what a flying
+body touches (two checks). `tests/game_vr_protocol_tests.py` checks the grab
+telemetry's layout (version 3: tension and the trailing web per hand; thugs
+knocked into a flight, steps steered, impacts, thugs struck). The user tried
+the rope build in the headset and found it good but for the sinking bins
+(open, see above); the web let go of was measured in the game; the game's
+flight for thugs and its steering were measured with a research DLL, Spidy's
+own pulls on thugs not yet.

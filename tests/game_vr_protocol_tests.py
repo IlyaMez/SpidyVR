@@ -157,13 +157,15 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(struct.unpack_from('<I2f',packet,72),(1,1,1))
 
     def test_grab_feedback_decodes_each_hand_the_body_driver_and_rejects_torn_reads(self):
-        raw = bytearray(336)
-        struct.pack_into('<4Iq10Q4I', raw, 0, 0x53475244, 2, 336, 2, 6, *range(1, 11), 5, 0, 6, 0)
+        raw = bytearray(368)
+        struct.pack_into('<4Iq10Q4I', raw, 0, 0x53475244, 3, 368, 2, 6, *range(1, 11), 5, 0, 6, 0)
         # Hands (48 bytes): phase, kind, target, end, length, taut, tension, trailing, reserved.
         struct.pack_into('<2IQ4fIf2I', raw, 120, 3, 1, 0x2156b32d740, -293.5, 2.25, -179.5, .7, 1, .125, 0, 0)
         struct.pack_into('<2IQ4fIf2I', raw, 168, 0, 1, 0x2156b32d800, 1.5, 2.5, 3.5, 0, 0, 0, 1, 0)
         struct.pack_into('<4f9Q', raw, 216, 6.5, 2.5, -13.25, 8.0, *range(20, 29))
         struct.pack_into('<6f2f', raw, 304, 1, 2, 3, 4, 5, 6, .00415, .0332)
+        # Three thugs knocked into the game's flight, 40 steps steered, 2 blows for what they struck, 1 thug struck.
+        struct.pack_into('<4Q', raw, 336, 3, 40, 2, 1)
         result = grab_snapshot(Reader(raw, struct.pack('<q', 6)), 0)
         self.assertEqual((result['grabs'], result['throws'], result['lost'], result['landed']), (3, 6, 8, 10))
         self.assertEqual((result['candidates'], result['kinds']), (5, 6))
@@ -179,6 +181,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual((result['body_steps'], result['frees'], result['expired']), (20, 21, 28))
         self.assertEqual((result['commanded'], result['observed']), ((1, 2, 3), (4, 5, 6)))
         self.assertAlmostEqual(result['step_dt'], .0332, places=6)
+        self.assertEqual((result['launches'], result['flown'], result['impacts'], result['struck']), (3, 40, 2, 1))
         torn = bytearray(raw)
         struct.pack_into('<q', torn, 16, 7)
         self.assertIsNone(grab_snapshot(Reader(*([torn, struct.pack('<q', 7)]*8)), 0))
@@ -227,13 +230,15 @@ class ProtocolTests(unittest.TestCase):
         self.assertIsNone(punch_snapshot(Reader(*([torn, struct.pack('<q', 5)]*8)), 0))
 
     def test_shooter_feedback_decodes_each_hand_and_the_latest_shot(self):
-        raw = bytearray(160)
+        raw = bytearray(192)
         # 900 samples, 5 pulls, 4 shots fired, 1 dropped, 2 aimed at a thug, 1 target taken; the gadget, 4000
         # frames, 3 thugs on offer.
-        struct.pack_into('<4Iq8Q2I', raw, 0, 0x53484f44, 1, 160, 2, 4, 900, 5, 4, 1, 2, 1, 0x1c5dd1c0560, 4000, 3, 0)
+        struct.pack_into('<4Iq8Q2I', raw, 0, 0x53484f44, 2, 192, 2, 4, 900, 5, 4, 1, 2, 1, 0x1c5dd1c0560, 4000, 3, 0)
         struct.pack_into('<2Q', raw, 96, 1, 0)
         struct.pack_into('<2Q', raw, 112, 3, 0x1c517822a00)
         struct.pack_into('<3f3fQ', raw, 128, 1.5, 95.25, 2393.75, 20, 96, 2390, 0x1c5dd3a0540)
+        # Three shots struck something: two webbed a thug, one knocked a prop; the latest hit a thug.
+        struct.pack_into('<4Q', raw, 160, 3, 2, 1, 0x1c517822a00)
         result = shooter_snapshot(Reader(raw, struct.pack('<q', 4)), 0)
         self.assertEqual((result['requested'], result['fired'], result['dropped'], result['targeted'],
                           result['resolved']), (5, 4, 1, 2, 1))
@@ -242,6 +247,8 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(result['hands'][1]['last_target'], '0x1c517822a00')
         self.assertEqual((result['last_origin'], result['last_aim_point']), ([1.5, 95.25, 2393.75], [20, 96, 2390]))
         self.assertEqual(result['last_shot'], '0x1c5dd3a0540')
+        self.assertEqual((result['collisions'], result['webbed'], result['pushed'], result['last_hit']),
+                         (3, 2, 1, '0x1c517822a00'))
         torn = bytearray(raw)
         struct.pack_into('<q', torn, 16, 5)
         self.assertIsNone(shooter_snapshot(Reader(*([torn, struct.pack('<q', 5)]*8)), 0))
@@ -595,8 +602,8 @@ class ProtocolTests(unittest.TestCase):
                                      (motion_snapshot, 0x534d5644, 176), (ray_snapshot, 0x53525944, 784),
                                      (swing_snapshot,0x53574441,240),(timing_snapshot,0x5358544d,344),
                                      (appearance_snapshot,0x53415044,328),(eye_snapshot,0x53455353,112),
-                                     (grab_snapshot,0x53475244,336),(body_snapshot,0x53424453,144),
-                                     (punch_snapshot,0x53505544,160),(shooter_snapshot,0x53484f44,160)):
+                                     (grab_snapshot,0x53475244,368),(body_snapshot,0x53424453,144),
+                                     (punch_snapshot,0x53505544,160),(shooter_snapshot,0x53484f44,192)):
             raw = bytearray(size)
             struct.pack_into('<4IQ', raw, 0, magic, 99, size, 2, 4)
             with self.assertRaisesRegex(RuntimeError, 'protocol mismatch'):

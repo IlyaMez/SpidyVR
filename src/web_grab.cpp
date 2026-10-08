@@ -1,4 +1,5 @@
 #include "spidy/web_grab.hpp"
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 
@@ -579,5 +580,61 @@ void WebGrab::step(float dt, const WorldQueries& world, const TargetQueries& tar
         else if (rank(c) > rank(*existing))
             *existing = c;
     }
+}
+float impactLoss(float before, float now, const StrikeConfig& c) {
+    if (!std::isfinite(before) || !std::isfinite(now) || !(before >= c.impactSpeed) || !(now < before * c.kept))
+        return 0;
+    return before - std::max(0.f, now);
+}
+StrikeBlow impactBlow(float speed, const StrikeConfig& c) {
+    StrikeBlow b;
+    b.damage = std::clamp(c.minDamage + (speed - c.impactSpeed) * c.damagePerSpeed, c.minDamage, c.maxDamage);
+    b.knockback = speed >= c.knockdownSpeed ? 4 : 2;
+    b.knockbackAmount = 2 + .25f * speed;
+    return b;
+}
+StrikeBlow strikeBlow(float speed, const StrikeConfig& c) {
+    StrikeBlow b;
+    b.damage = std::clamp(c.minDamage + (speed - c.strikeSpeed) * c.damagePerSpeed, c.minDamage, c.maxDamage);
+    b.fling = speed >= c.flingSpeed;
+    b.knockback = b.fling ? 5 : 4; // a body flying into him knocks him down
+    b.knockbackAmount = b.fling ? 10 : 2 + .25f * speed;
+    return b;
+}
+bool pullsIn(const TargetCommand& c, Vec3 position, const PullConfig& config) {
+    if (c.mode == TargetCommand::Mode::Launch)
+        return !c.thrown; // a yank's jerk
+    if (c.mode != TargetCommand::Mode::Rope || !finite(position))
+        return false;
+    for (unsigned i = 0; i < std::min<unsigned>(c.ropeCount, 2); ++i) {
+        const auto& rope = c.ropes[i];
+        const Vec3 out = position - rope.anchor;
+        const float distance = length(out);
+        if (distance > 1e-3f && (distance - rope.length >= config.stretch ||
+                                 -dot(rope.anchorVelocity, out / distance) >= config.speed))
+            return true;
+    }
+    return false;
+}
+Vec3 pullLaunch(const TargetCommand& c, Vec3 position, Vec3 gravity, const PullConfig& config) {
+    if (c.mode == TargetCommand::Mode::Launch)
+        return c.velocity;
+    const unsigned count = std::min<unsigned>(c.ropeCount, 2);
+    if (c.mode != TargetCommand::Mode::Rope || !count || !finite(position))
+        return {};
+    Vec3 hand{};
+    for (unsigned i = 0; i < count; ++i)
+        hand += c.ropes[i].anchor;
+    hand = hand / static_cast<float>(count);
+    const float time = std::clamp(length(hand - position) / std::max(config.launchSpeed, 1e-3f),
+                                  config.minLaunchTime, std::max(config.minLaunchTime, config.maxLaunchTime));
+    return arcVelocity(position, hand, time, gravity);
+}
+bool touches(Vec3 centre, float radius, Vec3 feet, const StrikeConfig& c) {
+    // A capsule from his feet to the top of his head.
+    const float bottom = feet.y + c.characterRadius,
+                top = std::max(bottom, feet.y + c.characterHeight - c.characterRadius);
+    const Vec3 axis{feet.x, std::clamp(centre.y, bottom, top), feet.z};
+    return finite(centre) && finite(feet) && length(centre - axis) <= radius + c.characterRadius;
 }
 } // namespace spidy

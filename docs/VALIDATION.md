@@ -1,6 +1,91 @@
 # Validation — 2026-10-08
 
-## A pressed in the air is no web zip — current build
+## Web balls and pulls on thugs — current build
+
+The user, October 8: "when shooting web projectiles at enemies and objects
+nothing really happens same with webbing and pulling enemies - they get
+pulled but dont really react to the web, collision damage etc"
+
+**The session.** `dist/Spidy-0.2.3/reports/game-vr-20261008-135010.json`
+(13:50-14:06): the shooter fired 58 shots, 30 aimed at thugs, the game took
+all 30 targets (`resolved`); the grab caught bots 4 times, yanked 3, asked 3
+flings (`flings` 3, `steers` 3); 8 punches landed (10-29 damage).
+
+**Measured headless** (a research DLL hooking the shot's event handler
+0xd2a570, `ShotActionDamage` 0x20b7200, the damage system's processing
+0x1eb8cf0 and delivery 0x1eb9b30, `RequestState` 0x20e51c0 and the web hit
+0xd4ea30, and running shots, state requests and damage requests on the main
+thread). The save loaded at (-481, 7, 452); a street crime of 7 `ThugBot`s
+(60 HP, webbed threshold 30) and 2 civilians was found at (-484, 1, 104) by
+swinging there with the virtual pad (its scripted thugs ignore hits until a
+blow starts the fight):
+
+| What | Result |
+|---|---|
+| Spidy's shot at a thug | event Collision, HitActor = the target; no damage action, no request, no state |
+| Its `ShotActionDamage` (from `ShotWebShooterPrius` DamageData) | damage 0, type kNone, status -1, impulse 22 |
+| The game's own RB (Impact Web on the user's save) | damage action: kWebImpact, status 19 amount 10, kTwitch |
+| Shot with options 3 + limb 0 (what the hero's melee web shots set) | `WebBlanket` spawned on the thug 4 of 4 times; no state change |
+| kWebImpact 0.1 + status 19 (kWebEncase) 100, or 25 on top of an earlier 22 | BotStateWebStruggle |
+| status 19: 3 x 4, then 10; 3 x 9 within 1 s | nothing (27 < 30; webbing decays to 0 within seconds) |
+| kWebCategory + status 12 at 100 | 0.1 damage, nothing else |
+| `RequestState(BotStateFlung)` on a fighting thug | returns 1; the thug keeps alternating Aim / Face |
+| kMelee kFlyBack / kSuperFlyBack / kAirborne, kExplosion kFlyBack (from 15-20 m) | BotStateHitReactGame only |
+| kMelee kKnockdown | HitReact, then BotStateStunned |
+| kKinetic + kFlyBack + KnockbackAmount 10 + ImpactImpulse 30 | BotStateFlung (3 of 3), away from the damager at ~12 m/s, then BotStateGroundFlop, BotStateStunned |
+| BotStateFlungLocal +0x94 written every frame toward the hero for 1 s | pulled 7 m toward him and up 3 m (sliding along an obstacle), then flop, stun |
+| The same, holding it 2.4 m above where it stood for 4 s | held there for 4 s, then flop, stun |
+| Damage taken | requested 3 -> 6, 5 -> 11 HP (the difficulty's own scaling) |
+| kKinetic 30 + kFlyBack + impulse 30 on a throwable trash can | processed, never delivered; the can stays |
+
+**What changed.**
+- `game_shooter` hooks the shot's event handler (ShotWebShooter +0xd8). A
+  collision of one of Spidy's own shots (its registry handle at +0x14, its
+  shot id at +0x104) reads the event's HitActor, HitPosition and HitNormal
+  with the game's own readers (1bcf3e0, 1f9db60, 1f7b760). A webbable thug
+  (`StatusEffectTrackerWebbed`, no `CivilianBot`) takes a kWebImpact blow of
+  0.5 with kTwitch and 11 of status 19 (`native_bodies::Damage` gained the
+  status, added by 0x1ed20e0); a throwable that is no breakable is launched
+  along the shot at 3.5 m/s plus 1 m/s up.
+- `game_targets` candidates carry traits: thug, civilian, webbable,
+  breakable.
+- `game_grab`: the first pull on a thug deals him kKinetic 2 + kFlyBack +
+  KnockbackAmount 10 + ImpactImpulse 30 (from the hero); while he is in
+  BotStateFlung the web's velocity is written to the flight
+  (`native_bodies::fling(..., request = false)`), never his mover; thrown or
+  let go, his flight gets the velocity once and the game lands him. Not
+  flung 0.25 s after the blow: his mover as before. Came down on the web: he
+  lies until 1.5 s after the last knock. Strikes (web_grab `StrikeConfig`):
+  a flight's pace over two steps that drops under 45% of the fastest of the
+  three steps before, from 7 m/s up, while the web asked no such stop, or a
+  landing at 8 m/s or faster: a kinetic blow by the speed lost (2 + 0.7 per
+  m/s over the threshold, up to 15; kKnockdown from 14 m/s); a flying thug
+  or thrown prop touching another thug (a 1.8 m capsule, 0.35 m around) at
+  6 m/s or faster: 2 + 0.7 per m/s over 6, kKnockdown, or from 9 m/s kFlyBack
+  with an impulse (the one hit is knocked away from the flying thug);
+  0.8 s between blows to one bot.
+- Telemetry: SpidyShooterData v2 (192 bytes: collisions, webbed, pushed,
+  last_hit), SpidyGrabData v3 (368 bytes: launches, flown, impacts, struck);
+  the session report samples them.
+
+**Verified with Spidy's modules** (second game, no thugs came near: the
+save loaded at (-486, 5, 233), the crime was gone, and swinging 450 m west
+met none): SpidyShooterTest at a trash can: 1 collision, `last_hit` its
+record, not pushed (breakable); at a dormant thug 300 m away (6 HP, no
+state): 3 collisions, 3 webbing blows queued, `last_hit` his record (a
+probe's test shot carries no damager, so the game drops those; trigger shots
+take the player from the input sample). Every hook entry restored on stop.
+All 147 throwables near the save were breakables.
+
+**Checks.** 185 core checks (2 new: impact loss and blows; what a flying
+body touches and the strike's blow), the launcher's, and the 5 Python suites
+(87; the shooter and grab layouts updated).
+
+**Unproven.** Spidy's own pull path on a thug in the game: the knock, the
+steered flight, the strikes and their thresholds (false or missed impacts);
+the webbing through a trigger shot in play; the headset feel.
+
+## A pressed in the air is no web zip — preceding build
 
 The user, October 8: "lets disable the regular og game webshooting mechanic
 that happens when pressing a in the air or mid jump"

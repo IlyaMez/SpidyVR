@@ -228,7 +228,7 @@ void visit(const native_rays::QueryContext& world) {
         game_grab::claim(sampleSeconds, in, world, player);
         float grabDt{};
         if (game_grab::due(grabDt))
-            game_grab::step(grabDt, world);
+            game_grab::step(grabDt, world, config.record);
         // Fists take the same samples. A hand whose web holds a target or
         // swings the player does not punch.
         if (game_punch::running()) {

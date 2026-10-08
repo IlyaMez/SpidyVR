@@ -2858,6 +2858,76 @@ int main() {
         check(std::isinf(rayMiss({},{0,0,-1},5,{0,0,-10},1)),"a target beyond reach was in reach");
         near(rayMiss({},{0,0,-1},50,{2,0,-10},1),std::atan2(2.f,10.f)-std::asin(1/std::sqrt(104.f)),1e-4f);
     });
+    test("a flight that loses its speed struck something, and hurts by how much it lost", [] {
+        const StrikeConfig c;
+        // A flight that keeps its speed, or a slow one stopped, struck nothing.
+        near(impactLoss(12,11.6f,c),0);
+        near(impactLoss(5,0,c),0);
+        // Falling faster under gravity is no impact.
+        near(impactLoss(10.8f,11.1f,c),0);
+        // Yanked at 12 m/s into a wall: it kept 2.
+        near(impactLoss(12,2,c),10);
+        const auto wall=impactBlow(10,c);
+        near(wall.damage,c.minDamage+3*c.damagePerSpeed);
+        check(wall.knockback==2&&!wall.fling,"a wall at 10 m/s did more than stagger");
+        const auto landing=impactBlow(20,c);
+        check(landing.knockback==4,"a 20 m/s landing did not knock down");
+        near(impactBlow(60,c).damage,c.maxDamage);
+        near(impactBlow(1,c).damage,c.minDamage);
+        check(!(impactLoss(12,std::numeric_limits<float>::quiet_NaN(),c)>0),"a torn speed read as an impact");
+    });
+    test("a flying body strikes a standing character it touches, flinging him when fast", [] {
+        const StrikeConfig c;const Vec3 feet{0,0,0};
+        check(touches({.6f,1,0},.45f,feet,c),"a prop at his hip missed");
+        check(!touches({1,1,0},.45f,feet,c),"a prop a metre off struck");
+        check(touches({0,2.1f,0},.45f,feet,c)&&!touches({0,2.4f,0},.45f,feet,c),"his head's height wrong");
+        check(!touches({0,-.9f,0},.45f,feet,c),"a body under the floor struck");
+        const auto slow=strikeBlow(7,c),fast=strikeBlow(15,c);
+        check(!slow.fling&&slow.knockback==4,"a 7 m/s strike flung, or did not knock down");
+        check(fast.fling&&fast.knockback==5,"a 15 m/s strike did not fling");
+        check(fast.damage>slow.damage&&fast.damage<=c.maxDamage,"strike damage did not grow with speed");
+    });
+    test("a web pulls a character in when it reels, a hand pulls away fast or yanks, not when it only holds him", [] {
+        const PullConfig c;const Vec3 at{0,1,-5};
+        TargetCommand rope{7,TargetKind::Character,TargetCommand::Mode::Rope};
+        rope.ropeCount=1;rope.ropes[0]={{0,1.3f,0},{},5};
+        // At the end of his web, walking off it: it only holds him.
+        check(!pullsIn(rope,{0,1,-5.02f},c),"a web that only held him pulled him in");
+        // Wound in half a metre shorter than he stands from the hand: a reel.
+        rope.ropes[0].length=4.5f;
+        check(pullsIn(rope,at,c),"a reel did not pull him in");
+        // The hand pulling away from him at 4 m/s; coming toward him.
+        rope.ropes[0].length=5;rope.ropes[0].anchorVelocity={0,0,4};
+        check(pullsIn(rope,at,c),"a hand pulling away fast did not pull him in");
+        rope.ropes[0].anchorVelocity={0,0,-4};
+        check(!pullsIn(rope,at,c),"a hand coming toward him pulled him in");
+        TargetCommand yank{7,TargetKind::Character,TargetCommand::Mode::Launch};yank.velocity={0,4,10};
+        check(pullsIn(yank,at,c),"a yank's jerk did not pull him in");
+        yank.thrown=true;
+        check(!pullsIn(yank,at,c),"a throw read as a pull");
+        const TargetCommand brake{7,TargetKind::Character,TargetCommand::Mode::Follow};
+        check(!pullsIn(brake,at,c),"a catch's brake read as a pull");
+    });
+    test("a pull launches a character onto an arc that reaches the hand", [] {
+        const PullConfig c;const Vec3 gravity{0,-9.81f,0},from{0,1,-12};
+        TargetCommand rope{7,TargetKind::Character,TargetCommand::Mode::Rope};
+        rope.ropeCount=1;rope.ropes[0]={{0,1.3f,0},{},11.5f};
+        // Off the ground, toward the hand: a pull from his standing pace kept
+        // him on the ground, and the game ended his flight there.
+        const Vec3 v=pullLaunch(rope,from,gravity,c);
+        check(v.y>2&&v.z>0,"the launch did not lift him toward the hand");
+        const float time=length(rope.ropes[0].anchor-from)/c.launchSpeed;
+        near(length(from+v*time+gravity*(.5f*time*time)-rope.ropes[0].anchor),0,.02f);
+        // Two webs pull toward between both hands.
+        rope.ropeCount=2;rope.ropes[1]={{.6f,1.3f,0},{},11.5f};
+        check(pullLaunch(rope,from,gravity,c).x>0,"two webs did not pull toward between the hands");
+        // Close to the hand the arc takes its shortest time, not a hard throw.
+        check(length(pullLaunch(rope,{.3f,1,-1},gravity,c))<6,"a close pull launched hard");
+        TargetCommand yank{7,TargetKind::Character,TargetCommand::Mode::Launch};yank.velocity={0,4,10};
+        near(pullLaunch(yank,from,gravity,c).z,10);
+        const TargetCommand none{7,TargetKind::Character,TargetCommand::Mode::Rope};
+        near(length(pullLaunch(none,from,gravity,c)),0);
+    });
     test("a grip held after its grab is lost never shoots a swing web", [] {
         TestWorld world;world.anchor={0,20,-30};
         GrabTargets targets;targets.add(7,{0,1,-8});
