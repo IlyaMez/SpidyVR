@@ -57,6 +57,8 @@ Copy-Item -LiteralPath (Join-Path $root 'third_party\imgui\LICENSE.txt') -Destin
 $check = & (Join-Path $stage 'python\python.exe') -B -X utf8 -c 'import run_game_vr, xr_runtime, probe_game_grab; print(7*6)'
 if ($LASTEXITCODE -or "$check" -ne '42') { throw 'The packaged Python cannot load the tools (run the line above to see why).' }
 
+# A fresh checkout (the release workflow's) has no dist\, and Compress-Archive will not make it.
+New-Item -ItemType Directory -Force $dist | Out-Null
 $zip = Join-Path $dist "$name-win64.zip"
 if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 Compress-Archive -LiteralPath $stage -DestinationPath $zip -CompressionLevel Optimal
