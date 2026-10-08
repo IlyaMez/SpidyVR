@@ -486,6 +486,47 @@ int main() {
         check(!swingNativeKeys(false,false,jump,SwingTakeoff::PressJump,true),"focus loss kept jumping");
         check(swingNativeKeys(true,false,jump|1,SwingTakeoff::Idle,false)==(jump|1),"walking keys lost");
     });
+    test("a jump pressed in the air never reaches the game as its web zip", [] {
+        constexpr uint32_t jump=swingJumpKey;
+        AirJumpFilter f;
+        // Pressed on the ground: the game's jump, held on into the air.
+        check(f.update(jump|1,false)==(jump|1),"ground jump withheld");
+        check(f.update(jump|1,true)==(jump|1),"jump held from the ground let go in the air");
+        check(f.update(1,true)==1,"walking keys lost");
+        // Pressed in the air: withheld until let go, a landing on the way included.
+        check(f.update(jump|1,true)==1,"midair press reached the game");
+        check(f.update(jump,false)==0,"midair press jumped on landing");
+        check(f.update(0,false)==0,"release went wrong");
+        check(f.update(jump,false)==jump,"next ground press withheld");
+        f.update(0,false);
+        check(f.update(jump,true)==0,"second midair press reached the game");
+        check(f.update(jump,true)==0,"held midair press reached the game");
+    });
+    test("airborne is Spidy's flight or the game's air state, never a perch or a wall", [] {
+        using game_swing::airborne;
+        constexpr int64_t hz=10000000,now=50*hz;
+        const auto sample=[&](uint32_t status,uint32_t owned,uint32_t grounded,uint32_t flags,int64_t age) {
+            game_swing::Data d;
+            d.status=status;d.owned=owned;d.grounded=grounded;d.collisionFlags=flags;
+            d.qpc=static_cast<uint64_t>(now-age);
+            return d;
+        };
+        // Flags as the October 7-8 headset reports have them.
+        check(airborne(sample(2,1,0,0x2060010,0),now,hz),"Spidy's flight is not airborne");
+        check(airborne(sample(2,1,0,0x2060000,0),now,hz),"Spidy's flight along a wall is not airborne");
+        check(airborne(sample(1,0,0,0x2060010,hz/100),now,hz),"the game's jump or fall is not airborne");
+        check(airborne(sample(1,0,0,0x3060010,0),now,hz),"the game's air state with 0x3060010 is not airborne");
+        check(!airborne(sample(1,0,1,0x2060000,0),now,hz),"standing is airborne");
+        check(!airborne(sample(1,0,1,0x2060010,0),now,hz),"the landing step is airborne");
+        check(!airborne(sample(1,0,0,0x2060001,0),now,hz),"a perch (contact 2) is airborne");
+        check(!airborne(sample(1,0,1,0x2060005,0),now,hz),"a wall crawl is airborne");
+        check(!airborne(sample(1,0,0,0x2060000,0),now,hz),"a wall run is airborne");
+        check(!airborne(sample(2,1,0,0x2060010,hz/5),now,hz),"a step 200 ms old is airborne");
+        check(airborne(sample(2,1,0,0x2060010,-hz/100),now,hz),"a step newer than the frame is not airborne");
+        check(!airborne(sample(0,1,0,0x2060010,0),now,hz),"a stopped swing is airborne");
+        check(!airborne(sample(4,1,0,0x2060010,0),now,hz),"a faulted swing is airborne");
+        check(!airborne(game_swing::Data{},now,hz),"no sample is airborne");
+    });
     test("point launch survives release of its web through native takeoff", [] {
         SwingTakeoff t;
         auto r=t.update(0,false,true,true,true,true,{},{},{3,9,0},true);

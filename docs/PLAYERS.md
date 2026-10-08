@@ -110,7 +110,8 @@ Moving
                          in Settings sets how far, or turns it off). With
                          SMOOTH TURN on, hold it to turn steadily instead:
                          the further you tilt it, the faster
-  A .................... jump
+  A .................... jump (from the ground, a wall or a perch; in the
+                         air it does nothing, no web zip from the wrist)
   B .................... interact: the game's Y (backpacks, doors, prompts;
                          web strike in a fight)
   Menu button .......... pause

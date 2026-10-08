@@ -94,7 +94,7 @@ inline uint32_t swingNativeKeys(bool active, bool owned, uint32_t keys, SwingTak
     if (!active)
         return 0;
     if (owned)
-        keys &= jump; // Manual jump remains available during a web-controlled landing.
+        keys &= jump; // A jump held since the ground stays held (AirJumpFilter).
     if (phase == SwingTakeoff::ReleaseJump || phase == SwingTakeoff::PressJump ||
         phase == SwingTakeoff::AwaitAir)
         keys &= ~jump;
@@ -102,4 +102,24 @@ inline uint32_t swingNativeKeys(bool active, bool owned, uint32_t keys, SwingTak
         keys |= jump;
     return keys;
 }
+// In the air the game's jump is its web zip: a web from Spider-Man's own
+// wrist, where VR's webs come from the hands. A press that starts while the
+// player is airborne stays away from the game until it is let go. One that
+// starts on the ground, a wall or a perch is the game's jump for as long as
+// it is held, into the air included.
+class AirJumpFilter {
+  public:
+    uint32_t update(uint32_t keys, bool airborne) {
+        const bool jump = (keys & swingJumpKey) != 0;
+        if (!jump)
+            fromAir_ = false;
+        else if (!held_)
+            fromAir_ = airborne;
+        held_ = jump;
+        return fromAir_ ? keys & ~swingJumpKey : keys;
+    }
+
+  private:
+    bool held_{}, fromAir_{};
+};
 } // namespace spidy

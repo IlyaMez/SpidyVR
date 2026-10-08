@@ -3,7 +3,26 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 8, eighth build): steadier aim markers, a colour per
+**Latest build (October 8, ninth build): A in the air no longer shoots the
+game's web zip.** You asked to turn off the game's own web shooting when you
+press A in the air or mid-jump. That is the game's web zip: in the air its
+jump button shoots a web from Spider-Man's wrist and zips him forward,
+whatever your hands are doing. Spidy gave the game your A wherever you were,
+even while its own webs flew you. Now a press of A that starts in the air
+(swinging, flying after letting go, or in the game's own jump or fall) never
+reaches the game, until you let go of it, a landing on the way included. A
+press that starts on the ground, on a wall or on a perch is the game's jump
+as before, for as long as you hold it. Telling the air from a perch: the
+game's mover says "airborne" on some perches too, so Spidy counts you in the
+air while its webs fly you, or while the mover is unsupported and in the mode
+the game's air state moves it in. In the reports of your October 6-8
+sessions that matched the game's own air state on 98.6% of 61,657 steps; the
+rest were a jump's first steps (no web zip there now either) and single
+landing steps (A jumps there). Perches and wall crawls never counted as air.
+183 core checks (2 new) and the 5 Python suites pass. Not tried in the game
+or the headset yet.
+
+**Preceding build (October 8, eighth build): steadier aim markers, a colour per
 hand, a new target ring.** You said the aim markers felt jerky and jittery,
 asked for a different colour shade per hand, and called the square target
 marker ugly. The jitter came from the controller: a hand held still still

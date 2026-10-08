@@ -1,6 +1,50 @@
 # Validation — 2026-10-08
 
-## Steadier aim markers, a colour per hand, a new target ring — current build
+## A pressed in the air is no web zip — current build
+
+The user, October 8: "lets disable the regular og game webshooting mechanic
+that happens when pressing a in the air or mid jump"
+
+**Cause.** The controllers' A (`XrFrame::jump`) reached the game as the
+virtual Xbox controller's A and the input bridge's Space whenever VR
+gameplay steered, in the air too: `swingNativeKeys` passed the jump during
+Spidy's owned flight ("manual jump during a web-controlled landing"). In
+the air the game's A is its web zip (`HeroStateWebZip`).
+
+**What changed.**
+- `AirJumpFilter` (include/spidy/swing_takeoff.hpp) decides at the press:
+  a jump key pressed while airborne is withheld until released; one pressed
+  on support passes for as long as it is held.
+- `game_swing::airborne(Data, nowQpc, frequency)` (include/spidy/game_swing.hpp):
+  status 1 or 2, a step within 100 ms (a perch or ledge the game animates
+  without steps leaves an old airborne sample), and owned flight or the
+  mover not grounded with collision flags bit `0x10`.
+- The XR worker (src/game_xr.cpp) filters `motion.nativeKeys` before
+  `swingNativeKeys`, so the pad's A and the bridge's Space both follow it.
+  Spidy's own jump input (`motion.swing.jump`: takeoff, point launch, both
+  on support only) and the takeoff's own jump press are unchanged. No
+  protocol change.
+
+**Why that rule.** Contact 2 alone is not the air: the October 8 11:54
+session began on a perch at contact 2 (`0x80a0` / `0x2060001`, standing
+still), and a wall-run-like stretch ran at contact 2 with `0x2060000`.
+Swing samples of the 11 October 6-8 session reports, each matched to the
+movement sample of the step it observed (`source_step`), against the game's
+air-state handler (0xa7b3a0, `air_events`) in that step: rule air and
+handler ran 37,612; neither 23,168; air without the handler 734 (a jump's
+first steps at `0x80a0` / `0x2060010`, and owned flight along walls);
+handler without air 143 (landing steps at contact 0): 98.6% agree. Perch
+(`0x2060001`, 1,434) and wall-crawl steps (`0x2060005`, and `0x8001` /
+`0x2060000`, 313) never counted as air, nor ran the handler.
+
+**Checks.** 183 core checks (2 new: the filter's press decisions, a landing
+during a withheld press, other keys kept; `airborne` on owned flight, the
+game's air state, standing, landing, perch, wall crawl, wall run, an old
+sample, a stopped or faulted swing), the 5 Python protocol suites. Not run
+in the game: a peer's research session had it open, and the XR worker
+needs the headset.
+
+## Steadier aim markers, a colour per hand, a new target ring — preceding build
 
 The user, October 8: "lets make the aim markers nicer (diffirent color shade
 per hand maybe) and they feel very jerky\jittery rn can we smooth them a bit

@@ -287,6 +287,8 @@ DWORD WINAPI run(void*) {
         // The last frame showed the game screen; A held from there (Resume,
         // Continue) is not a jump once gameplay is back.
         bool wasScreen{}, jumpFromScreen{};
+        // A pressed in the air is not the game's web zip.
+        AirJumpFilter airJump;
         // Where B went down: on the game screen it is Back, in VR the game's Y
         // (interact). Held across a switch it stays what it was until let go:
         // Back held into play is no interact, and an interact held into a menu
@@ -845,6 +847,8 @@ DWORD WINAPI run(void*) {
                         }
                     }
                     const bool steering = motion.active && !flatScreen && controlsVisible;
+                    motion.nativeKeys = airJump.update(
+                        motion.nativeKeys, game_swing::airborne(swingState, now.QuadPart, frequency.QuadPart));
                     const auto keys = swingNativeKeys(
                         steering, swingState.owned != 0, motion.nativeKeys,
                         static_cast<SwingTakeoff::Phase>(swingState.takeoffPhase), swingState.takeoff != 0);

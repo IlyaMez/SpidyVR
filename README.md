@@ -101,7 +101,7 @@ Spidy changes nothing in the game's folder.
 | Shoot a web ball | **Trigger** of a hand without a web |
 | Grab a prop or thug | Grip aimed at it; trigger reels it, a sharp pull yanks it, release throws it |
 | Punch | A fast fist into a thug |
-| Walk and run / jump | **Left stick** / **A** |
+| Walk and run / jump | **Left stick** / **A** (in the air A does nothing: no web zip) |
 | Turn | **Right stick**: snap 30° (adjustable or off), or hold to turn smoothly with SMOOTH TURN on in VR settings |
 | Interact (the game's Y) | **B** |
 | Pause (VR settings: Settings > SPIDY VR) | **Menu** button |

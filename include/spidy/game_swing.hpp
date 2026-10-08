@@ -146,6 +146,15 @@ constexpr float motionSpeedLimit = 65;
 // The most gravity a swing takes, m/s^2: every weight the VR settings offer.
 constexpr float maxGravity = 30;
 static_assert(sizeof(WebState) == 28 && sizeof(Data) == 240);
+// The player is in the air: Spidy's own flight, or the game's jump or fall,
+// where the mover is unsupported and in its airborne mode (collision flags
+// 0x10: the steps the game's air state runs). A perch, a wall crawl and a
+// wall run are neither, and a sample whose step is over 100 ms older than
+// `nowQpc` says nothing (a perch or ledge the game animates without steps).
+inline bool airborne(const Data& d, int64_t nowQpc, int64_t qpcFrequency) {
+    const bool recent = d.qpc && static_cast<int64_t>(d.qpc) > nowQpc - qpcFrequency / 10;
+    return recent && (d.status == 1 || d.status == 2) && (d.owned || (!d.grounded && (d.collisionFlags & 0x10u)));
+}
 // What a grip press would do now with each hand (SpidyAimSample), for the
 // headset's aim markers: worked out in the world-query callback with the rays
 // and target picks the press itself uses, from the latest input. It costs a
