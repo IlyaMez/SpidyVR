@@ -120,6 +120,12 @@ disassembly, then traced and tried at a street crime with a research DLL:
 | DamageType names (0 kNone ... 7 kKinetic ... 19 kWebEncase, 20 kWebImpact ...) | names at `0x5e07b50` | Read from the image |
 | `BotStateFlungLocal`, the flight's velocity +0x94 | vtable `0x386c448`; machine +0x98 | Written every frame, it steered the flight |
 | Thug, civilian, breakable components | `ThugBot` `0x384b010`, `CivilianBot` `0x383c480`, `BreakableSystemComponent` `0x3871018` | Registry scans at the crime and near the save |
+| Bot mover managers, all derived from `BotMoverManager`: `BotMoverManagerGame`, `HammerheadBotMoverManager` and `MechaHammerheadMoverManager` (from it), `HoverMoverManager`, `DocOckMoverManager` (from it) | vtables `0x38533e0`, `0x3853558`, `0x385c618`, `0x384ce18`, `0x384cfa0` | RTTI class hierarchies (October 9); `BotMoverManagerGame` bots scanned in the game, no hover bot seen yet |
+| `MoverManager`'s mover handle, +0xdb4, for the hero's and every bot's mover manager | read by `0x1fb9c60`, `0x1fb9cb0`, `0x1fb9d60`, `0x1fb9dd0`, `0x1fba3d0` | Disassembly |
+| `MoverManager`'s live body, a `MoverBodySize` at +0xdb8: lower and upper sphere centres above the transform +0xdc0, +0xdc4, radius +0xdc8, the upper one scaled by +0xdf8; the mover's capsule from them | vtable `0x500e870`; capsule `0x1fbba90` | Read in the game: Fisk thugs 0.85, 1.15, 0.45 (0.4 m to 1.6 m), the hero 0.86, 1.3, 0.4 |
+| `MoverConfig` (0x78 bytes) with a `MoverBodySize` at +0x58 (`BodyBottom`, `BodyTop`, `BodyRadius`) | vtable `0x500e950`; constructor `0x22c9300` | A thug's mover manager names his at +0x48: the same values |
+| MSVC x64 RTTI: complete object locator at vtable -8 (signature 1, offset, type descriptor, class hierarchy, its own image offset); the hierarchy's base count +8 and base array +0xc; each base names its type descriptor first, whose name is at +0x10 | — | Spidy's scan in the game counted the same 74 props and bots as the same rules read from the executable |
+| `Team` component (red and blue teams) | vtable `0x4f62ec0` | No actor had one in the running game: no hostility test there |
 
 For the SPIDY VR tab in the game's Settings (October 7;
 `include/spidy/game_menu.hpp`), found from the executable's strings, RTTI and

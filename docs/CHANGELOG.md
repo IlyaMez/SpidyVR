@@ -3,7 +3,140 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 8, fifteenth build): slow motion, as in Blade &
+**Latest build (October 9, fourth build): fists, web balls and webs take
+each enemy's own size.** Spidy treated every enemy as a street thug: aim at
+a chest 1.15 m above his feet, catch him 0.95 m up, a fist hits within 1.8 m
+of his feet, all 0.45 m wide or less. For a drone, a flyer or a heavy like
+Rhino that was off. Now Spidy reads each bot's size from the game: the
+capsule his mover collides with, which the game keeps in his mover manager
+(a street thug's spans 0.4 m to 1.6 m above his feet, 0.45 m around).
+Every height and width tuned on a street thug carries over in proportion to
+that capsule. Heights stretch between the capsule's ends and widths follow
+its radius, so a street thug keeps exactly today's values while a drone's
+shrink and a heavy's grow. The web balls' aim point and aim assist, where a
+web catches and holds an enemy, a fist's target, and what a flying enemy or
+thrown prop strikes all use it. Mass, which sets how hard the web pulls,
+stays as it was.
+Measured: the game builds each mover's capsule (`0x1fbba90`) from fields
+Spidy now reads. In the game, all 12 Fisk thugs at your save read 0.85,
+1.15 and 0.45 (0.4 m to 1.6 m), and the hero 0.86, 1.3 and 0.4. A new core
+check reads a body laid out like the game's, and checks that a street
+thug's measures come back unchanged and a drone's and a heavy's scale. Not
+seen yet: an enemy of another size in the game (none near your save).
+`tools/probe_combat.py --list` now prints each bot's capsule. No protocol
+change: only the ray module changed.
+
+**Preceding build (October 9, third build): the launcher updates itself.** You
+asked for an auto-updater for the launcher. When it starts, the launcher asks
+GitHub for the newest release. If that is newer, a banner above the Play tab
+offers it with *What's new* (the release's changes on hover, its page on
+click), *Update now* and *Later*. *Update now* downloads the zip (progress on
+the banner, *Cancel* stops it), checks it against the SHA-256 GitHub gives for
+it, unpacks it, puts its files in place of the folder's and starts the new
+launcher, which says "Spidy is updated: 0.2.6 to 0.2.7." Settings
+(`%APPDATA%`), `reports\` and files beside the launcher stay. *Later* hides the
+banner until the next start. About has a new UPDATES card: the last check's
+result, *Check now*, *All releases*, and a switch for the check at start. The
+switch is on by default, and updating always waits for a click.
+How: the files are swapped by renames within the Spidy folder, which Windows
+allows even for the running launcher. Old files go to a hidden
+`.spidy-update\previous\`; if any file cannot move, every move so far is undone
+("Nothing was changed"). It refuses while VR runs, while a program runs from
+the folder (a session's Python, the headset check), or while the game has
+Spidy's modules loaded. The old launcher closes and then starts the new one,
+which waits for it to exit and deletes `.spidy-update\`. A checkout's launcher
+(`build\windows-ninja`) neither checks at start nor installs. Details:
+[DEVELOPMENT.md](DEVELOPMENT.md#updates). No protocol change; `update_check=`
+is new in launcher.ini. Players on 0.2.6 or older download the first release
+with the updater by hand once.
+Measured: 21 launcher checks (5 new: JSON; the release read from GitHub's real
+answer for v0.2.6; the notes' SHA-256 when the digest is missing, and refusals
+without one, without the zip or without a version; versions; the update plan).
+End to end, with this launcher in a copy of the 0.2.5 release, against the
+real v0.2.6 release:
+- The banner offered 0.2.6. *Update now* downloaded, checked and installed it,
+  then the 0.2.6 launcher started. The folder's 68 package files were
+  hash-identical to the 0.2.6 zip; a report and a file beside the launcher
+  stayed, and a stray tool was retired.
+- With the folder's Python running, it refused ("Close python.exe first").
+- With `tools\xr_runtime.py` held open, it rolled back: all 69 files were
+  hash-identical to before, the running launcher's own exe included. *Try
+  again* after the lock was released succeeded.
+- Started with `--updated-from` and `--wait-for`, it waited for that process,
+  deleted `.spidy-update\`, and showed the updated banner.
+A whole update took a few seconds in two runs; in a third, GitHub served the
+12 MB zip in about 110 s.
+Not tested: *Cancel* mid-download, a SHA-256 mismatch, a proxy, and updating
+into a release that has the updater, since none is published yet.
+
+**Preceding build (October 9, second build): choose the button that shoots
+webs.** You asked for an option to switch the grip and trigger actions.
+WEB BUTTON, the first row under WEBS in Settings > SPIDY VR, is GRIP (the
+default, as before) or TRIGGER. On TRIGGER the trigger shoots and holds a
+hand's web, and the grip reels it in and, on a hand without a web, shoots web
+balls. The launcher's options have the same choice ("Web button"), and
+`Launch Spidy VR.cmd -TriggerWebs` starts with it. A change made in the
+headset carries over to your next session, like the other settings.
+How: the swap happens in one place, where the controllers' buttons become the
+swing's input. Everything that reads the web and reel buttons follows it:
+swinging, reeling, zips, the web grab and its throw, the web shooter, and
+the aim markers (the ring tightens as you press the web button). Fists still
+close with the grip, the T-pose calibration still asks for both triggers,
+and the game's menus keep the grips as bumpers. Changing it lets go of both
+webs, so a button held at that moment fires nothing until you release it.
+On TRIGGER, a fist made with the grip fires a web ball from a free hand (on
+GRIP it shoots a web). A fast punch closes the fist by itself, so you can
+punch with the grip open.
+Protocol: XrConfig and XrData are version 17 (options bit 12, settings bit
+64, `trigger_webs` in reports and in the launcher's settings line), so the
+runner and the DLLs must come from the same build.
+Measured: 206 core checks (1 new: the swap per hand; a change in play lets go
+of the webs once; a change in a menu lets go when play resumes; reset keeps
+the button). The tab test checks the new row and that RESET ALL puts GRIP
+back. 16 launcher checks, 88 Python checks and the GPU test pass. Not run in
+the game yet: `tools/probe_menu.py` now sets WEB BUTTON to TRIGGER first and
+expects 18 changes. Tell me how webbing on the trigger feels in the headset.
+
+**Preceding build (October 9, first build): fists, webs and web balls reach
+every enemy, flying ones included.** A player reported that flying Sable
+agents ignore punches and that webs pass through them. Spidy recognised a
+bot by one game class, the mover manager that walks bots on foot
+(`BotMoverManagerGame`), matched exactly. Any enemy moved some other way was
+invisible to the fists, the web grab and the web balls' webbing. That covers
+every flyer the game moves with its `HoverMoverManager`, plus Doc Ock's,
+Hammerhead's and Mecha-Hammerhead's movers.
+You asked for something systemic rather than a fix per enemy type. Spidy
+now reads the game's own type information (RTTI) for every component it
+scans, so a class counts together with everything derived from it. An actor
+with a component derived from `BotMoverManager` is a bot, whatever moves it.
+Every bot is an enemy except the friendly and neutral families: civilians,
+the police and mission companions, birds, helicopters and Silver Sable's
+aircraft. No enemy type is named, so flyers, bosses and DLC enemies are
+covered without a save for each. What a blow does is the game's own
+reaction, since fists, webbing and knock-backs go through its damage system.
+Fists now also skip the neutral bots.
+Measured: a new core check builds stand-in classes named like the game's and
+runs the same walk over them. A class two levels below `HoverMoverManager`
+is a flying bot, a subclass of `ThugBot` is a thug, and an unrelated class
+or plain data is nothing. In the game, headless, at your save's Fisk hideout
+(`tools/probe_combat.py`):
+- Spidy's scan inside the game found the same 74 props and bots as the same
+  rules read from outside, and no actor had a bot component without a bot
+  mover manager.
+- Three web balls webbed a thug up.
+- A scripted fist at 5.4 m/s landed: 27.9 damage, his health from 50 to 19.
+  This is the first time the fists' own path was seen hitting a thug.
+- A pull flung a thug into a wall: his health from 50 to 26.
+
+No flying enemy was loaded anywhere near your save, so a flyer's reactions
+were not seen. Fists and webbing are the game's damage, as for any bot. A
+pull asks the game for its flung reaction; if a flyer doesn't take it, Spidy
+steers its mover, as it already does for bots the game won't fling.
+No protocol change: only the ray module changed. 205 core checks pass.
+Tell me, or the player, how flying agents react to a punch, three web balls
+and a pull.
+
+**Preceding build (October 8, fifteenth build): slow motion, as in Blade &
 Sorcery.** You asked for a Blade & Sorcery-like slow-motion button with a
 smooth transition in and out, an effect while it is on, and a "mana" that
 runs down and recovers. Click the left thumbstick on its own (both together

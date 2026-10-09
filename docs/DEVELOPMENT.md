@@ -51,6 +51,43 @@ game's Settings, or X for the aim markers) prints them on its last line, "VR set
 from the headset: ...", and the launcher saves them as its options. The
 first start offers desktop and Start menu shortcuts.
 
+### Updates
+
+A player's copy updates itself from the newest release on GitHub
+(`apps/launcher/update.cpp`; the parts without Windows calls, tested in
+`tests/launcher_tests.cpp`, are in `include/spidy/launcher_update.hpp`):
+
+- **Check:** at start, unless `update_check=0` in `launcher.ini` (About >
+  UPDATES), a worker asks `api.github.com/repos/IlyaMez/SpidyVR/releases/latest`
+  over WinHTTP (Windows' proxy settings) and offers the release when its tag
+  is a newer `vX.Y.Z` than the launcher's. Unauthenticated, GitHub allows 60
+  such questions an hour from one address.
+- **What a release needs:** the asset `Spidy-<version>-win64.zip` and its
+  SHA-256: the asset's `digest` (GitHub's own), else the notes' line "SHA-256 of
+  Spidy-<version>-win64.zip: `...`" that `release.yml` writes. Keep both names
+  if the workflow changes: a release without them is not offered.
+- **Install** (only on *Update now*): the zip goes to the hidden
+  `.spidy-update\` in the Spidy folder, its size and SHA-256 are checked, and
+  Windows' `tar.exe` unpacks it (the folder's Python's `zipfile` where tar is
+  missing). Each package file then replaces the folder's by renames, which
+  Windows allows for the running launcher and loaded modules too: the old file
+  to `.spidy-update\previous\`, the new one into place. A file the package
+  lacks goes the same way when its folder holds package files (`tools\`,
+  `python\`, `build\windows-ninja\`, `docs\licenses\`), so a removed tool or an
+  older Python's files do not linger; files beside the launcher, `reports\` and
+  other folders stay (`updatePlan`). A rename that fails after 3 s of retries
+  (antivirus) undoes every rename so far.
+- **Refusals:** it waits for a stopped VR session and finished checks, and
+  before the download and again before the renames refuses while a process
+  runs from the folder or `Spider-Man.exe` has the folder's modules loaded.
+- **Restart:** the old launcher closes its window, releases its one-at-a-time
+  lock, then starts the new `Spidy Launcher.exe --updated-from <old> --wait-for
+  <pid>`. The new one waits for the old process to exit, deletes
+  `.spidy-update\`, and says what it replaced.
+- **Where:** only where `Spidy Launcher.exe` sits beside `tools\run_game_vr.py`
+  with no `.git` or `CMakeLists.txt` there. The launcher in a checkout's
+  `build\windows-ninja` neither checks at start nor installs; git updates it.
+
 Make the zip with:
 
 ```powershell
@@ -180,6 +217,13 @@ without a commit of its own.
   starts, its direction and speed, where it ends), shoots the nearest bot
   within 40 m if there is one, stops and starts the shooter during play, and
   checks that nothing faulted and every hook entry is restored.
+- `tools/probe_combat.py`: Spidy's web balls, fists and web pulls on the
+  game's enemies, flying ones included. `--list` reads the game only: every
+  bot as Spidy's scan sees it (the same RTTI rules: mover manager, traits,
+  states, health, webbing), plus any actor with a `Bot` component the scan
+  would miss. Without `--list`, in a freshly started game, it compares the
+  web grab's own scan with that list, then tries web balls, a scripted fist
+  and a pull on the nearest enemies (`--target flyer|walker|0x...`).
 - `tools/probe_air_handoff.py`: whether the swing keeps the player it flies,
   in a freshly started game loaded with the virtual controller: jumps, swings
   up on a web, and in the air turns the input unfocused for 0.3 s (web held),
@@ -244,6 +288,15 @@ nothing within 100 m holds in open air there; switch **Webs hold in open air**
 off (VR settings, the launcher's options) or start with
 `Launch Spidy VR.cmd -NoAirWebs`, and it misses instead.
 
+**WEB BUTTON** in the VR settings (*Web button* in the launcher's options,
+`Launch Spidy VR.cmd -TriggerWebs`) swaps the two buttons: the trigger shoots
+and holds a web, and the grip reels it in and shoots web balls. The swap is
+made where the controllers' input becomes the swing's (`trackedSwingInput`),
+so the swing, the grab, the web shooter and the aim markers all follow it;
+fists, the T-pose calibration and the game's menus keep the controllers' own
+buttons. A change lets go of both webs, so a button held across it does
+nothing until it is let go.
+
 Webs are drawn by the game's own web-line system. If they look wrong in the
 eyes, start with `Launch Spidy VR.cmd -OverlayWebs` for Spidy's overlay strands.
 
@@ -278,11 +331,14 @@ switch.
 **VR settings** are a tab of the game's own Settings: pause (the menu
 button), choose Settings, then **SPIDY VR**, after KEY MAPPING (Up from GAME
 reaches it; the list wraps). The game builds and draws it with its own option
-code, so it handles like its other tabs: switch the aim markers and webs in
+code, so it handles like its other tabs: choose the WEB BUTTON (GRIP or
+TRIGGER; `GameTrackingRig::triggerWebs`, XrConfig options bit 12, XrData
+settings bit 64), switch the aim markers and webs in
 open air, or step the swing speed limit, weight, snap turn, smooth turn,
 controller vibration and the game screen's size with left and right, and switch
 the experimental FLIPS (off by default; `GameTrackingRig::flips`, XrConfig
-options bit 11, XrData settings bit 32, version 16); X resets a setting, Y the
+options bit 11, XrData settings bit 32); XrConfig and XrData are version 17.
+X resets a setting, Y the
 whole tab (to Spidy's defaults). Web grabbing, the web
 shooter, your body and punching are not in it or in the launcher's options
 (since October 8): they are always on unless a launch option below turns
@@ -423,6 +479,7 @@ reattaching after a stopped session or a rebuilt DLL.
 | `-NoWebShooter` | The trigger only reels |
 | `-NoAimMarkers` | Start with the aim markers hidden (X shows them) |
 | `-Flips` | Experimental flips on (off by default): A tapped in the air flips you; held there, the left stick turns you over |
+| `-TriggerWebs` | The trigger shoots and holds webs, and the grip reels them in and shoots web balls (WEB BUTTON: TRIGGER) |
 | `-EyeHeight 1630 -ArmLength 590` | Your T-pose calibration in millimetres (the console's last "VR settings from the headset" line has it): Spider-Man's body takes your eye height and arm length, and the first gameplay asks for none |
 | `-NoCalibrationPrompt` | Without a calibration, do not ask for the T-pose at the first gameplay (Settings > SPIDY VR > CALIBRATE BODY still does it) |
 | `-NoBody` | Hide the hero and draw gloves |

@@ -63,6 +63,8 @@ constexpr int kSmoothValues[] = {0, 60, 90, 120, 180, 240};
 constexpr const char* kHaptics[] = {"Off", "25%", "50%", "75%", "100%"};
 constexpr int kHapticValues[] = {0, 25, 50, 75, 100};
 constexpr const char* kScreenSizes[] = {"Small", "Medium", "Large"};
+// The button that shoots and holds webs (SessionOptions::triggerWebs: the second).
+constexpr const char* kWebButtons[] = {"Grip", "Trigger"};
 constexpr const char* kWeights[] = {"40%", "60%", "80%", "100%", "125%", "150%", "200%", "250%", "300%"};
 constexpr int kWeightValues[] = {40, 60, 80, 100, 125, 150, 200, 250, 300};
 
@@ -114,8 +116,12 @@ void theme(ImGuiStyle& style) {
     c[ImGuiCol_NavCursor] = vec(kBlue);
 }
 
-App::App(HWND window, Fonts fonts) : window_(window), fonts_(fonts), settings_(loadSettings()) {
+App::App(HWND window, Fonts fonts, std::string updatedFrom)
+    : window_(window), fonts_(fonts), settings_(loadSettings()), installFolder_(installFolder()),
+      updatedFrom_(std::move(updatedFrom)) {
     scanner_.start(settings_);
+    // A player's copy asks GitHub for a newer Spidy as it starts, unless the player turned that off.
+    updater_.start(installFolder_, !installFolder_.empty() && settings_.updateCheck);
 }
 
 App::~App() {
@@ -165,13 +171,17 @@ void App::poll() {
     if (lastInstall_ == Outcome::running && install != Outcome::running)
         rescan();
     lastInstall_ = install;
+    update_ = updater_.status();
+    // The new files are in place: this launcher closes, and main.cpp starts the new one.
+    if (update_.state == UpdateState::installed)
+        quit_ = true;
     if (closeAfterStop_ && !session_.running())
         quit_ = true;
 }
 
 bool App::busy() {
     return session_.running() || scanner_.busy() || headset_.state() == Outcome::running ||
-           vcInstall_.state() == Outcome::running;
+           vcInstall_.state() == Outcome::running || updater_.busy();
 }
 
 bool App::allowClose() {
@@ -538,7 +548,10 @@ void App::tabs() {
 
 void App::play(ImVec2 origin, ImVec2 size) {
     float top = origin.y;
-    if (!settings_.shortcutsAsked && scan_.done) {
+    ImGui::SetCursorScreenPos(origin);
+    if (const float height = updateBanner(size.x); height > 0) {
+        top += height + S(14);
+    } else if (!settings_.shortcutsAsked && scan_.done) {
         ImGui::SetCursorScreenPos(origin);
         shortcutBanner(size.x);
         top += S(48) + S(14);
@@ -596,6 +609,112 @@ void App::shortcutBanner(float width) {
         settings_.shortcutsAsked = true;
         save();
     }
+}
+
+std::string App::updateBlocker() {
+    if (installFolder_.empty())
+        return "This launcher runs from a Spidy checkout, which git updates.";
+    if (session_.running())
+        return "Stop VR first.";
+    if (!scan_.done || scanner_.busy() || headset_.state() == Outcome::running ||
+        vcInstall_.state() == Outcome::running)
+        return "Wait for the checks on this PC to finish.";
+    if (!scan_.writable)
+        return "Spidy can't write in its folder. Move the Spidy folder somewhere like Documents.";
+    return {};
+}
+
+float App::updateBanner(float width) {
+    struct Button {
+        const char* label;
+        bool primary, enabled;
+        std::string tip;
+        std::function<void()> action;
+    };
+    const auto& release = update_.release;
+    const UpdateState state = update_.state;
+    const bool working = state == UpdateState::downloading || state == UpdateState::installing ||
+                         state == UpdateState::installed;
+    const bool offer = !installFolder_.empty() && release && !updateLater_ &&
+                       (state == UpdateState::available || state == UpdateState::installFailed);
+    if (!working && !offer && updatedFrom_.empty())
+        return 0;
+    std::string message;
+    std::vector<Button> buttons;
+    const bool failed = offer && state == UpdateState::installFailed;
+    if (working) {
+        const char* version = release->version.c_str();
+        if (state == UpdateState::downloading) {
+            const double total = static_cast<double>(std::max<uint64_t>(update_.total, 1));
+            message = format("Downloading Spidy %s...  %.0f%%  (%.1f of %.1f MB)", version,
+                             100.0 * update_.received / total, update_.received / 1048576.0, total / 1048576.0);
+            buttons.push_back({"Cancel", false, true, "", [&] { updater_.cancel(); }});
+        } else {
+            message = format(state == UpdateState::installing ? "Installing Spidy %s..."
+                                                              : "Spidy %s is installed. Starting it...",
+                             version);
+        }
+    } else if (offer) {
+        std::string changes;
+        for (size_t i = 0; i < release->changes.size() && i < 12; ++i)
+            changes += (changes.empty() ? "\xE2\x80\xA2  " : "\n\xE2\x80\xA2  ") + release->changes[i];
+        const std::string page = release->page.empty() ? kReleasesUrl : release->page;
+        const std::string blocker = updateBlocker();
+        message = failed ? format("Updating to Spidy %s failed: %s", release->version.c_str(), update_.message.c_str())
+                         : format("Spidy %s is out: you have %s. Updating takes a few seconds; your settings and "
+                                  "reports stay.",
+                                  release->version.c_str(), kVersion);
+        buttons.push_back({"What's new", false, true, changes, [page] { openUrl(page.c_str()); }});
+        buttons.push_back({failed ? "Try again" : "Update now", true, blocker.empty(), blocker,
+                           [&] { updater_.install(); }});
+        buttons.push_back({"Later", false, true, "", [&] { updateLater_ = true; }});
+    } else {
+        message = format("Spidy is updated: %s to %s.", updatedFrom_.c_str(), kVersion);
+        const std::string page = std::string(kReleasesUrl) + "/tag/v" + kVersion;
+        buttons.push_back({"What's new", false, true, "", [page] { openUrl(page.c_str()); }});
+        buttons.push_back({"OK", false, true, "", [&] { updatedFrom_.clear(); }});
+    }
+
+    auto* draw = ImGui::GetWindowDrawList();
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const float buttonWidth = S(112), gap = S(8);
+    const float buttonsWidth = buttons.empty() ? 0 : static_cast<float>(buttons.size()) * (buttonWidth + gap) - gap;
+    const float textWidth = width - S(36) - (buttons.empty() ? 0 : buttonsWidth + S(4));
+    const ImVec2 textSize = measure(fonts_.semibold, S(14.5f), message.c_str(), textWidth);
+    const float height = std::max(S(48), textSize.y + S(28));
+    draw->AddRectFilled(at, ImVec2(at.x + width, at.y + height), failed ? col({48, 36, 18}) : col({24, 36, 64}), S(12));
+    draw->AddRect(at, ImVec2(at.x + width, at.y + height), col(failed ? kAmber : kBlue, 0.35f), S(12));
+    draw->AddText(fonts_.semibold, S(14.5f), ImVec2(at.x + S(18), at.y + (height - textSize.y) * 0.5f), col(kText),
+                  message.c_str(), nullptr, textWidth);
+    if (state == UpdateState::downloading && update_.total) {
+        const float done =
+            std::clamp(static_cast<float>(static_cast<double>(update_.received) / update_.total), 0.f, 1.f);
+        const float left = at.x + S(18), right = at.x + width - S(18), y = at.y + height - S(8);
+        draw->AddRectFilled(ImVec2(left, y), ImVec2(right, y + S(3)), col(kWhite, 0.1f), S(2));
+        draw->AddRectFilled(ImVec2(left, y), ImVec2(left + (right - left) * done, y + S(3)), col(kBlue), S(2));
+    }
+    float x = at.x + width - S(12) - buttonsWidth;
+    for (const auto& button : buttons) {
+        ImGui::SetCursorScreenPos(ImVec2(x, at.y + (height - ImGui::GetFrameHeight()) * 0.5f));
+        ImGui::PushID(button.label);
+        if (button.primary) {
+            ImGui::PushStyleColor(ImGuiCol_Button, vec(kBlue));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, vec({96, 155, 255}));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, vec({45, 110, 220}));
+        }
+        ImGui::BeginDisabled(!button.enabled);
+        const bool clicked = secondaryButton(button.label, buttonWidth);
+        ImGui::EndDisabled();
+        if (button.primary)
+            ImGui::PopStyleColor(3);
+        if (!button.tip.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("%s", button.tip.c_str());
+        ImGui::PopID();
+        if (clicked)
+            button.action();
+        x += buttonWidth + gap;
+    }
+    return height;
 }
 
 void App::setupRow(Mark mark, const char* title, const std::string& detail, float actionWidth,
@@ -910,6 +1029,26 @@ void App::optionsCard(ImVec2 size) {
             changed = true;
         }
     });
+    // A value the list does not have shows as the nearest one.
+    const auto stepCombo = [&](const char* id, const char* const* labels, const int* values, int count, int* value) {
+        int index = 0;
+        for (int i = 1; i < count; ++i)
+            if (std::abs(values[i] - *value) < std::abs(values[index] - *value))
+                index = i;
+        ImGui::PushFont(fonts_.semibold, 13.5f);
+        if (ImGui::Combo(id, &index, labels, count)) {
+            *value = values[index];
+            changed = true;
+        }
+        ImGui::PopFont();
+    };
+    option("Web button", "Which button shoots and holds a web; the other reels in and shoots web balls.",
+           S(150), [&] {
+               static constexpr int buttons[] = {0, 1};
+               int trigger = o.triggerWebs ? 1 : 0;
+               stepCombo("##webButton", kWebButtons, buttons, 2, &trigger);
+               o.triggerWebs = trigger != 0;
+           });
     option("Webs hold in open air", "With nothing in reach, a web still holds 100 m out; off, it misses.", S(40),
            [&] { changed |= toggle("##air", &o.airWebs); });
     option("Aim markers", "Show where each hand's web would land; X switches them in VR.", S(40),
@@ -938,19 +1077,6 @@ void App::optionsCard(ImVec2 size) {
         changed |= ImGui::SliderInt("##speed", &o.swingSpeed, 10, 65, "%d m/s");
         ImGui::PopFont();
     });
-    // A value the list does not have shows as the nearest one.
-    const auto stepCombo = [&](const char* id, const char* const* labels, const int* values, int count, int* value) {
-        int index = 0;
-        for (int i = 1; i < count; ++i)
-            if (std::abs(values[i] - *value) < std::abs(values[index] - *value))
-                index = i;
-        ImGui::PushFont(fonts_.semibold, 13.5f);
-        if (ImGui::Combo(id, &index, labels, count)) {
-            *value = values[index];
-            changed = true;
-        }
-        ImGui::PopFont();
-    };
     option("Weight", "How heavy you are while swinging and after letting go. 100% is real gravity.", S(150), [&] {
         stepCombo("##weight", kWeights, kWeightValues, static_cast<int>(std::size(kWeightValues)), &o.weight);
     });
@@ -1343,6 +1469,75 @@ void App::about(ImVec2 origin, ImVec2 size) {
             ImGui::PopStyleColor();
         }
     }
+    endCard();
+    ImGui::SetCursorScreenPos(ImVec2(x, ImGui::GetItemRectMax().y + gap));
+    updatesCard(rightWidth);
+}
+
+void App::updatesCard(float width) {
+    if (!beginCard("##updates", ImVec2(width, 0), ImGuiChildFlags_AutoResizeY))
+        return endCard();
+    cardTitle("UPDATES");
+    ImGui::Dummy(ImVec2(0, S(4)));
+    const auto& release = update_.release;
+    const bool available = release && (update_.state == UpdateState::available ||
+                                       update_.state == UpdateState::installFailed);
+    std::string status;
+    switch (update_.state) {
+    case UpdateState::idle:
+        status = installFolder_.empty() ? "This launcher runs from a Spidy checkout, which git updates."
+                                        : "Not checked yet.";
+        break;
+    case UpdateState::checking: status = "Asking GitHub for the newest Spidy..."; break;
+    case UpdateState::current:
+        status = format("Spidy %s is the newest version (checked at %s).", kVersion, update_.checkedAt.c_str());
+        break;
+    case UpdateState::available: status = format("Spidy %s is out: you have %s.", release->version.c_str(), kVersion); break;
+    case UpdateState::checkFailed: status = "The check failed. " + update_.message; break;
+    case UpdateState::downloading:
+    case UpdateState::installing:
+    case UpdateState::installed: status = format("Updating to Spidy %s.", release->version.c_str()); break;
+    case UpdateState::installFailed: status = "The update failed. " + update_.message; break;
+    }
+    ImGui::PushStyleColor(ImGuiCol_Text, vec({200, 205, 216}));
+    ImGui::TextWrapped("%s", status.c_str());
+    ImGui::PopStyleColor();
+    ImGui::Dummy(ImVec2(0, S(10)));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(S(10), 0));
+    option("Check when Spidy starts", "Asks GitHub for a newer Spidy. Updating waits for your click.", S(40), [&] {
+        if (toggle("##updateCheck", &settings_.updateCheck))
+            save();
+    });
+    ImGui::PopStyleVar();
+    const float half = (ImGui::GetContentRegionAvail().x - S(8)) * 0.5f;
+    if (available && !installFolder_.empty()) {
+        // The Play tab's banner shows how it goes.
+        const std::string blocker = updateBlocker();
+        ImGui::BeginDisabled(!blocker.empty());
+        ImGui::PushStyleColor(ImGuiCol_Button, vec(kBlue));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, vec({96, 155, 255}));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, vec({45, 110, 220}));
+        if (secondaryButton("Update now", half)) {
+            updateLater_ = false;
+            tab_ = Tab::play;
+            updater_.install();
+        }
+        ImGui::PopStyleColor(3);
+        ImGui::EndDisabled();
+        if (!blocker.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("%s", blocker.c_str());
+    } else {
+        ImGui::BeginDisabled(updater_.busy() || update_.state == UpdateState::installed);
+        if (secondaryButton(fonts_.icons ? (std::string(kRefresh) + "  Check now").c_str() : "Check now", half)) {
+            updateLater_ = false;
+            updater_.check();
+        }
+        ImGui::EndDisabled();
+    }
+    ImGui::SameLine(0, S(8));
+    if (secondaryButton(fonts_.icons ? (std::string(kOpen) + "  All releases").c_str() : "All releases", half))
+        openUrl(kReleasesUrl);
+    ImGui::Dummy(ImVec2(0, S(2)));
     endCard();
 }
 

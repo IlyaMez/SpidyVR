@@ -354,7 +354,7 @@ own thrown bodies do (web_grab's `StrikeConfig`, decided by `impactLoss`,
 |---|---|---|
 | A flying thug stopped short | his pace over two steps drops under 45% of the fastest of the three steps before, from 7 m/s, while the web asked no such stop | kKinetic, 2 + 0.7 per m/s lost over 7, up to 15; kStagger, kKnockdown from 14 m/s |
 | A thrown thug landing | his flight ends at 8 m/s or faster | as above, by his landing speed |
-| A flying thug or a thrown prop touching another thug | 6 m/s or faster; a capsule from his feet to 1.8 m, 0.35 m around | 2 + 0.7 per m/s over 6, kKnockdown; from 9 m/s kFlyBack with an impulse, knocked away from the flying thug (from the player, for a prop) |
+| A flying thug or a thrown prop touching another thug | 6 m/s or faster; a capsule from his feet to 1.8 m, 0.35 m around (a street thug's; since October 9 another enemy's carried over to his size, `game_targets::Size`) | 2 + 0.7 per m/s over 6, kKnockdown; from 9 m/s kFlyBack with an impulse, knocked away from the flying thug (from the player, for a prop) |
 
 The game doubled requested damage on its normal difficulty (a street thug has
 60). A bot is not hurt again within 0.8 s. The two-step pace and the web's

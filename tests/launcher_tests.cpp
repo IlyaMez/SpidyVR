@@ -1,4 +1,5 @@
 #include "spidy/launcher_text.hpp"
+#include "spidy/launcher_update.hpp"
 #include <functional>
 #include <iostream>
 #include <stdexcept>
@@ -177,6 +178,11 @@ int main() {
         options.flips = true;
         args = sessionArguments(options, L"r.json", L"", L"");
         check(args.size() == 8 && args[7] == L"--flips", "the experimental flips switched on");
+        options = {};
+        check(!options.triggerWebs, "the trigger webs in a new launcher");
+        options.triggerWebs = true;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 8 && args[7] == L"--trigger-webs", "the web button on the trigger");
     });
     test("the headset check's eye size and the memory larger eyes take", [] {
         const char* probe = "Headset available: Oculus Quest3; position tracking=1; orientation tracking=1. No session "
@@ -196,12 +202,12 @@ int main() {
         SessionOptions options;
         check(headsetSettings("VR settings from the headset: aim_markers=0 web_grab=1 air_webs=0 web_shooter=0 "
                               "punch=0 body=1 swing_speed=48 weight=150 snap_turn=45 smooth_turn=90 haptics=50 "
-                              "flips=1 screen_size=2\r",
+                              "flips=1 trigger_webs=1 screen_size=2\r",
                               options),
               "the line changed nothing");
         check(!options.aimMarkers && !options.airWebs && options.swingSpeed == 48 && options.weight == 150 &&
                   options.snapTurn == 45 && options.smoothTurn == 90 && options.haptics == 50 && options.flips &&
-                  options.screenSize == 2,
+                  options.triggerWebs && options.screenSize == 2,
               "every value, the last one before a carriage return");
         const auto kept = options;
         check(!headsetSettings("VR settings from the headset: aim_markers=0 air_webs=0", options) && options == kept,
@@ -297,6 +303,99 @@ int main() {
         check(unsupportedGame("4.630.0.0", "", {true, "", false}) ==
                   "A different game version than the one Spidy supports." + verify,
               "no supported version known");
+    });
+    test("JSON: nesting, escapes and the four kinds of scalar", [] {
+        const auto value = parseJson(R"( {"a": [1, -2.5e1, true, false, null], "s": "q\"\\\/é🕸\n",
+            "o": {"in": {"deep": "x"}}, "empty": {}, "none": []} )");
+        check(value && value->type == Json::Type::object, "an object");
+        const Json* a = value->get("a");
+        check(a && a->items.size() == 5 && a->items[0].number == 1 && a->items[1].number == -25, "numbers");
+        check(a->items[2].boolean && a->items[3].type == Json::Type::boolean && !a->items[3].boolean, "true, false");
+        check(a->items[4].type == Json::Type::null, "null");
+        check(value->text("s") == "q\"\\/\xC3\xA9\xF0\x9F\x95\xB8\n", "escapes, a surrogate pair as one UTF-8 character");
+        check(value->get("o")->get("in")->text("deep") == "x", "nested objects");
+        check(value->get("empty")->members.empty() && value->get("none")->items.empty(), "empty object and array");
+        check(value->text("a").empty() && !value->get("missing"), "a non-string and a missing member");
+        for (const char* bad : {"", "{", "{\"a\" 1}", "[1,]", "\"open", "{\"a\":1} x", "tru", "\"\x01\"", "01x"})
+            check(!parseJson(bad), bad);
+        check(!parseJson(std::string(100, '[') + std::string(100, ']')), "nesting beyond 64 levels");
+    });
+    // GitHub's answer for v0.2.6 (October 8), the user objects and URLs Spidy does not read cut short.
+    const std::string latest = R"({"url":"https://api.github.com/repos/IlyaMez/SpidyVR/releases/407178026",
+"html_url":"https://github.com/IlyaMez/SpidyVR/releases/tag/v0.2.6","id":407178026,
+"author":{"login":"github-actions[bot]","id":41898282,"type":"Bot","site_admin":false},
+"tag_name":"v0.2.6","target_commitish":"main","name":"Spidy 0.2.6","draft":false,"immutable":false,
+"prerelease":false,"created_at":"2026-10-08T19:13:59Z","assets":[{"url":"https://api.github.com/x/622754987",
+"id":622754987,"name":"Spidy-0.2.6-win64.zip","label":"","uploader":{"login":"github-actions[bot]","id":41898282},
+"content_type":"application/zip","state":"uploaded","size":12780581,
+"digest":"sha256:53d31980e78e2334b7274f2c3c07f627b2afbe7b76961a68bf5e565ef3ae9031","download_count":390,
+"browser_download_url":"https://github.com/IlyaMez/SpidyVR/releases/download/v0.2.6/Spidy-0.2.6-win64.zip"}],
+"body":"Extract the zip anywhere you can write and start **Spidy Launcher.exe**.\r\n\r\nSHA-256 of Spidy-0.2.6-win64.zip: `53D31980E78E2334B7274F2C3C07F627B2AFBE7B76961A68BF5E565EF3AE9031`\r\n\r\n## Changes since v0.2.5\r\n\r\n- Implement slow motion\r\n- Keep A pressed in the air\r\n"})";
+    test("the newest release: its zip, size, SHA-256 and changes", [&] {
+        std::string error;
+        const auto release = parseRelease(latest, error);
+        check(release.has_value(), error.c_str());
+        check(release->version == "0.2.6" && release->zipName == "Spidy-0.2.6-win64.zip", "version and zip");
+        check(release->zipUrl == "https://github.com/IlyaMez/SpidyVR/releases/download/v0.2.6/Spidy-0.2.6-win64.zip",
+              "download address");
+        check(release->zipSize == 12780581, "size");
+        check(release->sha256 == "53d31980e78e2334b7274f2c3c07f627b2afbe7b76961a68bf5e565ef3ae9031", "digest");
+        check(release->page == "https://github.com/IlyaMez/SpidyVR/releases/tag/v0.2.6", "page");
+        check(release->changes == std::vector<std::string>{"Implement slow motion", "Keep A pressed in the air"},
+              "the list of changes, line ends dropped");
+    });
+    test("a release without a digest uses its notes' SHA-256; without either it is refused", [&] {
+        const auto replace = [&](std::string text, const std::string& from, const std::string& to) {
+            return text.replace(text.find(from), from.size(), to);
+        };
+        const std::string digest = "\"sha256:53d31980e78e2334b7274f2c3c07f627b2afbe7b76961a68bf5e565ef3ae9031\"";
+        std::string error;
+        const auto notes = parseRelease(replace(latest, digest, "null"), error);
+        check(notes && notes->sha256 == "53d31980e78e2334b7274f2c3c07f627b2afbe7b76961a68bf5e565ef3ae9031",
+              "from the notes, in lower case");
+        const std::string unchecked = replace(replace(latest, digest, "null"), "SHA-256 of", "Hash of");
+        check(!parseRelease(unchecked, error) && error.find("no SHA-256") != std::string::npos, error.c_str());
+        check(!parseRelease(replace(latest, "\"name\":\"Spidy-0.2.6-win64.zip\"", "\"name\":\"other.zip\""), error) &&
+                  error == "Spidy 0.2.6 has no Spidy-0.2.6-win64.zip to download.",
+              "another asset only");
+        check(!parseRelease(replace(latest, "\"https://github.com/IlyaMez/SpidyVR/releases/download",
+                                    "\"http://github.com/IlyaMez/SpidyVR/releases/download"),
+                            error),
+              "a download address that is not https");
+        check(!parseRelease(replace(latest, "\"v0.2.6\"", "\"nightly\""), error) &&
+                  error == "The newest release has no version number (its tag is \"nightly\").",
+              "a tag without a version");
+        check(!parseRelease("<html>rate limited</html>", error) && error == "GitHub's answer could not be read.",
+              "not JSON");
+    });
+    test("versions: three numbers, newer field by field", [] {
+        for (const char* good : {"0.2.6", "1.0.0", "10.20.300"})
+            check(releaseVersion(good), good);
+        for (const char* bad : {"", "0.2", "0.2.6.1", "0.2.", ".2.6", "0..6", "v0.2.6", "0.2.6-rc1", "1.123456.0"})
+            check(!releaseVersion(bad), bad);
+        check(newerVersion("0.2.7", "0.2.6") && newerVersion("0.10.0", "0.9.9") && newerVersion("1.0.0", "0.99.99"),
+              "newer");
+        check(!newerVersion("0.2.6", "0.2.6") && !newerVersion("0.2.5", "0.2.6"), "the same or older");
+    });
+    test("an update replaces and adds the package's files and retires stale ones in its folders only", [] {
+        const std::vector<std::wstring> installed{
+            L"Spidy Launcher.exe", L"README.txt", L"my notes.txt", L"tools/run_game_vr.py", L"Tools/Old_Tool.py",
+            L"tools/__pycache__/x.pyc", L"python/python312.dll", L"build/windows-ninja/spidy_bridge.dll",
+            L"build/windows-ninja/spidy_gone.dll", L"reports/game-vr-20261008-120000.json", L"saves/mine.txt"};
+        const std::vector<std::wstring> package{L"Spidy Launcher.exe", L"README.txt", L"tools/run_game_vr.py",
+                                                L"tools/new_tool.py", L"python/python313.dll",
+                                                L"build/windows-ninja/SPIDY_BRIDGE.dll", L"docs/licenses/MIT.txt"};
+        const auto plan = updatePlan(installed, package);
+        check(plan.replace == std::vector<std::wstring>{L"Spidy Launcher.exe", L"README.txt", L"tools/run_game_vr.py",
+                                                         L"build/windows-ninja/SPIDY_BRIDGE.dll"},
+              "the package's files already there, case aside");
+        check(plan.add == std::vector<std::wstring>{L"tools/new_tool.py", L"python/python313.dll",
+                                                     L"docs/licenses/MIT.txt"},
+              "new files");
+        check(plan.retire == std::vector<std::wstring>{L"Tools/Old_Tool.py", L"python/python312.dll",
+                                                        L"build/windows-ninja/spidy_gone.dll"},
+              "stale files in the package's folders; the player's files beside the launcher, subfolders the "
+              "package has no files in, reports and other folders stay");
     });
     std::cout << (total - failed) << '/' << total << " launcher checks passed\n";
     return failed ? 1 : 0;

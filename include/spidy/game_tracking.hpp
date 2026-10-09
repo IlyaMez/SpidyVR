@@ -7,7 +7,9 @@
 #include <cmath>
 
 namespace spidy {
-Input trackedSwingInput(const XrFrame& frame, const Rig& rig);
+// triggerWebs: the controllers' triggers are the hands' web buttons (Input's
+// grip) and their grips the reels (Input's trigger), swapped from the default.
+Input trackedSwingInput(const XrFrame& frame, const Rig& rig, bool triggerWebs = false);
 native_rays::Command controllerAimRays(const Input&, uint64_t serial);
 struct GameMotionFrame {
     bool active{}, releaseWebs = true;
@@ -139,6 +141,16 @@ class GameTrackingRig {
     void flips(bool on) {
         flips_ = on;
     }
+    // Which button webs (the WEB BUTTON setting): off, the grip shoots and
+    // holds a hand's web and the trigger reels it in and shoots web balls; on,
+    // the trigger webs and the grip reels. The grip until set; reset() keeps
+    // it. Menus, fists and the T-pose calibration keep the buttons as they are.
+    // A change lets go of both webs, as a long break does: a button held across
+    // it does nothing until it is let go.
+    void triggerWebs(bool on) {
+        buttonsChanged_ |= on != triggerWebs_;
+        triggerWebs_ = on;
+    }
     void reset();
 
   private:
@@ -148,6 +160,8 @@ class GameTrackingRig {
     Vec3 lastFeet_{}, standOff_{};
     std::int64_t lastTime_{};
     bool initialized_{}, wasActive_{}, turnHeld_{}, pendingRecenter_{}, onSurface_{}, flips_{};
+    // The trigger webs, and the web button changed since the last frame of play.
+    bool triggerWebs_{}, buttonsChanged_{};
     float snap_ = .5235988f, smooth_{};
     // The stand-off wanted along the surface's normal, and the time on it.
     float surfaceDepth_{}, surfaceSeconds_{};

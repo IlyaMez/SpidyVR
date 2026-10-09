@@ -39,8 +39,9 @@ coming. Questions, bugs, clips: come say hi on
 ## Features
 
 - 🕸️ **Physical web swinging.** Squeeze a grip to fire that hand's web where you
-  point, swing on it, reel in with the trigger, pull sharply to zip. Webs hold on
-  buildings, the ground, or open air.
+  point, swing on it, reel in with the trigger, pull sharply to zip (or swap the
+  two: the trigger webs, the grip reels). Webs hold on buildings, the ground, or
+  open air.
 - 🎯 **Web shooter.** The trigger of a hand without a web fires the game's own
   web ball from your wrist, with aim assist on thugs. Three quick hits web a
   thug up.
@@ -90,6 +91,7 @@ windows. If the headset shows a still picture, click the game window once.
 - Starts the game with the larger render memory VR needs, in a small window that
   saves GPU time, and puts your window settings back afterwards.
 - Remembers your options, and saves a report of every session in `reports\`.
+- Offers each new Spidy release when it starts, and updates itself in place with one click.
 
 Spidy changes nothing in the game's folder.
 
@@ -102,6 +104,7 @@ Spidy changes nothing in the game's folder.
 | Zip | Pull the hand sharply away from the anchor |
 | Shoot a web ball | **Trigger** of a hand without a web |
 | Grab a prop or thug | Grip aimed at it; trigger reels it, a sharp pull yanks it, release throws it |
+| Webs on the trigger instead | Set **WEB BUTTON** to TRIGGER in VR settings (or *Web button* in the launcher): the trigger shoots and holds webs, the grip reels and shoots web balls |
 | Punch | A fast fist into a thug |
 | Walk and run / jump | **Left stick** / **A** (from the ground, a wall or a perch; no web zip in the air) |
 | Flip (experimental, off by default: FLIPS in VR settings or the launcher) | Tap **A** in the air: one flip toward where the left stick points. Hold **A** in the air: the left stick turns you, as fast as you tilt it; let go to come back level |
@@ -126,7 +129,7 @@ a red cross misses, a turning ring of three arcs catches a prop or thug.
 | Low frame rate | Lower *Render resolution* in the launcher, or the streaming quality in Virtual Desktop. 90 Hz paces more evenly than 120 Hz. |
 | Blurry or jagged edges | Raise *Render resolution* in the launcher above 100% (try 125%); it costs frame rate and memory. |
 | A memory warning before start | Close big programs (browsers, chat apps), or [give Windows a larger page file](docs/DEVELOPMENT.md#memory-for-a-vr-session). |
-| Web balls fly when you meant to reel | The trigger reels only while that hand's web is attached; on a hand without a web it shoots. |
+| Web balls fly when you meant to reel | The trigger (the grip with WEB BUTTON: TRIGGER) reels only while that hand's web is attached; on a hand without a web it shoots. |
 
 More fixes are in the [players' guide](docs/PLAYERS.md). When you report a
 problem, attach the session's report from the `reports` folder, on

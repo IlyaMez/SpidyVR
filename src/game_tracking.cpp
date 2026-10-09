@@ -181,7 +181,7 @@ Quat FlipMotion::update(const Sample& s) {
     }
     return tilt_;
 }
-Input trackedSwingInput(const XrFrame& f, const Rig& rig) {
+Input trackedSwingInput(const XrFrame& f, const Rig& rig, bool triggerWebs) {
     Input input;
     input.focused = f.focused && f.valid && validTrackedPose(f.head);
     if (!input.focused)
@@ -191,9 +191,12 @@ Input trackedSwingInput(const XrFrame& f, const Rig& rig) {
     input.tilt = rig.tilt;
     for (unsigned i = 0; i < 2; ++i) {
         const auto& hand = f.hands[i];
+        // The web button and the reel: the grip and the trigger, or swapped.
+        const float web = triggerWebs ? hand.trigger : hand.squeeze;
+        const float reel = triggerWebs ? hand.squeeze : hand.trigger;
         if (handValid(hand))
             input.hands[i] = {rig.toWorld(hand.aim), hand.grip.position - f.head.position, true,
-                              std::clamp(hand.trigger, 0.f, 1.f), std::clamp(hand.squeeze, 0.f, 1.f)};
+                              std::clamp(reel, 0.f, 1.f), std::clamp(web, 0.f, 1.f)};
     }
     const auto& move = f.hands[0];
     if (handValid(move) && std::hypot(move.stickX, move.stickY) > .2f) {
@@ -205,12 +208,13 @@ Input trackedSwingInput(const XrFrame& f, const Rig& rig) {
 }
 void GameTrackingRig::reset() {
     const float snap = snap_, smooth = smooth_;
-    const bool flips = flips_;
+    const bool flips = flips_, triggerWebs = triggerWebs_;
     const FlipMotion flip = flip_;
     *this = {};
     snap_ = snap;
     smooth_ = smooth;
     flips_ = flips;
+    triggerWebs_ = triggerWebs;
     flip_ = flip;
     flip_.reset();
 }
@@ -322,11 +326,11 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         out.surfaceClearance = dot(unplacedHead + standOff_ - feet, away);
     const Rig placed{rig_.origin + standOff_, rig_.yaw, rig_.tilt, rig_.pivot};
     out.active = true;
-    out.releaseWebs = longBreak || pendingRecenter_;
-    pendingRecenter_ = false;
+    out.releaseWebs = longBreak || pendingRecenter_ || buttonsChanged_;
+    pendingRecenter_ = buttonsChanged_ = false;
     out.predictedDisplayTime = f.predictedDisplayTime;
     out.anchor = feet;
-    out.swing = trackedSwingInput(f, placed);
+    out.swing = trackedSwingInput(f, placed, triggerWebs_);
     // A held flip steers with the left stick: the player does not walk or drift.
     if (flip_.steering())
         out.swing.move = {};

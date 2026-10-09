@@ -16,6 +16,8 @@ constexpr const char* screenChoices[] = {"SMALL", "MEDIUM", "LARGE"};
 // CALIBRATE BODY, a switch with names of its own: ON RESUME asks for the T-pose
 // as soon as play resumes.
 constexpr const char* calibrateChoices[] = {"NO", "ON RESUME"};
+// WEB BUTTON, a switch named by the button that webs: TRIGGER swaps it with the grip.
+constexpr const char* webButtonChoices[] = {"GRIP", "TRIGGER"};
 constexpr int screenSizes[] = {0, 1, 2};
 static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(snapChoices) == std::size(snapTurns) &&
               std::size(smoothChoices) == std::size(smoothTurns) &&
@@ -69,6 +71,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.calibrate;
     case Item::flips:
         return &v.flips;
+    case Item::webButton:
+        return &v.triggerWebs;
     default:
         return nullptr;
     }
@@ -84,10 +88,12 @@ Values sanitized(Values v) {
     v.weight = std::clamp(v.weight, 40, 300);
     return v;
 }
-const std::array<Row, 14>& rows() {
+const std::array<Row, 15>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 14> all{{
+    static const std::array<Row, 15> all{{
         {Item::none, "WEBS", nullptr, {}},
+        {Item::webButton, "WEB BUTTON",
+         "Which button shoots and holds a web; the other reels in and shoots web balls.", webButtonChoices},
         {Item::aimMarkers, "AIM MARKERS", "Show where each web would land. X also switches them during play.", {}},
         {Item::airWebs, "WEBS HOLD IN OPEN AIR",
          "With nothing in reach, a web still holds in open air, 100 m out.", {}},

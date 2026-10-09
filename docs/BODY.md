@@ -251,7 +251,9 @@ pose's point (at the knuckles); its speed is that of the grip relative to the
 head, turned from tracking space into the world: the arm's own motion, whatever
 the player's flight. The characters are the game's bots, kept by a registry
 watch (`game_targets`, every 250 ms), each an upright capsule from his feet,
-1.8 m tall and 0.3 m around. A fist sphere of 8 cm swept from its last sample
+1.8 m tall and 0.3 m around for a street thug; since October 9 another bot's
+is that carried over to his size, the capsule his mover collides with
+(`game_targets::Size`). A fist sphere of 8 cm swept from its last sample
 to this one finds the first bot it enters; the punch's strength and reaction
 follow the tables above.
 

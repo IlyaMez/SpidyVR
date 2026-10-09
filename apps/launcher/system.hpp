@@ -72,6 +72,8 @@ struct Settings {
     uint64_t hashSize{}, hashTime{};
     std::string hashValue;
     bool shortcutsAsked{};
+    // Ask GitHub for a newer Spidy when the launcher starts.
+    bool updateCheck = true;
 };
 Settings loadSettings();
 void saveSettings(const Settings& settings);
@@ -162,6 +164,12 @@ private:
     std::optional<DWORD> exit_;
     std::chrono::steady_clock::time_point started_, stopAt_;
 };
+
+// Runs a hidden command to completion (or `timeoutMs`), collecting what it prints; nullopt when it did
+// not start or ran out of time.
+std::optional<DWORD> capture(const std::wstring& commandLine, const std::wstring& folder,
+                             std::wstring* environmentBlock, DWORD timeoutMs, std::string& output);
+std::optional<std::string> sha256(const std::wstring& path);
 
 // Shell actions.
 void openUrl(const char* url);

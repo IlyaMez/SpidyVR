@@ -21,21 +21,31 @@ namespace {
 using game_targets::Candidate;
 using game_targets::Kind;
 // A target's centre above its actor transform (feet, or the base of a prop),
-// its radius and its mass for the web.
+// its radius and its mass for the web. A bot's centre and radius are a
+// street thug's carried over to his size (game_targets::Size).
 struct Shape {
     float lift, radius, mass;
     TargetKind core;
 };
-Shape shape(Kind kind) {
-    switch (kind) {
+Shape shape(const Candidate& c) {
+    switch (c.kind) {
     case Kind::throwable:
         return {.45f, .45f, 30, TargetKind::Object};
     case Kind::bot:
-        return {.95f, .45f, 80, TargetKind::Character};
+        return {c.size.height(.95f), c.size.width(.45f), 80, TargetKind::Character};
     case Kind::pedestrian:
         return {.95f, .4f, 70, TargetKind::Character};
     }
     return {.5f, .4f, 50, TargetKind::Object};
+}
+// Whether a sphere at `centre` touches the standing bot `c` whose actor is at
+// `feet`: the strikes' capsule, a street thug's, carried over to his size.
+bool touchesBot(Vec3 centre, float radius, const Candidate& c, Vec3 feet, const StrikeConfig& strikes) {
+    StrikeConfig sized = strikes;
+    const float bottom = c.size.height(0);
+    sized.characterHeight = c.size.height(strikes.characterHeight) - bottom;
+    sized.characterRadius = c.size.width(strikes.characterRadius);
+    return touches(centre, radius, feet + Vec3{0, bottom, 0}, sized);
 }
 // A command lasts long enough for one slow frame, like the swing's.
 constexpr uint32_t leaseMs = 150;
@@ -198,7 +208,7 @@ const Candidate* nearest(Vec3 origin, Vec3 direction, float distance, float cone
         Vec3 at{};
         if (!game_targets::position(c, at))
             continue;
-        const auto s = shape(c.kind);
+        const auto s = shape(c);
         at += Vec3{0, s.lift, 0};
         // A standing person is a tall target: its sphere covers head to knees.
         const float radius = s.core == TargetKind::Character ? s.radius * 2 : s.radius;
@@ -214,7 +224,7 @@ const Candidate* nearest(Vec3 origin, Vec3 direction, float distance, float cone
     return best && game_targets::live(base, *best) ? best : nullptr;
 }
 GrabTarget described(const Candidate& c, Vec3 centre, Vec3 velocity) {
-    const auto s = shape(c.kind);
+    const auto s = shape(c);
     return GrabTarget{c.record, s.core, centre, velocity, s.mass, s.radius};
 }
 class Targets final : public TargetQueries {
@@ -235,14 +245,14 @@ class Targets final : public TargetQueries {
                 Vec3 at{};
                 if (c.record == id && takes(c) && movable(c) && game_targets::live(base, c) &&
                     game_targets::position(c, at)) {
-                    t = follow(c, at + Vec3{0, shape(c.kind).lift, 0});
+                    t = follow(c, at + Vec3{0, shape(c).lift, 0});
                     break;
                 }
             }
         }
         if (!t || t->gone || !t->seen)
             return {};
-        const auto s = shape(t->who.kind);
+        const auto s = shape(t->who);
         return GrabTarget{id, s.core, t->position, t->velocity, s.mass, s.radius};
     }
     // Body userData (+0x98) carries its actor's handle in the low 32 bits.
@@ -266,7 +276,7 @@ class Targets final : public TargetQueries {
     // The enemies a throw may be aimed at.
     void characters(std::vector<GrabTarget>& out) const override {
         for (const auto& c : candidates) {
-            const auto s = shape(c.kind);
+            const auto s = shape(c);
             Vec3 at{};
             if (s.core == TargetKind::Character && takes(c) && game_targets::position(c, at))
                 out.push_back({c.record, s.core, at + Vec3{0, s.lift, 0}, {}, s.mass, s.radius});
@@ -292,7 +302,7 @@ class Glance final : public TargetQueries {
             Vec3 at{};
             if (c.record == id && takes(c) && movable(c) && game_targets::live(base, c) &&
                 game_targets::position(c, at))
-                return described(c, at + Vec3{0, shape(c.kind).lift, 0}, {});
+                return described(c, at + Vec3{0, shape(c).lift, 0}, {});
         }
         return {};
     }
@@ -305,7 +315,7 @@ class Glance final : public TargetQueries {
 // loses what goes into a wall ahead, and the centre stays its lift above the
 // ground. Returns whether the target stands on the ground.
 bool guard(const Tracked& t, Vec3& v, float dt, const WorldQueries& world) {
-    const auto s = shape(t.who.kind);
+    const auto s = shape(t.who);
     const float travel = length(v) * dt;
     if (travel > 1e-4f) {
         const Vec3 direction = v / length(v);
@@ -545,10 +555,10 @@ void strike(Tracked& t, float dt, bool flung, const Vec3& gravity) {
             for (const auto& c : candidates) {
                 Vec3 feet{};
                 if (!game_targets::enemy(c) || c.record == t.who.record || !game_targets::position(c, feet) ||
-                    !touches(t.position, shape(Kind::bot).radius, feet, strikes))
+                    !touchesBot(t.position, shape(t.who).radius, c, feet, strikes))
                     continue;
                 // The one struck is knocked away from the one flying into him.
-                if (blow(c.record, t.who.record, feet + Vec3{0, shape(Kind::bot).lift, 0}, t.paced,
+                if (blow(c.record, t.who.record, feet + Vec3{0, shape(c).lift, 0}, t.paced,
                          strikeBlow(speed, strikes))) {
                     ++struck;
                     impacts += blow(t.who.record, hero, t.position, t.paced * -1.f, impactBlow(speed * .6f, strikes));
@@ -581,9 +591,9 @@ void strikeWith(const Tracked& t) {
     for (const auto& c : candidates) {
         Vec3 feet{};
         if (!game_targets::enemy(c) || !game_targets::position(c, feet) ||
-            !touches(t.position, shape(t.who.kind).radius, feet, strikes))
+            !touchesBot(t.position, shape(t.who).radius, c, feet, strikes))
             continue;
-        struck += blow(c.record, hero, feet + Vec3{0, shape(Kind::bot).lift, 0}, t.velocity,
+        struck += blow(c.record, hero, feet + Vec3{0, shape(c).lift, 0}, t.velocity,
                        strikeBlow(speed, strikes));
     }
     if (struck) {
@@ -636,7 +646,7 @@ void observe(float dt) {
             t.gone = true;
             continue;
         }
-        at += Vec3{0, shape(t.who.kind).lift, 0};
+        at += Vec3{0, shape(t.who).lift, 0};
         Vec3 velocity = t.seen ? (at - t.position) / dt : Vec3{};
         Vec3 centre{}, moving{}, measured{};
         if (t.who.kind == Kind::throwable && native_bodies::predicted(t.actor, centre, moving, measured)) {

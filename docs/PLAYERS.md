@@ -33,6 +33,18 @@ tools that attach to a running game; if files go missing after extracting,
 allow the Spidy folder and extract it again.
 
 
+UPDATES
+-------
+When it starts, the launcher asks GitHub whether a newer Spidy is out. If one
+is, a blue bar above the Play tab offers it. "Update now" downloads it, checks
+it, puts its files in this folder and starts the new launcher, all in a few
+seconds. Your settings and the reports folder stay. Stop VR and close the
+game first. "Later" asks again at the next start. About > UPDATES checks
+again on request, and its switch turns the check at start off.
+The folder keeps the name it was extracted with (Spidy-0.2.7, say) through
+updates; About shows the version inside.
+
+
 PLAY
 ----
 1. Close the game if it is running.
@@ -65,6 +77,12 @@ back when the game closes.
 
 CONTROLS
 --------
+The grip webs and the trigger reels, as below. To shoot webs with the
+trigger instead, set WEB BUTTON to TRIGGER (Settings > SPIDY VR, or "Web
+button" in the launcher's options): the trigger then shoots and holds a
+web, and the grip reels in and shoots web balls. Fists, the T-pose
+calibration and the game's menus keep the buttons as they are.
+
 Swinging
   Squeeze a grip ........ shoot that hand's web; hold to swing
   Release the grip ...... let go
@@ -78,6 +96,7 @@ Grabbing
   A thug you pull flies off his feet, flailing, and lands hard when thrown.
   Slammed into a wall or the ground he gets hurt, and thrown into another
   thug, or hit by a prop you throw, that thug goes down too.
+  "Thug" here means any enemy, flying ones included.
 
 Web shooter
   Trigger of a hand ...... shoot a web ball where that hand points: the
@@ -87,8 +106,8 @@ Web shooter
                            other hand can shoot while one hand swings.
                            Three quick hits web a thug up.
 
-Aim markers (where each hand's web would go if you squeezed its grip now;
-the left hand's are blue, the right hand's orange)
+Aim markers (where each hand's web would go if you pressed its web button
+now; the left hand's are blue, the right hand's orange)
   Ring with a dot ...... the web holds there
   Faint dashed ring .... nothing in reach: it holds in open air (with "Webs
                          hold in open air" off it would miss: no marker)
@@ -104,7 +123,8 @@ Your body and fists
                          and hands where your controllers are
   Punch a thug ......... a fist moving fast into him hits: the faster, the
                          harder he is knocked back (an uppercut lifts him)
-  Squeeze a grip ....... closes that hand into a fist (it shoots a web too)
+  Squeeze a grip ....... closes that hand into a fist (it shoots a web too;
+                         with WEB BUTTON: TRIGGER, a web ball)
   T-pose, both triggers  calibrates your body (when the panel asks): his
                          height and arms become yours. B skips it
 
@@ -155,8 +175,10 @@ VR settings
   one press). It works like the game's other tabs: the left stick moves and
   changes the selected setting, X resets it, Y resets the whole tab, B goes
   back.
-  Switch the aim markers and webs holding in open air (a web that meets
-  nothing within 100 m holds there; off, it misses) on or off, or step the
+  Choose the WEB BUTTON (GRIP or TRIGGER: the one that shoots and holds a
+  web; the other reels in and shoots web balls), switch the aim markers and
+  webs holding in open air (a web that meets nothing within 100 m holds
+  there; off, it misses) on or off, or step the
   swing speed limit, your weight, snap turn, smooth turn, controller
   vibration and the game screen's size. Under EXPERIMENTAL, FLIPS (off until
   you switch it on) lets A in the air flip you. Changes apply at once. The
@@ -209,8 +231,12 @@ IF SOMETHING IS WRONG
 - Webs shot at the sky hold somewhere you can't see: switch "Webs hold in
   open air" off in Settings > SPIDY VR or the launcher's options; a web then
   needs something within 100 m to hold on to.
-- Web balls fly when you only meant to reel in: the trigger reels only while
-  that hand's web is attached; otherwise it shoots.
+- Web balls fly when you only meant to reel in: the trigger (the grip with
+  WEB BUTTON: TRIGGER) reels only while that hand's web is attached;
+  otherwise it shoots.
+- You would rather shoot webs with the trigger, as in other VR games: set
+  WEB BUTTON to TRIGGER in Settings > SPIDY VR (or "Web button" in the
+  launcher's options). The grip then reels in and shoots web balls.
 - Snap turning makes you uneasy, or the vibration is too strong: Settings >
   SPIDY VR has both.
 - Swinging feels floaty, or falls too hard: WEIGHT in Settings > SPIDY VR

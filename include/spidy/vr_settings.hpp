@@ -35,6 +35,10 @@ struct Values {
     // Experimental, off unless chosen: A in the air flips you (game_tracking's
     // FlipMotion); off, it does nothing there.
     bool flips = false;
+    // The web button (the tab's WEB BUTTON): false the grip, which shoots and
+    // holds a hand's web while the trigger reels it in and shoots web balls;
+    // true the trigger, the two swapped (GameTrackingRig::triggerWebs).
+    bool triggerWebs = false;
     bool operator==(const Values&) const = default;
 };
 // The steps the game's Settings offer. The launcher's slider sets any swing
@@ -75,8 +79,9 @@ enum class Item : uint8_t {
     weight,
     calibrate,
     flips,
+    webButton,
 };
-inline constexpr Item lastItem = Item::flips;
+inline constexpr Item lastItem = Item::webButton;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. A setting without choices is an ON/OFF switch, the game's own;
 // one with choices steps through them. Titles are upper case, as the game's
@@ -87,7 +92,7 @@ struct Row {
     const char* help{};
     std::span<const char* const> choices{};
 };
-const std::array<Row, 14>& rows();
+const std::array<Row, 15>& rows();
 // The choice a setting shows for these values: a switch 0 (off) or 1 (on), a
 // list its step nearest to the value (a launcher value between two steps
 // shows the nearer one, the lower on a tie).

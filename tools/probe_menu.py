@@ -5,11 +5,12 @@
 It needs a started game with a loaded save (tools/probe_menu_pad.py start, then pad a --until-player), in which
 Settings have not been opened yet (the game reopens them on the tab last used), and the game window in front. It starts the tab's hooks with test values (SpidyMenuStart: swing speed 33 m/s, which the tab shows
 as its nearest step, 32; the web shooter off), pauses with Spidy's virtual Xbox controller, moving with its left stick
-as the Touch controllers do, opens Settings, goes Up to SPIDY VR (the list wraps) and opens it. Then it switches the
-aim markers off, switches webs in open air off and puts them back with X (RESET), steps the swing speed up (from 32 one
-step is 40), steps the weight up (from 60% one step is 80%), asks for a body calibration (CALIBRATE BODY: ON RESUME;
-without a headset nothing calibrates), steps snap turn up, switches smooth turning on (its first speed, 60 degrees a
-second), and resets the whole tab with Y (RESET ALL, confirmed with A): Spidy's defaults, the calibration no longer
+as the Touch controllers do, opens Settings, goes Up to SPIDY VR (the list wraps) and opens it. Then it puts the
+web button on the trigger (WEB BUTTON: TRIGGER), switches the aim markers off, switches webs in open air off and puts
+them back with X (RESET), steps the swing speed up (from 32 one step is 40), steps the weight up (from 60% one step is
+80%), asks for a body calibration (CALIBRATE BODY: ON RESUME; without a headset nothing calibrates), steps snap turn
+up, switches smooth turning on (its first speed, 60 degrees a second), switches the experimental flips on, and resets
+the whole tab with Y (RESET ALL, confirmed with A): Spidy's defaults, the grip webbing again, the calibration no longer
 asked for, while the web shooter, which the tab does not offer, stays off. After each step it reads what the tab holds
 (SpidyMenuSample) and saves a window capture in reports/menu-probe/. Last it backs out to the game, stops the hooks
 (SpidyMenuStop) and checks that each hooked function starts with the game's own bytes again. Writes
@@ -38,7 +39,8 @@ HOOKS = (0x1d1cf30, 0x7dc400, 0x72d640, 0x72d650, 0x72e1d0, 0x72d5f0, 0x72d610, 
          0x1749ae0)
 MAGIC = 0x554e4d53
 # ProbeSettings / ProbeSample flags, as XrData's settings bits plus the aim markers and a body calibration asked for.
-FLAGS = dict(web_grab=1, punch=2, body=4, air_webs=8, web_shooter=16, aim_markers=32, calibrate=64, flips=128)
+FLAGS = dict(web_grab=1, punch=2, body=4, air_webs=8, web_shooter=16, aim_markers=32, calibrate=64, flips=128,
+             trigger_webs=256)
 # The left stick pushed fully one way (x, y; up is +y).
 STICK = dict(up=(0, 32767), down=(0, -32767), left=(-32767, 0), right=(32767, 0))
 
@@ -130,43 +132,48 @@ def main():
         press('up', wait=.6)
         step('settings_last_tab')
         press('a', wait=1.2)
-        step('spidy_vr', dict(aim_markers=True, swing_speed=33.0, web_shooter=False, weight=60))
+        step('spidy_vr', dict(trigger_webs=False, aim_markers=True, swing_speed=33.0, web_shooter=False, weight=60))
+        # The first row: WEB BUTTON, GRIP until stepped to TRIGGER.
         press('right', wait=.8)
-        step('aim_markers_off', dict(aim_markers=False), changes=1)
+        step('web_button_trigger', dict(trigger_webs=True, aim_markers=True), changes=1)
         press('down')
         press('right', wait=.8)
-        step('air_webs_off', dict(air_webs=False), changes=2)
+        step('aim_markers_off', dict(aim_markers=False, trigger_webs=True), changes=2)
+        press('down')
+        press('right', wait=.8)
+        step('air_webs_off', dict(air_webs=False), changes=3)
         press('x', wait=.8)
-        step('air_webs_reset', dict(air_webs=True), changes=3)
+        step('air_webs_reset', dict(air_webs=True), changes=4)
         press('down')
         press('right', wait=.8)
-        step('swing_speed_40', dict(swing_speed=40.0), changes=4)
+        step('swing_speed_40', dict(swing_speed=40.0), changes=5)
         press('down')
         press('right', wait=.8)
-        step('weight_80', dict(weight=80, swing_speed=40.0), changes=5)
+        step('weight_80', dict(weight=80, swing_speed=40.0), changes=6)
         # Down past the BODY heading: a calibration at the next gameplay.
         press('down')
         press('right', wait=.8)
-        step('calibrate_on_resume', dict(calibrate=True, weight=80), changes=6)
+        step('calibrate_on_resume', dict(calibrate=True, weight=80), changes=7)
         # Down past the COMFORT heading.
         press('down')
         press('right', wait=.8)
-        step('snap_turn_45', dict(snap_turn=45, calibrate=True), changes=7)
+        step('snap_turn_45', dict(snap_turn=45, calibrate=True), changes=8)
         press('down')
         press('right', wait=.8)
-        step('smooth_turn_60', dict(smooth_turn=60, snap_turn=45), changes=8)
+        step('smooth_turn_60', dict(smooth_turn=60, snap_turn=45), changes=9)
         # Down past vibration, the screen size and the EXPERIMENTAL heading: the flips, off until switched on.
         press('down', 'down', 'down')
         press('right', wait=.8)
-        step('flips_on', dict(flips=True, smooth_turn=60), changes=9)
+        step('flips_on', dict(flips=True, smooth_turn=60), changes=10)
         press('y', wait=1.2)
         step('reset_all_asks')
         press('a', wait=1.2)
-        # Spidy's defaults: seven settings changed back (aim markers, swing speed, weight, the calibration asked
-        # for, snap turn, smooth turn, the flips). The web shooter, which the tab does not offer, stays as the
-        # probe started it.
-        step('reset_all', dict(aim_markers=True, air_webs=True, swing_speed=32.0, weight=60, calibrate=False,
-                               snap_turn=30, smooth_turn=0, flips=False, web_shooter=False, body=True), changes=16)
+        # Spidy's defaults: eight settings changed back (the web button, aim markers, swing speed, weight, the
+        # calibration asked for, snap turn, smooth turn, the flips). The web shooter, which the tab does not offer,
+        # stays as the probe started it.
+        step('reset_all', dict(trigger_webs=False, aim_markers=True, air_webs=True, swing_speed=32.0, weight=60,
+                               calibrate=False, snap_turn=30, smooth_turn=0, flips=False, web_shooter=False,
+                               body=True), changes=18)
         press('b', wait=.8)
         press('b', wait=.8)
         press('b', wait=1.5)

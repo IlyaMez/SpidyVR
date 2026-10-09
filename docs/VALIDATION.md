@@ -1,6 +1,237 @@
-# Validation — 2026-10-08
+# Validation — 2026-10-09
 
-## Slow motion — current build
+## Each enemy's own size — current build
+
+The user, October 9, after hearing that the fists, web balls and webs took
+every enemy for a street thug's size: "fix the size issue".
+
+**Where the game keeps a bot's size.** The executable's strings name a
+`MoverBodySize` (vtable `0x500e870`) with fields `BodyBottom`, `BodyTop` and
+`BodyRadius`. `MoverConfig` (vtable `0x500e950`, 0x78 bytes) embeds one at
++0x58 (its constructor at `0x22c9300`). Every mover manager keeps its live
+body at +0xdb8, after its mover's handle at +0xdb4: `MoverManager` code
+reads +0xdc0, +0xdc4 and +0xdc8 there. `0x1fbba90` builds the mover's
+capsule from them: the lower end at `position + up × (+0xdc0 − +0xdc8)`, the
+upper at `position + up × (+0xdf8 × +0xdc4 + +0xdc8)`. So +0xdc0 and +0xdc4
+are the spheres' centres above the transform, +0xdc8 their radius, and
++0xdf8 a scale on the upper one. Read from outside in the game, at the
+user's save:
+
+| Actor | Body at +0xdb8 (bottom, top, radius, scale) | Capsule above the transform |
+|---|---|---|
+| 12 Fisk thugs (`ThugBot`, `BotMoverManagerGame`) | 0.85, 1.15, 0.45, 1 (also in their `MoverConfig` at +0x48, +0x60) | 0.4 m to 1.6 m, 0.45 m around |
+| The hero | 0.86, 1.3, 0.4, 1 | 0.46 m to 1.7 m, 0.4 m around |
+
+**What was built.** `game_targets::sizeOf` reads that body from a bot's
+mover manager (the scan's marker component). It accepts it only behind the
+`MoverBodySize` vtable, with a radius of 0.02 to 10 m and a span of 0.05 to
+20 m, and keeps a street thug's size otherwise. Each scan stores it in the
+candidate (`Candidate::size`). `Size::height` carries a height tuned on a
+street thug (feet at 0) over to the bot: it maps his capsule's ends, 0.4 and
+1.6 m, onto the bot's. `Size::width` scales a width by the radius against
+0.45 m. A street thug's own measures come back unchanged. They now set:
+- the web balls' aim point (1.15 m) and the aim assist's width (0.45 m);
+- the punch target, an upright capsule from his feet to 1.8 m, 0.3 m around,
+  and the distance worth testing grows with his height;
+- the grab's centre (0.95 m), its radius (0.45 m) and the aim markers'
+  target;
+- the strikes' capsule, 1.8 m by 0.35 m, for the enemy a flying enemy or a
+  thrown prop strikes.
+
+Mass is unchanged.
+
+**Checks.** 207 core checks, 1 new: a fake mover manager laid out like the
+game's reads 0.4 to 1.6 m and 0.45 m. A street thug's 0, 0.95, 1.15 and
+1.8 m and his 0.3 m come back unchanged; a scale of 2 reaches 2.75 m; a
+drone's (−0.3 to 0.3 m, 0.2 m) and a heavy's (0.6 to 3 m, 0.9 m) scale as
+mapped. A zero radius or another class at +0xdb8 reads nothing and leaves the
+size as it was. The rebuilt ray module was not run in the game. For street
+thugs it gives the same numbers as the build measured there (see "Every
+enemy in the target scan" below).
+
+**Not verified.** No enemy of another size was near the save: how well a
+drone's, a flyer's or a heavy's capsule fits his model is unseen.
+
+## The launcher updates itself — preceding build
+
+The user, October 9: "lets add autoupdater for the launcher".
+
+**What was built.** `include/spidy/launcher_update.hpp`: a small JSON reader
+(`parseJson`), `parseRelease` (GitHub's `/releases/latest` answer: tag
+`vX.Y.Z`, the asset `Spidy-<version>-win64.zip` over https with its size, and
+the asset's `digest`, else the SHA-256 line in the notes; the notes' "- "
+lines as changes), `releaseVersion`, `newerVersion` and `updatePlan` (replace,
+add, retire). `apps/launcher/update.cpp`: `Updater` (start/check/install/
+cancel on a worker; WinHTTP; download into `.spidy-update\`, size and SHA-256
+checked, `tar.exe` unpacks it; renames with a journal and rollback),
+`installFolder`, `restartLauncher`, and the refusal when a process runs from
+the folder or the game has its modules loaded. `ui.cpp`: the Play tab's
+update banner (offer, progress, failure, "updated"), About's UPDATES card,
+`update_check=` in launcher.ini. `main.cpp`: `--wait-for <pid>`,
+`--updated-from <version>`, and the new launcher started after the old one's
+window and lock are gone. `system.cpp` shares `capture` and `sha256`. CMake:
+`update.cpp`, `winhttp`.
+
+**Checks.** 21 launcher checks, 5 new:
+- JSON: nesting, escapes with a surrogate pair, the scalars, nine malformed
+  texts, and nesting past 64 levels refused.
+- GitHub's real v0.2.6 answer, cut short: version, zip, address, size,
+  digest, page and changes.
+- The notes' SHA-256 (upper case) when the digest is null. Refused: no SHA-256,
+  another asset only, an http address, a tag without a version, and not JSON.
+- Versions: good and bad tags, newer field by field.
+- `updatePlan`: case-insensitive matches, stale files retired only in the
+  package's folders.
+
+The scratch build (subst, `-DSPIDY_BUILD_XR=OFF`) is clean at /W4.
+End to end, in a copy of the 0.2.5 release with this launcher (v0.2.5, from
+`CMakeLists.txt`), against the real v0.2.6 release; clicks were posted to the
+window, and `launcher.ini` was backed up and restored:
+- The banner offered 0.2.6 and About's card agreed. *Update now* showed the
+  progress and installed it. The 0.2.6 launcher took over. 68 files were
+  hash-identical to the 0.2.6 zip, `reports\` and `my notes.txt` stayed,
+  `tools\stray_tool.py` was in `.spidy-update\previous\`, and `.spidy-update` was
+  hidden.
+- A first run that started the new launcher before the old one released its
+  lock lost the window: 0.2.6 ignores `--wait-for` and saw the lock. The
+  restart moved to the end of `wWinMain`, and the second run handed over.
+- With `python\python.exe` from the folder running, the banner said "Close
+  python.exe first: it still uses Spidy's files."
+- With `tools\xr_runtime.py` held open by another Python, the swap failed at
+  that file and undid every rename: all 69 files were hash-identical to
+  before, the running exe included ("Nothing was changed"). *Try again* after
+  the lock was released installed 0.2.6.
+- `--updated-from 0.2.4 --wait-for <a 4 s sleeper>` opened the window after
+  4.3 s and deleted `.spidy-update\`. Once *Later* hid the 0.2.6 offer, it
+  showed "Spidy is updated: 0.2.4 to 0.2.5".
+
+**Not verified.** *Cancel* mid-download, a SHA-256 mismatch, a proxy or no
+network, and an update into a release that has the updater (none is
+published yet, so the first real one is the release after this build).
+
+## WEB BUTTON: webs on the grip or the trigger — preceding build
+
+The user, October 9: "lets add an option to switch between grip and trigger
+action mapping".
+
+**What was built.** `vr_settings::Values::triggerWebs` (off by default) and a
+WEB BUTTON row, the first under WEBS in the SPIDY VR tab: a switch named by
+its two choices, GRIP and TRIGGER, as CALIBRATE BODY is (15 rows, setting
+numbers 0x200-0x20e). `trackedSwingInput(frame, rig, triggerWebs)` gives the
+swing each controller's trigger as its web button (`HandInput::grip`) and its
+grip as its reel (`HandInput::trigger`). `GameTrackingRig::triggerWebs` holds
+the setting (`reset()` keeps it), and a change sets `releaseWebs` on the next
+frame of play, so each hand needs a fresh press. Everything that reads the
+swing's input follows: the swing (shoot, hold, reel, zip), the web grab
+(catch, reel, yank, throw), the web shooter (a free hand's reel button) and
+the aim markers (the ring's squeeze). What reads the controllers directly
+keeps their own buttons: the fists (the grip closes the hand), the T-pose
+calibration (both triggers) and the virtual Xbox controller on the game screen
+(grips as bumpers, triggers as triggers). The lab (`spidy_xr_lab`) keeps the
+grip.
+
+**Protocol.** XrConfig version 17, layout unchanged: options bit 12 (4096)
+starts a session with the trigger webbing, and `SpidyXrStart` takes options up
+to 8191. XrData version 17, layout unchanged: settings bit 64. The menu
+probe's flags bit 256 (`ProbeSettings` and `ProbeSample` stay version 3).
+run_game_vr.py: `--trigger-webs`; `trigger_webs` in `vr_settings` and in the
+"VR settings from the headset" line. Launcher: `SessionOptions::triggerWebs`,
+a "Web button" choice (Grip, Trigger) in OPTIONS before "Webs hold in open
+air", `trigger_webs=` in launcher.ini and from the headset line.
+launch-game-vr.ps1 `-TriggerWebs`; its console lines name the buttons as set.
+
+**Checks.** 206 core checks, 1 new: `trackedSwingInput` swaps each hand's two
+buttons both ways and clamps them. In `GameTrackingRig`, the default mapping
+holds in play. A change in play lets go of both webs for exactly one frame,
+then the trigger webs. The same button set again lets go of nothing. A change
+made with no gameplay (a menu) lets go once play is back. `reset()` keeps the
+button. The tab test finds WEB BUTTON at row 1 with GRIP and TRIGGER, headings
+at rows 0, 6, 8 and 13, and FLIPS last. Its choices: GRIP by default,
+TRIGGER, nothing past them, and RESET ALL puts GRIP back. 16 launcher checks
+(the `--trigger-webs` argument, `trigger_webs=1` from the headset line), 88
+Python checks (data version 17; settings bit 64 decodes as `trigger_webs`
+alone; the start values and the launcher's line carry it), and the GPU test
+(debug layer clean).
+
+**Not verified.** Nothing ran in the game. `tools/probe_menu.py` now sets WEB
+BUTTON to TRIGGER first and expects 18 changes, but has not run. Swinging
+with the trigger needs the headset: the XR worker runs only in an OpenXR
+session.
+
+## Every enemy in the target scan — preceding build
+
+The user, October 9, passing on a player's report: "Flying Sable agents
+ignore punches, and webs pass through them. in general those should be
+working on all enemies." Asked whether that meant a save per enemy type: "cant
+we do something more systemic?"
+
+**Cause.** `game_targets` took an actor for a bot by one component class,
+`BotMoverManagerGame` (vtable `0x38533e0`), compared exactly. The
+executable's RTTI has five classes derived from `BotMoverManager`:
+`BotMoverManagerGame` and, derived from it, `HammerheadBotMoverManager`
+(`0x3853558`) and `MechaHammerheadMoverManager` (`0x385c618`);
+`HoverMoverManager` (`0x384ce18`, beside the `BotStateHover*` states,
+`HoverBehaviorMap` and `BehaviorRangedCombatHover`) and, derived from it,
+`DocOckMoverManager` (`0x384cfa0`). The fists (`game_punch`), the web balls'
+aim assist and webbing (`game_shooter`) and the web grab (`game_grab`) all
+act only on that list, so a bot any other class moved was invisible to them.
+The game's `Team` component (red and blue teams) was looked at for a hostility
+test instead of classes: no actor in the running game had one.
+
+**What was built.** `game_targets` classifies every component class it
+scans from the game's RTTI: the complete object locator before the vtable
+(signature 1, offset 0, its own image offset), the class hierarchy it names,
+and each base class's type descriptor name. A rule names a class, and that
+class and everything derived from it marks a kind or gives a trait:
+`ThrowableHelper`, `BotMoverManager` and `PedestrianMover` mark the kinds;
+`HoverMoverManager` gives the new `hover` trait; `ThugBot`, `CivilianBot`,
+`AllyBot`, `MissionFollowBot`, `StatusEffectTrackerWebbed` and
+`BreakableSystemComponent` give the traits as before; `BirdBot`,
+`Helicopter` and `SilverSableCraftBot` give the new `neutral` trait, which
+`enemy()` excludes like civilians and allies (the fists skip neutral bots
+too). Results are cached per vtable and per type descriptor under one lock,
+which the three watches' scans share. Only vtables inside the game image are
+classified. `PhysicsComponent` and `SyncStaticStateMachine` stay exact, as
+`native_bodies` needs them. `live()` compares the vtable the scan recorded.
+`botMover()` holds for every bot: the mover's handle at +0xdb4 is
+`MoverManager`'s, read by its methods `0x1fb9c60`, `0x1fb9cb0`, `0x1fb9d60`,
+`0x1fb9dd0` and `0x1fba3d0`. No protocol change.
+
+**Checks.** 205 core checks, 1 new: the test program's own stand-in classes,
+named like the game's, through `game_targets::classOf` (MSVC lays out their
+RTTI as it did the game's). `DocOckMoverManager` (two levels below
+`HoverMoverManager`) is a bot that hovers, `BotMoverManagerGame` a bot that
+doesn't, `SilverSable` (from `ThugBot`) a thug and no bot, `CivilianBot`,
+`BirdBot`, `ThrowableHelper` and `StatusEffectTrackerWebbed` exactly their
+own bits, an unrelated class and plain data nothing.
+
+In the game, headless, on the user's save (a Fisk hideout on a construction
+site: 12 `ThugBot`s on `BotMoverManagerGame`, no hover bot loaded anywhere),
+with `tools/probe_combat.py` (new):
+
+| Check | Result |
+|---|---|
+| `--list`, the same rules read from outside | 12 bots, all enemies, none flying; no actor with a `Bot` component lacked a bot mover manager |
+| The web grab's own scan inside the game (props and bots) | 74 candidates, as the outside scan counts |
+| `shoot`: 3 web balls at a thug | 3 fired, 3 collisions, 3 webbing blows, all on him; webbing 30 of 30, `BotStateWebStruggle`; health 50 to 48.5 |
+| `punch`: a scripted fist through a thug at 6 m/s (swing input) | 1 punch on him at 5.36 m/s, 1 request issued: damage 27.9, `BotStateHitReactGame`, health 50 to 19.34 |
+| `pull`: grip, yank, carry, throw | caught him; `BotStateFlung`, then `BotStateWallFlop`; 1 launch, 588 steered steps, 1 impact blow; moved 28.6 m; health 50 to 25.9 |
+| Stops and hooks | every module stopped with 0; every hook entry restored |
+
+The hideout's snipers shot the hero down during the run (health 0 in the
+last capture). The game saved `slot0-s.save` once itself (`[Save] Request
+save type 0` at 11:24:38). Every other save file stayed byte-identical; the
+backup is `reports/backups/saves-before-combat-probe-20261009-110805`.
+
+**Not verified.** No flying enemy was loaded near the save (a player met
+them). Which enemies `HoverMoverManager` flies comes from the class names,
+not from a sighting. A flyer's reaction to a fist and to webbing is the
+game's damage, as for any bot. To a pull: the kinetic knock asks for
+`BotStateFlung`; if a flyer doesn't take it within 0.25 s, its
+`MoverStandard` is steered as for bots the game won't fling, and once let
+go it is brought down under Spidy's rays.
+
+## Slow motion — preceding build
 
 The user, October 8: "lets add a blade and sorcery like slow motion button
 with nice smooth transition in and out, effect when its active and a "mana"

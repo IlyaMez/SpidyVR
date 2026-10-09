@@ -15,8 +15,9 @@ extern "C" {
 __declspec(dllexport) Data SpidyPunchData;
 }
 namespace {
-// A bot from the feet up, and how far from a fist one may stand to be
-// worth testing this sample.
+// A street thug from the feet up (other bots by their size, as
+// game_targets::Size carries it over), and how far from a fist one of his
+// height may stand to be worth testing this sample.
 constexpr float botHeight = 1.8f, botRadius = .3f, reach = 3;
 uintptr_t base{};
 std::atomic<bool> enabled{};
@@ -126,13 +127,15 @@ void game_punch::update(float seconds, const Input& in, uint64_t hero, uint32_t 
     inReach.clear();
     for (const auto& b : bots) {
         Vec3 feet{};
-        if (!game_targets::position(b, feet))
+        if ((b.traits & game_targets::neutral) || !game_targets::position(b, feet))
             continue;
+        const float bottom = b.size.height(0), top = b.size.height(botHeight);
+        const Vec3 middle = feet + Vec3{0, b.size.height(1), 0};
         bool close{};
         for (const auto& h : hands)
-            close |= h.tracked && length(h.fist - (feet + Vec3{0, 1, 0})) < reach;
+            close |= h.tracked && length(h.fist - middle) < reach + std::max(0.f, top - bottom - botHeight);
         if (close && game_targets::live(base, b))
-            inReach.push_back({b.record, feet, botHeight, botRadius});
+            inReach.push_back({b.record, feet + Vec3{0, bottom, 0}, top - bottom, b.size.width(botRadius)});
     }
     events.clear();
     punches.update(seconds, hands, inReach, events);

@@ -5,6 +5,7 @@
 #include "imgui_impl_win32.h"
 #include <d3d11.h>
 #include <dwmapi.h>
+#include <shellapi.h>
 #include <filesystem>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
@@ -157,6 +158,23 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM w, LPARAM l) {
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
+    // After an update the launcher that installed it starts this one (update.cpp's restartLauncher): this
+    // one waits for it to close, then says which version it replaced.
+    std::string updatedFrom;
+    int count = 0;
+    if (LPWSTR* args = CommandLineToArgvW(GetCommandLineW(), &count)) {
+        for (int i = 1; i + 1 < count; ++i) {
+            if (wcscmp(args[i], L"--wait-for") == 0) {
+                if (HANDLE previous = OpenProcess(SYNCHRONIZE, FALSE, wcstoul(args[i + 1], nullptr, 10))) {
+                    WaitForSingleObject(previous, 20000);
+                    CloseHandle(previous);
+                }
+            } else if (wcscmp(args[i], L"--updated-from") == 0) {
+                updatedFrom = launcher::narrow(args[i + 1]);
+            }
+        }
+        LocalFree(args);
+    }
     // One launcher at a time: a second start brings the first one forward.
     HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\SpidyLauncher");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -214,8 +232,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     ImGui_ImplWin32_Init(window);
     ImGui_ImplDX11_Init(device, context);
 
+    std::wstring restartFolder;
     {
-        launcher::App application(window, fonts);
+        launcher::App application(window, fonts, updatedFrom);
         app = &application;
         bool done = false, occluded = false;
         while (!done) {
@@ -265,6 +284,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
             occluded = swapChain->Present(foreground ? 1 : 0, 0) == DXGI_STATUS_OCCLUDED;
         }
         app = nullptr;
+        restartFolder = application.restartFolder();
     }
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
@@ -273,5 +293,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     CoUninitialize();
     if (single)
         CloseHandle(single);
+    // An update put new files in place: their launcher starts now that this one's window and its
+    // one-at-a-time lock are gone.
+    if (!restartFolder.empty()) {
+        std::string error;
+        if (!launcher::restartLauncher(restartFolder, error))
+            MessageBoxW(nullptr, launcher::widen(error).c_str(), L"Spidy VR", MB_ICONWARNING);
+    }
     return 0;
 }

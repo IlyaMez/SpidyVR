@@ -1,5 +1,6 @@
 #pragma once
 #include "system.hpp"
+#include "update.hpp"
 #include "imgui.h"
 #include <functional>
 
@@ -19,7 +20,8 @@ void theme(ImGuiStyle& style);
 
 class App {
 public:
-    App(HWND window, Fonts fonts);
+    // `updatedFrom`: the version an update just replaced (the launcher started again), else empty.
+    App(HWND window, Fonts fonts, std::string updatedFrom = {});
     ~App();
     // Reads the scan, checks and session; runs every loop, even while minimized.
     void poll();
@@ -29,6 +31,10 @@ public:
     // The window's close button: false while VR runs (the window asks first).
     bool allowClose();
     bool shouldQuit() const { return quit_; }
+    // After an update: the folder whose new launcher starts once this one has closed (main.cpp).
+    std::wstring restartFolder() const {
+        return quit_ && update_.state == UpdateState::installed ? installFolder_ : std::wstring();
+    }
 
 private:
     enum class Tab { play, controls, about };
@@ -45,6 +51,11 @@ private:
     void startBlock(ImVec2 size);
     void logCard(ImVec2 size);
     void shortcutBanner(float width);
+    // The update offer, its progress or the update just made, above the Play tab; returns its height (0: none).
+    float updateBanner(float width);
+    void updatesCard(float width);
+    // Why the update cannot start now; empty when it can.
+    std::string updateBlocker();
     void modals();
 
     bool beginCard(const char* id, ImVec2 size, int childFlags = 0);
@@ -92,6 +103,12 @@ private:
     Outcome lastInstall_ = Outcome::idle;
     double lastRefresh_{};
     std::string shortcutMessage_;
+    // Updates: the player's copy of Spidy (empty in a checkout), and the banner's state.
+    std::wstring installFolder_;
+    Updater updater_;
+    UpdateStatus update_;
+    std::string updatedFrom_;
+    bool updateLater_{};
 };
 
 } // namespace launcher

@@ -283,6 +283,8 @@ struct SessionOptions {
     int smoothTurn = 0; // degrees a second the right stick turns you while held over; 0: it snap turns
     int weight = 60;    // how heavy you are while webs fly you, percent of real gravity
     bool flips = false; // experimental: A in the air flips you (tap), or lets the left stick turn you (held)
+    // The trigger shoots and holds webs, and the grip reels them in and shoots web balls; off, the other way round.
+    bool triggerWebs = false;
     // Your T-pose calibration in the headset (body_calibration.hpp): the eye height and arm length Spider-Man's
     // body is sized to, millimetres. Both 0: none yet, and VR asks for one at the first gameplay unless
     // calibrationPrompt is off (you skipped it).
@@ -317,6 +319,8 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
         args.emplace_back(L"--no-air-webs");
     if (options.flips)
         args.emplace_back(L"--flips");
+    if (options.triggerWebs)
+        args.emplace_back(L"--trigger-webs");
     if (calibrated(options)) {
         args.emplace_back(L"--eye-height");
         args.emplace_back(std::to_wstring(options.eyeHeightMm));
@@ -383,6 +387,8 @@ inline bool headsetSettings(std::string_view line, SessionOptions& options) {
             next.airWebs = number != 0;
         else if (key == "flips")
             next.flips = number != 0;
+        else if (key == "trigger_webs")
+            next.triggerWebs = number != 0;
         else if (key == "swing_speed")
             next.swingSpeed = std::clamp(number, 10, 65);
         else if (key == "snap_turn")

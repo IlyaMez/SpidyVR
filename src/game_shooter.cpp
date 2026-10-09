@@ -52,7 +52,8 @@ using MakeRef = uint64_t* (*)(uint64_t*, void*);
 constexpr uint8_t eventHeader[10] = {0x35, 0x20, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x49, 0x9c};
 // A pull waits this long for the main thread at most; a paused game drops it.
 constexpr uint64_t leaseMs = 250;
-// A thug's aim point above his feet, and how wide he is to the aim assist.
+// A street thug's aim point above his feet, and how wide he is to the aim
+// assist; other bots' by their size (game_targets::Size).
 constexpr float chest = 1.15f, botRadius = .45f;
 // The gadget belongs to the player: its actor is this close to the player's.
 constexpr float gadgetReach = 10;
@@ -471,7 +472,7 @@ void collided(uintptr_t shot, uintptr_t event) {
                 continue;
             Vec3 at{};
             if (!placed && game_targets::position(c, at))
-                point = at + Vec3{0, chest, 0};
+                point = at + Vec3{0, c.size.height(chest), 0};
             if (game_targets::enemy(c) && (c.traits & game_targets::webbable)) {
                 native_bodies::Damage d;
                 d.victim = record;
@@ -754,7 +755,8 @@ void game_shooter::update(float seconds, const Input& in, uint32_t busy, uint64_
         targets.clear();
         for (const auto& b : bots)
             if (Vec3 at{}; game_targets::enemy(b) && game_targets::position(b, at))
-                targets.push_back({b.record, at + Vec3{0, chest, 0}, botRadius});
+                targets.push_back(
+                    {b.record, at + Vec3{0, b.size.height(chest), 0}, b.size.width(botRadius)});
         for (int i = 0; i < 2; ++i) {
             if (!((pulls >> i) & 1))
                 continue;

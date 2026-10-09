@@ -35,7 +35,7 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 16, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 17, bytes = sizeof(XrConfig), pid{};
     // record and mover are no longer used: VR starts with the game, before
     // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
@@ -52,13 +52,14 @@ struct XrConfig {
     // bit 9: no web shooter (a free hand's trigger shoots nothing);
     // bit 10: no T-pose calibration at the first gameplay of a session without
     // one (the player skipped it before; the SPIDY VR tab still offers it);
-    // bit 11: flips, experimental (A in the air flips the player; FlipMotion)
+    // bit 11: flips, experimental (A in the air flips the player; FlipMotion);
+    // bit 12: the trigger webs and the grip reels (WEB BUTTON: TRIGGER)
     uint32_t options{};
     // OpenXR runtime manifest the launcher chose; empty: Virtual Desktop's if
     // installed, else Windows' active runtime.
     wchar_t runtime[260]{};
-    // The rest of the VR settings a session starts from (options bits 3, 5-9
-    // and 11, swingSpeed and weight give the others): degrees per snap turn (0:
+    // The rest of the VR settings a session starts from (options bits 3, 5-9,
+    // 11 and 12, swingSpeed and weight give the others): degrees per snap turn (0:
     // none), controller vibration in percent, the game screen's size (0-2),
     // degrees a second of smooth turning (0: the stick snap turns).
     uint32_t snapTurn = 30, haptics = 100, screenSize = 1, smoothTurn{};
@@ -80,7 +81,7 @@ enum GateReason : uint32_t {
     gateTracking = 16,    // the headset's pose or timing was not usable
 };
 struct XrData {
-    uint32_t magic = 0x53585244, version = 16, bytes = sizeof(XrData), status{};
+    uint32_t magic = 0x53585244, version = 17, bytes = sizeof(XrData), status{};
     int64_t sequence{};
     uint64_t frames{}, tracked{}, submitted{}, dropped{}, leftHands{}, rightHands{}, serial{}, generation{};
     uint32_t nativeKeys{}, error{};
@@ -113,7 +114,8 @@ struct XrData {
     uint64_t markers{};
     // The VR settings now: the SPIDY VR tab in the game's Settings changes
     // them during play (X the aim markers, too). settings bits: 1 web grab,
-    // 2 punch, 4 body, 8 webs in open air, 16 web shooter, 32 flips. Then the changes
+    // 2 punch, 4 body, 8 webs in open air, 16 web shooter, 32 flips, 64 the
+    // trigger webs (WEB BUTTON: TRIGGER; the grip reels). Then the changes
     // made in that tab so far, the times the game built its Settings with it,
     // whether its hooks are in, and why it is missing (game_menu: 93xx-94xx
     // not hooked, 95xx not built).
@@ -346,6 +348,7 @@ DWORD WINAPI run(void*) {
         values.airWebs = !(config.options & 256);
         values.webShooter = !(config.options & 512);
         values.flips = config.options & 2048;
+        values.triggerWebs = config.options & 4096;
         values.swingSpeed = config.swingSpeed;
         values.snapTurn = static_cast<int>(config.snapTurn);
         values.smoothTurn = static_cast<int>(config.smoothTurn);
@@ -510,6 +513,7 @@ DWORD WINAPI run(void*) {
             rig.snapTurn(static_cast<float>(values.snapTurn) * 3.14159265f / 180);
             rig.smoothTurn(static_cast<float>(values.smoothTurn) * 3.14159265f / 180);
             rig.flips(values.flips);
+            rig.triggerWebs(values.triggerWebs);
             if (swingStarted && swingSettings) {
                 game_swing::Settings s;
                 s.grab = values.webGrab && sampleGrab;
@@ -874,7 +878,7 @@ DWORD WINAPI run(void*) {
                         check(swingState.error, "Native swinging");
                         if (!sampleGrab || sampleGrab(&grabState))
                             grabState = {};
-                        // What each free hand's grip press would do: the aim markers.
+                        // What each free hand's web button would do: the aim markers.
                         aims = {};
                         if (values.aimMarkers && sampleAim && input.focused) {
                             game_swing::AimData sample;
@@ -1016,7 +1020,7 @@ DWORD WINAPI run(void*) {
                         d.aimMarkers = values.aimMarkers;
                         d.settings = (values.webGrab ? 1u : 0u) | (values.punch ? 2u : 0u) | (values.body ? 4u : 0u) |
                                      (values.airWebs ? 8u : 0u) | (values.webShooter ? 16u : 0u) |
-                                     (values.flips ? 32u : 0u);
+                                     (values.flips ? 32u : 0u) | (values.triggerWebs ? 64u : 0u);
                         d.snapTurn = static_cast<uint32_t>(values.snapTurn);
                         d.smoothTurn = static_cast<uint32_t>(values.smoothTurn);
                         d.haptics = static_cast<uint32_t>(values.haptics);
@@ -1322,7 +1326,7 @@ DWORD WINAPI run(void*) {
                                 appendWeb(vertices, line, viewer, pixelAngle);
                             }
                         }
-                        // Aim markers: where each free hand's grip press would send its
+                        // Aim markers: where each free hand's web button would send its
                         // web, on the line that hand points along in this image, that
                         // line steadied from image to image. Translucent, the farthest
                         // drawn first.
@@ -1609,11 +1613,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 16 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 17 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
-        !config.motionModule || config.options > 4095 || config.snapTurn > 90 || config.haptics > 100 ||
+        !config.motionModule || config.options > 8191 || config.snapTurn > 90 || config.haptics > 100 ||
         config.screenSize > 2 || config.smoothTurn > 360 ||
         !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 || config.swingSpeed > 65 ||
         (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||

@@ -149,7 +149,11 @@ with gravity-correction and airborne-event counters.
 
 A grip press shoots a hand's web and holding the grip keeps it; release the grip
 to let go. The trigger reels while a web is attached (after a release, if it was
-held when the web attached). That press takes up existing slack immediately;
+held when the web attached). `run_game_vr.py --trigger-webs` (the VR settings'
+WEB BUTTON: TRIGGER; XrConfig options bit 12, reported as `trigger_webs` in
+`vr_settings`, XrData settings bit 64) swaps the two for the swing, the grab,
+the web shooter and the aim markers (`trackedSwingInput`); the fists, the T-pose
+calibration and the game's menus keep the controllers' own buttons. That press takes up existing slack immediately;
 reeling runs at 16 m/s and starts at that speed in one step. Physical yanks use
 tracked sample timestamps. Left stick steers, right stick snap-turns, and A jumps. The landing
 window for point launch is core-tested; the combined in-game headset controls
@@ -171,7 +175,7 @@ holding, done; `hint`: what the panel asks for; `progress`; `done` and
 `skipped` this session; `reach_m`, each arm at the last one) and, in
 `vr_settings`, `eye_height_mm`, `arm_length_mm` and `calibration_prompt`, so
 the session's last line hands a calibration made or skipped to the launcher;
-`body` has `arm_scale`. XrConfig and XrData are version 15 (640 and 792
+`body` has `arm_scale`. XrConfig and XrData are version 17 (640 and 792
 bytes); the body's status is version 2 (144 bytes).
 
 The test report rejects intermediate XR/swing faults, incomplete GPU work, failed
@@ -335,6 +339,35 @@ RB on the virtual pad fires the gadget the game's gadget wheel has selected,
 which need not be the web shooter (the user's save had the Impact Web), and a
 perched hero fires it too; Spidy's shots always use the web shooter.
 
+### Enemies: web balls, fists and pulls
+
+`python tools/probe_combat.py --list` reads a running game and lists every bot
+as Spidy's target scan takes it, by the same rules on the game's RTTI: its own
+class, its mover manager, its traits, whether it is an enemy, its size (the
+capsule his mover collides with, as `game_targets::sizeOf` reads it: lowest
+and highest point above his transform, radius), its two states, health,
+webbing and MoverStandard. The probes' shots, fist and grip aim at heights
+carried over to that size. It also lists any actor with a `Bot`
+component but no bot mover manager, one the scan would miss. It loads nothing,
+so it can run again and again, for instance while the player travels to a
+crime.
+`python tools/probe_combat.py --target flyer` (or `walker`, `nearest`, an
+actor record) after `tools/probe_menu_pad.py start` and `pad a --until-player`
+with enemies within `--range` (40 m). It starts the rays, the swing (props and
+bots offered), the shooter and the fists, and checks that the web grab's own
+scan counts as many candidates as the outside list. Then each phase takes the
+nearest target not tried yet:
+- `shoot`: three web balls (`SpidyShooterTest`) from 6 m before his chest.
+- `punch`: a scripted fist through his chest at 6 m/s, through the swing's
+  input.
+- `pull`: a scripted grip catches him, yanks, carries, winds up and throws.
+
+It records his states, health, webbing and path, and the modules' telemetry.
+It fails if a hook entry was patched before it started; it reports whether
+the modules stopped and the hooks were restored. Report:
+`reports/combat-probe.json`, window captures in `reports/grab-probe/`. A blow
+starts the fight: thugs around may shoot the standing hero.
+
 ### The SPIDY VR tab in the game's Settings
 
 `python tools/probe_menu.py` after `tools/probe_menu_pad.py start` and
@@ -342,14 +375,15 @@ perched hero fires it too; Spidy's shots always use the web shooter.
 has Settings fifth): it starts the tab's hooks with test values
 (`SpidyMenuStart`: 33 m/s, the web shooter off), pauses with the virtual Xbox
 controller, moving with its left stick as the Touch controllers do, opens
-Settings, goes Up to SPIDY VR and opens it, then switches the aim markers off,
+Settings, goes Up to SPIDY VR and opens it, then sets WEB BUTTON to TRIGGER,
+switches the aim markers off,
 switches webs in open air off and resets them with X, steps the swing speed to
 40 m/s and the weight to 80%, sets CALIBRATE BODY to ON RESUME (a calibration
 asked for; without a headset nothing calibrates), snap turn to 45 degrees,
 smooth turn to 60 degrees a second, switches the experimental FLIPS on, and
-resets the tab with Y and A (16 changes in all; the web shooter, which the tab
+resets the tab with Y and A (18 changes in all; the web shooter, which the tab
 does not offer, stays off). The FLIPS step is new on October 8 (thirteenth
-build) and has not run in the game yet.
+build), the WEB BUTTON step on October 9; neither has run in the game yet.
 After each step
 it reads `SpidyMenuSample` (what the tab holds, the tabs built, the changes)
 and captures the window. It fails if a step left other values than expected or

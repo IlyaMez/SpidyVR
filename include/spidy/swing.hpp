@@ -41,6 +41,9 @@ struct HandInput {
     Pose aim{};                // world space, -Z forward
     Vec3 gripRelativeToHead{}; // tracking meters, excludes artificial travel
     bool tracked{};
+    // grip shoots and holds this hand's web; trigger reels it in (a free
+    // hand's shoots a web ball). The controller's own grip and trigger unless
+    // the player swapped them (trackedSwingInput).
     float trigger{}, grip{};
 };
 struct Input {

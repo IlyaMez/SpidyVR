@@ -21,6 +21,7 @@ param(
     [switch]$NoAimMarkers,
     [switch]$NoCalibrationPrompt,
     [switch]$Flips,
+    [switch]$TriggerWebs,
     [switch]$NoEyeOcclusion,
     [switch]$StockMonitorView,
     [switch]$FullDesktopView,
@@ -48,6 +49,9 @@ if($Size -and $RenderScale -ne 100) { throw 'Use -Size or -RenderScale, not both
 if(($EyeHeight -eq 0) -ne ($ArmLength -eq 0) -or ($EyeHeight -and ($EyeHeight -lt 1000 -or $ArmLength -lt 250))) {
     throw 'Give both -EyeHeight (1000..2500 mm) and -ArmLength (250..1200 mm) from a T-pose calibration, or neither.'
 }
+# The button that shoots and holds webs, and the one that reels them in and shoots web balls.
+$web='grip'; $reel='trigger'
+if($TriggerWebs) { $web='trigger'; $reel='grip' }
 Write-Host 'Spidy VR - connect your headset before starting (Quest 3: Virtual Desktop or Steam Link; SteamVR headsets: start SteamVR).'
 if($XrRuntime) { Write-Host "VR runtime: $XrRuntime." }
 else { Write-Host 'VR runtime: the one your headset is connected to (add -XrRuntime <manifest> to choose).' }
@@ -63,20 +67,23 @@ Write-Host "In VR B is the game's interact button (its Y: backpacks, doors, prom
 Write-Host 'Keep the game window in front on the desktop: the game pauses while another window is.'
 Write-Host 'Click both thumbsticks to switch between immersive VR and a flat game screen in the headset.'
 Write-Host "VR settings are in the game's own Settings: pause, Settings, then SPIDY VR (Up from GAME reaches it)."
-Write-Host 'There change the aim markers, webs in open air, swing speed, weight, your body calibration,'
+Write-Host 'There change the web button, aim markers, webs in open air, swing speed, weight, your body calibration,'
 Write-Host 'snap turn, smooth turn, vibration, screen size and the experimental flips during play.'
-Write-Host "Squeeze a grip to shoot that hand's web. Keep it held to swing; release it to let go."
-Write-Host "Swing speed cap: $SwingSpeed m/s. Pull the trigger while a web is attached to reel in."
+Write-Host "Press a $web to shoot that hand's web. Keep it held to swing; release it to let go."
+Write-Host "Swing speed cap: $SwingSpeed m/s. Press the $reel while a web is attached to reel in."
+if($TriggerWebs) { Write-Host 'Web button: the trigger (the grip reels in and shoots web balls).' }
+else { Write-Host 'Web button: the grip (add -TriggerWebs to shoot webs with the trigger and reel with the grip).' }
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $report=Join-Path $projectRoot "reports\game-vr-$stamp.json"
 $captureArgs=@()
 if($CaptureImages) { $captureArgs=@('--capture-images') }
+if($TriggerWebs) { $captureArgs+=@('--trigger-webs') }
 if($OverlayWebs) { $captureArgs+=@('--overlay-webs'); Write-Host 'Webs: Spidy overlay strands.' }
 else { Write-Host "Webs: the game's own web lines (add -OverlayWebs for Spidy's strands)." }
 if($NoWebGrab) { $captureArgs+=@('--no-web-grab'); Write-Host 'Web grab off: webs only swing.' }
 else {
-    Write-Host 'A web aimed at a throwable prop or a thug catches it: trigger reels it in, a sharp pull yanks'
-    Write-Host 'it to your hand, release the grip to throw (add -NoWebGrab to only swing).'
+    Write-Host "A web aimed at a throwable prop or a thug catches it: the $reel reels it in, a sharp pull yanks"
+    Write-Host "it to your hand, release the $web to throw (add -NoWebGrab to only swing)."
 }
 if($NoAirWebs) {
     $captureArgs+=@('--no-air-webs')
@@ -90,9 +97,9 @@ if($NoBody) {
 else { Write-Host "Your body: Spider-Man's, following your head and hands (add -NoBody for gloves)." }
 if($NoPunch) { $captureArgs+=@('--no-punch'); Write-Host 'Punching off: fists pass through thugs.' }
 else { Write-Host 'Punch a thug: a fist that hits him fast enough knocks him back (add -NoPunch to turn it off).' }
-if($NoWebShooter) { $captureArgs+=@('--no-web-shooter'); Write-Host 'Web shooter off: the trigger of a free hand shoots nothing.' }
+if($NoWebShooter) { $captureArgs+=@('--no-web-shooter'); Write-Host "Web shooter off: the $reel of a free hand shoots nothing." }
 else {
-    Write-Host "Pull the trigger of a hand without a web to shoot the game's web balls where it points; a thug"
+    Write-Host "Press the $reel of a hand without a web to shoot the game's web balls where it points; a thug"
     Write-Host 'near that line takes it (add -NoWebShooter to turn it off).'
 }
 if($NoAimMarkers) {

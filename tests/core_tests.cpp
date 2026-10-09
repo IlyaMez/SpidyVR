@@ -29,8 +29,30 @@
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#ifdef _WIN32
+#include "spidy/game_targets.hpp"
+// Stand-ins for the game's classes, by the names the target scan's rules look
+// for: MSVC lays out their type information as it did the game's.
+class Component {
+  public:
+    virtual ~Component() = default;
+};
+class BotMoverManager : public Component {};
+class HoverMoverManager : public BotMoverManager {};
+class DocOckMoverManager : public HoverMoverManager {};
+class BotMoverManagerGame : public BotMoverManager {};
+class ThugBot : public Component {};
+class SilverSable : public ThugBot {};
+class CivilianBot : public Component {};
+class BirdBot : public Component {};
+class ThrowableHelper : public Component {};
+class StatusEffectTrackerWebbed : public Component {};
+class Unrelated : public Component {};
+extern "C" char __ImageBase;
+#endif
 using namespace spidy;
 void check(bool condition, const char* message) {
     if (!condition)
@@ -642,6 +664,49 @@ int main() {
         f.predictedDisplayTime+=static_cast<std::int64_t>(controlHoldMs)*ms;
         out=rig.update(f,{},{0,0,-1},true);
         check(out.active&&out.releaseWebs&&!out.swing.hands[0].tracked,"a long break kept the webs");
+    });
+    test("WEB BUTTON: TRIGGER swaps each hand's web button and reel, and a change lets go of the webs", [] {
+        auto f=trackedFrame();
+        f.hands[0].trigger=.9f;f.hands[0].squeeze=.1f;f.hands[1].trigger=.2f;f.hands[1].squeeze=.7f;
+        // The swing's grip shoots and holds the web, its trigger reels: the controllers' own by default.
+        auto input=trackedSwingInput(f,{});
+        near(input.hands[0].grip,.1f);near(input.hands[0].trigger,.9f);
+        near(input.hands[1].grip,.7f);near(input.hands[1].trigger,.2f);
+        input=trackedSwingInput(f,{},true);
+        near(input.hands[0].grip,.9f);near(input.hands[0].trigger,.1f);
+        near(input.hands[1].grip,.2f);near(input.hands[1].trigger,.7f);
+        f.hands[0].trigger=1.5f;
+        near(trackedSwingInput(f,{},true).hands[0].grip,1);
+        f.hands[0].trigger=.9f;
+        GameTrackingRig rig;
+        rig.update(f,{},{0,0,-1},true);
+        f.predictedDisplayTime=2;
+        auto out=rig.update(f,{},{0,0,-1},true);
+        check(out.active&&!out.releaseWebs&&out.swing.hands[0].tracked,"the webs went before the change");
+        near(out.swing.hands[0].grip,.1f);
+        // Switched in play: both webs let go for a frame, so a button held across the change shoots
+        // nothing until it is let go; then the trigger webs.
+        rig.triggerWebs(true);
+        f.predictedDisplayTime=3;out=rig.update(f,{},{0,0,-1},true);
+        check(out.active&&out.releaseWebs&&!out.swing.hands[0].tracked&&!out.swing.hands[1].tracked,
+              "the change kept the webs");
+        f.predictedDisplayTime=4;out=rig.update(f,{},{0,0,-1},true);
+        check(!out.releaseWebs&&out.swing.hands[0].tracked,"the change let go of the webs twice");
+        near(out.swing.hands[0].grip,.9f);near(out.swing.hands[0].trigger,.1f);
+        rig.triggerWebs(true);
+        f.predictedDisplayTime=5;
+        check(!rig.update(f,{},{0,0,-1},true).releaseWebs,"setting the same button let go of the webs");
+        // Changed in a menu (no gameplay), it lets go once play is back; reset() keeps the button.
+        rig.triggerWebs(false);
+        f.predictedDisplayTime=6;
+        check(!rig.update(f,{},{0,0,-1},false).active,"a menu frame was active");
+        f.predictedDisplayTime=7;
+        check(rig.update(f,{},{0,0,-1},true).releaseWebs,"a change in a menu kept the webs");
+        rig.triggerWebs(true);rig.reset();
+        f.predictedDisplayTime=8;rig.update(f,{},{0,0,-1},true);
+        f.predictedDisplayTime=9;out=rig.update(f,{},{0,0,-1},true);
+        check(!out.releaseWebs,"the webs went again");
+        near(out.swing.hands[0].grip,.9f);
     });
     test("artificial player movement does not become a hand yank", [] {
         GameTrackingRig rig;auto f=trackedFrame();rig.update(f,{},{0,0,-1},true);
@@ -3832,14 +3897,17 @@ int main() {
             for (const char* c : row.choices)
                 check(c && *c, "an empty choice");
         }
-        check(headings == 4 && all[0].item == Item::none && all[5].item == Item::none && all[7].item == Item::none &&
-                  all[12].item == Item::none,
+        check(headings == 4 && all[0].item == Item::none && all[6].item == Item::none && all[8].item == Item::none &&
+                  all[13].item == Item::none,
               "the sections: webs, body, comfort, experimental");
-        check(all[13].item == Item::flips && all[13].choices.empty() && std::strcmp(all[12].title, "EXPERIMENTAL") == 0,
+        check(all[14].item == Item::flips && all[14].choices.empty() && std::strcmp(all[13].title, "EXPERIMENTAL") == 0,
               "the flips: a switch under EXPERIMENTAL, the last row");
-        check(all[3].item == Item::swingSpeed && all[4].item == Item::weight, "the weight under the swing speed");
-        check(all[6].item == Item::calibrate && all[6].choices.size() == 2 &&
-                  std::strcmp(all[6].choices[1], "ON RESUME") == 0,
+        check(all[1].item == Item::webButton && all[1].choices.size() == 2 &&
+                  std::strcmp(all[1].choices[0], "GRIP") == 0 && std::strcmp(all[1].choices[1], "TRIGGER") == 0,
+              "the web button first under WEBS: GRIP, or TRIGGER");
+        check(all[4].item == Item::swingSpeed && all[5].item == Item::weight, "the weight under the swing speed");
+        check(all[7].item == Item::calibrate && all[7].choices.size() == 2 &&
+                  std::strcmp(all[7].choices[1], "ON RESUME") == 0,
               "the body's calibration: NO, or ON RESUME");
         check(seen == (2u << static_cast<unsigned>(lastItem)) - 2, "a setting missing");
         auto choicesOf = [&](Item item) {
@@ -3902,6 +3970,10 @@ int main() {
         check(!defaults.flips && choice(Item::flips, defaults) == 0 && defaultChoice(Item::flips) == 0 &&
                   choose(Item::flips, 1, v) && v.flips && choice(Item::flips, v) == 1,
               "the experimental flips: OFF by default, a switch to ON");
+        check(!defaults.triggerWebs && choice(Item::webButton, defaults) == 0 && defaultChoice(Item::webButton) == 0 &&
+                  choose(Item::webButton, 1, v) && v.triggerWebs && choice(Item::webButton, v) == 1 &&
+                  !choose(Item::webButton, 1, v) && !choose(Item::webButton, 2, v),
+              "the web button: GRIP by default, TRIGGER swaps it");
         check(choice(Item::none, v) == 0 && !choose(Item::none, 0, v), "a heading holds no value");
         // RESET: each setting's default choice puts its default back.
         for (const auto& row : rows())
@@ -4523,6 +4595,82 @@ int main() {
         check(!menu.update(.011f, true, true, false), "a new click counted at once");
         check(menu.update(.011f, true, false, false), "a new click after the menu did not count");
     });
+#ifdef _WIN32
+    test("the target scan knows a game class by what it derives from", [] {
+        const auto base = reinterpret_cast<uintptr_t>(&__ImageBase);
+        const auto classOf = [&](const std::unique_ptr<Component>& object) {
+            uintptr_t vtable{};
+            std::memcpy(&vtable, object.get(), sizeof(vtable));
+            return game_targets::classOf(base, vtable);
+        };
+        const uint32_t bot = 1u << static_cast<unsigned>(game_targets::Kind::bot),
+                       throwable = 1u << static_cast<unsigned>(game_targets::Kind::throwable);
+        const std::unique_ptr<Component> docOck(new DocOckMoverManager), walker(new BotMoverManagerGame),
+            boss(new SilverSable), civilian(new CivilianBot), bird(new BirdBot), prop(new ThrowableHelper),
+            tracker(new StatusEffectTrackerWebbed), other(new Unrelated);
+        // A mover manager two classes down from HoverMoverManager: a bot, and one that flies.
+        const auto flying = classOf(docOck);
+        check((flying & bot) && ((flying >> 8) & game_targets::hover),
+              "a hover mover's subclass is no flying bot");
+        const auto walking = classOf(walker);
+        check((walking & bot) && !((walking >> 8) & game_targets::hover), "a walking bot was missed or flies");
+        check(classOf(boss) >> 8 == game_targets::thug && !(classOf(boss) & bot),
+              "a thug's subclass is no thug");
+        check(classOf(civilian) >> 8 == game_targets::civilian, "a civilian was not one");
+        check(classOf(bird) >> 8 == game_targets::neutral, "a bird was not neutral");
+        check(classOf(prop) == throwable, "a throwable was not one");
+        check(classOf(tracker) >> 8 == game_targets::webbable, "the webbing tracker was missed");
+        check(!classOf(other), "an unrelated class was taken for something");
+        static const uintptr_t plain[2]{};
+        check(!game_targets::classOf(base, reinterpret_cast<uintptr_t>(&plain[1])),
+              "data was taken for a class");
+    });
+    test("a bot's size comes from his mover and carries a street thug's measures over", [] {
+        // A mover manager as the game lays one out: its body's class at
+        // +0xdb8, the spheres' centres and radius from +0xdc0, the scale at +0xdf8.
+        constexpr uintptr_t base = 0x140000000;
+        std::vector<uint8_t> manager(0xe00);
+        const auto put = [&](size_t at, const auto& value) {
+            std::memcpy(manager.data() + at, &value, sizeof(value));
+        };
+        const auto address = reinterpret_cast<uint64_t>(manager.data());
+        put(0xdb8, base + game_targets::moverBodySize);
+        put(0xdc0, std::array<float, 3>{.85f, 1.15f, .45f});
+        put(0xdf8, 1.f);
+        game_targets::Size thug{9, 9, 9};
+        check(game_targets::sizeOf(base, address, thug), "a street thug's body was not read");
+        near(thug.low, .4f);
+        near(thug.high, 1.6f);
+        near(thug.radius, .45f);
+        // A street thug keeps the measures tuned on him.
+        for (const float h : {0.f, .95f, 1.15f, 1.8f})
+            near(thug.height(h), h);
+        near(thug.width(.3f), .3f);
+        // The upper sphere scales with the mover (1fbba90).
+        put(0xdf8, 2.f);
+        game_targets::Size tall;
+        check(game_targets::sizeOf(base, address, tall), "a scaled body was not read");
+        near(tall.high, 2.75f);
+        // A drone's small capsule about its centre, a heavy's big one.
+        const game_targets::Size drone{-.3f, .3f, .2f}, heavy{.6f, 3.f, .9f};
+        near(drone.height(.4f), -.3f);
+        near(drone.height(1.6f), .3f);
+        near(drone.height(1.15f), .075f);
+        near(drone.width(.45f), .2f);
+        near(heavy.height(1.8f), 3.4f);
+        near(heavy.width(.3f), .6f);
+        // Another class at the body's place, or an implausible body: no size.
+        game_targets::Size kept;
+        put(0xdf8, 1.f);
+        put(0xdc8, 0.f);
+        check(!game_targets::sizeOf(base, address, kept) && kept.high == 1.6f,
+              "a body without radius was read");
+        put(0xdc8, .45f);
+        put(0xdb8, base + 8);
+        check(!game_targets::sizeOf(base, address, kept) && kept.radius == .45f,
+              "another class was read as a body");
+    });
+#endif
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;
 }

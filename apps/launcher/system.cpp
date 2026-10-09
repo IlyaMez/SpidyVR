@@ -175,6 +175,8 @@ HANDLE spawn(std::wstring commandLine, const std::wstring& folder, std::wstring*
     return info.hProcess;
 }
 
+} // namespace
+
 // Runs a command to completion (or `timeoutMs`), collecting what it prints.
 std::optional<DWORD> capture(const std::wstring& commandLine, const std::wstring& folder, std::wstring* environmentBlock,
                              DWORD timeoutMs, std::string& output) {
@@ -220,6 +222,8 @@ std::optional<DWORD> capture(const std::wstring& commandLine, const std::wstring
         }
     }
 }
+
+namespace {
 
 std::string trim(std::string value) {
     while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
@@ -347,6 +351,8 @@ SteamApp steamAppFor(const fs::path& exe) {
                : SteamApp{};
 }
 
+} // namespace
+
 std::optional<std::string> sha256(const std::wstring& path) {
     BCRYPT_ALG_HANDLE algorithm{};
     BCRYPT_HASH_HANDLE hash{};
@@ -378,6 +384,8 @@ std::optional<std::string> sha256(const std::wstring& path) {
     BCryptCloseAlgorithmProvider(algorithm, 0);
     return result;
 }
+
+namespace {
 
 bool processRunning(const wchar_t* name) {
     Handle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
@@ -526,6 +534,7 @@ Settings loadSettings() {
         else if (key == "aim_markers") o.aimMarkers = number() != 0;
         else if (key == "air_webs") o.airWebs = number() != 0;
         else if (key == "flips") o.flips = number() != 0;
+        else if (key == "trigger_webs") o.triggerWebs = number() != 0;
         // eye_size (a square size, before October 8) is no longer read: 2048 x 2048 rendered one player's game
         // below the 2496 x 2688 their headset asked for, and it looked blurry.
         else if (key == "render_scale") o.renderScale = spidy::validRenderScale(number()) ? number() : 100;
@@ -543,6 +552,7 @@ Settings loadSettings() {
         else if (key == "hash_time") settings.hashTime = std::strtoull(value.c_str(), nullptr, 10);
         else if (key == "hash") settings.hashValue = value;
         else if (key == "shortcuts_asked") settings.shortcutsAsked = number() != 0;
+        else if (key == "update_check") settings.updateCheck = number() != 0;
     }
     // A calibration is both measurements within their ranges, or none.
     if (!text::calibrated(settings.options))
@@ -561,6 +571,7 @@ void saveSettings(const Settings& settings) {
     file << "game=" << narrow(settings.gameExe) << "\nxr_runtime=" << narrow(settings.runtime)
          << "\nsmall_window=" << o.smallWindow << "\nstock_monitor_view=" << o.stockMonitorView
          << "\naim_markers=" << o.aimMarkers << "\nair_webs=" << o.airWebs << "\nflips=" << o.flips
+         << "\ntrigger_webs=" << o.triggerWebs
          << "\nrender_scale=" << o.renderScale
          << "\nswing_speed=" << o.swingSpeed << "\nweight=" << o.weight << "\nsnap_turn=" << o.snapTurn
          << "\nsmooth_turn=" << o.smoothTurn
@@ -568,7 +579,8 @@ void saveSettings(const Settings& settings) {
          << "\narm_length_mm=" << o.armLengthMm << "\ncalibration_prompt=" << o.calibrationPrompt
          << "\nhash_path=" << narrow(settings.hashPath)
          << "\nhash_size=" << settings.hashSize << "\nhash_time=" << settings.hashTime
-         << "\nhash=" << settings.hashValue << "\nshortcuts_asked=" << settings.shortcutsAsked << "\n";
+         << "\nhash=" << settings.hashValue << "\nshortcuts_asked=" << settings.shortcutsAsked
+         << "\nupdate_check=" << settings.updateCheck << "\n";
 }
 
 // --- Scanner -------------------------------------------------------------------
