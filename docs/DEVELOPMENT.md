@@ -146,6 +146,41 @@ has uncommitted edits in `CMakeLists.txt`, and undoes its commit and tag when
 the push fails. Given the current version, `-Version` tags the current commit
 without a commit of its own.
 
+### Antivirus false positives
+
+Spidy does, for a good reason, what antivirus heuristics are built to flag: an
+unsigned program attaches a DLL to the running game (`observe_game.py` /
+`bridge_game.py`), reads its memory, and updates itself by downloading and
+replacing its own files. Engines that score behaviour and reputation can't tell
+that from malware, so some flag the launcher or a module. To reduce it, in order
+of impact:
+
+- **Sign the binaries.** Reputation then carries across releases instead of
+  resetting to zero on every new unsigned build. `build.ps1` signs the launcher
+  and the shipped modules with `signtool` when a certificate is configured, and
+  is a no-op otherwise (unsigned dev builds still work). Set, locally or as
+  repository secrets of the same name (release.yml passes them through):
+  - `SPIDY_SIGN_THUMBPRINT` — SHA-1 thumbprint of a code-signing certificate in
+    the Windows store (a hardware token, or an imported PFX), or
+  - `SPIDY_SIGN_PFX` (+ `SPIDY_SIGN_PASSWORD`) — a PFX file, or
+  - `SPIDY_SIGN_ARGS` — raw `signtool sign` arguments for anything else, e.g.
+    Azure Trusted Signing's `/dlib`.
+
+  `SPIDY_SIGN_TIMESTAMP_URL` overrides the timestamp server. Certificate options
+  for an individual: Azure Trusted Signing (cheapest, identity-history gated),
+  Certum open-source code signing (token), or a standard OV certificate (token
+  or HSM). A hardware token can't be used on a hosted CI runner; Azure Trusted
+  Signing and a PFX can.
+- **Report the false positive** to each vendor that flags it (Microsoft's
+  Defender submission portal, and the others by name); for an open-source
+  project this is usually resolved in days. Every shipped binary now carries
+  version metadata (`apps/spidy_module.rc`) so a vendor can identify it.
+- **Upload each release to VirusTotal** and keep the link in the release notes:
+  it shows which engines flag it (generic/ML names like `Wacatac` or
+  `ML.Attribute.HighConfidence` mean a heuristic false positive, not a real
+  signature) and lets players verify the zip against its published SHA-256.
+- Don't ever pack or obfuscate the binaries — that raises detections.
+
 ## What's runnable
 
 - `spidy_xr_lab.exe`: an original block city in OpenXR/D3D12 with tracked hands,

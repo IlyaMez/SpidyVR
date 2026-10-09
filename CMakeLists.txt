@@ -9,6 +9,30 @@ endif()
 option(SPIDY_BUILD_XR "Build the Windows OpenXR / D3D12 swing lab" ${WIN32})
 option(SPIDY_BUILD_OBSERVER "Build the opt-in camera diagnostic DLL" OFF)
 option(SPIDY_BUILD_LAUNCHER "Build the Spidy launcher window (Dear ImGui from tools/bootstrap.ps1)" ${SPIDY_BUILD_XR})
+
+# Stamp a shipped Windows binary with version metadata (CompanyName, ProductName, FileVersion...)
+# via apps/spidy_module.rc. Unsigned, metadata-less modules that attach to the running game are
+# what antivirus heuristics flag; the resource is also how a vendor identifies a false-positive
+# report. Signing (tools/build.ps1, when a certificate is configured) builds on top of this.
+function(spidy_stamp_version target description)
+  if(NOT WIN32)
+    return()
+  endif()
+  get_target_property(kind ${target} TYPE)
+  if(kind STREQUAL "EXECUTABLE")
+    set(filetype VFT_APP)
+  else()
+    set(filetype VFT_DLL)
+  endif()
+  target_sources(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/apps/spidy_module.rc")
+  target_compile_definitions(${target} PRIVATE
+                             SPIDY_VERSION="${PROJECT_VERSION}"
+                             SPIDY_VERSION_NUMBERS=${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},0
+                             SPIDY_MODULE_DESC="${description}"
+                             SPIDY_MODULE_FILE="$<TARGET_FILE_NAME:${target}>"
+                             SPIDY_MODULE_FILETYPE=${filetype})
+endfunction()
+
 add_library(spidy_core src/swing.cpp src/web_grab.cpp src/lab_world.cpp src/lab_props.cpp src/game_tracking.cpp
             src/web_visual.cpp src/body_ik.cpp src/punch.cpp src/shooter.cpp src/vr_settings.cpp
             src/body_calibration.cpp src/overlay_text.cpp src/slow_motion.cpp)
@@ -101,6 +125,13 @@ if(SPIDY_BUILD_OBSERVER)
   target_compile_definitions(spidy_render_memory PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_compile_options(spidy_render_memory PRIVATE /W4 /permissive-)
   target_link_libraries(spidy_render_memory PRIVATE minhook)
+  # Version-stamp the modules the player package ships (package.ps1's $modules).
+  spidy_stamp_version(spidy_bridge "Spidy VR game bridge")
+  spidy_stamp_version(spidy_render_probe "Spidy VR render probe")
+  spidy_stamp_version(spidy_ray_bridge "Spidy VR input bridge")
+  spidy_stamp_version(spidy_movement_bridge "Spidy VR movement bridge")
+  spidy_stamp_version(spidy_stereo_probe "Spidy VR stereo renderer")
+  spidy_stamp_version(spidy_render_memory "Spidy VR render-memory helper")
 endif()
 if(SPIDY_BUILD_XR)
   if(NOT WIN32)
@@ -130,6 +161,7 @@ if(SPIDY_BUILD_XR)
   target_link_libraries(spidy_xr_lab PRIVATE spidy_openxr)
   add_executable(spidy_headset_probe apps/xr_headset_probe.cpp)
   target_link_libraries(spidy_headset_probe PRIVATE openxr_loader)
+  spidy_stamp_version(spidy_headset_probe "Spidy VR headset probe")
   add_executable(spidy_xr_swapchain_probe apps/xr_swapchain_probe.cpp)
   target_link_libraries(spidy_xr_swapchain_probe PRIVATE spidy_openxr)
   add_executable(spidy_graphics_test tests/graphics_test.cpp)

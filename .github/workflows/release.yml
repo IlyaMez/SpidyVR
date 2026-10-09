@@ -99,6 +99,14 @@ jobs:
         run: ./tools/bootstrap.ps1 -Observer
 
       - name: Build and run the C++ tests
+        # Signs the launcher and modules when a code-signing certificate is configured as repository
+        # secrets; a no-op (unsigned build) while they are unset. See tools/build.ps1 for the scheme.
+        env:
+          SPIDY_SIGN_THUMBPRINT: ${{ secrets.SPIDY_SIGN_THUMBPRINT }}
+          SPIDY_SIGN_PFX: ${{ secrets.SPIDY_SIGN_PFX }}
+          SPIDY_SIGN_PASSWORD: ${{ secrets.SPIDY_SIGN_PASSWORD }}
+          SPIDY_SIGN_ARGS: ${{ secrets.SPIDY_SIGN_ARGS }}
+          SPIDY_SIGN_TIMESTAMP_URL: ${{ secrets.SPIDY_SIGN_TIMESTAMP_URL }}
         run: ./tools/build.ps1 -Observer
 
       - name: Run the Python protocol tests

@@ -896,8 +896,14 @@ def settle_display(running):
         settle_display.deferred = True
         print('Your game settings (display, frame generation, controllers) are restored after the game closes, '
               r'the next time Spidy VR starts it (or run tools\vr_display.py --restore).', flush=True)
-    elif vr_display.restore():
-        print('Restored your game settings (display, frame generation, controllers).', flush=True)
+        return
+    try:
+        if vr_display.restore():
+            print('Restored your game settings (display, frame generation, controllers).', flush=True)
+    except OSError as error:
+        settle_display.deferred = True
+        print(f'WARNING: Windows refused restoring your game settings ({error}); the next time Spidy VR '
+              r'starts the game it tries again (or run tools\vr_display.py --restore).', flush=True)
 
 
 def main():
@@ -1009,7 +1015,21 @@ def session(a, startup):
                         bool(sys.stdin and sys.stdin.isatty()))
 
     def prepare_display():
-        values = vr_display.prepare_launch(small=not a.full_desktop_view)
+        try:
+            values = vr_display.prepare_launch(small=not a.full_desktop_view)
+        except OSError as error:
+            # VR runs without them: the window only saves GPU time, and the two settings matter where
+            # frame generation is on or under SteamVR.
+            startup.fields['game_settings_refused'] = str(error)
+            print(f"WARNING: Spidy could not apply the game's VR settings ({error}). "
+                  'The game starts with its current settings: turn '
+                  'frame generation off in its graphics settings, and a smaller window leaves more of the GPU '
+                  "for the headset. Under SteamVR the game's menus may not follow the VR controllers.",
+                  flush=True)
+            if vr_display.pending():
+                print('Some saved game settings still need restoring; Spidy will retry after the game closes.',
+                      flush=True)
+            return
         if values:
             print(f"Desktop view: {values['WindowWidth']} x {values['WindowHeight']} window to save GPU time; "
                   'your display settings return when the game closes.', flush=True)
@@ -1146,6 +1166,7 @@ def session(a, startup):
             """Everything sampled so far. It is written however the session ends."""
             return dict(pid=game.pid, eye_size=a.size, render_scale=a.render_scale, swing_speed=a.swing_speed,
                         vr_settings=settings_start,
+                        game_settings_refused=startup.fields.get('game_settings_refused'),
                         xr_runtime=runtime, motion_hash=motion_hash,
                         xr_hash=xr_hash, ray_hash=ray_hash, samples=list(samples),
                         swing_samples=list(swing_samples), motion_samples=list(motion_samples),
@@ -1335,6 +1356,7 @@ def session(a, startup):
             timing=timing_snapshot(game,xr['SpidyXrTimingData']),
             ray_hash=ray_hash, ray_samples=list(ray_samples), rays=ray_snapshot(game, rays['SpidyRayData']),
             motion_hash=motion_hash, swing_speed=a.swing_speed, vr_settings=settings_start, xr_runtime=runtime,
+            game_settings_refused=startup.fields.get('game_settings_refused'),
             swing_samples=list(swing_samples),
             grab_samples=list(grab_samples), grab=grab_snapshot(game, rays['SpidyGrabData']),
             body=body_snapshot(game, xr['SpidyBodyData']) or body,

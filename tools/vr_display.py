@@ -125,11 +125,13 @@ def restore(registry=None, backup=BACKUP):
     if not _saved(values, NAMES) or not known:
         raise RuntimeError(f'Unrecognized display backup: {backup}')
     registry = registry or Registry()
-    if values:
-        registry.write(values)
-    for entry in session:
-        if entry['values']:
-            registry.write(entry['values'], entry['key'])
+    # Only what differs now: where Windows refused the launch's changes, the user's values are still there,
+    # and writing them again would be refused too.
+    for key, wanted in [(KEY, values)]+[(entry['key'], entry['values']) for entry in session]:
+        current = registry.read(tuple(wanted), key)
+        changed = {name: value for name, value in wanted.items() if current.get(name) != value}
+        if changed:
+            registry.write(changed, key)
     backup.unlink()
     return True
 
@@ -174,10 +176,21 @@ def prepare_session(registry=None, backup=BACKUP):
 def prepare_launch(small=True, registry=None, backup=BACKUP, screen=None):
     """Called with the game closed, just before it starts. A previous session's values are restored
     first, so a backup always holds the user's own settings. Returns the window's values written
-    (None when the window keeps the user's settings)."""
+    (None when the window keeps the user's settings).
+
+    Raises OSError when a settings change or its backup fails. Any changes made during this attempt
+    are restored where possible; if restoration also fails, the backup stays for a later retry."""
+    registry = registry or Registry()
     restore(registry, backup)
-    window = shrink(registry, backup, screen) if small else None
-    prepare_session(registry, backup)
+    try:
+        window = shrink(registry, backup, screen) if small else None
+        prepare_session(registry, backup)
+    except OSError:
+        try:
+            restore(registry, backup)
+        except OSError:
+            pass  # the backup stays; it is restored after the game closes, or at the next launch
+        raise
     return window
 
 

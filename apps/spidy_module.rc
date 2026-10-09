@@ -1,0 +1,50 @@
+#include <winres.h>
+
+// Shared version stamp for the shipped DLLs and the headset probe exe. CMake's
+// spidy_stamp_version() adds this to each shipped target and defines the macros
+// below (SPIDY_MODULE_* per target, SPIDY_VERSION* from the project version).
+// Unsigned, metadata-less modules that attach to the running game are exactly
+// what antivirus heuristics flag; this metadata also gives a vendor something to
+// identify when a false positive is reported. The launcher keeps its own
+// launcher.rc (it also carries the icon).
+#ifndef SPIDY_VERSION
+#define SPIDY_VERSION "0.0.0"
+#endif
+#ifndef SPIDY_VERSION_NUMBERS
+#define SPIDY_VERSION_NUMBERS 0, 0, 0, 0
+#endif
+#ifndef SPIDY_MODULE_DESC
+#define SPIDY_MODULE_DESC "Spidy VR module"
+#endif
+#ifndef SPIDY_MODULE_FILE
+#define SPIDY_MODULE_FILE "spidy_module"
+#endif
+#ifndef SPIDY_MODULE_FILETYPE
+#define SPIDY_MODULE_FILETYPE VFT_DLL
+#endif
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION SPIDY_VERSION_NUMBERS
+PRODUCTVERSION SPIDY_VERSION_NUMBERS
+FILEOS VOS_NT_WINDOWS32
+FILETYPE SPIDY_MODULE_FILETYPE
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Ilya Mezerowsky"
+            VALUE "FileDescription", SPIDY_MODULE_DESC
+            VALUE "FileVersion", SPIDY_VERSION
+            VALUE "InternalName", SPIDY_MODULE_FILE
+            VALUE "LegalCopyright", "Copyright 2026 Ilya Mezerowsky"
+            VALUE "OriginalFilename", SPIDY_MODULE_FILE
+            VALUE "ProductName", "Spidy - VR for Marvel's Spider-Man Remastered"
+            VALUE "ProductVersion", SPIDY_VERSION
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

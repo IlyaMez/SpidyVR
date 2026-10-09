@@ -3,7 +3,29 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 9, ninth build): a flip speed setting, slower by
+**Latest build (October 9, tenth build): VR starts where Windows refuses
+changes to the game's settings.** A player's 0.2.8 launch (Virtual Desktop,
+Quest 3) ended before the game started with "Spidy VR unavailable: [WinError
+5] Access is denied" and a traceback. Before it starts the game, the launcher
+sets a small window and turns off frame generation and Windows.Gaming.Input
+in the game's registry key. On that PC Windows opened the key for writing,
+then refused writing a value; the traceback does not establish why.
+The launch now goes on with the current settings and prints a warning
+(turn frame generation off in the game, and a smaller window leaves more of
+the GPU for the headset). Whatever the launch had already changed is put
+back where possible; a failed rollback keeps the backup for a later retry.
+Restoring writes only values that differ from the registry, so a
+launch whose changes were all refused has nothing to restore. A refused
+restore after the game closes is a warning, and the next launch tries again.
+The session report and the startup report have `game_settings_refused` (the
+error, or null). 3 new launcher checks: everything refused, or only the
+controllers' key; a restore that writes nothing, or keeps its backup when it
+cannot write; the warning shown once. Two additional checks cover a partial
+write within a key, failed rollback and retry, and continued startup in both
+window modes with the error recorded. All 94 checks in the 6 Python suites
+pass. Not run on the player's PC; not in the play folder.
+
+**Preceding build (October 9, ninth build): a flip speed setting, slower by
 default.** You asked for flip speeds to choose from, like the turning speed
 and the weight, and for a lower default. FLIP SPEED is a new row under FLIPS
 in the SPIDY VR tab of the game's Settings, and "Flip speed" in the

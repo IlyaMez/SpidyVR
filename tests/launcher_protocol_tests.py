@@ -12,15 +12,17 @@ import vr_launcher as launcher
 
 class FakeRegistry:
     """The game's keys: `values` is the graphics key, `keys` every key by path."""
-    def __init__(self,values,others=None):
+    def __init__(self,values,others=None,refused=()):
         self.values=dict(values)
         self.keys={display.KEY:self.values,**{key:dict(v) for key,v in (others or {}).items()}}
         self.writes=[]
+        self.refused=set(refused) # keys whose writes Windows refuses
 
     def read(self,names=display.NAMES,key=display.KEY):
         return {name:value for name,value in self.keys.get(key,{}).items() if name in names}
 
     def write(self,values,key=display.KEY):
+        if key in self.refused: raise PermissionError(13,'Access is denied')
         self.writes.append(dict(values))
         stored=self.keys.setdefault(key,{})
         for name,value in values.items():
@@ -111,6 +113,40 @@ class DesktopViewTests(unittest.TestCase):
         other=self.backup.with_name('other.json')
         self.assertIsNone(display.shrink(FakeRegistry({}),other,(3440,1440)))
         self.assertFalse(other.exists())
+
+    def test_refused_changes_leave_the_users_settings(self):
+        # A player's PC on October 9: Windows refused every value, the launcher's traceback ended the launch.
+        graphics={**USER,'DLSSG':1}
+        refused=FakeRegistry(graphics,refused={display.KEY,display.INPUT_KEY})
+        with self.assertRaises(PermissionError): display.prepare_launch(registry=refused,backup=self.backup,screen=(3440,1440))
+        self.assertEqual((refused.values,refused.writes),(graphics,[]))
+        self.assertFalse(display.pending(self.backup))
+        # Only the controllers' key refused: the window and frame generation are put back.
+        partial=FakeRegistry(graphics,refused={display.INPUT_KEY})
+        with self.assertRaises(PermissionError): display.prepare_launch(registry=partial,backup=self.backup,screen=(3440,1440))
+        self.assertEqual(partial.values,graphics)
+        self.assertFalse(display.pending(self.backup))
+
+    def test_restore_writes_only_what_changed(self):
+        registry=FakeRegistry(USER,refused={display.KEY,display.INPUT_KEY})
+        self.backup.parent.mkdir(parents=True)
+        self.backup.write_text(json.dumps(dict(key=display.KEY,values=USER,session=[
+            dict(key=display.INPUT_KEY,values=dict(EnableWindowsGamingInput=None))])))
+        self.assertTrue(display.restore(registry,self.backup))
+        self.assertFalse(display.pending(self.backup))
+        # A value that differs and cannot be written: the backup stays for the next try.
+        self.backup.write_text(json.dumps(dict(key=display.KEY,values=dict(USER,WindowWidth=960))))
+        with self.assertRaises(PermissionError): display.restore(registry,self.backup)
+        self.assertTrue(display.pending(self.backup))
+
+    def test_session_warns_instead_of_failing_when_restoring_is_refused(self):
+        import io,run_game_vr
+        self.addCleanup(run_game_vr.settle_display.__dict__.pop,'deferred',None)
+        shown=io.StringIO()
+        with patch.object(run_game_vr.vr_display,'pending',return_value=True),              patch.object(run_game_vr.vr_display,'restore',side_effect=PermissionError(13,'Access is denied')),              patch('sys.stdout',shown):
+            run_game_vr.settle_display(False)
+            run_game_vr.settle_display(False) # once
+        self.assertEqual(shown.getvalue().count('WARNING: Windows refused restoring'),1)
 
     def test_unrecognized_backup_is_never_written(self):
         self.backup.parent.mkdir(parents=True)
