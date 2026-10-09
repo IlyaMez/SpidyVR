@@ -144,7 +144,7 @@ Settings are Scaleform (AS3) screens fed from `configs/uiconfig/uisystemmenu.con
 | Builds one tab's Flash object (out value, movie, tab) | `0x807740` | Built a tab of copied items; its rows, ids above 0x200, drew and changed |
 | A row (`0x80a220`, `0x809e20`), a setting's choices and value (`0x80b950`) | | Disassembly; per-setting cases only for 4-122 |
 | The UI movie Flash objects are made in | `0x1d29690` | Disassembly |
-| A setting's kind (0 list, 1-2 slider, 3 colour, 4 command, 5 heading) / value / changeable / default / default choice | `0x72d640` / `0x72d650` / `0x72e1d0` / `0x72d5f0` / `0x72d610` | Disassembly; hooked for numbers 0x200-0x20e |
+| A setting's kind (0 list, 1-2 slider, 3 colour, 4 command, 5 heading) / value / changeable / default / default choice | `0x72d640` / `0x72d650` / `0x72e1d0` / `0x72d5f0` / `0x72d610` | Disassembly; hooked for numbers 0x200-0x20f |
 | The pause menu's Settings callbacks (ui, name hash, args, count) | `0x7dc400` | Logged: `UpdateOption` (setting, value), `ResetOption`, `ResetAllOptionsForCurrentOptionsMenu` (tab id; ignored above 10, hash at `0x6d8ed88`) |
 | Text by hash (hash, fallback); whether there is one | `0x1749970`, `0x1749ae0` | Hashes are CRC-32 of tags (`0x1749a20` hashes a tag string) |
 

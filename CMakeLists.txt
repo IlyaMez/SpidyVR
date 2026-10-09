@@ -54,7 +54,7 @@ if(SPIDY_BUILD_OBSERVER)
   target_compile_options(spidy_view PRIVATE /W4 /permissive-)
   target_link_libraries(spidy_view PRIVATE minhook)
   add_library(spidy_stereo_probe SHARED src/stereo_probe.cpp src/native_eye_gpu.cpp src/native_webs.cpp
-              src/native_body.cpp)
+              src/native_body.cpp src/native_hud.cpp)
   target_include_directories(spidy_stereo_probe PRIVATE include)
   target_compile_definitions(spidy_stereo_probe PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_compile_options(spidy_stereo_probe PRIVATE /W4 /permissive-)

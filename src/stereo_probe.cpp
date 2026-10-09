@@ -6,6 +6,7 @@
 #include "spidy/native_body.hpp"
 #include "spidy/native_eye_frame.hpp"
 #include "spidy/native_eye_gpu.hpp"
+#include "spidy/native_hud.hpp"
 #include "spidy/native_view.hpp"
 #include "spidy/native_webs.hpp"
 #include <MinHook.h>
@@ -103,6 +104,51 @@ std::atomic<bool> lateEyes{};
 using InitBuffers = bool (*)(void*, const void*, const char*);
 InitBuffers originalInitBuffers{};
 void* initBuffersHook{};
+// The HUD panel (native_hud.hpp): PlayerModelHudFollower's placement 73ab80,
+// on the main thread after the camera submits and before 1920240. It ends in
+// SetTransform 191c0e0 on the panel's render instance, which writes the
+// instance's world transform (+0) and marks it changed for the renderer.
+using HudPlace = void (*)(void*);
+using SetTransform = void (*)(void*, const float*, void*);
+HudPlace originalHudPlace{};
+void* hudPlaceHook{};
+// The game's placement in this frame: the panel's instance, the scales it
+// got, and its distance from the game's camera (follower +48).
+struct HudPlacement {
+    uintptr_t instance{};
+    Vec3 scale{};
+    float distance{};
+};
+// Half the width of the stock camera's view, as a tangent: what the game's
+// own view shows of the HUD panel (submit(), main thread).
+float stockHalfWidth{};
+// The head of one frame (main thread): the eye command the frame's views
+// render, the player's travel to the frame, and the head view and lens that
+// gives (pose moved by the travel). Latched at the frame's first camera submit
+// (activeView), or later at the first HUD use without one. The engine's active
+// view, the HUD panel, its markers and the eyes all take it, so they agree on
+// the head in every frame: a transform set any later than the game's own HUD
+// placement (in placeEyes, at 1920240) did not reach the frame's render, so
+// the panel is placed in that placement's hook, before the eyes.
+struct FrameHead {
+    uint64_t frame = UINT64_MAX;
+    native_eyes::Command command{};
+    bool controlled{}, viewed{};
+    Vec3 offset{};
+    Mat4 pose{};
+    native_eyes::Bounds lens{};
+    // The head turned the way the HUD panel faces (native_hud::Follow, sent by
+    // the XR worker with the command), and whether the worker sent one.
+    Mat4 panel{};
+    bool followed{};
+};
+FrameHead frameHead;
+// The HUD panel's render instance while the HUD is off and the eyes are shown:
+// renderActor leaves it out of the eye views (main thread sets it).
+std::atomic<uintptr_t> hiddenHud{};
+// The game's main thread (view maintenance's), the only one the frame's head
+// is latched and read on.
+std::atomic<DWORD> mainThread{};
 thread_local bool creatingEye{};
 using CopyJob = void (*)(void*, void*, void*, void*, bool);
 CopyJob originalCopyJob{};
@@ -256,6 +302,14 @@ void nearInstance(unsigned eye, uintptr_t instance, const float* m, const float*
     ReleaseSRWLockExclusive(&telemetry);
 }
 void renderActor(void* context, void* actor, uint8_t visibility) {
+    // The HUD off: its panel stays out of the eyes (the game's own view, which
+    // the game screen shows, keeps it).
+    if (const auto hud = hiddenHud.load(std::memory_order_relaxed);
+        enabled && hud && reinterpret_cast<uintptr_t>(actor) == hud &&
+        eyeView(pointer(reinterpret_cast<uintptr_t>(context) + 8)) >= 0) {
+        native_hud::hiddenDraw();
+        return;
+    }
     // 1796d20 copies the scene view into context +8. The primary hide uses the
     // game's actor visibility switch in maintain(); this per-eye check removes
     // anything still drawn as the hero or on the hero's root transform. It
@@ -347,6 +401,111 @@ void updateHero(bool immersive, bool hide) {
     data.webStartMax = webs.startErrorMax;
     InterlockedIncrement64(&data.sequence);
     ReleaseSRWLockExclusive(&telemetry);
+}
+bool heroPosition(Vec3& position);
+bool retiring();
+// This frame's head (FrameHead), latched at its first use in the frame.
+const FrameHead& latchHead() {
+    if (frameHead.frame == frameIndex)
+        return frameHead;
+    FrameHead head;
+    head.frame = frameIndex;
+    AcquireSRWLockShared(&commandLock);
+    head.command = command;
+    head.controlled = head.command.enabled && GetTickCount64() < commandDeadline;
+    ReleaseSRWLockShared(&commandLock);
+    // This frame's rope-update sample of the hero, if one ran since the last
+    // frame (taken once a frame, immersive or not, as FrameHero requires).
+    uint64_t ropeSamples{};
+    Vec3 ropeHero{}, rendered{};
+    native_webs::heroSample(ropeSamples, ropeHero);
+    const bool shared = activeHero.fresh(ropeSamples, ropeHero);
+    if (enabled && head.controlled && head.command.enabled == 1 && !retiring() &&
+        native_eyes::headView(head.command, head.pose, head.lens)) {
+        // The same render-frame correction placeEyes() gives the eyes: the
+        // rope-update sample, else the hero's render transform.
+        if (head.command.anchored && (shared || heroPosition(rendered))) {
+            native_eyes::reanchorOffset(head.command.anchor, shared ? ropeHero : rendered, head.offset);
+            activeHeroPosition = shared ? ropeHero : rendered;
+            activeHeroPlaced = true;
+        }
+        head.pose[12] += head.offset.x;
+        head.pose[13] += head.offset.y;
+        head.pose[14] += head.offset.z;
+        head.viewed = true;
+        Quat relative{};
+        head.followed = native_hud::followed(head.command.serial, relative);
+        head.panel = native_hud::turned(head.pose, relative);
+    }
+    frameHead = head;
+    return frameHead;
+}
+// While immersive, the HUD panel goes in front of this frame's head, facing
+// the way the XR worker's Follow turned it.
+void placeHud(const HudPlacement& placed, const FrameHead& head) {
+    native_hud::Shape shape;
+    shape.halfWidth = native_hud::halfWidth(native_hud::size());
+    Mat4 transform{};
+    uint32_t handle{};
+    const bool done = shape.halfWidth > 0 && registered(placed.instance, handle) &&
+                      native_hud::panel(head.panel, placed.scale, placed.distance, stockHalfWidth, shape, transform);
+    if (done)
+        reinterpret_cast<SetTransform>(base + 0x191c0e0)(reinterpret_cast<void*>(placed.instance),
+                                                         transform.data(),
+                                                         reinterpret_cast<void*>(placed.instance + 0x70));
+    const float turn = std::acos(std::clamp(head.pose[8] * head.panel[8] + head.pose[9] * head.panel[9] +
+                                                head.pose[10] * head.panel[10],
+                                            -1.f, 1.f)) *
+                       180 / 3.14159265f;
+    native_hud::publish([&](native_hud::Data& d) {
+        if (!shape.halfWidth)
+            return;
+        ++(done ? d.placedFrames : d.rejectedFrames);
+        if (done) {
+            d.distance = shape.distance;
+            d.halfWidth = shape.halfWidth;
+            d.followedFrames += head.followed;
+            d.followAngle = turn;
+            d.followAngleMax = std::max(d.followAngleMax, turn);
+        }
+    });
+}
+// After the game placed the HUD panel in front of its camera: while immersive,
+// move it in front of this frame's head.
+void hudPlace(void* follower) {
+    originalHudPlace(follower);
+    if (!enabled || !(config.createViews & 4) || lateEyes) {
+        hiddenHud = 0;
+        return;
+    }
+    const auto address = reinterpret_cast<uintptr_t>(follower);
+    native_hud::follower(address);
+    HudPlacement placed;
+    float m[16]{};
+    if (pointer(address) != base + 0x38929c8 || !(placed.instance = pointer(pointer(address + 8))) ||
+        !read(placed.instance, m, sizeof(m)) || !read(address + 0x48, &placed.distance, 4)) {
+        hiddenHud = 0;
+        return;
+    }
+    placed.scale = {length(Vec3{m[0], m[1], m[2]}), length(Vec3{m[4], m[5], m[6]}), length(Vec3{m[8], m[9], m[10]})};
+    native_hud::publish([&](native_hud::Data& d) {
+        ++d.gameFrames;
+        d.follower = address;
+        d.instance = placed.instance;
+        d.gameScale[0] = placed.scale.x;
+        d.gameScale[1] = placed.scale.y;
+        d.gameScale[2] = placed.scale.z;
+        d.gameDistance = placed.distance;
+        d.viewHalfWidth = stockHalfWidth;
+    });
+    const auto& head = latchHead();
+    // The HUD off: the eyes (immersive or the flat screen) leave the panel out.
+    const bool hide = !native_hud::size() && head.controlled && !retiring();
+    hiddenHud = hide ? placed.instance : 0;
+    if (hide)
+        native_hud::publish([](native_hud::Data& d) { ++d.hiddenFrames; });
+    if (head.viewed)
+        placeHud(placed, head);
 }
 // `lag` is the hero's render-transform distance from the shared rope-update
 // sample the eyes used, or negative when they used the render transform.
@@ -582,10 +741,9 @@ bool heroPosition(Vec3& position) {
 // While immersive, move the view to the tracked head with a lens covering both
 // eyes. The monitor shows this view; the gameplay camera object is unchanged.
 bool activeView(const Descriptor* incoming, Descriptor& out) {
-    uint64_t ropeSamples{};
-    Vec3 ropeHero{};
-    native_webs::heroSample(ropeSamples, ropeHero);
-    const bool shared = activeHero.fresh(ropeSamples, ropeHero);
+    // Every submit of the frame takes the frame's head (latchHead), which also
+    // keeps the frame's rope-update sample.
+    const auto& head = latchHead();
     uint64_t mask{};
     Descriptor stock{};
     if (!read(base + 0x7a34dd8, &mask, 8) || !(mask & 1) ||
@@ -594,28 +752,16 @@ bool activeView(const Descriptor* incoming, Descriptor& out) {
     // The flat screen keeps the stock camera's shape whichever view is drawn.
     flatAspect = (stock.values[0x404 / 4] - stock.values[0x400 / 4]) /
                  (stock.values[0x40c / 4] - stock.values[0x408 / 4]);
+    // What that camera shows of the HUD panel sizes the panel in VR.
+    stockHalfWidth = (stock.values[0x404 / 4] - stock.values[0x400 / 4]) / 2;
     if (!(config.createViews & 8) || stopRequested || GetTickCount64() >= deadline || live.load() != 2)
         return false;
-    AcquireSRWLockShared(&commandLock);
-    const auto desired = command;
-    const bool immersive = desired.enabled == 1 && GetTickCount64() < commandDeadline;
-    ReleaseSRWLockShared(&commandLock);
-    if (!immersive)
+    if (!head.controlled || head.command.enabled != 1)
         return false;
-    Mat4 pose{};
-    native_eyes::Bounds lens{};
-    bool placed = native_eyes::headView(desired, pose, lens);
+    const auto& pose = head.pose;
+    const auto& lens = head.lens;
+    bool placed = head.viewed;
     if (placed) {
-        // The same render-frame correction placeEyes() gives the eyes.
-        Vec3 offset{}, rendered = ropeHero;
-        if (desired.anchored && (shared || heroPosition(rendered))) {
-            native_eyes::reanchorOffset(desired.anchor, rendered, offset);
-            activeHeroPosition = rendered;
-            activeHeroPlaced = true;
-        }
-        pose[12] += offset.x;
-        pose[13] += offset.y;
-        pose[14] += offset.z;
         out = stock;
         // Keep the stock camera's clip planes and temporal jitter.
         reinterpret_cast<Lens>(base + 0x187bb00)(&out, stock.nearZ(), stock.farZ(), lens.left, lens.right,
@@ -688,13 +834,20 @@ void placeEyes() {
     activeHeroPlaced = false;
     native_eyes::Command desired{};
     bool controlled{};
-    if (render) {
+    if (render && frameHead.frame == frameIndex) {
+        // The active view and the HUD went to this command's head (latchHead).
+        desired = frameHead.command;
+        controlled = frameHead.controlled;
+    } else if (render) {
         AcquireSRWLockShared(&commandLock);
         desired = command;
         controlled = desired.enabled && GetTickCount64() < commandDeadline;
         ReleaseSRWLockShared(&commandLock);
     }
     latchedImmersive = render && enabled && controlled && desired.enabled == 1;
+    // The HUD's second movie goes on its panel while the eyes are shown.
+    if (render && enabled && controlled && (config.createViews & 4))
+        native_hud::eyesShown();
     latchedHide = latchedImmersive && !native_body::drawn();
     if ((config.createViews & 4) && (latchedImmersive || hiddenHero.load()))
         updateHero(latchedImmersive, latchedHide);
@@ -733,6 +886,11 @@ void placeEyes() {
             activeLag = length(activeHeroPosition - rendered);
     }
     recordOffset(placed, anchored, rejected, lag, activeLag);
+    if (latchedImmersive && frameHead.frame == frameIndex && frameHead.viewed) {
+        // The HUD and the eyes should have moved with the player alike.
+        const float mismatch = length(placed.offset - frameHead.offset);
+        native_hud::publish([&](native_hud::Data& d) { d.offsetMismatch = std::max(d.offsetMismatch, mismatch); });
+    }
     for (auto& slot : eyes)
         // A load can replace the native view pool between frames. maintain()
         // forgets an eye that left it; until then, never write to one.
@@ -868,6 +1026,7 @@ void maintain(void* manager) {
     ++d.frames;
     d.primary = primary;
     d.thread = GetCurrentThreadId();
+    mainThread = d.thread;
     for (unsigned i = 0; i < 2; ++i) {
         if (!eyes[i])
             continue;
@@ -999,6 +1158,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
         const unsigned char occlusionBytes[] = {0x48, 0x89, 0x5c, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24,
                                                 0x18, 0x57, 0x48, 0x83, 0xec, 0x40, 0x48, 0x8b, 0xf9,
                                                 0x48, 0x83, 0xb9, 0xa0, 0x1b, 0x00, 0x00, 0x00};
+        // The HUD follower's placement and the render instance's transform setter.
+        const unsigned char hudPlaceBytes[] = {0x40, 0x55, 0x53, 0x48, 0x8d, 0xac, 0x24, 0xc8, 0xfe,
+                                               0xff, 0xff, 0x48, 0x81, 0xec, 0x38, 0x02, 0x00, 0x00};
+        const unsigned char setTransformBytes[] = {0x40, 0x53, 0x48, 0x83, 0xec, 0x40, 0x0f, 0x10, 0x02, 0x33, 0xc0};
         if (!entry(0x18a0bb0, maintainBytes, sizeof(maintainBytes)) ||
             !entry(0x1899ab0, submitBytes, sizeof(submitBytes)) ||
             !entry(0x164703f, cameraSubmitBytes, sizeof(cameraSubmitBytes)) ||
@@ -1021,7 +1184,9 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
             !entry(0x1920310, setupDisplayBytes, sizeof(setupDisplayBytes)) ||
             !entry(0x187e130, enqueueBytes, sizeof(enqueueBytes)) ||
             !entry(0x191afb0, drawOffBytes, sizeof(drawOffBytes)) ||
-            !entry(0x191b880, drawOnBytes, sizeof(drawOnBytes))) {
+            !entry(0x191b880, drawOnBytes, sizeof(drawOnBytes)) ||
+            !entry(0x73ab80, hudPlaceBytes, sizeof(hudPlaceBytes)) ||
+            !entry(0x191c0e0, setTransformBytes, sizeof(setTransformBytes))) {
             result = 1002;
             break;
         }
@@ -1043,6 +1208,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
             setupDisplayHook = reinterpret_cast<void*>(base + 0x1920310);
             submitHook = reinterpret_cast<void*>(base + 0x1899ab0);
             renderOffscreenHook = reinterpret_cast<void*>(base + 0x1920240);
+            hudPlaceHook = reinterpret_cast<void*>(base + 0x73ab80);
             s = MH_CreateHook(maintainHook, reinterpret_cast<void*>(maintain),
                               reinterpret_cast<void**>(&originalMaintain));
             if (s == MH_OK)
@@ -1078,11 +1244,14 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
             if (s == MH_OK)
                 s = MH_CreateHook(renderOffscreenHook, reinterpret_cast<void*>(renderOffscreen),
                                   reinterpret_cast<void**>(&originalRenderOffscreen));
+            if (s == MH_OK)
+                s = MH_CreateHook(hudPlaceHook, reinterpret_cast<void*>(hudPlace),
+                                  reinterpret_cast<void**>(&originalHudPlace));
             if (s != MH_OK) {
                 result = 1200 + s;
-                for (auto hook :
-                     {maintainHook, updateHook, copyFinalHook, toneHook, copyJobHook, beginJobHook,
-                      endJobHook, initBuffersHook, renderActorHook, setupDisplayHook, submitHook, renderOffscreenHook})
+                for (auto hook : {maintainHook, updateHook, copyFinalHook, toneHook, copyJobHook, beginJobHook,
+                                  endJobHook, initBuffersHook, renderActorHook, setupDisplayHook, submitHook,
+                                  renderOffscreenHook, hudPlaceHook})
                     MH_RemoveHook(hook);
                 break;
             }
@@ -1097,19 +1266,24 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
         if (s == MH_OK)
             s = MH_EnableHook(toneHook);
         for (auto hook : {copyJobHook, beginJobHook, endJobHook, initBuffersHook, renderActorHook,
-                          setupDisplayHook, submitHook, renderOffscreenHook})
+                          setupDisplayHook, submitHook, renderOffscreenHook, hudPlaceHook})
             if (s == MH_OK)
                 s = MH_EnableHook(hook);
         if (s == MH_OK)
             s = MH_EnableHook(maintainHook);
         if (s != MH_OK) {
             for (auto hook : {updateHook, copyFinalHook, toneHook, copyJobHook, beginJobHook, endJobHook,
-                              initBuffersHook, renderActorHook, setupDisplayHook, submitHook, renderOffscreenHook})
+                              initBuffersHook, renderActorHook, setupDisplayHook, submitHook, renderOffscreenHook,
+                              hudPlaceHook})
                 MH_DisableHook(hook);
             result = 1300 + s;
             break;
         }
         enabled = true;
+        // The rest of the HUD on the panel (native_hud.cpp). Without it the
+        // panel still goes in front of the head; SpidyHudData says why not.
+        if (config.createViews & 4)
+            native_hud::start(base);
     } while (false);
     AcquireSRWLockExclusive(&telemetry);
     InterlockedIncrement64(&SpidyStereoData.sequence);
@@ -1130,17 +1304,22 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStop(void*) {
     AcquireSRWLockExclusive(&creation);
     enabled = false;
     ReleaseSRWLockExclusive(&creation);
+    hiddenHud = 0;
     // Keep maintenance installed until both owned views are excluded from jobs
     // and the main thread has restored the hero's native visibility.
     const auto limit = GetTickCount64() + 5000;
     while ((live || hiddenHero.load()) && GetTickCount64() < limit)
         Sleep(10);
+    // The HUD's texture goes back to the game's size while frames still run
+    // (SpidyHudData's restored says whether it did).
+    native_hud::stop(1000);
     if (live)
         result = 1401;
     else if (hooked) {
         enabled = false;
         for (auto hook : {maintainHook, updateHook, copyFinalHook, toneHook, copyJobHook, beginJobHook,
-                          endJobHook, initBuffersHook, renderActorHook, setupDisplayHook, submitHook, renderOffscreenHook}) {
+                          endJobHook, initBuffersHook, renderActorHook, setupDisplayHook, submitHook, renderOffscreenHook,
+                          hudPlaceHook}) {
             auto s = MH_DisableHook(hook);
             if (s != MH_OK && s != MH_ERROR_DISABLED)
                 result = 1500 + s;
@@ -1186,6 +1365,21 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyEyePlacement(void* late) {
 }
 extern "C" float SpidyFlatAspect() {
     return flatAspect.load();
+}
+uint32_t spidy::native_hud::eyes(Head& out) {
+    if (!enabled || !(config.createViews & 4) || lateEyes || GetCurrentThreadId() != mainThread.load())
+        return 0;
+    const auto& head = latchHead();
+    if (!head.controlled)
+        return 0;
+    if (head.command.enabled == 2)
+        return 2;
+    if (!head.viewed)
+        return 0;
+    out.pose = head.pose;
+    out.panel = head.panel;
+    out.halfWidth = halfWidth(size());
+    return 1;
 }
 void spidy::native_appearance::setPlayerRecord(uint64_t record) {
     playerRecord = record;

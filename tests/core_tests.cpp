@@ -2,6 +2,7 @@
 #include "spidy/native_view.hpp"
 #include "spidy/game_tracking.hpp"
 #include "spidy/native_eye_frame.hpp"
+#include "spidy/native_hud.hpp"
 #include "spidy/native_eye_history.hpp"
 #include "spidy/eye_job_table.hpp"
 #include "spidy/eye_pair_state.hpp"
@@ -890,8 +891,8 @@ int main() {
         Swing s(config);
         const Input none;
         const Body flying{{0,50,0},{},false};
-        near(config.gravity,5.886f);
-        near(s.predictNativeStep(.02f,none,w,flying).velocity.y,-5.886f*.02f);
+        near(config.gravity,7.848f);
+        near(s.predictNativeStep(.02f,none,w,flying).velocity.y,-7.848f*.02f);
         s.setGravity(vr_settings::gravity(150));
         near(s.config().gravity,14.715f);
         near(s.predictNativeStep(.02f,none,w,flying).velocity.y,-14.715f*.02f);
@@ -1674,6 +1675,99 @@ int main() {
         check(lens.right-lens.left>2*std::tan(.9f)+.1f,"cant did not widen the head lens");
         auto bad=c;bad.eyes[1].world=native_view::relativePose(basis,{{.032f,0,0},Quat::yaw(3.f)});
         check(!native_eyes::headView(bad,pose,lens),"backward-facing eye accepted");
+    });
+    test("game HUD panel sits in front of the head at the width asked for, its markers on it", [] {
+        // A head looking along world -z (rows right, down, forward, position).
+        const Mat4 head{1,0,0,0, 0,-1,0,0, 0,0,-1,0, 10,20,30,1};
+        const native_hud::Shape shape;
+        // The game's own placement on October 9: 20 m from its camera, whose view is 0.8125 half wide.
+        const Vec3 game{14.4446f,10.682f,11.f};
+        Mat4 m{};
+        check(native_hud::panel(head,game,20,.8125f,shape,m),"panel rejected");
+        near(m[12],10);near(m[13],20);near(m[14],30-shape.distance);
+        // x right, y up, z toward the viewer, every scale changed alike.
+        const float k=m[0]/game.x;
+        near(m[5],game.y*k);near(m[10],game.z*k);
+        near(m[1],0);near(m[2],0);near(m[4],0);near(m[6],0);near(m[8],0);near(m[9],0);
+        // What the game's view showed of it (16.25 m half wide at 20 m) now spans halfWidth.
+        near(k*.8125f*20,shape.halfWidth*shape.distance);
+        check(!native_hud::panel(head,{0,1,1},20,.8125f,shape,m),"a flat panel accepted");
+        check(!native_hud::panel(head,game,20,0,shape,m),"no view width accepted");
+        check(!native_hud::panel(head,game,std::numeric_limits<float>::quiet_NaN(),.8125f,shape,m),"NaN accepted");
+        // Markers: straight ahead is the panel's middle, the panel's edges are its half width.
+        float x{},y{};bool front{};
+        check(native_hud::project(head,.577f,2,{10,20,0},.05f,x,y,front),"a point ahead rejected");
+        near(x,.5f);near(y,.5f);check(front,"a point ahead is behind");
+        check(native_hud::project(head,.577f,2,{10+.577f*10,20,20},.05f,x,y,front),"right edge rejected");
+        near(x,1,.002f);near(y,.5f);
+        check(native_hud::project(head,.577f,2,{10,20+.2885f*10,20},.05f,x,y,front),"top edge rejected");
+        near(x,.5f);near(y,0,.002f);
+        check(native_hud::project(head,.577f,2,{10,20,40},.05f,x,y,front)&&!front,"a point behind is ahead");
+        // The panel's texture: the stream makes int(base * factor) pixels wide.
+        for(uint32_t width:{1290u,1720u,2580u,3440u})
+            check(static_cast<uint32_t>(static_cast<float>(native_hud::textureBase(width,1.35224f))*1.35224f)==width,
+                  "texture base misses the window width");
+        check(native_hud::textureBase(1920,1)==1920,"16:9 base changed");
+    });
+    test("game HUD panel holds still while the head looks around it, glides back beyond, stays upright", [] {
+        const float degree=3.14159265f/180;
+        const auto facing=[](const Quat& q){return q.rotate({0,0,-1});};
+        native_hud::Follow follow;
+        Quat panel=follow.update({},1.f/72);
+        near(facing(panel).z,-1);check(!follow.gliding()&&follow.angle()<.01f,"the first update off the head");
+        // A look 1.5 degrees aside, held for a second: inside the hold, the panel stays.
+        for(int i=0;i<72;++i) panel=follow.update(Quat::yaw(1.5f*degree),1.f/72);
+        near(facing(panel).x,0);near(follow.angle(),1.5f,.01f);
+        // 10 degrees: it glides after the head and holds again once there.
+        panel=follow.update(Quat::yaw(10*degree),1.f/72);
+        check(follow.gliding()&&follow.angle()<10&&follow.angle()>8,"no glide past the hold");
+        for(int i=0;i<72;++i) panel=follow.update(Quat::yaw(10*degree),1.f/72);
+        check(!follow.gliding()&&follow.angle()<follow.settle,"the glide did not settle on the head");
+        near(std::atan2(-facing(panel).x,-facing(panel).z),10*degree,.005f);
+        // Most of the way in one glide time (63%), and none of a frame past a quarter second.
+        native_hud::Follow timed;
+        timed.update({},1.f/72);
+        panel=timed.update(Quat::yaw(30*degree),timed.glide);
+        near(std::atan2(-facing(panel).x,-facing(panel).z),30*degree*(1-std::exp(-1.f)),.002f);
+        native_hud::Follow stalled;
+        stalled.update({},1.f/72);
+        panel=stalled.update(Quat::yaw(30*degree),5.f);
+        near(std::atan2(-facing(panel).x,-facing(panel).z),30*degree*(1-std::exp(-.25f/stalled.glide)),.002f);
+        // A head looking down and tilted over: the panel stays level, facing where the face does.
+        native_hud::Follow tilted;
+        panel=tilted.update(Quat::yaw(.5f)*Quat::around({1,0,0},-.3f)*Quat::around({0,0,1},.4f),1.f/72);
+        near(panel.rotate({1,0,0}).y,0);
+        near(facing(panel).y,std::sin(-.3f),.002f);
+        near(std::atan2(-facing(panel).x,-facing(panel).z),.5f,.002f);
+        // Straight down, the top of the head says which way: no NaN, and the panel faces down.
+        native_hud::Follow down;
+        panel=down.update(Quat::yaw(.7f)*Quat::around({1,0,0},-1.5707963f),1.f/72);
+        check(std::isfinite(panel.x+panel.y+panel.z+panel.w),"straight down gave NaN");
+        near(facing(panel).y,-1,.002f);
+        // A reset starts in front of the head again, without a glide.
+        follow.reset();
+        panel=follow.update(Quat::yaw(-40*degree),1.f/72);
+        near(std::atan2(-facing(panel).x,-facing(panel).z),-40*degree,.002f);
+        check(!follow.gliding(),"a reset glided");
+        // Seen from the head: a panel turned 10 degrees left of a head looking along world -z.
+        const Mat4 head{1,0,0,0, 0,-1,0,0, 0,0,-1,0, 10,20,30,1};
+        const Mat4 turned=native_hud::turned(head,Quat::yaw(10*degree));
+        near(turned[8],-std::sin(10*degree));near(turned[9],0);near(turned[10],-std::cos(10*degree));
+        near(turned[0],std::cos(10*degree));near(turned[2],-std::sin(10*degree));near(turned[5],-1);
+        near(turned[12],10);near(turned[13],20);near(turned[14],30);
+        check(native_hud::turned(head,{})==head,"no turn moved the pose");
+        // The panel in front of the turned pose, and a point straight along it in its middle.
+        Mat4 m{};
+        check(native_hud::panel(turned,{14.4446f,10.682f,11.f},20,.8125f,native_hud::Shape{},m),"panel rejected");
+        near(m[12],10-2*std::sin(10*degree));near(m[14],30-2*std::cos(10*degree));
+        float x{},y{};bool front{};
+        check(native_hud::project(turned,.577f,16.f/9,{10-50*std::sin(10*degree),20,30-50*std::cos(10*degree)},.05f,
+                                  x,y,front)&&front,"a point along the panel rejected");
+        near(x,.5f);near(y,.5f);
+        // Sizes: degrees across, off none.
+        near(native_hud::halfWidth(2),std::tan(30*degree));near(native_hud::halfWidth(1),std::tan(25*degree));
+        near(native_hud::halfWidth(3),std::tan(35*degree));near(native_hud::halfWidth(0),0);
+        near(native_hud::halfWidth(9),std::tan(30*degree));
     });
     test("web strand spans wrist to anchor and stays visible at range", [] {
         std::vector<Vertex> v;
@@ -3898,10 +3992,13 @@ int main() {
                 check(c && *c, "an empty choice");
         }
         check(headings == 4 && all[0].item == Item::none && all[6].item == Item::none && all[8].item == Item::none &&
-                  all[13].item == Item::none,
+                  all[14].item == Item::none,
               "the sections: webs, body, comfort, experimental");
-        check(all[14].item == Item::flips && all[14].choices.empty() && std::strcmp(all[13].title, "EXPERIMENTAL") == 0,
+        check(all[15].item == Item::flips && all[15].choices.empty() && std::strcmp(all[14].title, "EXPERIMENTAL") == 0,
               "the flips: a switch under EXPERIMENTAL, the last row");
+        check(all[12].item == Item::screenSize && all[13].item == Item::hud && all[13].choices.size() == 4 &&
+                  std::strcmp(all[13].choices[0], "OFF") == 0 && std::strcmp(all[13].choices[3], "LARGE") == 0,
+              "the HUD after the game screen's size: OFF, SMALL, MEDIUM, LARGE");
         check(all[1].item == Item::webButton && all[1].choices.size() == 2 &&
                   std::strcmp(all[1].choices[0], "GRIP") == 0 && std::strcmp(all[1].choices[1], "TRIGGER") == 0,
               "the web button first under WEBS: GRIP, or TRIGGER");
@@ -3927,8 +4024,8 @@ int main() {
         check(choice(Item::aimMarkers, defaults) == 1 && choice(Item::swingSpeed, defaults) == 4 &&
                   choice(Item::snapTurn, defaults) == 2 && choice(Item::smoothTurn, defaults) == 0 &&
                   choice(Item::haptics, defaults) == 4 && choice(Item::screenSize, defaults) == 1 &&
-                  choice(Item::weight, defaults) == 1,
-              "the defaults as the tab shows them: ON, 32 m/s, 30 degrees, no smooth turning, 100%, medium, 60%");
+                  choice(Item::weight, defaults) == 2,
+              "the defaults as the tab shows them: ON, 32 m/s, 30 degrees, no smooth turning, 100%, medium, 80%");
         Values v;
         check(choose(Item::swingSpeed, 5, v) && v.swingSpeed == 40, "faster");
         check(!choose(Item::swingSpeed, 5, v), "the same choice changed something");
@@ -3974,6 +4071,10 @@ int main() {
                   choose(Item::webButton, 1, v) && v.triggerWebs && choice(Item::webButton, v) == 1 &&
                   !choose(Item::webButton, 1, v) && !choose(Item::webButton, 2, v),
               "the web button: GRIP by default, TRIGGER swaps it");
+        check(defaults.hud == 2 && choice(Item::hud, defaults) == 2 && defaultChoice(Item::hud) == 2 &&
+                  choose(Item::hud, 0, v) && v.hud == 0 && choice(Item::hud, v) == 0 && choose(Item::hud, 3, v) &&
+                  v.hud == 3 && !choose(Item::hud, 4, v) && !choose(Item::hud, -1, v),
+              "the HUD: MEDIUM by default, OFF to LARGE");
         check(choice(Item::none, v) == 0 && !choose(Item::none, 0, v), "a heading holds no value");
         // RESET: each setting's default choice puts its default back.
         for (const auto& row : rows())
@@ -3995,6 +4096,10 @@ int main() {
         heavy.weight = 999;
         light.weight = 0;
         check(sanitized(heavy).weight == 300 && sanitized(light).weight == 40, "weights past either end");
+        Values big, none;
+        big.hud = 9;
+        none.hud = -1;
+        check(sanitized(big).hud == 3 && sanitized(none).hud == 0, "HUD sizes past either end");
         check(gravity(300) <= game_swing::maxGravity, "the heaviest weight is more than a swing takes");
         near(screenWidth(0), 2.4f);
         near(screenWidth(7), 4.2f);
@@ -4543,7 +4648,7 @@ int main() {
         strict.minimum = .9f;
         SlowMotion picky(strict);
         picky.update(.01f, true, true);
-        for (int i = 0; i < 100; ++i)
+        while (picky.focus() > .85f)
             picky.update(.01f, false, true);
         picky.update(.01f, true, true);
         check(picky.update(.01f, true, true) == SlowMotion::Event::refused, "a press below the minimum started it");

@@ -335,9 +335,11 @@ code, so it handles like its other tabs: choose the WEB BUTTON (GRIP or
 TRIGGER; `GameTrackingRig::triggerWebs`, XrConfig options bit 12, XrData
 settings bit 64), switch the aim markers and webs in
 open air, or step the swing speed limit, weight, snap turn, smooth turn,
-controller vibration and the game screen's size with left and right, and switch
-the experimental FLIPS (off by default; `GameTrackingRig::flips`, XrConfig
-options bit 11, XrData settings bit 32); XrConfig and XrData are version 17.
+controller vibration, the game screen's size and the HUD (OFF, SMALL, MEDIUM,
+LARGE; XrConfig and XrData `hud`, see [The HUD in VR](#the-hud-in-vr)) with
+left and right, and switch the experimental FLIPS (off by default;
+`GameTrackingRig::flips`, XrConfig options bit 11, XrData settings bit 32);
+XrConfig and XrData are version 18.
 X resets a setting, Y the
 whole tab (to Spidy's defaults). Web grabbing, the web
 shooter, your body and punching are not in it or in the launcher's options
@@ -392,8 +394,8 @@ stretched; in flat mode it shows the normal game view. Add `-StockMonitorView`
 to keep the normal game view on the monitor in immersive VR too, at the cost of
 culling and shading that follow the stock camera instead of your head.
 
-When the launcher starts the game, the game opens in a small window with your
-desktop's shape, 540 pixels tall, centred. The engine still runs culling, shadow
+When the launcher starts the game, the game opens in a small 1920 x 1080 window
+(16:9, at most three quarters of the desktop's height), centred. The engine still runs culling, shadow
 setup, and auto-exposure for that view; a small window keeps that work and skips
 most of its rendering. The launcher saves the game's window settings in
 `reports\desktop-view-before-vr.json` and writes them back after the game
@@ -467,7 +469,7 @@ reattaching after a stopped session or a rebuilt DLL.
 | Option | Effect |
 |---|---|
 | `-SwingSpeed 32` | Swing speed limit in m/s (1-65) |
-| `-Weight 100` | How heavy you are while webs fly you, in percent of real gravity (40-300; 60 by default) |
+| `-Weight 100` | How heavy you are while webs fly you, in percent of real gravity (40-300; 80 by default) |
 | `-SnapTurn 30` | Snap turn angle in degrees; 0 turns it off |
 | `-SmoothTurn 120` | Smooth turning in degrees a second at full tilt, instead of snap turning (0-360; 0, the default, snap turns) |
 | `-Haptics 100` | Controller vibration in percent; 0 turns it off |
@@ -557,7 +559,11 @@ the stock camera, which may cost some frame rate; compare with `-StockMonitorVie
 
 The desktop view renders at the game window's size. Before the small VR window,
 it rendered the full 3440 x 1440 desktop, about a fifth of the frame's pixels;
-at 1290 x 540 it is about 3%. The October 5 morning session averaged 44 new
+at 1290 x 540 it was about 3%, at 1720 x 720 about 6%, and at 1920 x 1080
+(since October 9's seventh build, for the HUD: see
+[The HUD in VR](#the-hud-in-vr)) it is about 7% of 3840 x 4080 eyes, 10% of
+3072 x 3264 ones. The October 5
+morning session averaged 44 new
 stereo pairs per second at
 3072 x 3264 per eye with the headset at 120 Hz; about 40% of the frames sent to
 the headset repeated an earlier pair, which doubles fast-moving scenery. The
@@ -574,6 +580,98 @@ fast-moving edges. A refresh rate the frame rate divides evenly, such as 72 or
 the game at half the refresh rate and synthesizes the frames in between; at 90 Hz
 that is 45 frames per second, close to the rate measured above, so most frames it
 receives are new rather than repeats.
+
+## The HUD in VR
+
+The game's HUD has two parts (`include/spidy/native_hud.hpp`,
+`src/native_hud.cpp`, and the placement in `src/stereo_probe.cpp`):
+
+- **The panel**: health, gadgets, minimap, prompts. `ui/export/ModelHudFull.gfx`
+  is drawn into a texture (a `ScaleformRTTStream`: base 1920 x 1080, its width
+  times the window's aspect over 16:9) that a 16:9 model ("modelHudFull", 2.25
+  units tall) carries. `PlayerModelHudFollower` places that model every frame
+  (`0x73ab80`, main thread) 20 m in front of the camera manager's camera
+  (`0x60444d0`, read through `0x1642040`), scaled so the texture covers what
+  that camera's view shows (at the October 9 save the view is 0.8125 half wide
+  as a tangent, the model's 56% middle). It is drawn in each view's GUI pass,
+  so the eyes draw it, but in VR that camera is still the third-person one.
+- **The second movie**: world markers (POIs), subtitles, QTE and other
+  prompts, pause menus. One Scaleform movie (global `0x7be3e00`) laid out in
+  the window's pixels. The "Scaleform" render command (`0xa8`, handler
+  `0x1d2b6c0`) draws a list of movies each frame (two lists at `0x7be3f40`,
+  128 items of 24 bytes: movie, render target or 0 for the game's view, frame
+  stamp, clear flag). The list holds the panel's movie (into the panel's render
+  target, cleared) and this one (into the game's view), which the eyes never
+  get. Its markers are placed through `0x1f10b60` / `0x1f10ad0` (to `0x1f10c20`:
+  the active view's view-projection at view +0x100, returning 0 to 1 across
+  the screen); the POI code calls them on the main thread.
+
+What Spidy does:
+
+- **Placement.** While immersive, after the follower's own placement, Spidy
+  moves the panel in front of the head with the game's transform setter
+  (`0x191c0e0`): 2 m ahead, the part the game's view showed spanning the HUD
+  setting's width (`native_hud::halfWidth`: 50, 60 or 70 degrees across), all
+  three scales changed alike. A transform set any later (at `0x1920240`, where
+  the eyes are placed) did not reach the frame's render. The frame's head is
+  latched once (`latchHead`, at the first camera submit): the active view, the
+  panel, its markers and the eyes all use that command and that travel, so the
+  panel never trails the eyes (`offsetMismatch` stays 0).
+- **Lazy follow.** The panel faces where `native_hud::Follow` turned it, not
+  the head's exact way. The XR worker updates it every headset frame from the
+  head's orientation in the tracking space (the room): it holds still while
+  the head looks within 2 degrees of it, then glides back in front of the head
+  (63% of the way every 0.15 s) until within 0.25 degrees, upright. It is
+  reset to the head when play, the immersive view or a recentred room begins.
+  The worker hands its orientation seen from the head to `native_hud::follow`
+  under the eye command's serial; `latchHead` takes the one for its command
+  and turns the head pose by it (`native_hud::turned`), and the panel and its
+  markers use that turned pose, so the panel stays fixed in the room between
+  glides. A head-locked panel shook on the headset: a quarter of the images
+  shown in the October 9 session were earlier ones, turned by the runtime to
+  the newer head, and the panel turned with them.
+- **HUD setting.** `vr_settings::Values::hud` (0 off, 1-3 small to large) goes
+  to `native_hud::setSize` whenever the settings apply. Off, the panel's render
+  instance is left out of the eye views in `renderActor` (`0x17991a0`, per eye
+  and draw), the second movie stays in the game's view and markers keep the
+  game's projection; the game screen, which copies the game's view, keeps it
+  all.
+- **Texture.** For the session the panel's stream makes its texture at the
+  second movie's size (the window's: `textureBase` picks the base width the
+  stream's `int(base * factor)` turns into it; `+0x78`, `+0x7c`, and `-1` at
+  `+0x9c` re-create it). The stream's update (`0x2104400`) runs on the main
+  thread before the follower's update; clearing the follower's `+0xc0` makes
+  that update bind the new texture in the same frame. `stop()` puts the game's
+  size back and binds it.
+- **Second movie on the panel.** While the headset shows the eye views
+  (immersive or flat; `eyesShown()` from `placeEyes` every frame), the render
+  command draws the second movie into the panel's render target (stream
+  `+0x20`, size at `+0x1cc`) after the panel's own movie, instead of into the
+  game's view. Within 100 ms of the eye views stopping (menus, cutscenes,
+  loads: the game screen), it goes back to the game's view.
+- **Markers.** While immersive, the HUD's own callers of the two projections
+  (return addresses in `0x72a000`-`0x7c0000` and `0x1f00000`-`0x1f10980`; the
+  `0x81xxxx` callers are targeting code and keep the game's view) get the
+  point projected from the head onto the panel (`native_hud::project` through
+  the turned pose: where the line from the head to the point crosses the
+  panel), with the game's margins for "on screen". On the flat screen the
+  panel is where the game put it, so the game's own projection fits.
+
+The VR window is 1920 x 1080 (`tools/vr_display.py`; 16:9 whatever the
+desktop's shape, at most three quarters of its height). The game sizes its HUD
+by the window's height: at 1080 rows the panel's texture (1920 x 1080) has
+about the detail of a Quest 3's eye images at 125% across its 60 degrees
+(1660 against 1640 pixels per unit of tangent; 1720 x 720 had 1490), and its
+16:9 layout shows everything a third larger on a panel as wide as the 21:9
+one of the fifth build. `SpidyHudData` (version 3) counts the
+game's placements, panels placed and rejected, the texture's size and changes,
+frames with the second movie on the panel, markers projected, the HUD setting,
+frames and eye draws that left the panel out, placements the follow turned,
+and the follow's angle from the head; session reports carry it as `hud`.
+`tools/probe_hud.py` checks all of it in the game without a headset: it drives
+VR-like eyes through head poses, the game screen and the flat screen, sets the
+HUD's size and a turned panel through `SpidyHudSet` (the XR worker's follow
+needs a headset), and saves both eyes and the window.
 
 ## Run the lab
 
@@ -691,6 +789,7 @@ still requires a running game or headset.
 | `src/native_render_memory.cpp`, `tools/vr_launcher.py` | A larger per-frame render memory ring, installed while the game starts |
 | `src/web_visual.cpp` | Fallback game-style web strands for the headset overlay and lab |
 | `src/game_xr.cpp`, `src/game_tracking.cpp` | Native eye presentation and Quest controls |
+| `src/native_hud.cpp`, `include/spidy/native_hud.hpp`, `tools/probe_hud.py` | The game's HUD in VR: its panel in front of the head, the second movie (markers, subtitles, prompts) on it, and its check in the game |
 | `src/native_rays.cpp`, `src/native_movement.cpp`, `src/game_swing.cpp` | Native world queries and collision-controlled swing requests |
 | `src/lab_world.cpp`, `apps/xr_lab.cpp` | Synthetic collision world and VR lab |
 | `tools/inspect_game.py`, `tools/discover_render_types.py` | Offline game research |

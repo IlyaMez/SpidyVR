@@ -40,20 +40,27 @@ class DesktopViewTests(unittest.TestCase):
     def tearDown(self):
         self.folder.cleanup()
 
-    def test_small_window_keeps_the_desktop_shape_centred_and_fits(self):
+    def test_small_window_is_16_by_9_centred_and_fits(self):
+        # 1920 x 1080 for the HUD panel's texture (native_hud.cpp), whatever the desktop's shape.
         w=display.small_window(3440,1440)
         self.assertEqual((w['Fullscreen'],w['ExclusiveFullscreen'],w['WindowWidth'],w['WindowHeight'],
-                          w['WindowLeft'],w['WindowTop']),(0,0,1290,540,1075,450))
-        self.assertEqual((w['UserWindowWidth'],w['UserWindowHeight']),(1290,540))
-        self.assertEqual(display.small_window(1920,1080)['WindowWidth'],960)
+                          w['WindowLeft'],w['WindowTop']),(0,0,1920,1080,760,180))
+        self.assertEqual((w['UserWindowWidth'],w['UserWindowHeight']),(1920,1080))
+        self.assertEqual((display.small_window(2560,1440)['WindowWidth'],display.small_window(3840,2160)['WindowHeight']),
+                         (1920,1080))
+        # At most three quarters of the desktop's height, and its width.
+        self.assertEqual((display.small_window(1920,1080)['WindowWidth'],display.small_window(1920,1080)['WindowHeight']),
+                         (1440,810))
         tiny=display.small_window(800,450)
-        self.assertEqual((tiny['WindowWidth'],tiny['WindowHeight'],tiny['WindowLeft'],tiny['WindowTop']),(800,450,0,0))
+        self.assertEqual((tiny['WindowWidth'],tiny['WindowHeight'],tiny['WindowLeft'],tiny['WindowTop']),(599,337,100,56))
+        narrow=display.small_window(1000,2000)
+        self.assertEqual((narrow['WindowWidth'],narrow['WindowHeight']),(1000,562))
 
     def test_launch_saves_the_users_settings_once_and_restores_them(self):
         registry=FakeRegistry(USER)
         written=display.prepare_launch(registry=registry,backup=self.backup,screen=(3440,1440))
         self.assertEqual(written,display.small_window(3440,1440))
-        self.assertEqual((registry.values['Fullscreen'],registry.values['WindowWidth']),(0,1290))
+        self.assertEqual((registry.values['Fullscreen'],registry.values['WindowWidth']),(0,1920))
         display.shrink(registry,self.backup,(3440,1440)) # a second launch must not save the VR window
         self.assertEqual(json.loads(self.backup.read_text())['values'],USER)
         self.assertTrue(display.restore(registry,self.backup))
@@ -85,7 +92,7 @@ class DesktopViewTests(unittest.TestCase):
         # A value the game never saved: created for the session, deleted afterwards. Frame generation the
         # game never saved stays unsaved.
         fresh=FakeRegistry(USER)
-        self.assertEqual(display.prepare_launch(registry=fresh,backup=self.backup,screen=(1920,1080))['WindowWidth'],960)
+        self.assertEqual(display.prepare_launch(registry=fresh,backup=self.backup,screen=(1920,1080))['WindowWidth'],1440)
         self.assertEqual(fresh.keys[display.INPUT_KEY],dict(EnableWindowsGamingInput=0))
         self.assertNotIn('DLSSG',fresh.values)
         self.assertTrue(display.restore(fresh,self.backup))

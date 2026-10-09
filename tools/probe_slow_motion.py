@@ -43,9 +43,9 @@ TIME_UPDATE = 0x19bb430
 TIME_EXPORTS = ('SpidyTimeStart', 'SpidyTimeSet', 'SpidyTimeSample', 'SpidyTimeStop')
 MAGIC = 0x454d4954
 SLOW = .3
-# The swing's default weight (60%), and what the web grab may catch (game_grab::movableKinds): with it the grab
+# The swing's default weight (80%), and what the web grab may catch (game_grab::movableKinds): with it the grab
 # steps, so its step time is reported.
-WEIGHT = 60
+WEIGHT = 80
 GRAB_KINDS = (1 << 1) | (1 << 2)
 # Seconds after a change before measuring: the hook applies it at the game's next update, the clock at the frame
 # after, and the mover runs each command a step late.

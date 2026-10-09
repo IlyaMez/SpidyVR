@@ -498,22 +498,22 @@ namespace {
 // The settings as XrData reports them: flags 1 web grab, 2 punch, 4 body,
 // 8 webs in open air, 16 web shooter, 32 aim markers; 64 a T-pose
 // calibration wanted (CALIBRATE BODY: ON RESUME); 128 flips (experimental);
-// 256 the trigger webs (WEB BUTTON: TRIGGER).
+// 256 the trigger webs (WEB BUTTON: TRIGGER). hud: the HUD row (0 off, 1-3).
 struct ProbeSettings {
-    uint32_t magic = 0x554e4d53, version = 3, bytes = sizeof(ProbeSettings), flags{};
+    uint32_t magic = 0x554e4d53, version = 4, bytes = sizeof(ProbeSettings), flags{};
     uint32_t snapTurn{}, haptics{}, screenSize{};
     float swingSpeed{};
-    uint32_t smoothTurn{}, weight{};
+    uint32_t smoothTurn{}, weight{}, hud{}, spare{};
 };
-static_assert(sizeof(ProbeSettings) == 40);
+static_assert(sizeof(ProbeSettings) == 48);
 struct ProbeSample {
-    uint32_t magic = 0x554e4d53, version = 3, bytes = sizeof(ProbeSample), installed{};
+    uint32_t magic = 0x554e4d53, version = 4, bytes = sizeof(ProbeSample), installed{};
     uint64_t tabs{}, changes{};
     uint32_t status{}, flags{}, snapTurn{}, haptics{}, screenSize{};
     float swingSpeed{};
-    uint32_t smoothTurn{}, weight{};
+    uint32_t smoothTurn{}, weight{}, hud{}, spare{};
 };
-static_assert(sizeof(ProbeSample) == 64);
+static_assert(sizeof(ProbeSample) == 72);
 } // namespace
 extern "C" __declspec(dllexport) DWORD WINAPI SpidyMenuStart(void* input) {
     ProbeSettings s;
@@ -543,6 +543,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMenuStart(void* input) {
     v.screenSize = static_cast<int>(s.screenSize);
     v.swingSpeed = s.swingSpeed;
     v.weight = static_cast<int>(s.weight);
+    v.hud = static_cast<int>(s.hud);
     if (const auto code = install(reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr))))
         return code;
     publish(vr_settings::sanitized(v));
@@ -567,6 +568,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMenuSample(void* output) {
     s.screenSize = static_cast<uint32_t>(v.screenSize);
     s.swingSpeed = v.swingSpeed;
     s.weight = static_cast<uint32_t>(v.weight);
+    s.hud = static_cast<uint32_t>(v.hud);
     __try {
         if (reinterpret_cast<uintptr_t>(output) < 0x10000)
             return 9601;

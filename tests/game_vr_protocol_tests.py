@@ -13,7 +13,7 @@ from run_game_vr import (snapshot as xr_snapshot, accepted as accepted_xr, timin
                          game_memory, keep_game_log, commit_warning, VR_COMMIT_MB, body_snapshot,
                          punch_snapshot, shooter_snapshot, start_settings, settings_line, SETTINGS_LINE,
                          scaled_eye_size, vr_commit_mb, rendering_line, EYE_COMMIT_BYTES,
-                         slow_motion_snapshot, GAME_HOOKS)
+                         slow_motion_snapshot, hud_snapshot, GAME_HOOKS)
 from probe_collision import snapshot as collision_snapshot
 from probe_movement import snapshot as movement_snapshot
 from probe_native_motion import snapshot as motion_snapshot
@@ -252,6 +252,38 @@ class ProtocolTests(unittest.TestCase):
             slow_motion_snapshot(Reader(wrong, struct.pack('<q', 6)), 0)
         # The session checks the time system's update is unpatched before and restored after.
         self.assertIn(0x19bb430, GAME_HOOKS)
+
+    def test_hud_decodes_the_panel_its_texture_and_the_second_movie_and_rejects_torn_reads(self):
+        raw = bytearray(192)
+        struct.pack_into('<4Iq2Q3Q', raw, 0, 0x53485544, 3, 192, 0, 6, 0x1000, 0x2000, 2930, 2494, 3)
+        struct.pack_into('<3f5f', raw, 64, 14.4446, 10.682, 11, 20, .8125, 2, .577, 0)
+        struct.pack_into('<4I4Q2I', raw, 96, 1920, 1080, 1920, 1080, 0, 0, 2840, 4988, 0, 0)
+        # The large HUD; none left out; 2400 placements where the XR worker's follow turned the panel, which
+        # last faced 1.5 degrees from the head and at most 31.25.
+        struct.pack_into('<2I3Q2f', raw, 152, 3, 0, 0, 0, 2400, 1.5, 31.25)
+        result = hud_snapshot(Reader(raw, struct.pack('<q', 6)), 0)
+        self.assertEqual((result['game_frames'], result['placed_frames'], result['rejected_frames']), (2930, 2494, 3))
+        self.assertEqual((result['game_distance'], result['view_half_width'], result['distance']), (20, .8125, 2))
+        self.assertEqual((result['texture'], result['game_texture']), ([1920, 1080], [1920, 1080]))
+        self.assertEqual((result['texture_resizes'], result['texture_restores'], result['layer_frames'],
+                          result['marker_projections']), (0, 0, 2840, 4988))
+        self.assertEqual((result['layer_status'], result['restored']), (0, False))
+        self.assertEqual((result['size'], result['hidden_frames'], result['hidden_draws'], result['followed_frames'],
+                          result['follow_angle'], result['follow_angle_max']), (3, 0, 0, 2400, 1.5, 31.25))
+        # The HUD off: 300 frames left the panel out of both eyes.
+        struct.pack_into('<2I3Q', raw, 152, 0, 0, 300, 600, 2400)
+        result = hud_snapshot(Reader(raw, struct.pack('<q', 6)), 0)
+        self.assertEqual((result['size'], result['hidden_frames'], result['hidden_draws']), (0, 300, 600))
+        torn = bytearray(raw)
+        struct.pack_into('<q', torn, 16, 7)
+        self.assertIsNone(hud_snapshot(Reader(*([torn, struct.pack('<q', 7)]*8)), 0))
+        wrong = bytearray(raw)
+        struct.pack_into('<I', wrong, 4, 1)
+        with self.assertRaises(RuntimeError):
+            hud_snapshot(Reader(wrong, struct.pack('<q', 6)), 0)
+        # The session checks the HUD's hooked entries are unpatched before and restored after.
+        for rva in (0x73ab80, 0x2104400, 0x1d2b6c0, 0x1f10ad0, 0x1f10b60):
+            self.assertIn(rva, GAME_HOOKS)
 
     def test_shooter_feedback_decodes_each_hand_and_the_latest_shot(self):
         raw = bytearray(192)
@@ -732,12 +764,12 @@ class ProtocolTests(unittest.TestCase):
 
     def test_xr_never_publishes_partly_updated_pose(self):
         raw = bytearray(792)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 17, 792, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 18, 792, 3, 4)
         self.assertIsNone(xr_snapshot(Reader(*([raw, struct.pack('<Q', 6)]*8)), 0))
 
     def test_xr_decodes_both_hands_and_status_message(self):
         raw = bytearray(792)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 17, 792, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 18, 792, 3, 4)
         struct.pack_into('<16f', raw, 160, *range(16))
         struct.pack_into('<16f', raw, 224, *range(16, 32))
         raw[288:295] = b'Tracked'
@@ -755,7 +787,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_xr_says_why_gameplay_was_unavailable_and_which_camera_ran(self):
         raw = bytearray(792)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 17, 792, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 18, 792, 3, 4)
         # A played scene whose camera the gate does not accept, the third player of the session,
         # and the menu button held on the virtual controller the game has read 900 times.
         struct.pack_into('<2I2Q2IQ', raw, 592, 8, 0x3872860, 3, 0x2aefe723280, 0x10, 1, 900)
@@ -774,7 +806,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_xr_counts_interacts_and_aim_markers(self):
         raw = bytearray(792)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 17, 792, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 18, 792, 3, 4)
         result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual((result['interacts'], result['aim_markers'], result['markers']), (0, False, 0))
         # Three B presses reached the game as its Y; markers on, 5000 drawn so far.
@@ -784,20 +816,24 @@ class ProtocolTests(unittest.TestCase):
 
     def test_xr_reports_the_vr_settings_and_the_settings_tab(self):
         raw = bytearray(792)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 17, 792, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 18, 792, 3, 4)
         # Markers on; web grab, webs in open air, the web shooter and body on, punching off; 48 m/s, half again
         # real gravity, 45 degree snap turns, smooth turning at 120 degrees a second, half vibration, the large
         # screen; two changes in the SPIDY VR tab, which the game built 7 times.
         struct.pack_into('<2IQ', raw, 648, 0, 1, 0)
         struct.pack_into('<4IfIQ2I', raw, 664, 29, 45, 50, 2, 48.0, 2, 7, 1, 0)
         struct.pack_into('<I', raw, 704, 120)
-        struct.pack_into('<I', raw, 744, 150)
+        # Half again real gravity, the large HUD.
+        struct.pack_into('<2I', raw, 744, 150, 3)
         result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual(result['vr_settings'], dict(aim_markers=True, web_grab=True, air_webs=True, web_shooter=True,
                                                      punch=False, body=True, swing_speed=48.0, weight=150,
                                                      snap_turn=45, smooth_turn=120, haptics=50, screen_size=2,
-                                                     flips=False, trigger_webs=False, eye_height_mm=0,
+                                                     flips=False, trigger_webs=False, hud=3, eye_height_mm=0,
                                                      arm_length_mm=0, calibration_prompt=True))
+        # The HUD switched off in the tab.
+        struct.pack_into('<I', raw, 748, 0)
+        self.assertEqual(xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)['vr_settings']['hud'], 0)
         self.assertEqual((result['setting_changes'], result['menu_tabs'], result['menu_installed'],
                           result['menu_status']), (2, 7, True, 0))
         # The tab could not be hooked: the game's code at its second hook is not the supported build's.
@@ -821,7 +857,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_xr_reports_walls_the_game_held_the_player_on(self):
         raw = bytearray(792)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 17, 792, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 18, 792, 3, 4)
         result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual(result['surface'], dict(entries=0, frames=0, hero_up=[0, 0, 0], stand_off_m=0,
                                                  head_height_m=0, head_clearance_m=0))
@@ -834,7 +870,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_xr_reports_the_t_pose_calibration(self):
         raw = bytearray(792)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 17, 792, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 18, 792, 3, 4)
         result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual(result['calibration'], dict(phase='none', hint=None, progress=0, done=0, skipped=0,
                                                      reach_m=[0, 0]))
@@ -858,13 +894,13 @@ class ProtocolTests(unittest.TestCase):
     def test_settings_the_headset_changed_go_to_the_launcher_on_one_line(self):
         args = Mock(no_aim_markers=False, no_web_grab=False, no_air_webs=False, no_web_shooter=False, no_punch=True,
                     no_body=False, swing_speed=32.0, weight=60, snap_turn=30, smooth_turn=0, haptics=100,
-                    screen_size=1, flips=False, trigger_webs=False, eye_height=0, arm_length=0,
+                    screen_size=1, flips=False, trigger_webs=False, hud=2, eye_height=0, arm_length=0,
                     no_calibration_prompt=False)
         start = start_settings(args)
         self.assertEqual(start, dict(aim_markers=True, web_grab=True, air_webs=True, web_shooter=True, punch=False,
                                      body=True, swing_speed=32.0, weight=60, snap_turn=30, smooth_turn=0,
-                                     haptics=100, screen_size=1, flips=False, trigger_webs=False, eye_height_mm=0,
-                                     arm_length_mm=0, calibration_prompt=True))
+                                     haptics=100, screen_size=1, flips=False, trigger_webs=False, hud=2,
+                                     eye_height_mm=0, arm_length_mm=0, calibration_prompt=True))
         # Nothing changed, or no sample: no line.
         self.assertIsNone(settings_line(start, dict(vr_settings=dict(start))))
         self.assertIsNone(settings_line(start, None))
@@ -873,11 +909,13 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(settings_line(start, dict(vr_settings=changed)),
                          SETTINGS_LINE + 'aim_markers=1 web_grab=1 air_webs=0 web_shooter=0 punch=1 body=1 '
                                          'swing_speed=48 weight=150 snap_turn=0 smooth_turn=90 haptics=100 '
-                                         'screen_size=1 flips=0 trigger_webs=0 eye_height_mm=0 arm_length_mm=0 '
+                                         'screen_size=1 flips=0 trigger_webs=0 hud=2 eye_height_mm=0 arm_length_mm=0 '
                                          'calibration_prompt=1')
-        # The experimental flips switched on in the headset go to the launcher too; so does the web button.
+        # The experimental flips switched on in the headset go to the launcher too; so do the web button and
+        # the HUD.
         self.assertIn(' flips=1 ', settings_line(start, dict(vr_settings=dict(start, flips=True))))
         self.assertIn(' trigger_webs=1 ', settings_line(start, dict(vr_settings=dict(start, trigger_webs=True))))
+        self.assertIn(' hud=0 ', settings_line(start, dict(vr_settings=dict(start, hud=0))))
         # A T-pose calibration in the headset goes to the launcher the same way; so does skipping it.
         self.assertTrue(settings_line(start, dict(vr_settings=dict(start, eye_height_mm=1630, arm_length_mm=590)))
                         .endswith(' eye_height_mm=1630 arm_length_mm=590 calibration_prompt=1'))

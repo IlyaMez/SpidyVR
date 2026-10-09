@@ -3,7 +3,131 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 9, fourth build): fists, web balls and webs take
+**Latest build (October 9, seventh build): a steadier, sharper HUD, and a HUD
+setting.** You played the fifth build's HUD on a Quest 3 (Virtual Desktop,
+eyes of 3840 x 4080 at 125%), found it still a bit blurry and a tad
+jittery, asked for it to follow the head smoothly, and for a way to switch it
+off. Your 14:37 session placed the panel in every immersive frame. Its jitter:
+a quarter of the images the headset showed were earlier ones turned to your
+newer head (53.6 new images a second on a 72 Hz display), and turning an
+image turns a panel locked to your head with it. Its blur: the panel's
+texture had 1720 pixels across its 60 degrees, fewer than your eye images
+have there, so the HUD was stretched, and the game made its text for a
+720-row window.
+- The HUD now stays put in your room while your head looks within 2 degrees
+  of it, and once you look further it glides back in front of you (63% of the
+  way every 0.15 s), level with the horizon. Fixed in the room between those
+  glides, it stays put on reused images too. Markers still sit on their
+  targets: the game places them where the line from your head to the target
+  crosses the panel, whichever way it faces.
+- The VR window is 1920 x 1080 (16:9) instead of the desktop's shape (1720 x
+  720 on 3440 x 1440), and at most three quarters of the desktop's height.
+  The game sizes its HUD by the window's height and lays it out for 16:9, as
+  on a console: the HUD has half again the pixels, and the same 60-degree
+  panel shows all of it a third larger. Menus and cutscenes on the game screen
+  are 1080p too. Next to your eyes it is about 3% more pixels to render.
+- HUD (Settings > SPIDY VR, under COMFORT after GAME SCREEN SIZE; "HUD" in
+  the launcher; `--hud`, `-Hud`): OFF, SMALL (50 degrees across), MEDIUM (60,
+  the default) or LARGE (70). OFF leaves the panel and everything on it
+  (markers, subtitles, prompts) out of the headset, immersive and on the flat
+  screen; the game screen keeps the game's own HUD.
+Measured, in the game without the headset (`tools/probe_hud.py` at the
+headset's eye size, your save at the Fisk construction site):
+- The window came up at 1920 x 1080, and so did the panel's texture (the game
+  makes it 1932 x 1080 for that window; Spidy makes it once at the window's
+  size, as before).
+- At MEDIUM the panel stayed in place with the head ahead, turned 40 degrees
+  and turning at 90 degrees a second. The run placed it 1,621 times, none
+  rejected, with 0 m between the panel's and the eyes' travel. SMALL and LARGE
+  spanned 50 and 70 degrees, with a world marker on the same spot.
+- A panel turned 15 degrees from the head, as the follow leaves it mid-glide,
+  showed 15 degrees to the side with its subtitles and minimap.
+- OFF: no panel and no subtitles in either eye, immersive and on the flat
+  screen (848 eye draws of the panel left out in 424 frames); at MEDIUM again
+  it came back, and stopping VR gave the game its own texture back.
+- At half the headset's resolution, subtitles that were hard to read in the
+  fifth build's captures now read cleanly, and the health bar is a third
+  larger.
+- The follow itself (still within 2 degrees, the glide, level when the head
+  tilts, straight down, a reset) is a new core test: only the XR worker drives
+  it, which needs the headset.
+Not tested: the headset, so neither how the follow feels nor how sharp it is
+through Virtual Desktop. In your next session's report, `hud` gains
+`followed_frames` (placements the follow turned) and `follow_angle`, and
+`vr_settings` the `hud` value. XrConfig and XrData are v18, SpidyHudData v3
+and the menu probe's structs v4: install the whole package.
+
+**Preceding build (October 9, sixth build): heavier by default, and longer
+slow motion.** You asked for the default weight to be 80 and for slow
+motion to last longer.
+- WEIGHT (Settings > SPIDY VR, "Weight" in the launcher) now starts at 80%
+  of real gravity (7.85 m/s² while webs fly you) instead of 60%. RESET ALL
+  goes back to 80%. Until now the launcher saved the weight whether or not
+  you had chosen it, so every player's saved settings say 60%: the launcher
+  now takes a saved 60% as the old default and starts at 80%. Any other
+  saved weight is kept, and the launcher now saves it under a new name. A
+  60% you chose yourself needs choosing once more.
+- A full focus meter lasts 12 seconds of slow motion instead of 7.
+  Refilling still takes 12 seconds from empty, starting a moment after slow
+  motion ends.
+Measured: the core tests (208), the launcher's tests, five Python suites and
+the GPU test pass. The tests show the new default as the tab's 80% step,
+falling at 7.848 m/s², and the meter running out at its 12 s. Not run in the
+game; the swing's gravity code itself did not change. `probe_menu.py` now
+steps the weight from 80% to 100%, and `probe_weight.py` and
+`probe_slow_motion.py` fly at 80%.
+
+**Preceding build (October 9, fifth build): the HUD stays in view, sharper, with
+the game's markers and subtitles.** You asked for the HUD to stay in view, be
+sharper (it was very blurry), and show what the flat game shows, like
+trackers. The game draws its HUD (health, gadgets, minimap, prompts) on a
+panel it hangs 20 m in front of its own third-person camera, larger than that
+camera's view. In VR that camera is still behind you and does not turn with
+your head, so the panel hung far ahead, mostly out of view and small. The
+rest of the HUD (world markers such as objective trackers and interaction
+rings, subtitles, QTE and other prompts) the game draws only into its own
+view on the monitor, which the eyes never get.
+Now, while you play in VR:
+- The panel sits 2 m in front of your head and turns with it, centred, the
+  part the flat game shows spanning 60 degrees (30 to each side). Both eyes
+  see it at 2 m, so it fuses cleanly. Like the flat HUD it is drawn over
+  everything, walls included.
+- The rest of the HUD is drawn onto the same panel, laid out as on the
+  monitor: subtitles at its bottom, prompts where the game puts them. The game
+  places its world markers from your head onto the panel, so a marker sits
+  over its target while the target is inside the panel; outside it, the game's
+  edge indicator shows the way.
+- The flat-screen view (both sticks) now shows markers and subtitles too.
+- Sharper: the panel's texture is drawn at the window's size, and the VR
+  window is 720 rows instead of 540 (1720 x 720 on a 3440 x 1440 desktop),
+  about the headset's own detail across the panel's 60 degrees. That window is
+  also what the game screen shows, so menus and cutscenes are sharper. It adds
+  about 3% to the pixels the game renders for the two eyes.
+How: [DEVELOPMENT.md](DEVELOPMENT.md#the-hud-in-vr).
+Measured, in the game without the headset (`tools/probe_hud.py`, your save at
+the Fisk construction site):
+- The panel stayed at the same place in both eye images while the head looked
+  ahead, turned 40 degrees, looked 25 and 70 degrees down, and turned at 90
+  degrees a second, which also shows no frame of lag. Every immersive frame
+  placed it (2,349 placements, none rejected), and the panel and the eyes always
+  moved with the player alike (0 m apart).
+- The rest of the HUD was on the panel in every immersive frame; two markers
+  a frame were placed from the head. Looking down at the crates, the game's
+  interaction ring sat on the crate; subtitles showed at the panel's bottom.
+- With the eye views paused, as when the headset shows the game screen, the
+  game's own view had the whole HUD back within about 0.35 s: the window
+  showed the HUD, the ring and the subtitles as the flat game does.
+- Stopping VR made the panel's texture at the game's size again and bound it.
+- Text is readable in captures at half the headset's resolution.
+Not tested: the headset. In your next session the report's `hud` block shows
+it working (`placed_frames`, `layer_frames`, `marker_projections`; `restored`
+after the session). Worth checking in the headset: whether 2 m and 60 degrees
+are comfortable (both could become settings), subtitles and prompts in a
+fight or a QTE, and objective markers while swinging. A new export
+(`SpidyHudData`) ties this build's modules and Python together: install the
+whole package.
+
+**Preceding build (October 9, fourth build): fists, web balls and webs take
 each enemy's own size.** Spidy treated every enemy as a street thug: aim at
 a chest 1.15 m above his feet, catch him 0.95 m up, a fist hits within 1.8 m
 of his feet, all 0.45 m wide or less. For a drone, a flyer or a heavy like

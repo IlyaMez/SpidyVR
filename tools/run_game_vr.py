@@ -36,7 +36,10 @@ GAME_HOOKS = (*HOOKS, 0x2e67010, 0x1fbe360, 0x1fbda50, 0xa7b3a0, 0x1f9db60,
               # and the shots' events (what they strike).
               0x897d30, 0x2150c40, 0xd2a570,
               # Slow motion: the update of the game's time system (game_time.hpp).
-              0x19bb430)
+              0x19bb430,
+              # The HUD in VR (native_hud.hpp): its panel's placement, its texture's stream, the render command
+              # that draws its second movie, and the projections of its world markers.
+              0x73ab80, 0x2104400, 0x1d2b6c0, 0x1f10ad0, 0x1f10b60)
 # What the game process commits in a VR session at 3072 x 3264 per eye (16.7-17.1 GB on October 5),
 # with Spidy's render memory ring and some room to grow.
 VR_COMMIT_MB = 19000
@@ -386,7 +389,7 @@ def start_settings(a):
                 web_shooter=not a.no_web_shooter, punch=not a.no_punch, body=not a.no_body,
                 swing_speed=round(a.swing_speed, 1), weight=a.weight,
                 snap_turn=a.snap_turn, smooth_turn=a.smooth_turn, haptics=a.haptics, screen_size=a.screen_size,
-                flips=a.flips, trigger_webs=a.trigger_webs, eye_height_mm=a.eye_height,
+                flips=a.flips, trigger_webs=a.trigger_webs, hud=a.hud, eye_height_mm=a.eye_height,
                 arm_length_mm=a.arm_length, calibration_prompt=not a.no_calibration_prompt)
 
 
@@ -430,7 +433,7 @@ def snapshot(game, address):
         raw = game.read(address, 792)
         if len(raw) != 792:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53585244, 17, 792):
+        if struct.unpack_from('<3I', raw) != (0x53585244, 18, 792):
             raise RuntimeError('Game XR protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -472,7 +475,8 @@ def snapshot(game, address):
         flags, snap_turn, haptics, screen_size = struct.unpack_from('<4I', raw, 664)
         swing_speed, changes = struct.unpack_from('<fI', raw, 680)
         smooth_turn, = struct.unpack_from('<I', raw, 704)
-        weight, = struct.unpack_from('<I', raw, 744)
+        # The weight (percent of real gravity) and the HUD (0 off, 1-3 small to large).
+        weight, hud = struct.unpack_from('<2I', raw, 744)
         # The T-pose calibration: its phase and what its panel asks for, the hold (0-1), the eye height and arm
         # length the body is sized to (mm, 0: the headset's running height and Spider-Man's own arms),
         # calibrations finished and skipped this session, whether a session without one asks for none at its
@@ -485,7 +489,7 @@ def snapshot(game, address):
                                        punch=bool(flags & 2), body=bool(flags & 4),
                                        swing_speed=round(swing_speed, 1), weight=weight, snap_turn=snap_turn,
                                        smooth_turn=smooth_turn, haptics=haptics, screen_size=screen_size,
-                                       flips=bool(flags & 32), trigger_webs=bool(flags & 64),
+                                       flips=bool(flags & 32), trigger_webs=bool(flags & 64), hud=hud,
                                        eye_height_mm=eye_height, arm_length_mm=arm_length,
                                        calibration_prompt=not calibration_flags & 1),
                       setting_changes=changes,
@@ -790,6 +794,36 @@ def slow_motion_snapshot(game, address):
     return None
 
 
+def hud_snapshot(game, address):
+    """The HUD in VR (native_hud::Data v3): its panel in front of the head, where the lazy follow turned it, its
+    texture at the window's size, its second movie (markers, subtitles, prompts) drawn on it, markers projected
+    onto it, and the HUD setting (size 0 off, 1-3 small to large) with what leaving it out of the eyes did."""
+    for _ in range(8):
+        raw = game.read(address, 192)
+        if len(raw) != 192:
+            return None
+        if struct.unpack_from('<3I', raw) != (0x53485544, 3, 192):
+            raise RuntimeError('HUD protocol mismatch')
+        if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
+            continue
+        result = dict(zip(('game_frames', 'placed_frames', 'rejected_frames'), struct.unpack_from('<3Q', raw, 40)))
+        result.update(game_scale=[round(v, 4) for v in struct.unpack_from('<3f', raw, 64)])
+        result.update(zip(('game_distance', 'view_half_width', 'distance', 'half_width', 'offset_mismatch_m'),
+                          (round(v, 4) for v in struct.unpack_from('<5f', raw, 76))))
+        result.update(texture=list(struct.unpack_from('<2I', raw, 96)),
+                      game_texture=list(struct.unpack_from('<2I', raw, 104)))
+        result.update(zip(('texture_resizes', 'texture_restores', 'layer_frames', 'marker_projections'),
+                          struct.unpack_from('<4Q', raw, 112)))
+        layer_status, restored = struct.unpack_from('<2I', raw, 144)
+        result.update(layer_status=layer_status, restored=bool(restored))
+        result['size'] = struct.unpack_from('<I', raw, 152)[0]
+        result.update(zip(('hidden_frames', 'hidden_draws', 'followed_frames'), struct.unpack_from('<3Q', raw, 160)))
+        result.update(zip(('follow_angle', 'follow_angle_max'),
+                          (round(v, 2) for v in struct.unpack_from('<2f', raw, 184))))
+        return result
+    return None
+
+
 def wait_for_renderer(game, process, render_data, timeout=180, problems=None, tell_every=20):
     """The game's graphics queue, as soon as the game draws frames (its intro, seconds after it starts).
 
@@ -894,8 +928,8 @@ def main():
     p.add_argument('--stock-monitor-view', action='store_true',
                    help="Keep the stock camera as the game's active view; culling and shadows then follow it, not the head")
     p.add_argument('--swing-speed', type=float, default=32, help='Native swing speed cap in m/s (default 32)')
-    p.add_argument('--weight', type=int, default=60,
-                   help='How heavy you are while webs fly you, in percent of real gravity (40..300; default 60)')
+    p.add_argument('--weight', type=int, default=80,
+                   help='How heavy you are while webs fly you, in percent of real gravity (40..300; default 80)')
     p.add_argument('--eye-height', type=int, default=0,
                    help="Your eye height in millimetres from a T-pose calibration (with --arm-length): Spider-Man's "
                         'body is sized to it. 0 (default): none yet, the first gameplay asks for one')
@@ -913,6 +947,9 @@ def main():
     p.add_argument('--haptics', type=int, default=100, help='Controller vibration in percent (default 100)')
     p.add_argument('--screen-size', type=int, choices=(0, 1, 2), default=1,
                    help='The game screen for menus, cutscenes and flat mode: 0 small, 1 medium, 2 large')
+    p.add_argument('--hud', type=int, choices=(0, 1, 2, 3), default=2,
+                   help="The game's HUD in the headset: 0 off, 1 small (50 degrees across), 2 medium (60, the "
+                        'default), 3 large (70)')
     p.add_argument('--full-desktop-view', action='store_true',
                    help="Start the game with its own display settings instead of a small VR window")
     p.add_argument('--output', type=pathlib.Path, default=ROOT/'reports/game-vr.json')
@@ -1036,8 +1073,8 @@ def session(a, startup):
             ROOT/'reports/stereo-modules', ('SpidyXrStart', 'SpidyXrStop', 'SpidyXrKeepAlive', 'SpidyXrData',
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
-                                           'SpidyBodyData', 'SpidySlowMotionData'))
-        config = struct.pack('<4I7Q2IfI', 0x53585243, 17, 640, game.pid, game.base, queue,
+                                           'SpidyBodyData', 'SpidySlowMotionData', 'SpidyHudData'))
+        config = struct.pack('<4I7Q2IfI', 0x53585243, 18, 648, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
@@ -1047,8 +1084,8 @@ def session(a, startup):
                              (256 if a.no_air_webs else 0) | (512 if a.no_web_shooter else 0) |
                              (1024 if a.no_calibration_prompt else 0) | (2048 if a.flips else 0) |
                              (4096 if a.trigger_webs else 0)) + \
-            runtime_path(manifest) + struct.pack('<8I', a.snap_turn, a.haptics, a.screen_size, a.smooth_turn,
-                                                 a.render_scale, a.weight, a.eye_height, a.arm_length)
+            runtime_path(manifest) + struct.pack('<10I', a.snap_turn, a.haptics, a.screen_size, a.smooth_turn,
+                                                 a.render_scale, a.weight, a.eye_height, a.arm_length, a.hud, 0)
         startup.stage = 'starting VR'
         code = call_with_payload(process, xr['SpidyXrStart'], config)
         if code:
@@ -1074,6 +1111,8 @@ def session(a, startup):
         # Slow motion: the latest, and a sample when it starts, ends or a press is refused.
         slow_motion = None
         slow_motion_samples = deque(maxlen=2000)
+        # The HUD: the latest (native_hud::Data), for a report written after the game closed.
+        hud_last = None
         eye_jobs = None
         render_memory = None
         lowest_commit = start_commit = free_commit_mb()
@@ -1102,7 +1141,7 @@ def session(a, startup):
                         swing_samples=list(swing_samples), motion_samples=list(motion_samples),
                         grab_samples=list(grab_samples), body=body, punch=punch,
                         punch_samples=list(punch_samples), shooter=shooter, shooter_samples=list(shooter_samples),
-                        slow_motion=slow_motion, slow_motion_samples=list(slow_motion_samples),
+                        slow_motion=slow_motion, slow_motion_samples=list(slow_motion_samples), hud=hud_last,
                         ray_samples=list(ray_samples), appearance=appearance, eye_jobs=eye_jobs,
                         render_memory=render_memory,
                         free_commit_mb=dict(start=start_commit, lowest=lowest_commit),
@@ -1175,6 +1214,12 @@ def session(a, startup):
                         if any(slow[k] != (slow_motion or {}).get(k) for k in SLOW_MOTION_COUNTS):
                             slow_motion_samples.append(dict(slow, seconds=round(time.monotonic()-started, 3)))
                         slow_motion = slow
+                    hud = hud_snapshot(game, xr['SpidyHudData'])
+                    if hud:
+                        hud_last = hud
+                        sample['hud'] = {k: hud[k] for k in ('placed_frames', 'layer_frames', 'marker_projections',
+                                                             'followed_frames', 'follow_angle', 'size',
+                                                             'hidden_frames', 'hidden_draws')}
                     # Eye job copies the game dropped unrendered (reclaimed by age).
                     eye_jobs = frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs
                     sample['eye_jobs_reclaimed'] = eye_jobs['reclaimed'] if eye_jobs else None
@@ -1289,6 +1334,7 @@ def session(a, startup):
             slow_motion=slow_motion_snapshot(game, xr['SpidySlowMotionData']) or slow_motion,
             slow_motion_samples=list(slow_motion_samples),
             motion_samples=list(motion_samples), appearance=appearance_snapshot(game,xr['SpidyAppearanceData']),
+            hud=hud_snapshot(game, xr['SpidyHudData']),
             eye_jobs=frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs,
             render_memory=final_render_memory or render_memory, render_stop=render_stop,
             free_commit_mb=dict(start=start_commit, lowest=lowest_commit),

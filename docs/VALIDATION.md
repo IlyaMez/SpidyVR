@@ -1,6 +1,216 @@
 # Validation — 2026-10-09
 
-## Each enemy's own size — current build
+## A steadier, sharper HUD, and a HUD setting — current build
+
+The user, October 9, after a Quest 3 session (Virtual Desktop, eyes 3840 x
+4080 at 125%) with the fifth build's HUD: "the hud is still a bit too blurry.
+cam be smoothed a bit and follow the head maybe (its a tad jittery)", then
+"also add option to disable hud in settings".
+
+**Their session** (`dist\Spidy-0.2.7\reports\game-vr-20261009-143726.json`,
+8 minutes): `hud.placed_frames` rose with every immersive frame (27,385),
+second movie and markers on the panel throughout. 53.6 new eye pairs a second
+on a 72 Hz display, 8.9 reused: about a quarter of what the headset showed
+were earlier images turned by the runtime to the newer head, which turns a
+head-locked panel with them (the jitter). The panel's texture had 1720
+pixels across 60 degrees, about 1490 per unit of tangent, where 3840-pixel
+eye images have about 1640 (Quest 3 lenses as `probe_hud.py` models them; the
+blur, with text the game made for 720 rows). 1920 x 1080 gives 1660.
+The game-exit report had no `hud` block (that report path never wrote one);
+it now writes the last one.
+
+**What was built.**
+- `native_hud::Follow`: the panel's orientation in the tracking space, from
+  the head's. Still within `hold` (2 degrees); beyond, it glides back at
+  1 - e^(-dt / 0.15 s) a frame (at most a quarter second's worth) until within
+  0.25 degrees; yaw and pitch only (level), the yaw from the face's direction
+  within 64 degrees of level and from the top of the head nearer the poles.
+  The XR worker updates it with each eye command and resets it without play,
+  on the flat screen and when the room is recentred; `native_hud::follow`
+  keeps its orientation seen from the head by command serial (64 entries).
+  `latchHead` takes it for its command (`FrameHead::panel`, through
+  `native_hud::turned`); `placeHud` and the marker projection use the turned
+  pose. Without one (probes), the panel faces the head's way.
+- HUD setting: `vr_settings::Values::hud` (0 off, 1 small, 2 medium, 3
+  large; `native_hud::widths` 50, 60, 70 degrees), row HUD (OFF, SMALL,
+  MEDIUM, LARGE) after GAME SCREEN SIZE: 16 rows, numbers 0x200-0x20f.
+  XrConfig v18 (648 bytes: `hud`, `spare`), XrData v18 (`hud` where `spare`
+  was, offset 748), `vr_settings.hud` in samples and the launcher line.
+  Launcher: `SessionOptions::hud`, `hud=` in launcher.ini, a "HUD" choice
+  after "Game screen size", `--hud N` when not medium. `run_game_vr.py
+  --hud`, `launch-game-vr.ps1 -Hud`. Menu probe structs v4 (48 and 72 bytes).
+  Off: `hudPlace` hands the panel's instance to `renderActor`, which skips it
+  in eye views (`hidden_frames`, `hidden_draws`); the second movie stays in the
+  game's view and markers keep the game's projection.
+- Window: `vr_display.small_window` makes 16:9, 1080 rows, at most three
+  quarters of the desktop's height (1920 x 1080 on 3440 x 1440 and 2560 x
+  1440, 1440 x 810 on 1920 x 1080).
+- SpidyHudData v3 (192 bytes): `size`, `hidden_frames`, `hidden_draws`,
+  `followed_frames`, `follow_angle`, `follow_angle_max`. `SpidyHudSet` (probes)
+  sets the size and a fixed turn.
+
+**Tests.** Core 209/209: the tab test finds HUD at row 13 with its four
+choices and FLIPS last at row 15; "the HUD: MEDIUM by default, OFF to LARGE";
+HUD sizes clamp; a new follow test (still within the hold, the first glide
+step, settled within 0.25 degrees after a second, 63% in one glide time, no
+more than a quarter second's step, level with a tilted head and facing as the
+face does, straight down finite, a reset without a glide; `turned` and a point
+along it in the panel's middle; the three widths). Launcher 21/21 (`--hud 0`,
+capped at 3, `hud=` from the headset line). Five Python suites (XrData v18
+`hud`, SpidyHudData v3, the settings line with `hud=2`, the window sizes).
+GPU test passes.
+
+**In the game, without the headset** (`tools/probe_hud.py --width 3072
+--height 3264`, after `probe_menu_pad.py start` and `pad a --until-player`;
+the user's save at the Fisk construction site; `reports/hud2-probe.json`,
+captures in `reports/hud2-probe-eyes/`):
+- Window 1920 x 1080; the second movie's viewport 1920 x 1080, and the panel's
+  texture made once at that size (`texture_resizes` 1; the game's own for
+  this window is 1932 x 1080: its factor at `0x7a4ae50` is about 1.006).
+- ahead, turned (40 degrees), turning (90 degrees a second): the panel at the
+  same place; 1,621 placements, 0 rejected, offset mismatch 0 m.
+- small, large: half widths 0.4663 and 0.7002 (50 and 70 degrees); a world
+  marker near the crates on the same spot in both.
+- panel15 (`SpidyHudSet` turn of 15 degrees): the panel, subtitles and minimap
+  15 degrees to the left; `follow_angle_max` 15.
+- off, flatoff: no panel and no subtitles in either eye, immersive and on the
+  flat screen; 424 hidden frames, 848 eye draws left out.
+- Back at medium, the game screen (eye commands paused) and the stop as in the
+  fifth build: `restored` true, the game's texture (1932 x 1080 at the game's
+  own window factor) bound again.
+- At half the headset's resolution the subtitle line reads cleanly; the fifth
+  build's (1720 x 720) was barely legible in the same crop.
+- The user's saves: all byte-identical but `slot0-s.save`, which the game
+  re-saved itself right after Continue (15:23:45), as in every probe.
+
+**Not tested.** The headset: the follow's feel, the XR worker's
+`follow`/`setSize` path and the sharpness through Virtual Desktop.
+`probe_menu.py`'s new HUD steps have not run in the game.
+
+## Default weight 80% and 12 s of slow motion — preceding build
+
+The user, October 9: "lets set the default weight to 80, increase the max
+duration of slow-mo".
+
+- `vr_settings::Values::weight`, XrConfig's `weight`, the launcher's
+  `SessionOptions::weight`, `run_game_vr.py --weight` and
+  `launch-game-vr.ps1 -Weight` all default to 80 (was 60), and the launcher
+  leaves out `--weight` at 80. The launcher saves `weight_percent=` in
+  `%APPDATA%\Spidy\launcher.ini`. It reads the old `weight=` only when no
+  `weight_percent=` is there, and takes 60 (the old default, saved for every
+  player) as the new default.
+- `SlowMotionTuning::drainSeconds` 12 (was 7); refilling unchanged (12 s,
+  after 1.2 s).
+- Tests: core 208/208 ("the defaults as the tab shows them" at step 2, 80%;
+  the swing's default gravity 7.848 m/s²; focus empties at drainSeconds;
+  the refused-press test now spends the meter below 85% instead of for 1 s,
+  which no longer spent enough at 12 s). Launcher tests and ctest pass; game
+  VR 45, launcher 16, observer 5, runtime 11, stereo 12 Python tests OK; the
+  GPU test passes (slow motion's grade and meter).
+- Not run: the game (no in-game probe; `probe_menu.py`, `probe_weight.py`,
+  `probe_slow_motion.py` updated to the new default), the launcher's
+  migration of an old `launcher.ini` (`loadSettings` has no unit test), and
+  the headset.
+
+## The HUD in VR — preceding build
+
+The user, October 9: "lets fix the hud to stay view, be a bit sharper (its
+very blurry rn) and showing missing elements like trackers that you see in
+game".
+
+**What the eyes showed.** The user's October 8 20:38 session (eye snapshots in
+`dist\Spidy-0.2.5\reports\game-vr-20261008-203808-eyes`) had HUD pieces at
+odd places that moved with the game's camera, not the head ("New Equipment
+Available" top right, a gadget ring near the middle). A probe at the save
+(views 29, eyes at the hero's head looking along the camera's heading) showed
+only the health bar, small, left of centre; the gadget and minimap were out of
+view.
+
+**Where the HUD comes from**, read in the executable and measured live with
+throwaway hook DLLs (scratchpad, not in the tree):
+
+- `PlayerModelHudFollower` (vtable `0x38929c8`) places the panel in
+  `0x73ab80`: the camera manager's camera (`0x1642040`, transform rows left,
+  up, forward, position), forward 20 m (`+0x48`), scales x 14.44, y 10.68,
+  z 11 (`+0x4c`), from a FOV of 1.082 rad and the window aspect factor
+  (`0x72d420`, 2.404 / (16/9) = 1.352, kept at `0x7a4ae50`). It ends in
+  `0x191c0e0`, which writes the render instance's transform at +0 and marks
+  it changed. The stock camera's view is 0.8125 half wide (tangent): the
+  texture covers that much of the panel, its middle 56%.
+- Order on the main thread each frame (logged): camera submits (5 to 7), marker
+  projections, the panel stream's update (`0x2104400`), the follower's update
+  (`0x73a740`, which binds the texture when `+0xc0` is clear), its placement
+  (`0x73ab80`), `0x1920240` (eye placement), the render command's enqueue
+  (`0x1d277c0`), view maintenance.
+- The second movie is the global `0x7be3e00`, viewport 1290 x 540 at +0xa0
+  (Scaleform's 0x34-byte viewport; `SetViewport` is vtable slot 0x60,
+  `0x31a9ba0`). The render command `0xa8` ("Scaleform", registered at
+  `0x1d266ee` into the handler table at `0x7a2d1a8`) draws a list per frame:
+  the panel's movie into a 2596 x 1080 target with clear, then this movie into
+  the game's view. Changing the viewport, its Scale, or the render-side
+  viewport did not scale this movie's content: it is laid out in pixels.
+
+**Experiments in the game.** Appending a copy of the second movie's item with
+the panel's target drew it into the panel's texture at 1:1 (top-left
+quarter). Making the panel's texture the window's size (stream `+0x78`,
+`+0x7c`, `+0x9c` = -1) re-created it at 1290 x 540; the panel then sampled a
+freed texture (a washed-out frame) until the follower's `+0xc0` was cleared,
+which bound the new one. With both, the copied marker landed within a few
+pixels of the original on the monitor. Putting `+0x78`/`+0x7c` back
+re-created it at 2596 x 1080.
+
+**What was built** (see DEVELOPMENT.md, "The HUD in VR"): the panel placed in
+front of the frame's latched head right after the follower's placement; the
+texture at the window's size for the session; the second movie moved onto the
+panel while the eye views are shown; the HUD's markers projected from the head
+while immersive; the VR window at 720 rows. `SpidyHudData` v2; `hud` in
+session reports.
+
+**Checks.**
+
+- Core: 208/208 (new: the panel's transform keeps the game's proportions, its
+  centre 2 m ahead and the game view's part at the asked width; markers ahead,
+  at the right and top edges and behind; texture base widths for 1290, 1720,
+  2580, 3440). Python suites all pass (new: the `hud` block decodes and rejects
+  torn reads; the five hooked entries are checked fresh and restored; the
+  720-row window). D3D12 graphics test passes.
+- In the game, `tools/probe_hud.py` at the save, eyes 1536 x 1632 and
+  3072 x 3264, VR window 1720 x 720 (reports `hud-probe-final.json`,
+  `hud-probe-full.json`):
+  - First try, placing the panel at `0x1920240`: no effect (the eyes showed the
+    game's placement). Moved into the follower's placement hook: the panel held
+    the same image position looking ahead, 40 degrees right, 25 and 70 degrees
+    down, mid-turn at 90 degrees a second, in both eyes, ~1 degree of disparity
+    (2 m).
+  - Its first size came out 0.6 of the asked width: the game's model is
+    larger than its view. Scaling by the stock camera's half width fixed it:
+    the HUD's elements span the asked 60 degrees.
+  - Final run: 2,349 placements, 0 rejected, offset mismatch 0 m; the second
+    movie on the panel every immersive frame (2,684 by the end, flat screen
+    included); 2 markers a frame from the head (4,642); texture 1720 x 720 made
+    once for the session; after stop 2596 x 1080 again, restored.
+  - Looking down 25 degrees the interaction ring sat on its crate; looking
+    ahead, with the crate below the panel, the game's edge indicator showed at
+    the panel's edge, moving to the other edge after turning right.
+  - The panel was not hidden facing the floor 1.7 m away: the GUI pass draws
+    over the scene.
+  - Eye views paused for 1.2 s (as on the game screen): the window showed the
+    whole flat HUD, the ring and subtitles; the second movie had gone back to
+    the game's view about 0.35 s after the last eye frame.
+  - Flat screen (eye mode 2): subtitles and the ring show (before: neither).
+- A first build crashed the game at the first marker: inside
+  `native_hud::start`, the detour's name `project` resolved to the header's
+  `native_hud::project`, so the game called the math function. The detours are
+  named `marker`/`markerXY` now (minidump: `spidy_stereo_probe.dll+0x175bf`
+  reading address 0x30). An earlier crash (`+0x17ff0a1`, occlusion readback)
+  came from `probe_vr_load.py`'s occlusion on/off step, not this work.
+- The save folder was byte-identical to its backup after all runs
+  (`reports/backups/saves-before-hud-probe-20261009`).
+
+Not tested: the headset; a fight, a QTE, an objective marker far away, a
+level load or a respawn with VR running; another window size or aspect.
+
+## Each enemy's own size — preceding build
 
 The user, October 9, after hearing that the fists, web balls and webs took
 every enemy for a street thug's size: "fix the size issue".

@@ -514,6 +514,7 @@ Settings loadSettings() {
     Settings settings;
     std::istringstream lines(readText(settingsPath(), 1 << 16));
     std::string line;
+    int weight = 0, legacyWeight = 0;
     while (std::getline(lines, line)) {
         if (!line.empty() && line.back() == '\r')
             line.pop_back();
@@ -543,7 +544,10 @@ Settings loadSettings() {
         else if (key == "smooth_turn") o.smoothTurn = std::clamp(number(), 0, 360);
         else if (key == "haptics") o.haptics = std::clamp(number(), 0, 100);
         else if (key == "screen_size") o.screenSize = std::clamp(number(), 0, 2);
-        else if (key == "weight") o.weight = std::clamp(number(), 40, 300);
+        else if (key == "hud") o.hud = std::clamp(number(), 0, 3);
+        // "weight" (before October 9) was saved whether chosen or not: its old default, 60, starts on today's.
+        else if (key == "weight") legacyWeight = std::clamp(number(), 40, 300);
+        else if (key == "weight_percent") weight = std::clamp(number(), 40, 300);
         else if (key == "eye_height_mm") o.eyeHeightMm = number();
         else if (key == "arm_length_mm") o.armLengthMm = number();
         else if (key == "calibration_prompt") o.calibrationPrompt = number() != 0;
@@ -554,6 +558,10 @@ Settings loadSettings() {
         else if (key == "shortcuts_asked") settings.shortcutsAsked = number() != 0;
         else if (key == "update_check") settings.updateCheck = number() != 0;
     }
+    if (weight)
+        settings.options.weight = weight;
+    else if (legacyWeight && legacyWeight != 60)
+        settings.options.weight = legacyWeight;
     // A calibration is both measurements within their ranges, or none.
     if (!text::calibrated(settings.options))
         settings.options.eyeHeightMm = settings.options.armLengthMm = 0;
@@ -573,9 +581,10 @@ void saveSettings(const Settings& settings) {
          << "\naim_markers=" << o.aimMarkers << "\nair_webs=" << o.airWebs << "\nflips=" << o.flips
          << "\ntrigger_webs=" << o.triggerWebs
          << "\nrender_scale=" << o.renderScale
-         << "\nswing_speed=" << o.swingSpeed << "\nweight=" << o.weight << "\nsnap_turn=" << o.snapTurn
+         << "\nswing_speed=" << o.swingSpeed << "\nweight_percent=" << o.weight << "\nsnap_turn=" << o.snapTurn
          << "\nsmooth_turn=" << o.smoothTurn
-         << "\nhaptics=" << o.haptics << "\nscreen_size=" << o.screenSize << "\neye_height_mm=" << o.eyeHeightMm
+         << "\nhaptics=" << o.haptics << "\nscreen_size=" << o.screenSize << "\nhud=" << o.hud
+         << "\neye_height_mm=" << o.eyeHeightMm
          << "\narm_length_mm=" << o.armLengthMm << "\ncalibration_prompt=" << o.calibrationPrompt
          << "\nhash_path=" << narrow(settings.hashPath)
          << "\nhash_size=" << settings.hashSize << "\nhash_time=" << settings.hashTime

@@ -175,8 +175,9 @@ holding, done; `hint`: what the panel asks for; `progress`; `done` and
 `skipped` this session; `reach_m`, each arm at the last one) and, in
 `vr_settings`, `eye_height_mm`, `arm_length_mm` and `calibration_prompt`, so
 the session's last line hands a calibration made or skipped to the launcher;
-`body` has `arm_scale`. XrConfig and XrData are version 17 (640 and 792
-bytes); the body's status is version 2 (144 bytes).
+`body` has `arm_scale`. XrConfig and XrData are version 18 (648 and 792
+bytes; `hud`, the HUD setting, 0 off to 3 large, is in `vr_settings` and
+`--hud`); the body's status is version 2 (144 bytes).
 
 The test report rejects intermediate XR/swing faults, incomplete GPU work, failed
 stop calls, and any checked game entry left patched. Its success flag validates
@@ -378,12 +379,13 @@ controller, moving with its left stick as the Touch controllers do, opens
 Settings, goes Up to SPIDY VR and opens it, then sets WEB BUTTON to TRIGGER,
 switches the aim markers off,
 switches webs in open air off and resets them with X, steps the swing speed to
-40 m/s and the weight to 80%, sets CALIBRATE BODY to ON RESUME (a calibration
+40 m/s and the weight to 100%, sets CALIBRATE BODY to ON RESUME (a calibration
 asked for; without a headset nothing calibrates), snap turn to 45 degrees,
-smooth turn to 60 degrees a second, switches the experimental FLIPS on, and
-resets the tab with Y and A (18 changes in all; the web shooter, which the tab
-does not offer, stays off). The FLIPS step is new on October 8 (thirteenth
-build), the WEB BUTTON step on October 9; neither has run in the game yet.
+smooth turn to 60 degrees a second, steps the HUD from MEDIUM to SMALL and
+OFF, switches the experimental FLIPS on, and resets the tab with Y and A (21
+changes in all; the web shooter, which the tab does not offer, stays off). The
+FLIPS step is new on October 8 (thirteenth build), the WEB BUTTON step on
+October 9, the HUD steps in its seventh build; none has run in the game yet.
 After each step
 it reads `SpidyMenuSample` (what the tab holds, the tabs built, the changes)
 and captures the window. It fails if a step left other values than expected or
@@ -416,9 +418,9 @@ from another folder (a play folder's build) for a before-and-after. Report:
 
 `python tools/probe_weight.py` after `tools/probe_menu_pad.py start` and
 `pad a --until-player` (the same loaded save as the midair probe). It starts
-the swing at the default weight (60%, 5.886 m/s²), jumps, webs the most open
+the swing at the default weight (80%, 7.848 m/s²), jumps, webs the most open
 direction 60 degrees up, reels, lets go, and in that flight changes the weight
-through `SpidySwingSettings` as the SPIDY VR tab does: 0.6 s at 60%, 0.6 s at
+through `SpidySwingSettings` as the SPIDY VR tab does: 0.6 s at 80%, 0.6 s at
 150%, 0.4 s at 300%. For each it fits the vertical acceleration of the
 airborne steps on game time (their `dt`, the first 0.1 s left out: the mover
 applies a command a step late). It fails if a weight's fall is more than 5%

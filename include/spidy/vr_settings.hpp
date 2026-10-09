@@ -25,9 +25,9 @@ struct Values {
     // turns instead.
     int smoothTurn = 0;
     // How heavy you are while webs fly you (swinging, and after letting go
-    // until you land), percent of real gravity: the swing's gravity. 60 is
-    // the 6 m/s^2 Spidy has flown at since October 5, to within 2%.
-    int weight = 60;
+    // until you land), percent of real gravity: the swing's gravity. 80 since
+    // October 9; before, 60 (the 6 m/s^2 Spidy flew at from October 5).
+    int weight = 80;
     // A T-pose calibration of your body is wanted at the next gameplay (the
     // tab's CALIBRATE BODY: ON RESUME); the XR worker clears it once the
     // calibration starts (body_calibration.hpp).
@@ -39,6 +39,9 @@ struct Values {
     // holds a hand's web while the trigger reels it in and shoots web balls;
     // true the trigger, the two swapped (GameTrackingRig::triggerWebs).
     bool triggerWebs = false;
+    // The game's HUD in the headset (the tab's HUD): 0 off, 1 small, 2 medium,
+    // 3 large (native_hud::widths).
+    int hud = 2;
     bool operator==(const Values&) const = default;
 };
 // The steps the game's Settings offer. The launcher's slider sets any swing
@@ -64,7 +67,7 @@ inline float screenWidth(int size) {
 inline constexpr float screenDistance = 2.5f;
 // The values within the session's ranges: swing speed 1-65 m/s (what
 // run_game_vr.py accepts), snap turn 0-90 degrees, smooth turn 0-360 degrees
-// a second, vibration 0-100%, weight 40-300%.
+// a second, vibration 0-100%, weight 40-300%, HUD 0-3.
 Values sanitized(Values);
 
 enum class Item : uint8_t {
@@ -80,8 +83,9 @@ enum class Item : uint8_t {
     calibrate,
     flips,
     webButton,
+    hud,
 };
-inline constexpr Item lastItem = Item::webButton;
+inline constexpr Item lastItem = Item::hud;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. A setting without choices is an ON/OFF switch, the game's own;
 // one with choices steps through them. Titles are upper case, as the game's
@@ -92,7 +96,7 @@ struct Row {
     const char* help{};
     std::span<const char* const> choices{};
 };
-const std::array<Row, 15>& rows();
+const std::array<Row, 16>& rows();
 // The choice a setting shows for these values: a switch 0 (off) or 1 (on), a
 // list its step nearest to the value (a launcher value between two steps
 // shows the nearer one, the lower on a tie).

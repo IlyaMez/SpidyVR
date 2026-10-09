@@ -3,11 +3,12 @@ param(
     [ValidateRange(0,8192)][int]$Size=0,
     [ValidateRange(50,200)][int]$RenderScale=100,
     [ValidateRange(1,65)][float]$SwingSpeed=32,
-    [ValidateRange(40,300)][int]$Weight=60,
+    [ValidateRange(40,300)][int]$Weight=80,
     [ValidateRange(0,90)][int]$SnapTurn=30,
     [ValidateRange(0,360)][int]$SmoothTurn=0,
     [ValidateRange(0,100)][int]$Haptics=100,
     [ValidateSet('Small','Medium','Large')][string]$ScreenSize='Medium',
+    [ValidateSet('Off','Small','Medium','Large')][string]$Hud='Medium',
     [ValidateRange(0,2500)][int]$EyeHeight=0,
     [ValidateRange(0,1200)][int]$ArmLength=0,
     [string]$Python,
@@ -68,7 +69,7 @@ Write-Host 'Keep the game window in front on the desktop: the game pauses while 
 Write-Host 'Click both thumbsticks to switch between immersive VR and a flat game screen in the headset.'
 Write-Host "VR settings are in the game's own Settings: pause, Settings, then SPIDY VR (Up from GAME reaches it)."
 Write-Host 'There change the web button, aim markers, webs in open air, swing speed, weight, your body calibration,'
-Write-Host 'snap turn, smooth turn, vibration, screen size and the experimental flips during play.'
+Write-Host 'snap turn, smooth turn, vibration, screen size, the HUD and the experimental flips during play.'
 Write-Host "Press a $web to shoot that hand's web. Keep it held to swing; release it to let go."
 Write-Host "Swing speed cap: $SwingSpeed m/s. Press the $reel while a web is attached to reel in."
 if($TriggerWebs) { Write-Host 'Web button: the trigger (the grip reels in and shoots web balls).' }
@@ -143,10 +144,12 @@ if(-not $AttachOnly) { $captureArgs+=@('--auto-launch') }
 if($XrRuntime) { $captureArgs+=@('--xr-runtime',$XrRuntime) }
 if($SnapTurn -ne 30) { Write-Host "Snap turn: $SnapTurn degrees (0: off)." }
 if($SmoothTurn -ne 0) { Write-Host "Smooth turn: $SmoothTurn degrees a second (replaces snap turning)." }
-if($Weight -ne 60) { Write-Host "Weight: $Weight% of real gravity while webs fly you." }
+if($Weight -ne 80) { Write-Host "Weight: $Weight% of real gravity while webs fly you." }
 if($Haptics -ne 100) { Write-Host "Controller vibration: $Haptics%." }
+if($Hud -ne 'Medium') { Write-Host "HUD: $Hud." }
 $screenIndex=@{Small=0;Medium=1;Large=2}[$ScreenSize]
+$hudIndex=@{Off=0;Small=1;Medium=2;Large=3}[$Hud]
 $captureArgs+=@('--snap-turn',$SnapTurn,'--smooth-turn',$SmoothTurn,'--haptics',$Haptics,'--screen-size',$screenIndex,
-               '--render-scale',$RenderScale,'--weight',$Weight)
+               '--render-scale',$RenderScale,'--weight',$Weight,'--hud',$hudIndex)
 & $Python (Join-Path $PSScriptRoot 'run_game_vr.py') --seconds $Seconds --size $Size --swing-speed $SwingSpeed --output $report @captureArgs
 exit $LASTEXITCODE

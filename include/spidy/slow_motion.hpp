@@ -15,7 +15,7 @@ struct SlowMotionTuning {
     float enterSeconds = .4f, exitSeconds = .55f;
     // Real seconds a full meter lasts, and refilling takes from empty to full;
     // refilling starts this long after slow motion ends.
-    float drainSeconds = 7, refillSeconds = 12, refillDelay = 1.2f;
+    float drainSeconds = 12, refillSeconds = 12, refillDelay = 1.2f;
     // A press with less focus than this is refused.
     float minimum = .15f;
 };

@@ -26,7 +26,15 @@ INPUT_KEY = r"Software\Insomniac Games\Marvel's Spider-Man Remastered\Input"
 BACKUP = ROOT/'reports'/'desktop-view-before-vr.json'
 NAMES = ('Fullscreen', 'ExclusiveFullscreen', 'WindowMaximized', 'WindowLeft', 'WindowTop',
          'WindowWidth', 'WindowHeight', 'UserWindowWidth', 'UserWindowHeight')
-HEIGHT = 540
+# The window's rows and shape. VR's HUD panel draws the game's HUD at the window's size
+# (src/native_hud.cpp), and the game sizes its HUD by the window's height: 1920 x 1080 gives the
+# HUD half again the pixels of the 1720 x 720 (the desktop's shape) of October 9's fifth build,
+# whose HUD a Quest 3 player still found soft, and its 16:9 layout, as on a console, puts the same
+# HUD on a panel as wide with a third more height, so all of it shows a third larger. Next to two
+# 3840 x 4080 eyes, the frame draws about 3% more pixels than at 1720 x 720. No more than three
+# quarters of the desktop's height.
+HEIGHT = 1080
+ASPECT = 16/9
 # What every VR session changes, whatever its window: (key, values, create). A value the game never
 # saved is created only where `create` is set, and deleted again afterwards.
 # - Frame generation (DLSS or FSR) off: Spidy draws the eyes itself, and generated frames change how
@@ -79,10 +87,13 @@ def desktop():
     return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
 
 
-def small_window(screen_width, screen_height, height=HEIGHT):
-    """Centred window with the desktop's shape, `height` rows tall (never larger than the desktop)."""
-    height = min(height, screen_height)
-    width = min(round(screen_width*height/screen_height), screen_width)
+def small_window(screen_width, screen_height, height=HEIGHT, aspect=ASPECT):
+    """Centred 16:9 window `height` rows tall, within three quarters of the desktop's height and its width."""
+    height = min(height, screen_height*3//4)
+    width = round(height*aspect)
+    if width > screen_width:
+        width = screen_width
+        height = round(width/aspect)
     return dict(Fullscreen=0, ExclusiveFullscreen=0, WindowMaximized=0,
                 WindowLeft=(screen_width-width)//2, WindowTop=(screen_height-height)//2,
                 WindowWidth=width, WindowHeight=height, UserWindowWidth=width, UserWindowHeight=height)

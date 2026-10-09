@@ -63,6 +63,7 @@ constexpr int kSmoothValues[] = {0, 60, 90, 120, 180, 240};
 constexpr const char* kHaptics[] = {"Off", "25%", "50%", "75%", "100%"};
 constexpr int kHapticValues[] = {0, 25, 50, 75, 100};
 constexpr const char* kScreenSizes[] = {"Small", "Medium", "Large"};
+constexpr const char* kHudSizes[] = {"Off", "Small", "Medium", "Large"};
 // The button that shoots and holds webs (SessionOptions::triggerWebs: the second).
 constexpr const char* kWebButtons[] = {"Grip", "Trigger"};
 constexpr const char* kWeights[] = {"40%", "60%", "80%", "100%", "125%", "150%", "200%", "250%", "300%"};
@@ -1093,6 +1094,10 @@ void App::optionsCard(ImVec2 size) {
     option("Game screen size", "The headset's screen for menus, cutscenes and flat mode.", S(150), [&] {
         static constexpr int sizes[] = {0, 1, 2};
         stepCombo("##screen", kScreenSizes, sizes, 3, &o.screenSize);
+    });
+    option("HUD", "How large the game's HUD shows in front of you; off, there is none in VR.", S(150), [&] {
+        static constexpr int sizes[] = {0, 1, 2, 3};
+        stepCombo("##hud", kHudSizes, sizes, 4, &o.hud);
     });
     option("Flips (experimental)", "Tap A in the air to flip; hold A there and the left stick turns you over.",
            S(40), [&] { changed |= toggle("##flips", &o.flips); });

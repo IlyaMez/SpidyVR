@@ -149,7 +149,7 @@ Slow motion (as in Blade & Sorcery)
                          your swing slows with it
   Focus meter .......... the cyan ring around an hourglass over the back of
                          your left wrist. It empties while slow motion lasts
-                         (7 seconds from full) and ends it when empty; it
+                         (12 seconds from full) and ends it when empty; it
                          refills a moment after slow motion ends (12 seconds
                          from empty). With too little left a click flashes
                          it red and does nothing
@@ -169,6 +169,14 @@ Menus and cutscenes show on a screen in the headset. There the controllers act
 as an Xbox controller: left stick moves, A selects, B goes back, grips switch
 tabs, the menu button is Start.
 
+The game's HUD (health, gadgets, minimap, prompts, subtitles and the game's
+markers) floats 2 m ahead of you, about 60 degrees wide. It stays still while
+your head moves a little, and glides back in front of you when you look
+further away. A marker sits over its target while the target is inside that
+frame; otherwise the game's edge arrow points the way. HUD in Settings > SPIDY
+VR (or "HUD" in the launcher's options) makes it SMALL, MEDIUM or LARGE, or
+switches it OFF.
+
 VR settings
   They are a tab of the game's own Settings: pause with the menu button,
   choose Settings, then SPIDY VR, the last tab (Up from GAME gets there in
@@ -180,7 +188,8 @@ VR settings
   webs holding in open air (a web that meets nothing within 100 m holds
   there; off, it misses) on or off, or step the
   swing speed limit, your weight, snap turn, smooth turn, controller
-  vibration and the game screen's size. Under EXPERIMENTAL, FLIPS (off until
+  vibration, the game screen's size and the HUD's (OFF hides it in VR).
+  Under EXPERIMENTAL, FLIPS (off until
   you switch it on) lets A in the air flip you. Changes apply at once. The
   launcher starts your next session with them; its options show them too.
   CALIBRATE BODY: set it to ON RESUME and resume, and the T-pose panel asks
@@ -241,13 +250,15 @@ IF SOMETHING IS WRONG
   SPIDY VR has both.
 - Swinging feels floaty, or falls too hard: WEIGHT in Settings > SPIDY VR
   (or "Weight" in the launcher's options) sets how heavy you are while
-  swinging and after letting go, until you land: 100% is real gravity, 60%
+  swinging and after letting go, until you land: 100% is real gravity, 80%
   the default, up to 300%. Jumps and falls without a web are the game's own.
 - You would rather turn smoothly than in steps: SMOOTH TURN in Settings >
   SPIDY VR (or "Smooth turn" in the launcher's options). If it makes you
   uneasy, try a slower speed, or OFF for snap turning again.
 - The menu screen is too small or too large: "Game screen size" in Settings
   > SPIDY VR.
+- The HUD is too small, too large or in the way: HUD in Settings > SPIDY VR
+  (or "HUD" in the launcher's options): SMALL, MEDIUM, LARGE, or OFF.
 - The game asks for Y (Triangle) to interact: in VR that is B.
 - A flip you did not mean, or flips make you uneasy: switch FLIPS off in
   Settings > SPIDY VR (or "Flips (experimental)" in the launcher's options).

@@ -55,7 +55,7 @@ coming. Questions, bugs, clips: come say hi on
   harder the faster you swing.
 - ⚙️ **VR settings in the game's menu.** A SPIDY VR tab in the game's own
   Settings for aim markers, snap or smooth turning, vibration, swing speed,
-  how heavy you swing, screen size and more. Changes apply at once.
+  how heavy you swing, screen size, the HUD and more. Changes apply at once.
 - 🖥️ **Menus and cutscenes on a screen.** The Touch controllers work as an
   Xbox controller there; VR resumes when play does.
 

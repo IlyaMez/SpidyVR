@@ -18,6 +18,7 @@
 #include "spidy/native_eye_frame.hpp"
 #include "spidy/native_eye_gpu.hpp"
 #include "spidy/native_eye_history.hpp"
+#include "spidy/native_hud.hpp"
 #include "spidy/native_webs.hpp"
 #include "spidy/presentation_gate.hpp"
 #include "spidy/slow_motion.hpp"
@@ -35,7 +36,7 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 17, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 18, bytes = sizeof(XrConfig), pid{};
     // record and mover are no longer used: VR starts with the game, before
     // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
@@ -66,12 +67,15 @@ struct XrConfig {
     // Eye resolution in percent of the runtime's recommendation, per side
     // (eye_resolution.hpp; with eyeSize set, 100), and the player's weight
     // while webs fly them, in percent of real gravity (40-300).
-    uint32_t renderScale = 100, weight = 60;
+    uint32_t renderScale = 100, weight = 80;
     // The player's T-pose calibration (body_calibration.hpp): the eye height
     // and arm length their body is sized to, millimetres. Both 0: none yet.
     uint32_t eyeHeightMm{}, armLengthMm{};
+    // The game's HUD in the headset: 0 off, 1 small, 2 medium, 3 large
+    // (native_hud.hpp). spare is 0.
+    uint32_t hud = 2, spare{};
 };
-static_assert(sizeof(XrConfig) == 640);
+static_assert(sizeof(XrConfig) == 648);
 // Why the last frame had no gameplay (XrData::gate bits).
 enum GateReason : uint32_t {
     gateNoPlayer = 1,     // no save loaded, or a level change in progress
@@ -81,7 +85,7 @@ enum GateReason : uint32_t {
     gateTracking = 16,    // the headset's pose or timing was not usable
 };
 struct XrData {
-    uint32_t magic = 0x53585244, version = 17, bytes = sizeof(XrData), status{};
+    uint32_t magic = 0x53585244, version = 18, bytes = sizeof(XrData), status{};
     int64_t sequence{};
     uint64_t frames{}, tracked{}, submitted{}, dropped{}, leftHands{}, rightHands{}, serial{}, generation{};
     uint32_t nativeKeys{}, error{};
@@ -135,8 +139,8 @@ struct XrData {
     float heroUp[3]{};
     float standOff{}, surfaceHeight{}, surfaceClearance{};
     // The weight now, percent of real gravity (the swing's gravity while webs
-    // fly the player). spare is 0.
-    uint32_t weight{}, spare{};
+    // fly the player), and the HUD row now (0 off, 1-3 small to large).
+    uint32_t weight{}, hud{};
     // The T-pose calibration (body_calibration.hpp): its phase now and what its
     // panel asks for (Phase, Hint), how far the hold is (0-1); the eye height
     // and arm length the body is sized to (mm; 0: the headset's running height
@@ -355,6 +359,7 @@ DWORD WINAPI run(void*) {
         values.haptics = static_cast<int>(config.haptics);
         values.screenSize = static_cast<int>(config.screenSize);
         values.weight = static_cast<int>(config.weight);
+        values.hud = static_cast<int>(config.hud);
         values = vr_settings::sanitized(values);
         game_menu::publish(values);
         uint32_t settingChanges{};
@@ -368,6 +373,10 @@ DWORD WINAPI run(void*) {
         GameTrackingRig rig;
         GameMotionFrame motion;
         NativeEyeHistory history;
+        // Where the HUD panel faces in the room: it follows the head lazily
+        // (native_hud::Follow), and starts in front of it again with play,
+        // the immersive view and a recentred room.
+        native_hud::Follow hudFollow;
         VrShortcut shortcut;
         GameScreen gameScreen;
         bool flatScreen{};
@@ -514,6 +523,7 @@ DWORD WINAPI run(void*) {
             rig.smoothTurn(static_cast<float>(values.smoothTurn) * 3.14159265f / 180);
             rig.flips(values.flips);
             rig.triggerWebs(values.triggerWebs);
+            native_hud::setSize(values.hud);
             if (swingStarted && swingSettings) {
                 game_swing::Settings s;
                 s.grab = values.webGrab && sampleGrab;
@@ -721,6 +731,8 @@ DWORD WINAPI run(void*) {
                     // for, valid until the tracking space itself changes.
                     if (!viewing || frame.recentered)
                         history.clear();
+                    if (!viewing || frame.recentered || !motion.active || flatScreen)
+                        hudFollow.reset();
                     if (!viewing) {
                         lastPresentedMs = lastNewImageMs = firstImageDeadline = 0;
                         presented = false;
@@ -1027,6 +1039,7 @@ DWORD WINAPI run(void*) {
                         d.screenSize = static_cast<uint32_t>(values.screenSize);
                         d.swingSpeed = values.swingSpeed;
                         d.weight = static_cast<uint32_t>(values.weight);
+                        d.hud = static_cast<uint32_t>(values.hud);
                         d.settingChanges = settingChanges;
                         const auto menu = game_menu::telemetry();
                         d.menuTabs = menu.tabs;
@@ -1173,6 +1186,11 @@ DWORD WINAPI run(void*) {
                         eyes.eyes[i].fov[2] = f.down;
                         eyes.eyes[i].fov[3] = f.up;
                     }
+                    // The HUD panel for this command's frame, as the head sees it:
+                    // fixed in the room, so a reused image the headset turns to a
+                    // newer head shows it where it was.
+                    const Quat hudFacing = hudFollow.update(frame.head.orientation, frame.seconds);
+                    native_hud::follow(eyes.serial, frame.head.orientation.conjugate() * hudFacing);
                     NativeEyeFrame saved;
                     saved.serial = eyes.serial;
                     saved.motion = motion;
@@ -1613,12 +1631,12 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 17 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 18 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
         !config.motionModule || config.options > 8191 || config.snapTurn > 90 || config.haptics > 100 ||
-        config.screenSize > 2 || config.smoothTurn > 360 ||
+        config.screenSize > 2 || config.smoothTurn > 360 || config.hud > 3 || config.spare ||
         !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 || config.swingSpeed > 65 ||
         (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||
         (config.eyeSize && !validEyeSize(config.eyeSize)) || !validRenderScale(config.renderScale) ||

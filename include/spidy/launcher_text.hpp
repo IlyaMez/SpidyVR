@@ -281,10 +281,11 @@ struct SessionOptions {
     int haptics = 100;  // controller vibration, percent
     int screenSize = 1; // the game screen in the headset: 0 small, 1 medium, 2 large
     int smoothTurn = 0; // degrees a second the right stick turns you while held over; 0: it snap turns
-    int weight = 60;    // how heavy you are while webs fly you, percent of real gravity
+    int weight = 80;    // how heavy you are while webs fly you, percent of real gravity
     bool flips = false; // experimental: A in the air flips you (tap), or lets the left stick turn you (held)
     // The trigger shoots and holds webs, and the grip reels them in and shoots web balls; off, the other way round.
     bool triggerWebs = false;
+    int hud = 2; // the game's HUD in the headset: 0 off, 1 small, 2 medium, 3 large
     // Your T-pose calibration in the headset (body_calibration.hpp): the eye height and arm length Spider-Man's
     // body is sized to, millimetres. Both 0: none yet, and VR asks for one at the first gameplay unless
     // calibrationPrompt is off (you skipped it).
@@ -337,7 +338,8 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
         {std::clamp(options.smoothTurn, 0, 360), {L"--smooth-turn", 0}},
         {std::clamp(options.haptics, 0, 100), {L"--haptics", 100}},
         {std::clamp(options.screenSize, 0, 2), {L"--screen-size", 1}},
-        {std::clamp(options.weight, 40, 300), {L"--weight", 60}}};
+        {std::clamp(options.weight, 40, 300), {L"--weight", 80}},
+        {std::clamp(options.hud, 0, 3), {L"--hud", 2}}};
     for (const auto& [value, flag] : settings)
         if (value != flag.second) {
             args.emplace_back(flag.first);
@@ -401,6 +403,8 @@ inline bool headsetSettings(std::string_view line, SessionOptions& options) {
             next.screenSize = std::clamp(number, 0, 2);
         else if (key == "weight")
             next.weight = std::clamp(number, 40, 300);
+        else if (key == "hud")
+            next.hud = std::clamp(number, 0, 3);
         else if (key == "eye_height_mm")
             next.eyeHeightMm = number;
         else if (key == "arm_length_mm")

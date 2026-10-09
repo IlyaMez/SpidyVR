@@ -5,7 +5,7 @@
 The weight (percent of real gravity) is the swing's gravity while webs fly the player: swinging, and after
 letting go until landing. The probe starts the swing at the default weight, jumps with the virtual Xbox controller,
 shoots a web up into the most open direction and reels, lets go, and in that released flight changes the weight
-as the SPIDY VR tab does (SpidySwingSettings) a step at a time: 60%, 150%, 300%. For each it fits the player's
+as the SPIDY VR tab does (SpidySwingSettings) a step at a time: 80%, 150%, 300%. For each it fits the player's
 vertical acceleration to every native step in the air that Spidy commanded, and compares it with the gravity the
 weight sets (9.81 m/s^2 x weight / 100). It needs a freshly started game in free roam whose save was loaded with
 the virtual controller (`tools/probe_menu_pad.py start`, then `pad a --until-player`), the player perched or
@@ -34,7 +34,7 @@ from vr_launcher import bring_to_front
 
 # vr_settings.hpp: real gravity, and the weights the probe flies at (the default first).
 REAL_GRAVITY = 9.81
-WEIGHTS = ((60, .6), (150, .6), (300, .4))  # percent, seconds of flight
+WEIGHTS = ((80, .6), (150, .6), (300, .4))  # percent, seconds of flight
 # A weight's first steps may still run the command made at the one before (the mover applies a command a step late).
 SETTLE = .1
 
