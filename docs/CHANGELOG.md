@@ -3,7 +3,59 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 9, seventh build): a steadier, sharper HUD, and a HUD
+**Latest build (October 9, ninth build): a flip speed setting, slower by
+default.** You asked for flip speeds to choose from, like the turning speed
+and the weight, and for a lower default. FLIP SPEED is a new row under FLIPS
+in the SPIDY VR tab of the game's Settings, and "Flip speed" in the
+launcher's options under "Flips (experimental)": how fast a flip turns you at
+full tilt of the left stick, 90, 120, 150, 180, 240, 300, 360 or 480 degrees
+a second. The default is 180, a quarter slower than the 240 the flips had so
+far; 240 is still a choice. A tap's whole flip and the turn back level go as
+much faster or slower (at 180: a tap's flip about 1.4 s instead of 1.1 s,
+the way back 1.33 s a turn instead of 1). Changed in the headset, it carries
+to the next session as the other settings do (launcher.ini `flip_speed=`;
+`--flip-speed`, `Launch Spidy VR.cmd -FlipSpeed`). RESET in the tab puts 180
+back.
+XrConfig and XrData went to version 19 (XrConfig's spare is now `flipSpeed`;
+XrData has `flipSpeed` at 792, 800 bytes), the menu probe's structs to 5: the
+launcher, the Python tools and the modules must come from the same build;
+install the whole package. The session report's `vr_settings` has
+`flip_speed`. 212 core checks (1 new: the stick's speed, a tap and the way
+back at 180 against 240, kept through a reset, the clamps, the rig passing it
+on; the tab's checks now count 17 rows), 21 launcher checks (the
+`--flip-speed` argument and its range, `flip_speed=` from the headset) and the
+5 Python suites pass. `tools/probe_menu.py` now steps FLIP SPEED to 240 and
+expects RESET ALL to put it back (23 changes); it has not run in the game.
+Not tried in the headset; not in the play folder.
+
+**Preceding build (October 9, eighth build): with FLIPS on, the left stick flips
+you without A.** You asked for the stick to flip you at all times once flips
+are on, without holding A. With the experimental FLIPS switch on, the left
+stick in the air now turns you head over heels by itself, as fast as you tilt
+it (ahead a front flip, back a backflip, to a side a cartwheel, a whole turn
+in 1.5 s at full tilt). Let go and you turn back level the short way; push
+again on the way and the stick takes the turn over where it is. While it
+flips you the stick no longer steers you in the air, as with A held before.
+- A stick already held when you jump (a running jump) keeps steering you
+  until you let it go once in the air, so running off a roof does not throw
+  you into a flip. Landing, or the game sticking you to a wall or ceiling,
+  levels you as before, and from the ground the stick walks again.
+- A works as before: a tap is one whole flip toward the stick, and held in
+  the air it keeps you turned while the stick rests (let go of A and the
+  stick to come back level). A tap while the stick is turning you is no
+  extra flip.
+- FLIPS off: nothing changed; the stick steers you in the air.
+The SPIDY VR tab's and the launcher's FLIPS help now read "In the air the
+left stick turns you over; tap A for one flip, hold A to stay." No protocol
+change: the stereo DLL (the flip and the tab's text) and the launcher (its
+text) change in code. 211 core checks (2 new: the stick alone in the
+air flips, a stick held from a jump or on a wall walks, release levels,
+landing levels; its speed, A holding the angle, a flick or a tap no whole
+flip), 21 launcher checks and the 5 Python suites pass. Not run in the game
+or the headset; not in the play folder. (Its flips turned at 240 degrees a
+second; the ninth build makes that a setting, 180 by default.)
+
+**Preceding build (October 9, seventh build): a steadier, sharper HUD, and a HUD
 setting.** You played the fifth build's HUD on a Quest 3 (Virtual Desktop,
 eyes of 3840 x 4080 at 125%), found it still a bit blurry and a tad
 jittery, asked for it to follow the head smoothly, and for a way to switch it

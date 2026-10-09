@@ -337,9 +337,11 @@ settings bit 64), switch the aim markers and webs in
 open air, or step the swing speed limit, weight, snap turn, smooth turn,
 controller vibration, the game screen's size and the HUD (OFF, SMALL, MEDIUM,
 LARGE; XrConfig and XrData `hud`, see [The HUD in VR](#the-hud-in-vr)) with
-left and right, and switch the experimental FLIPS (off by default;
-`GameTrackingRig::flips`, XrConfig options bit 11, XrData settings bit 32);
-XrConfig and XrData are version 18.
+left and right, switch the experimental FLIPS (off by default;
+`GameTrackingRig::flips`, XrConfig options bit 11, XrData settings bit 32)
+and step their FLIP SPEED (90 to 480 degrees a second at full tilt of the
+left stick, 180 by default; `GameTrackingRig::flipSpeed`, XrConfig and XrData
+`flipSpeed`); XrConfig and XrData are version 19.
 X resets a setting, Y the
 whole tab (to Spidy's defaults). Web grabbing, the web
 shooter, your body and punching are not in it or in the launcher's options
@@ -480,7 +482,8 @@ reattaching after a stopped session or a rebuilt DLL.
 | `-NoAirWebs` | A web that meets nothing within 100 m misses instead of holding in open air |
 | `-NoWebShooter` | The trigger only reels |
 | `-NoAimMarkers` | Start with the aim markers hidden (X shows them) |
-| `-Flips` | Experimental flips on (off by default): A tapped in the air flips you; held there, the left stick turns you over |
+| `-Flips` | Experimental flips on (off by default): in the air the left stick turns you over, and a tap of A flips you |
+| `-FlipSpeed 240` | How fast a flip turns you at full tilt of the left stick, degrees a second (90-480, default 180) |
 | `-TriggerWebs` | The trigger shoots and holds webs, and the grip reels them in and shoots web balls (WEB BUTTON: TRIGGER) |
 | `-EyeHeight 1630 -ArmLength 590` | Your T-pose calibration in millimetres (the console's last "VR settings from the headset" line has it): Spider-Man's body takes your eye height and arm length, and the first gameplay asks for none |
 | `-NoCalibrationPrompt` | Without a calibration, do not ask for the T-pose at the first gameplay (Settings > SPIDY VR > CALIBRATE BODY still does it) |

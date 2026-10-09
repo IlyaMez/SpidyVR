@@ -129,7 +129,8 @@ Your body and fists
                          height and arms become yours. B skips it
 
 Moving
-  Left stick ........... walk and run
+  Left stick ........... walk and run (with FLIPS on, in the air it flips
+                         you, below)
   Right stick .......... flick left or right to turn (30 degrees; SPIDY VR
                          in Settings sets how far, or turns it off). With
                          SMOOTH TURN on, hold it to turn steadily instead:
@@ -157,13 +158,20 @@ Slow motion (as in Blade & Sorcery)
 
 Flips (experimental, off until you switch FLIPS on in Settings > SPIDY VR or
 in the launcher's options)
-  Tap A in the air ..... one flip, about a second, toward where the left
-                         stick points (ahead or at rest a front flip, back a
-                         backflip, to a side a cartwheel)
-  Hold A in the air .... the left stick turns you head over heels about your
-                         head, as fast as you tilt it (at rest you stay where
-                         you are); it does not move you meanwhile
-  Let go of A .......... you turn back level. Landing or a wall levels you too
+  Left stick in the air  turns you head over heels about your head, as
+                         fast as you tilt it (ahead a front flip, back a
+                         backflip, to a side a cartwheel); it does not move
+                         you meanwhile. A stick held from a running jump
+                         still steers you until you let it go once
+  Let go of the stick .. you turn back level
+  Tap A in the air ..... one flip, about a second and a half, toward where
+                         the left stick points (at rest a front flip)
+  Hold A in the air .... the left stick turns you, and at rest you stay
+                         turned; let go of A and the stick to come back level.
+                         Landing or a wall levels you too
+  FLIP SPEED ........... how fast all of it turns you: 180 degrees a second
+                         at full tilt unless you change it (90 to 480;
+                         Settings > SPIDY VR or "Flip speed" in the launcher)
 
 Menus and cutscenes show on a screen in the headset. There the controllers act
 as an Xbox controller: left stick moves, A selects, B goes back, grips switch
@@ -190,7 +198,8 @@ VR settings
   swing speed limit, your weight, snap turn, smooth turn, controller
   vibration, the game screen's size and the HUD's (OFF hides it in VR).
   Under EXPERIMENTAL, FLIPS (off until
-  you switch it on) lets A in the air flip you. Changes apply at once. The
+  you switch it on) lets the left stick and A in the air flip you, and FLIP
+  SPEED sets how fast. Changes apply at once. The
   launcher starts your next session with them; its options show them too.
   CALIBRATE BODY: set it to ON RESUME and resume, and the T-pose panel asks
   for your measurements again.
@@ -262,7 +271,8 @@ IF SOMETHING IS WRONG
 - The game asks for Y (Triangle) to interact: in VR that is B.
 - A flip you did not mean, or flips make you uneasy: switch FLIPS off in
   Settings > SPIDY VR (or "Flips (experimental)" in the launcher's options).
-  It is off unless you switched it on.
+  It is off unless you switched it on. Flips too fast or too slow: FLIP
+  SPEED, under it (or "Flip speed" in the launcher).
 
 
 SHARING

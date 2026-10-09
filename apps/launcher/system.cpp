@@ -545,6 +545,7 @@ Settings loadSettings() {
         else if (key == "haptics") o.haptics = std::clamp(number(), 0, 100);
         else if (key == "screen_size") o.screenSize = std::clamp(number(), 0, 2);
         else if (key == "hud") o.hud = std::clamp(number(), 0, 3);
+        else if (key == "flip_speed") o.flipSpeed = std::clamp(number(), 90, 480);
         // "weight" (before October 9) was saved whether chosen or not: its old default, 60, starts on today's.
         else if (key == "weight") legacyWeight = std::clamp(number(), 40, 300);
         else if (key == "weight_percent") weight = std::clamp(number(), 40, 300);
@@ -584,7 +585,7 @@ void saveSettings(const Settings& settings) {
          << "\nswing_speed=" << o.swingSpeed << "\nweight_percent=" << o.weight << "\nsnap_turn=" << o.snapTurn
          << "\nsmooth_turn=" << o.smoothTurn
          << "\nhaptics=" << o.haptics << "\nscreen_size=" << o.screenSize << "\nhud=" << o.hud
-         << "\neye_height_mm=" << o.eyeHeightMm
+         << "\nflip_speed=" << o.flipSpeed << "\neye_height_mm=" << o.eyeHeightMm
          << "\narm_length_mm=" << o.armLengthMm << "\ncalibration_prompt=" << o.calibrationPrompt
          << "\nhash_path=" << narrow(settings.hashPath)
          << "\nhash_size=" << settings.hashSize << "\nhash_time=" << settings.hashTime

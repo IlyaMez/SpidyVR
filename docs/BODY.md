@@ -25,7 +25,7 @@ The body is the game's own hero model, its joints turned every frame
 | Stand in a T-pose and hold both triggers | The calibration: Spider-Man takes your eye height and your arms' length ([below](#your-size-the-t-pose-calibration-october-8)); the first time VR shows the game, and from Settings > SPIDY VR > CALIBRATE BODY |
 | Walk around your room | The feet stay put until your hips are 15 cm from over them, then follow |
 | Swing, fall, jump | The legs keep the game's pose (a swing's tuck, a fall's flail) under your upright body |
-| Flip (A in the air, with the experimental FLIPS on) | The whole body turns with you about your eyes; the legs keep the game's pose |
+| Flip (the left stick or A in the air, with the experimental FLIPS on) | The whole body turns with you about your eyes; the legs keep the game's pose |
 | Squeeze a grip | That hand closes into a fist (it still shoots its web) |
 | Move a hand fast | It closes into a fist too, and opens again within a third of a second |
 | Punch a thug | A fist moving 2.2 m/s or faster into him lands a blow (table below); the controller kicks |
@@ -151,7 +151,7 @@ frames may be mirrored, so no joint orientation is ever taken as a rotation):
    the thumb's base as the tip's place (at most 80 degrees), and the base
    swings the tip there: over the middle bones of the index and middle
    fingers, 1.6 cm out of the fist.
-9. A flip (A in the air, game_tracking's FlipMotion): the headset and the
+9. A flip (the left stick or A in the air, game_tracking's FlipMotion): the headset and the
    controllers go into steps 2-8 turned back level about the eyes, so the
    body is solved as if the player stood level; then everything under the
    body's root turns with the flip's tilt about the eyes. Tilted more than

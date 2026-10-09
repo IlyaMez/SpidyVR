@@ -32,8 +32,8 @@ struct Values {
     // tab's CALIBRATE BODY: ON RESUME); the XR worker clears it once the
     // calibration starts (body_calibration.hpp).
     bool calibrate = false;
-    // Experimental, off unless chosen: A in the air flips you (game_tracking's
-    // FlipMotion); off, it does nothing there.
+    // Experimental, off unless chosen: the left stick and A in the air flip
+    // you (game_tracking's FlipMotion); off, A does nothing there.
     bool flips = false;
     // The web button (the tab's WEB BUTTON): false the grip, which shoots and
     // holds a hand's web while the trigger reels it in and shoots web balls;
@@ -42,6 +42,10 @@ struct Values {
     // The game's HUD in the headset (the tab's HUD): 0 off, 1 small, 2 medium,
     // 3 large (native_hud::widths).
     int hud = 2;
+    // How fast a flip turns you at full tilt of the left stick, degrees a
+    // second (the tab's FLIP SPEED; FlipMotion::speed): 180 since October 9,
+    // a quarter slower than the flips' first 240.
+    int flipSpeed = 180;
     bool operator==(const Values&) const = default;
 };
 // The steps the game's Settings offer. The launcher's slider sets any swing
@@ -51,6 +55,7 @@ inline constexpr int snapTurns[] = {0, 15, 30, 45, 60, 90};
 inline constexpr int smoothTurns[] = {0, 60, 90, 120, 180, 240};
 inline constexpr int hapticLevels[] = {0, 25, 50, 75, 100};
 inline constexpr int weights[] = {40, 60, 80, 100, 125, 150, 200, 250, 300};
+inline constexpr int flipSpeeds[] = {90, 120, 150, 180, 240, 300, 360, 480};
 // Real gravity, m/s^2: a weight of 100% falls at it.
 inline constexpr float realGravity = 9.81f;
 // The swing's gravity for a weight, m/s^2.
@@ -67,7 +72,8 @@ inline float screenWidth(int size) {
 inline constexpr float screenDistance = 2.5f;
 // The values within the session's ranges: swing speed 1-65 m/s (what
 // run_game_vr.py accepts), snap turn 0-90 degrees, smooth turn 0-360 degrees
-// a second, vibration 0-100%, weight 40-300%, HUD 0-3.
+// a second, vibration 0-100%, weight 40-300%, HUD 0-3, flip speed 90-480
+// degrees a second.
 Values sanitized(Values);
 
 enum class Item : uint8_t {
@@ -84,8 +90,9 @@ enum class Item : uint8_t {
     flips,
     webButton,
     hud,
+    flipSpeed,
 };
-inline constexpr Item lastItem = Item::hud;
+inline constexpr Item lastItem = Item::flipSpeed;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. A setting without choices is an ON/OFF switch, the game's own;
 // one with choices steps through them. Titles are upper case, as the game's
@@ -96,7 +103,7 @@ struct Row {
     const char* help{};
     std::span<const char* const> choices{};
 };
-const std::array<Row, 16>& rows();
+const std::array<Row, 17>& rows();
 // The choice a setting shows for these values: a switch 0 (off) or 1 (on), a
 // list its step nearest to the value (a launcher value between two steps
 // shows the nearer one, the lower on a tie).

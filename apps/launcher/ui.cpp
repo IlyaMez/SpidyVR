@@ -68,6 +68,9 @@ constexpr const char* kHudSizes[] = {"Off", "Small", "Medium", "Large"};
 constexpr const char* kWebButtons[] = {"Grip", "Trigger"};
 constexpr const char* kWeights[] = {"40%", "60%", "80%", "100%", "125%", "150%", "200%", "250%", "300%"};
 constexpr int kWeightValues[] = {40, 60, 80, 100, 125, 150, 200, 250, 300};
+constexpr const char* kFlipSpeeds[] = {"90\xC2\xB0/s",  "120\xC2\xB0/s", "150\xC2\xB0/s", "180\xC2\xB0/s",
+                                       "240\xC2\xB0/s", "300\xC2\xB0/s", "360\xC2\xB0/s", "480\xC2\xB0/s"};
+constexpr int kFlipSpeedValues[] = {90, 120, 150, 180, 240, 300, 360, 480};
 
 } // namespace
 
@@ -1099,8 +1102,12 @@ void App::optionsCard(ImVec2 size) {
         static constexpr int sizes[] = {0, 1, 2, 3};
         stepCombo("##hud", kHudSizes, sizes, 4, &o.hud);
     });
-    option("Flips (experimental)", "Tap A in the air to flip; hold A there and the left stick turns you over.",
+    option("Flips (experimental)", "In the air the left stick turns you over; tap A for one flip, hold A to stay.",
            S(40), [&] { changed |= toggle("##flips", &o.flips); });
+    option("Flip speed", "How fast a flip turns you over, at full tilt of the left stick.", S(150), [&] {
+        stepCombo("##flipspeed", kFlipSpeeds, kFlipSpeedValues, static_cast<int>(std::size(kFlipSpeedValues)),
+                  &o.flipSpeed);
+    });
     option("Small game window", "Saves GPU time while you play in VR.", S(40),
            [&] { changed |= toggle("##small", &o.smallWindow); });
     option("Normal camera on the monitor", "Off: the monitor shows your head's view.", S(40),

@@ -19,12 +19,15 @@ constexpr const char* calibrateChoices[] = {"NO", "ON RESUME"};
 // WEB BUTTON, a switch named by the button that webs: TRIGGER swaps it with the grip.
 constexpr const char* webButtonChoices[] = {"GRIP", "TRIGGER"};
 constexpr const char* hudChoices[] = {"OFF", "SMALL", "MEDIUM", "LARGE"};
+constexpr const char* flipSpeedChoices[] = {"90\xC2\xB0/S",  "120\xC2\xB0/S", "150\xC2\xB0/S", "180\xC2\xB0/S",
+                                            "240\xC2\xB0/S", "300\xC2\xB0/S", "360\xC2\xB0/S", "480\xC2\xB0/S"};
 constexpr int screenSizes[] = {0, 1, 2};
 constexpr int hudSizes[] = {0, 1, 2, 3};
 static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(snapChoices) == std::size(snapTurns) &&
               std::size(smoothChoices) == std::size(smoothTurns) &&
               std::size(hapticChoices) == std::size(hapticLevels) && std::size(screenChoices) == std::size(screenSizes) &&
-              std::size(weightChoices) == std::size(weights) && std::size(hudChoices) == std::size(hudSizes));
+              std::size(weightChoices) == std::size(weights) && std::size(hudChoices) == std::size(hudSizes) &&
+              std::size(flipSpeedChoices) == std::size(flipSpeeds));
 // A list setting's steps, or none for a switch.
 std::span<const int> steps(Item item) {
     switch (item) {
@@ -42,6 +45,8 @@ std::span<const int> steps(Item item) {
         return weights;
     case Item::hud:
         return hudSizes;
+    case Item::flipSpeed:
+        return flipSpeeds;
     default:
         return {};
     }
@@ -62,6 +67,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.weight);
     case Item::hud:
         return static_cast<float>(v.hud);
+    case Item::flipSpeed:
+        return static_cast<float>(v.flipSpeed);
     default:
         return 0;
     }
@@ -93,11 +100,12 @@ Values sanitized(Values v) {
     v.screenSize = std::clamp(v.screenSize, 0, 2);
     v.weight = std::clamp(v.weight, 40, 300);
     v.hud = std::clamp(v.hud, 0, 3);
+    v.flipSpeed = std::clamp(v.flipSpeed, 90, 480);
     return v;
 }
-const std::array<Row, 16>& rows() {
+const std::array<Row, 17>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 16> all{{
+    static const std::array<Row, 17> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webButton, "WEB BUTTON",
          "Which button shoots and holds a web; the other reels in and shoots web balls.", webButtonChoices},
@@ -121,7 +129,9 @@ const std::array<Row, 16>& rows() {
          screenChoices},
         {Item::hud, "HUD", "How large the game's HUD shows in front of you. Off: no HUD in VR.", hudChoices},
         {Item::none, "EXPERIMENTAL", nullptr, {}},
-        {Item::flips, "FLIPS", "Tap A in the air to flip; hold A there and the left stick turns you over.", {}},
+        {Item::flips, "FLIPS", "In the air the left stick turns you over; tap A for one flip, hold A to stay.", {}},
+        {Item::flipSpeed, "FLIP SPEED", "How fast a flip turns you over, at full tilt of the left stick.",
+         flipSpeedChoices},
     }};
     return all;
 }
@@ -171,6 +181,9 @@ bool choose(Item item, int index, Values& v) {
         break;
     case Item::hud:
         v.hud = s[index];
+        break;
+    case Item::flipSpeed:
+        v.flipSpeed = s[index];
         break;
     default:
         return false;

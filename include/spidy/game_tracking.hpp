@@ -48,11 +48,15 @@ constexpr float surfaceEnterCos = .7071068f, surfaceLeaveCos = .819152f;
 // The stand-off approaches its target by 63% in standOffSeconds; the first
 // surfaceSettleSeconds on a surface are the actor turning onto it.
 constexpr float standOffSeconds = .06f, surfaceSettleSeconds = .5f;
-// A flip: A held in the air lets the left stick turn the player head over
-// heels, the tracking space tilting about the head (the eyes stay where they
-// are): ahead pitches forward (a front flip), back a backflip, to a side a
-// cartwheel, as fast as the stick is tilted; at rest it holds the angle. Let
-// go of A, the player turns back level the short way. A tap (let go within
+// A flip: in the air the left stick turns the player head over heels, the
+// tracking space tilting about the head (the eyes stay where they are): ahead
+// pitches forward (a front flip), back a backflip, to a side a cartwheel, as
+// fast as the stick is tilted. Let go, the player turns back level the short
+// way; pushed again on the way, the stick takes the turn over where it is. A
+// stick held into the air (a running jump) moves the player until it is let
+// go once there. A held in the air flips with the stick at once, held or not
+// from the ground, and keeps the angle while the stick rests; let go of A
+// and the stick, the player turns back level. A tap (let go within
 // tapSeconds) is one whole flip the way the stick points, ahead with it at
 // rest; pressed again during it, A takes the flip over where it is. Landing,
 // or the game holding the player on a wall or a ceiling, brings it back level
@@ -66,7 +70,8 @@ class FlipMotion {
     // tap's flip takes tapTurnSeconds a turn; let go, the player turns back
     // level at a turn in returnTurnSeconds, from a landing twice as fast. Over
     // the last easeAngle radians to level it slows, to no less than `slowest`.
-    // On the ground, a wall or a ceiling for landingSeconds: landed.
+    // On the ground, a wall or a ceiling for landingSeconds: landed. speed()
+    // makes all three turns as much faster or slower.
     static constexpr float holdTurnSeconds = 1.5f, tapTurnSeconds = 1, returnTurnSeconds = 1, tapSeconds = .25f,
                            spinUpSeconds = .08f, stickDeadZone = .2f, stickFull = .9f, easeAngle = .4f,
                            slowest = .3f, landingSeconds = .08f;
@@ -86,7 +91,8 @@ class FlipMotion {
     bool level() const {
         return phase_ == Phase::level;
     }
-    // A held in the air: the left stick turns the flip, not the player.
+    // The left stick (or A held in the air) turns the flip: the stick moves
+    // the player no more.
     bool steering() const {
         return phase_ == Phase::holding;
     }
@@ -94,8 +100,14 @@ class FlipMotion {
     float turned() const {
         return turned_;
     }
+    // How fast the stick turns the player at full tilt, radians a second (the
+    // FLIP SPEED setting), from a quarter to four times the holdTurnSeconds
+    // turn; a tap's flip and the way back level go as much faster or slower.
+    // A turn in holdTurnSeconds until set; reset() keeps it.
+    void speed(float radiansPerSecond);
     // Level at once (a menu, a recenter, another player). A held A stays held:
-    // it flips again only once let go and pressed in the air.
+    // it flips again only once let go and pressed in the air; a held stick
+    // flips again only once let go in the air.
     void reset();
 
   private:
@@ -113,7 +125,11 @@ class FlipMotion {
     // now, and settling's.
     float speed_{}, rate_{}, returnRate_{};
     float turned_{}, landed_{}, heldFor_{};
+    float scale_ = 1; // speed(): the turns' speed over the constants'
     bool held_{}, fromAir_{};
+    // The stick has been at rest in the air since the landing (it flips when
+    // pushed), and this hold began with a press of A (let go soon: a tap).
+    bool stickFree_{}, tap_{};
 };
 // Converts one complete predicted tracking sample into world-space head, eyes,
 // hand aims, and physical swing input. The game adapter still owns collision and
@@ -121,7 +137,8 @@ class FlipMotion {
 class GameTrackingRig {
   public:
     // surfaceUp: the up of the player's actor, the world's while it stands.
-    // airborne: the player is in the air, so A pressed now flips (FlipMotion).
+    // airborne: the player is in the air, so A or the left stick flips now
+    // (FlipMotion).
     GameMotionFrame update(const XrFrame&, Vec3 playerFeet, Vec3 gameForward, bool gameplay,
                            Vec3 surfaceUp = {0, 1, 0}, bool airborne = false);
     // How far a flick of the right stick turns the player (0: it does not);
@@ -135,11 +152,18 @@ class GameTrackingRig {
     void smoothTurn(float radiansPerSecond) {
         smooth_ = std::isfinite(radiansPerSecond) ? std::clamp(radiansPerSecond, 0.f, 6.2831853f) : 0.f;
     }
-    // Whether A in the air flips the player (FlipMotion; the experimental
-    // FLIPS setting); off until set, when A there does nothing. Switched off
-    // mid-flip, the player is level at once. reset() keeps it.
+    // Whether A and the left stick in the air flip the player (FlipMotion;
+    // the experimental FLIPS setting); off until set, when A there does
+    // nothing and the stick moves the player. Switched off mid-flip, the
+    // player is level at once. reset() keeps it.
     void flips(bool on) {
         flips_ = on;
+    }
+    // How fast a flip turns the player at full tilt of the left stick,
+    // radians a second (FlipMotion::speed; the FLIP SPEED setting). reset()
+    // keeps it.
+    void flipSpeed(float radiansPerSecond) {
+        flip_.speed(radiansPerSecond);
     }
     // Which button webs (the WEB BUTTON setting): off, the grip shoots and
     // holds a hand's web and the trigger reels it in and shoots web balls; on,

@@ -3995,7 +3995,9 @@ int main() {
                   all[14].item == Item::none,
               "the sections: webs, body, comfort, experimental");
         check(all[15].item == Item::flips && all[15].choices.empty() && std::strcmp(all[14].title, "EXPERIMENTAL") == 0,
-              "the flips: a switch under EXPERIMENTAL, the last row");
+              "the flips: a switch under EXPERIMENTAL");
+        check(all.size() == 17 && all[16].item == Item::flipSpeed && all[16].choices.size() == std::size(flipSpeeds),
+              "the flip speed under the flips, the last row");
         check(all[12].item == Item::screenSize && all[13].item == Item::hud && all[13].choices.size() == 4 &&
                   std::strcmp(all[13].choices[0], "OFF") == 0 && std::strcmp(all[13].choices[3], "LARGE") == 0,
               "the HUD after the game screen's size: OFF, SMALL, MEDIUM, LARGE");
@@ -4075,6 +4077,13 @@ int main() {
                   choose(Item::hud, 0, v) && v.hud == 0 && choice(Item::hud, v) == 0 && choose(Item::hud, 3, v) &&
                   v.hud == 3 && !choose(Item::hud, 4, v) && !choose(Item::hud, -1, v),
               "the HUD: MEDIUM by default, OFF to LARGE");
+        check(defaults.flipSpeed == 180 && choice(Item::flipSpeed, defaults) == 3 &&
+                  defaultChoice(Item::flipSpeed) == 3 && choose(Item::flipSpeed, 4, v) && v.flipSpeed == 240 &&
+                  choose(Item::flipSpeed, 0, v) && v.flipSpeed == 90 && choose(Item::flipSpeed, 7, v) &&
+                  v.flipSpeed == 480 && !choose(Item::flipSpeed, 8, v) && !choose(Item::flipSpeed, -1, v),
+              "the flip speed: 180 degrees a second by default, 90 to 480");
+        v.flipSpeed = 200;
+        check(choice(Item::flipSpeed, v) == 3, "a launcher flip speed shows the step nearest to it");
         check(choice(Item::none, v) == 0 && !choose(Item::none, 0, v), "a heading holds no value");
         // RESET: each setting's default choice puts its default back.
         for (const auto& row : rows())
@@ -4100,6 +4109,10 @@ int main() {
         big.hud = 9;
         none.hud = -1;
         check(sanitized(big).hud == 3 && sanitized(none).hud == 0, "HUD sizes past either end");
+        Values fast, slow;
+        fast.flipSpeed = 9999;
+        slow.flipSpeed = 0;
+        check(sanitized(fast).flipSpeed == 480 && sanitized(slow).flipSpeed == 90, "flip speeds past either end");
         check(gravity(300) <= game_swing::maxGravity, "the heaviest weight is more than a swing takes");
         near(screenWidth(0), 2.4f);
         near(screenWidth(7), 4.2f);
@@ -4329,6 +4342,226 @@ int main() {
                 m = flipFrame(rig, f, false);
             check(levelTilt(m.swing.tilt) && frames <= 30, "letting go did not bring the player back level");
         }
+    });
+    test("flip: in the air the left stick alone turns the player once let go there; held from a jump it walks", [] {
+        GameTrackingRig rig;
+        rig.flips(true);
+        auto f = trackedFrame();
+        // A running jump: the stick held from the ground into the air moves the player.
+        f.hands[0].stickY = 1;
+        flipFrame(rig, f, false, false);
+        auto m = flipFrame(rig, f, false, false);
+        for (int i = 0; i < 30; ++i) {
+            m = flipFrame(rig, f, false);
+            check(levelTilt(m.swing.tilt) && length(m.swing.move) > .5f, "a stick held into the air flipped");
+        }
+        // Let go in the air, then pushed: ahead a front flip, back a backflip, the player moved no more.
+        const float ways[] = {1, -1};
+        for (const float way : ways) {
+            f.hands[0].stickY = 0;
+            flipFrame(rig, f, false);
+            f.hands[0].stickY = way;
+            for (int i = 0; i < 30; ++i) {
+                m = flipFrame(rig, f, false);
+                check(length(m.swing.move) == 0 && m.walkForward == 0 && m.walkRight == 0,
+                      "the stick moved the player while it flipped them");
+            }
+            const Vec3 ahead = matrixRow(m.head, 2);
+            check(way > 0 ? ahead.y < -.5f : ahead.y > .5f,
+                  way > 0 ? "the stick ahead did not front flip" : "the stick back did not backflip");
+            // Let go: back level the short way, no snap.
+            f.hands[0].stickY = 0;
+            m = flipFrame(rig, f, false);
+            check(!levelTilt(m.swing.tilt), "the player snapped level as the stick was let go");
+            int frames = 0;
+            for (; frames < 60 && !levelTilt(m.swing.tilt); ++frames)
+                m = flipFrame(rig, f, false);
+            check(levelTilt(m.swing.tilt) && frames <= 30, "letting go of the stick did not bring the player level");
+        }
+        // Landing mid-flip levels the player; from the ground the stick walks again, into the air too.
+        f.hands[0].stickY = 1;
+        for (int i = 0; i < 30; ++i)
+            m = flipFrame(rig, f, false);
+        check(!levelTilt(m.swing.tilt), "no flip before the landing");
+        int frames = 0;
+        for (; frames < 60 && !levelTilt(m.swing.tilt); ++frames)
+            m = flipFrame(rig, f, false, false);
+        check(levelTilt(m.swing.tilt) && frames <= 40, "landing did not level the player quickly");
+        for (int i = 0; i < 20; ++i) {
+            m = flipFrame(rig, f, false, i >= 10);
+            check(levelTilt(m.swing.tilt) && length(m.swing.move) > .5f, "the stick held from the landing flipped");
+        }
+        // On a wall (in the air as the game has it there) the stick crawls: no flip.
+        const auto wallFrame = [&] {
+            ++f.predictedDisplayTime;
+            return rig.update(f, {}, {0, 0, -1}, true, {1, 0, 0}, true);
+        };
+        f.hands[0].stickY = 0;
+        for (int i = 0; i < 20; ++i)
+            wallFrame();
+        f.hands[0].stickY = 1;
+        for (int i = 0; i < 30; ++i) {
+            m = wallFrame();
+            check(levelTilt(m.swing.tilt) && length(m.swing.move) > .5f, "the stick flipped the player on a wall");
+        }
+        // Flips off: the stick let go and pushed in the air walks, level.
+        GameTrackingRig off;
+        f.hands[0].stickY = 0;
+        flipFrame(off, f, false);
+        f.hands[0].stickY = 1;
+        for (int i = 0; i < 20; ++i) {
+            m = flipFrame(off, f, false);
+            check(levelTilt(m.swing.tilt) && length(m.swing.move) > .5f, "flips off, the stick in the air flipped");
+        }
+    });
+    test("flip: the stick alone turns as fast as it is tilted; A held keeps the angle; a flick is no whole flip", [] {
+        constexpr float turn = 6.2831853f, full = turn / FlipMotion::holdTurnSeconds;
+        FlipMotion::Sample s;
+        s.airborne = true;
+        s.seconds = 1.f / 90;
+        const auto run = [&](FlipMotion& flip, int frames) {
+            for (int i = 0; i < frames; ++i)
+                flip.update(s);
+        };
+        const auto toLevel = [&](FlipMotion& flip) {
+            int frames = 0;
+            for (; frames < 1000 && !flip.level(); ++frames)
+                flip.update(s);
+            check(flip.level() && levelTilt(flip.tilt()), "the player did not come out level");
+        };
+        FlipMotion stick;
+        run(stick, 1);
+        s.stickY = 1;
+        run(stick, 45);
+        check(stick.steering(), "the stick alone did not steer the flip");
+        float before = stick.turned();
+        run(stick, 45);
+        near(stick.turned() - before, full * .5f, .02f);
+        // A pressed while it turns, then the stick at rest: the angle stays while A is held.
+        s.jump = true;
+        run(stick, 5);
+        s.stickY = 0;
+        run(stick, 30);
+        const Quat kept = stick.tilt();
+        run(stick, 30);
+        const Quat now = stick.tilt();
+        near(std::abs(kept.x * now.x + kept.y * now.y + kept.z * now.z + kept.w * now.w), 1, 1e-5f);
+        // Let go of A: back level the short way.
+        before = stick.turned();
+        s.jump = false;
+        toLevel(stick);
+        check(stick.turned() - before <= turn / 2 + .01f, "letting go went the long way round");
+        // A flick of the stick: back level the way it came, no whole turn.
+        FlipMotion flick;
+        run(flick, 1);
+        s.stickY = 1;
+        run(flick, 6);
+        s.stickY = 0;
+        toLevel(flick);
+        check(flick.turned() < turn / 4, "a flick of the stick flipped the player round");
+        // A tap of A while the stick turns the player is no whole flip either.
+        FlipMotion tapped;
+        run(tapped, 1);
+        s.stickY = 1;
+        run(tapped, 20);
+        s.jump = true;
+        run(tapped, 3);
+        s.jump = false;
+        run(tapped, 10);
+        s.stickY = 0;
+        toLevel(tapped);
+        check(tapped.turned() < turn / 2, "a tap during the stick's turn flipped the player round");
+    });
+    test("flip speed: the stick's turn, a tap's flip and the way back all go as fast as FLIP SPEED says", [] {
+        constexpr float turn = 6.2831853f, degree = turn / 360;
+        FlipMotion::Sample s;
+        s.airborne = true;
+        s.seconds = 1.f / 90;
+        const auto run = [&](FlipMotion& flip, int frames) {
+            for (int i = 0; i < frames; ++i)
+                flip.update(s);
+        };
+        const auto toLevel = [&](FlipMotion& flip) {
+            int frames = 0;
+            for (; frames < 1000 && !flip.level(); ++frames)
+                flip.update(s);
+            check(flip.level() && levelTilt(flip.tilt()), "the player did not come out level");
+            return frames;
+        };
+        // The stick at full tilt: 180 degrees a second, once up to speed.
+        FlipMotion slow;
+        slow.speed(180 * degree);
+        run(slow, 1);
+        s.stickY = 1;
+        run(slow, 45);
+        float before = slow.turned();
+        run(slow, 45);
+        near(slow.turned() - before, turn / 4, .02f);
+        // Let go: back level as much slower as the flip, against the first flips' 240 degrees a second.
+        FlipMotion first;
+        s.stickY = 0;
+        run(first, 1);
+        s.stickY = 1;
+        run(first, 69);
+        check(std::abs(first.turned() - slow.turned()) < .05f, "the two flips did not turn alike before letting go");
+        s.stickY = 0;
+        const float ratio = static_cast<float>(toLevel(slow)) / static_cast<float>(toLevel(first));
+        check(ratio > 1.25f && ratio < 1.42f, ("the way back took " + std::to_string(ratio) + " times as long").c_str());
+        // A tap's whole flip: a third longer at 180 than at 240.
+        const auto tapFrames = [&](FlipMotion& flip) {
+            s.jump = true;
+            run(flip, 1);
+            s.jump = false;
+            return toLevel(flip);
+        };
+        FlipMotion tapSlow, tapFirst;
+        tapSlow.speed(180 * degree);
+        const float tapRatio = static_cast<float>(tapFrames(tapSlow)) / static_cast<float>(tapFrames(tapFirst));
+        check(tapRatio > 1.25f && tapRatio < 1.42f, ("a tap took " + std::to_string(tapRatio) + " times as long").c_str());
+        near(tapSlow.turned(), turn, .01f);
+        // A reset keeps the speed; past either end it is a quarter or four times the first flips'.
+        slow.reset();
+        s.stickY = 0;
+        run(slow, 1);
+        s.stickY = 1;
+        run(slow, 45);
+        before = slow.turned();
+        run(slow, 45);
+        near(slow.turned() - before, turn / 4, .02f);
+        FlipMotion fastest, odd;
+        fastest.speed(1e6f);
+        odd.speed(std::numeric_limits<float>::quiet_NaN());
+        s.stickY = 0;
+        run(fastest, 1);
+        run(odd, 1);
+        s.stickY = 1;
+        run(fastest, 45);
+        run(odd, 45);
+        before = fastest.turned();
+        const float oddBefore = odd.turned();
+        run(fastest, 9);
+        run(odd, 9);
+        near(fastest.turned() - before, 4 * turn / FlipMotion::holdTurnSeconds * .1f, .02f);
+        near(odd.turned() - oddBefore, turn / FlipMotion::holdTurnSeconds * .1f, .01f);
+        // The rig passes it on and keeps it through a reset: half the first flips' 240 turns half as far.
+        const auto tiltAngle = [](Quat q) { return 2 * std::acos(std::min(1.f, std::abs(q.w))); };
+        float angles[2]{};
+        for (int k = 0; k < 2; ++k) {
+            GameTrackingRig rig;
+            rig.flips(true);
+            if (k)
+                rig.flipSpeed(120 * degree);
+            rig.reset();
+            auto f = trackedFrame();
+            flipFrame(rig, f, false);
+            f.hands[0].stickY = 1;
+            GameMotionFrame m;
+            for (int i = 0; i < 40; ++i)
+                m = flipFrame(rig, f, false);
+            angles[k] = tiltAngle(m.swing.tilt);
+        }
+        check(angles[0] > .5f && std::abs(angles[1] / angles[0] - .5f) < .03f,
+              "the rig's flip speed did not halve the turn");
     });
     test("flip: landing brings it back level quickly; a menu at once; a held A turns no more", [] {
         GameTrackingRig rig;

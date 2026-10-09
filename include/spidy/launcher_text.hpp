@@ -282,7 +282,8 @@ struct SessionOptions {
     int screenSize = 1; // the game screen in the headset: 0 small, 1 medium, 2 large
     int smoothTurn = 0; // degrees a second the right stick turns you while held over; 0: it snap turns
     int weight = 80;    // how heavy you are while webs fly you, percent of real gravity
-    bool flips = false; // experimental: A in the air flips you (tap), or lets the left stick turn you (held)
+    bool flips = false; // experimental: in the air the left stick turns you over, and a tap of A flips you
+    int flipSpeed = 180; // degrees a second a flip turns you at full tilt of the left stick
     // The trigger shoots and holds webs, and the grip reels them in and shoots web balls; off, the other way round.
     bool triggerWebs = false;
     int hud = 2; // the game's HUD in the headset: 0 off, 1 small, 2 medium, 3 large
@@ -339,7 +340,8 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
         {std::clamp(options.haptics, 0, 100), {L"--haptics", 100}},
         {std::clamp(options.screenSize, 0, 2), {L"--screen-size", 1}},
         {std::clamp(options.weight, 40, 300), {L"--weight", 80}},
-        {std::clamp(options.hud, 0, 3), {L"--hud", 2}}};
+        {std::clamp(options.hud, 0, 3), {L"--hud", 2}},
+        {std::clamp(options.flipSpeed, 90, 480), {L"--flip-speed", 180}}};
     for (const auto& [value, flag] : settings)
         if (value != flag.second) {
             args.emplace_back(flag.first);
@@ -405,6 +407,8 @@ inline bool headsetSettings(std::string_view line, SessionOptions& options) {
             next.weight = std::clamp(number, 40, 300);
         else if (key == "hud")
             next.hud = std::clamp(number, 0, 3);
+        else if (key == "flip_speed")
+            next.flipSpeed = std::clamp(number, 90, 480);
         else if (key == "eye_height_mm")
             next.eyeHeightMm = number;
         else if (key == "arm_length_mm")

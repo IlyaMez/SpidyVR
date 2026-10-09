@@ -10,8 +10,9 @@ web button on the trigger (WEB BUTTON: TRIGGER), switches the aim markers off, s
 them back with X (RESET), steps the swing speed up (from 32 one step is 40), steps the weight up (from 80% one step is
 100%), asks for a body calibration (CALIBRATE BODY: ON RESUME; without a headset nothing calibrates), steps snap turn
 up, switches smooth turning on (its first speed, 60 degrees a second), steps the HUD down from MEDIUM to SMALL and to
-OFF, switches the experimental flips on, and resets the whole tab with Y (RESET ALL, confirmed with A): Spidy's
-defaults, the grip webbing again, the calibration no longer asked for, the HUD back to MEDIUM, while the web shooter,
+OFF, switches the experimental flips on, steps the flip speed up (from 180 degrees a second one step is 240), and
+resets the whole tab with Y (RESET ALL, confirmed with A): Spidy's defaults, the grip webbing again, the calibration
+no longer asked for, the HUD back to MEDIUM, the flip speed back to 180 degrees a second, while the web shooter,
 which the tab does not offer, stays off. After each step it reads what the tab holds
 (SpidyMenuSample) and saves a window capture in reports/menu-probe/. Last it backs out to the game, stops the hooks
 (SpidyMenuStop) and checks that each hooked function starts with the game's own bytes again. Writes
@@ -46,9 +47,10 @@ FLAGS = dict(web_grab=1, punch=2, body=4, air_webs=8, web_shooter=16, aim_marker
 STICK = dict(up=(0, 32767), down=(0, -32767), left=(-32767, 0), right=(32767, 0))
 
 
-def settings_payload(flags, snap_turn, haptics, screen_size, swing_speed, smooth_turn=0, weight=80, hud=2):
-    return struct.pack('<7If4I', MAGIC, 4, 48, flags, snap_turn, haptics, screen_size, swing_speed, smooth_turn,
-                       weight, hud, 0)
+def settings_payload(flags, snap_turn, haptics, screen_size, swing_speed, smooth_turn=0, weight=80, hud=2,
+                     flip_speed=180):
+    return struct.pack('<7If4I', MAGIC, 5, 48, flags, snap_turn, haptics, screen_size, swing_speed, smooth_turn,
+                       weight, hud, flip_speed)
 
 
 def sample(game, process, exports):
@@ -57,12 +59,12 @@ def sample(game, process, exports):
     if code or len(raw) != 72:
         raise RuntimeError(f'SpidyMenuSample: {code}')
     magic, version, size, installed, tabs, changes, status, flags, snap, haptics, screen, speed, smooth, weight, \
-        hud, _ = struct.unpack('<4I2Q5If4I', raw)
-    if (magic, version, size) != (MAGIC, 4, 72):
+        hud, flip_speed = struct.unpack('<4I2Q5If4I', raw)
+    if (magic, version, size) != (MAGIC, 5, 72):
         raise RuntimeError('Menu protocol mismatch: rebuild and restart the game')
     values = {name: bool(flags & bit) for name, bit in FLAGS.items()}
     values.update(snap_turn=snap, smooth_turn=smooth, haptics=haptics, screen_size=screen,
-                  swing_speed=round(speed, 1), weight=weight, hud=hud)
+                  swing_speed=round(speed, 1), weight=weight, hud=hud, flip_speed=flip_speed)
     return dict(installed=bool(installed), tabs=tabs, changes=changes, status=status, values=values)
 
 
@@ -133,7 +135,8 @@ def main():
         press('up', wait=.6)
         step('settings_last_tab')
         press('a', wait=1.2)
-        step('spidy_vr', dict(trigger_webs=False, aim_markers=True, swing_speed=33.0, web_shooter=False, weight=80, hud=2))
+        step('spidy_vr', dict(trigger_webs=False, aim_markers=True, swing_speed=33.0, web_shooter=False, weight=80, hud=2,
+                              flip_speed=180))
         # The first row: WEB BUTTON, GRIP until stepped to TRIGGER.
         press('right', wait=.8)
         step('web_button_trigger', dict(trigger_webs=True, aim_markers=True), changes=1)
@@ -172,15 +175,19 @@ def main():
         press('down')
         press('right', wait=.8)
         step('flips_on', dict(flips=True, hud=0), changes=12)
+        # The flip speed, 180 degrees a second until stepped up to 240.
+        press('down')
+        press('right', wait=.8)
+        step('flip_speed_240', dict(flip_speed=240, flips=True), changes=13)
         press('y', wait=1.2)
         step('reset_all_asks')
         press('a', wait=1.2)
-        # Spidy's defaults: nine settings changed back (the web button, aim markers, swing speed, weight, the
-        # calibration asked for, snap turn, smooth turn, the HUD, the flips). The web shooter, which the tab does not
-        # offer, stays as the probe started it.
+        # Spidy's defaults: ten settings changed back (the web button, aim markers, swing speed, weight, the
+        # calibration asked for, snap turn, smooth turn, the HUD, the flips, the flip speed). The web shooter, which
+        # the tab does not offer, stays as the probe started it.
         step('reset_all', dict(trigger_webs=False, aim_markers=True, air_webs=True, swing_speed=32.0, weight=80,
-                               calibrate=False, snap_turn=30, smooth_turn=0, hud=2, flips=False, web_shooter=False,
-                               body=True), changes=21)
+                               calibrate=False, snap_turn=30, smooth_turn=0, hud=2, flips=False, flip_speed=180,
+                               web_shooter=False, body=True), changes=23)
         press('b', wait=.8)
         press('b', wait=.8)
         press('b', wait=1.5)

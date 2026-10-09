@@ -73,11 +73,17 @@ Vec3 frontFlipAxis(const FlipMotion::Sample& s) {
     return normalized(stickTurn(ahead));
 }
 } // namespace
+void FlipMotion::speed(float radiansPerSecond) {
+    const float scale = radiansPerSecond * holdTurnSeconds / (2 * pi);
+    scale_ = std::isfinite(scale) ? std::clamp(scale, .25f, 4.f) : 1.f;
+}
 void FlipMotion::reset() {
     const bool held = held_, fromAir = fromAir_;
+    const float scale = scale_;
     *this = {};
     held_ = held;
     fromAir_ = fromAir;
+    scale_ = scale;
 }
 void FlipMotion::toLevel(Phase phase, Vec3 way) {
     // The turn that takes the tilt back to level, the short way.
@@ -111,7 +117,7 @@ void FlipMotion::toLevel(Phase phase, Vec3 way) {
 }
 Quat FlipMotion::update(const Sample& s) {
     const float dt = std::isfinite(s.seconds) ? std::clamp(s.seconds, 0.f, .1f) : 0.f;
-    const float returnRate = 2 * pi / returnTurnSeconds;
+    const float returnRate = 2 * pi / returnTurnSeconds * scale_;
     // A press is from the air or not as it starts, as AirJumpFilter decides.
     const bool press = s.jump && !held_;
     if (!s.jump)
@@ -121,24 +127,38 @@ Quat FlipMotion::update(const Sample& s) {
     held_ = s.jump;
     landed_ = s.airborne && !s.surface ? 0.f : landed_ + dt;
     const bool landed = landed_ >= landingSeconds;
+    // The stick flips once it has been at rest in the air: one held into
+    // the air from a running jump goes on moving the player.
+    const Vec3 want = stickTurn(s);
+    const bool pushed = length(want) > 0;
+    if (landed)
+        stickFree_ = false;
+    else if (s.airborne && !s.surface && !pushed)
+        stickFree_ = true;
+    const bool stick = stickFree_ && pushed, heldA = s.jump && fromAir_;
     if (landed && (phase_ == Phase::holding || phase_ == Phase::flipping)) {
         toLevel(Phase::settling);
         returnRate_ = 2 * returnRate;
     }
-    if (press && fromAir_ && !landed) {
-        // From level a new flip; during one A takes it over where it is,
-        // still turning until the stick says otherwise.
+    const bool pressA = press && fromAir_ && !landed;
+    if (pressA || (stick && phase_ != Phase::holding && !landed)) {
+        // From level a new flip; during one A or the stick takes it over
+        // where it is, still turning until the stick says otherwise.
         if (phase_ == Phase::level)
             turned_ = 0;
         else if (phase_ != Phase::holding)
             spin_ = axis_ * rate_;
         phase_ = Phase::holding;
+        tap_ = pressA;
         heldFor_ = 0;
         tapWay_ = {};
     }
     if (phase_ == Phase::holding) {
-        if (!(s.jump && fromAir_)) {
-            if (heldFor_ < tapSeconds) {
+        // A let go while the stick turns the player is no tap.
+        if (stick && !heldA)
+            tap_ = false;
+        if (!heldA && !stick) {
+            if (tap_ && heldFor_ < tapSeconds) {
                 // A tap: a whole flip the way the stick pointed, else the
                 // way it was turning, else ahead.
                 Vec3 way = tapWay_;
@@ -151,10 +171,9 @@ Quat FlipMotion::update(const Sample& s) {
             }
         } else {
             heldFor_ += dt;
-            const Vec3 want = stickTurn(s);
-            if (length(want) > 0)
+            if (pushed)
                 tapWay_ = normalized(want);
-            spin_ += (want * (2 * pi / holdTurnSeconds) - spin_) * (1 - std::exp(-dt / spinUpSeconds));
+            spin_ += (want * (2 * pi / holdTurnSeconds * scale_) - spin_) * (1 - std::exp(-dt / spinUpSeconds));
             const float speed = length(spin_);
             if (speed > 1e-6f) {
                 tilt_ = unit(tilt_ * Quat::around(spin_ / speed, speed * dt));
@@ -165,7 +184,7 @@ Quat FlipMotion::update(const Sample& s) {
     if (phase_ == Phase::flipping || phase_ == Phase::settling) {
         float speed = returnRate_;
         if (phase_ == Phase::flipping) {
-            speed_ += (2 * pi / tapTurnSeconds - speed_) * (1 - std::exp(-dt / spinUpSeconds));
+            speed_ += (2 * pi / tapTurnSeconds * scale_ - speed_) * (1 - std::exp(-dt / spinUpSeconds));
             speed = speed_;
         }
         rate_ = speed * std::clamp(left_ / easeAngle, slowest, 1.f);
@@ -331,7 +350,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     out.predictedDisplayTime = f.predictedDisplayTime;
     out.anchor = feet;
     out.swing = trackedSwingInput(f, placed, triggerWebs_);
-    // A held flip steers with the left stick: the player does not walk or drift.
+    // The left stick turns the flip: the player does not walk or drift.
     if (flip_.steering())
         out.swing.move = {};
     if (out.releaseWebs)

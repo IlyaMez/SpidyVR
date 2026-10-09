@@ -1,6 +1,88 @@
 # Validation — 2026-10-09
 
-## A steadier, sharper HUD, and a HUD setting — current build
+## FLIP SPEED, 180 degrees a second by default — current build
+
+The user, October 9: "lets also do this much like how you can change the
+speed of turning and weight in the game it'd be cool to have different flip
+speeds you could toggle from the launcher", then "set default speed to
+lower".
+
+**What changed.** `FlipMotion::speed(radians a second)` sets `scale_`, the
+stick's full-tilt speed over 2π/`holdTurnSeconds` (240 degrees a second),
+clamped to 0.25-4 (not finite: 1); the held turn, a tap's flip (2π/
+`tapTurnSeconds`) and the return (2π/`returnTurnSeconds`, twice from a
+landing) all take it; the 80 ms spin-up, the 0.25 s tap and the easing angle
+do not. `reset()` keeps it. `GameTrackingRig::flipSpeed` passes it on.
+`vr_settings::Values::flipSpeed` (degrees a second, 180; `sanitized` 90-480),
+steps 90/120/150/180/240/300/360/480, row 17 FLIP SPEED under FLIPS (tab rows
+0x200-0x210). XrConfig v19 (`flipSpeed` where `spare` was, 90-480, else
+1001), XrData v19 (800 bytes, `flipSpeed` at 792), menu probe structs v5
+(`flipSpeed` where `spare` was). The XR worker applies it with the other
+settings (start, the tab), and reports it. Launcher: `SessionOptions::
+flipSpeed` (180), `--flip-speed` when not 180 (clamped 90-480), `flip_speed`
+from the headset's line and launcher.ini, a "Flip speed" combo under
+"Flips (experimental)". `launch-game-vr.ps1 -FlipSpeed`.
+
+**Checks.** 212 core checks pass; 1 new (FlipMotion at 180 degrees a second:
+a quarter turn over 0.5 s at full tilt within 0.02 rad, the way back from the
+same angle and a tap's whole flip 1.25-1.42 times as many frames as at 240, a
+whole turn exactly; after `reset()` the same speed; 1e6 rad/s clamps to four
+times, NaN to once; `GameTrackingRig` at 120 turns half as far as at 240 in
+40 frames after a `reset()`). The tab's checks: 17 rows, FLIP SPEED last
+with one choice per step; its default choice 180, steps to 240, 90 and 480,
+none past either end; a launcher 200 shows 180; `sanitized` clamps 9999 and
+0. 21 launcher checks (default 180, `--flip-speed 240`, 9999 and 1 clamped
+to 480 and 90, `flip_speed=300` and `=5000` from the headset). 89 Python
+tests (XrData v19 at 800 bytes, `flip_speed` decoded from 792, the start
+settings and the launcher line carry it).
+
+**Not tested.** `tools/probe_menu.py` (its FLIP SPEED step and 23 changes)
+has not run in the game; the launcher's new combo has not been looked at;
+the headset: which speed feels right.
+
+## The left stick flips without A — preceding build
+
+The user, October 9: "when flips are turned on lets allow to use the
+joystick to flip at all times (without holding a)".
+
+**What changed.** `FlipMotion` (game_tracking) has `stickFree_`: set once
+the left stick is in its dead zone (0.2) while the player is in the air and
+on no wall or ceiling, cleared on landing (80 ms on the ground, a wall or a
+ceiling) and by `reset()`. A free stick pushed past the dead zone in the air
+starts the holding phase (or takes over a flip or a return to level where it
+is, as a press of A does), and holding goes on while A is held from the air
+or the free stick is pushed. With neither, it ends: a whole flip only if the
+hold began with a press of A let go within 0.25 s with the stick never
+turning the player alone meanwhile (`tap_`), else back level the short way
+at 2π a second. The stick's speed, dead zone, spin-up and the return are the
+held-A flip's. `steering()` (holding) still zeroes the swing's move and the
+walk, so a flipping stick steers nothing. `GameTrackingRig` is unchanged:
+flips off resets `FlipMotion` every frame, so the stick never arms.
+
+**Checks.** 211 core checks pass; 2 new:
+- `GameTrackingRig`: the stick held from the ground into the air walks and
+  stays level for 30 frames; let go once in the air, then ahead a front flip
+  (look below -0.5 in 30 frames), back a backflip, no move or walk while
+  flipping; let go, not snapped level and level within 30 frames; landing
+  mid-flip levels within 40 frames and the stick held from there walks, into
+  the air too; on a wall (airborne as the game reports it there) the stick
+  let go and pushed walks, level; flips off, the stick let go and pushed in
+  the air walks, level.
+- `FlipMotion`: the stick alone steers the flip and turns at 2π/1.5 s at
+  full tilt (within 0.02 rad over 0.5 s); A pressed while it turns, the angle
+  kept at rest within 1e-5; let go of A, back level no more than half a turn;
+  a 6-frame flick turns less than a quarter turn in all; A tapped while the
+  stick turns is no whole flip.
+The six earlier flip checks pass unchanged (their stick is held from the
+first frame, so it never arms). 21 launcher checks and the 5 Python suites
+(89 tests) pass.
+
+**Not tested.** The game and the headset: comfort of a stick that flips
+with no button, losing air steering once the stick is let go in the air
+(swinging included), and whether `game_swing::airborne` holds steady enough
+on walls and perches that the stick never arms there.
+
+## A steadier, sharper HUD, and a HUD setting — preceding build
 
 The user, October 9, after a Quest 3 session (Virtual Desktop, eyes 3840 x
 4080 at 125%) with the fifth build's HUD: "the hud is still a bit too blurry.

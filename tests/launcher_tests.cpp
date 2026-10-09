@@ -191,6 +191,17 @@ int main() {
         options.hud = 9;
         args = sessionArguments(options, L"r.json", L"", L"");
         check(args.size() == 9 && args[7] == L"--hud" && args[8] == L"3", "the HUD at most large");
+        options = {};
+        check(options.flipSpeed == 180, "flips at 180 degrees a second in a new launcher");
+        options.flipSpeed = 240;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 9 && args[7] == L"--flip-speed" && args[8] == L"240", "the flip speed");
+        options.flipSpeed = 9999;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 9 && args[7] == L"--flip-speed" && args[8] == L"480", "the flip speed at most 480");
+        options.flipSpeed = 1;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 9 && args[7] == L"--flip-speed" && args[8] == L"90", "the flip speed at least 90");
     });
     test("the headset check's eye size and the memory larger eyes take", [] {
         const char* probe = "Headset available: Oculus Quest3; position tracking=1; orientation tracking=1. No session "
@@ -210,12 +221,12 @@ int main() {
         SessionOptions options;
         check(headsetSettings("VR settings from the headset: aim_markers=0 web_grab=1 air_webs=0 web_shooter=0 "
                               "punch=0 body=1 swing_speed=48 weight=150 snap_turn=45 smooth_turn=90 haptics=50 "
-                              "flips=1 trigger_webs=1 hud=0 screen_size=2\r",
+                              "flips=1 flip_speed=300 trigger_webs=1 hud=0 screen_size=2\r",
                               options),
               "the line changed nothing");
         check(!options.aimMarkers && !options.airWebs && options.swingSpeed == 48 && options.weight == 150 &&
                   options.snapTurn == 45 && options.smoothTurn == 90 && options.haptics == 50 && options.flips &&
-                  options.triggerWebs && options.hud == 0 && options.screenSize == 2,
+                  options.flipSpeed == 300 && options.triggerWebs && options.hud == 0 && options.screenSize == 2,
               "every value, the last one before a carriage return");
         const auto kept = options;
         check(!headsetSettings("VR settings from the headset: aim_markers=0 air_webs=0", options) && options == kept,
@@ -225,10 +236,10 @@ int main() {
               "web grab, the web shooter, punching and the body are no options");
         check(!headsetSettings("Game closed. Session report: r.json", options) && options == kept, "another line");
         check(headsetSettings("VR settings from the headset: swing_speed=99 snap_turn=x smooth_turn=999 haptics=-4 "
-                              "weight=7 hud=8 colour=3",
+                              "weight=7 hud=8 flip_speed=5000 colour=3",
                               options) &&
                   options.swingSpeed == 65 && options.snapTurn == 45 && options.smoothTurn == 360 &&
-                  options.haptics == 0 && options.weight == 40 && options.hud == 3,
+                  options.haptics == 0 && options.weight == 40 && options.hud == 3 && options.flipSpeed == 480,
               "values outside their ranges, unreadable ones and unknown keys");
     });
     test("a T-pose calibration in the headset sizes every next session, until Redo", [] {

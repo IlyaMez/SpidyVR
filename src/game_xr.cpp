@@ -36,7 +36,7 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 18, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 19, bytes = sizeof(XrConfig), pid{};
     // record and mover are no longer used: VR starts with the game, before
     // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
@@ -53,16 +53,17 @@ struct XrConfig {
     // bit 9: no web shooter (a free hand's trigger shoots nothing);
     // bit 10: no T-pose calibration at the first gameplay of a session without
     // one (the player skipped it before; the SPIDY VR tab still offers it);
-    // bit 11: flips, experimental (A in the air flips the player; FlipMotion);
+    // bit 11: flips, experimental (A and the left stick in the air flip the player; FlipMotion);
     // bit 12: the trigger webs and the grip reels (WEB BUTTON: TRIGGER)
     uint32_t options{};
     // OpenXR runtime manifest the launcher chose; empty: Virtual Desktop's if
     // installed, else Windows' active runtime.
     wchar_t runtime[260]{};
     // The rest of the VR settings a session starts from (options bits 3, 5-9,
-    // 11 and 12, swingSpeed and weight give the others): degrees per snap turn (0:
-    // none), controller vibration in percent, the game screen's size (0-2),
-    // degrees a second of smooth turning (0: the stick snap turns).
+    // 11 and 12, swingSpeed, weight, hud and flipSpeed give the others):
+    // degrees per snap turn (0: none), controller vibration in percent, the
+    // game screen's size (0-2), degrees a second of smooth turning (0: the
+    // stick snap turns).
     uint32_t snapTurn = 30, haptics = 100, screenSize = 1, smoothTurn{};
     // Eye resolution in percent of the runtime's recommendation, per side
     // (eye_resolution.hpp; with eyeSize set, 100), and the player's weight
@@ -72,8 +73,9 @@ struct XrConfig {
     // and arm length their body is sized to, millimetres. Both 0: none yet.
     uint32_t eyeHeightMm{}, armLengthMm{};
     // The game's HUD in the headset: 0 off, 1 small, 2 medium, 3 large
-    // (native_hud.hpp). spare is 0.
-    uint32_t hud = 2, spare{};
+    // (native_hud.hpp); how fast a flip turns the player at full tilt of the
+    // left stick, degrees a second (90-480; FlipMotion::speed).
+    uint32_t hud = 2, flipSpeed = 180;
 };
 static_assert(sizeof(XrConfig) == 648);
 // Why the last frame had no gameplay (XrData::gate bits).
@@ -85,7 +87,7 @@ enum GateReason : uint32_t {
     gateTracking = 16,    // the headset's pose or timing was not usable
 };
 struct XrData {
-    uint32_t magic = 0x53585244, version = 18, bytes = sizeof(XrData), status{};
+    uint32_t magic = 0x53585244, version = 19, bytes = sizeof(XrData), status{};
     int64_t sequence{};
     uint64_t frames{}, tracked{}, submitted{}, dropped{}, leftHands{}, rightHands{}, serial{}, generation{};
     uint32_t nativeKeys{}, error{};
@@ -151,8 +153,10 @@ struct XrData {
     float calibrationProgress{};
     uint32_t eyeHeightMm{}, armLengthMm{}, calibrations{}, calibrationSkips{}, calibrationFlags{};
     float calibrationReach[2]{};
+    // The flip speed now, degrees a second at full tilt (FLIP SPEED). spare is 0.
+    uint32_t flipSpeed{}, spare{};
 };
-static_assert(sizeof(XrData) == 792);
+static_assert(sizeof(XrData) == 800);
 // Slow motion (slow_motion.hpp, game_time.hpp): what the player did with it
 // and what the game's time did. status: 1 before VR starts, then 0 with the
 // game's time hooked, else why it is not (game_time::install) and slow
@@ -360,6 +364,7 @@ DWORD WINAPI run(void*) {
         values.screenSize = static_cast<int>(config.screenSize);
         values.weight = static_cast<int>(config.weight);
         values.hud = static_cast<int>(config.hud);
+        values.flipSpeed = static_cast<int>(config.flipSpeed);
         values = vr_settings::sanitized(values);
         game_menu::publish(values);
         uint32_t settingChanges{};
@@ -522,6 +527,7 @@ DWORD WINAPI run(void*) {
             rig.snapTurn(static_cast<float>(values.snapTurn) * 3.14159265f / 180);
             rig.smoothTurn(static_cast<float>(values.smoothTurn) * 3.14159265f / 180);
             rig.flips(values.flips);
+            rig.flipSpeed(static_cast<float>(values.flipSpeed) * 3.14159265f / 180);
             rig.triggerWebs(values.triggerWebs);
             native_hud::setSize(values.hud);
             if (swingStarted && swingSettings) {
@@ -672,8 +678,8 @@ DWORD WINAPI run(void*) {
                     // The player's up (its actor's second row): a wall's normal
                     // while the game holds it on one. Spidy's own flight is on none.
                     const Vec3 heroUp{body[4], body[5], body[6]};
-                    // A pressed in the air flips the player (FlipMotion), in the air
-                    // as the latest swing sample has it.
+                    // A or the left stick in the air flips the player (FlipMotion),
+                    // in the air as the latest swing sample has it.
                     motion = rig.update(controller, {body[12], body[13], body[14]},
                                         {camera[8], camera[9], camera[10]}, gameplay,
                                         swingState.owned ? Vec3{0, 1, 0} : heroUp,
@@ -1040,6 +1046,7 @@ DWORD WINAPI run(void*) {
                         d.swingSpeed = values.swingSpeed;
                         d.weight = static_cast<uint32_t>(values.weight);
                         d.hud = static_cast<uint32_t>(values.hud);
+                        d.flipSpeed = static_cast<uint32_t>(values.flipSpeed);
                         d.settingChanges = settingChanges;
                         const auto menu = game_menu::telemetry();
                         d.menuTabs = menu.tabs;
@@ -1631,14 +1638,14 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 18 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 19 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
         !config.motionModule || config.options > 8191 || config.snapTurn > 90 || config.haptics > 100 ||
-        config.screenSize > 2 || config.smoothTurn > 360 || config.hud > 3 || config.spare ||
-        !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 || config.swingSpeed > 65 ||
-        (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||
+        config.screenSize > 2 || config.smoothTurn > 360 || config.hud > 3 || config.flipSpeed < 90 ||
+        config.flipSpeed > 480 || !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 ||
+        config.swingSpeed > 65 || (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||
         (config.eyeSize && !validEyeSize(config.eyeSize)) || !validRenderScale(config.renderScale) ||
         (config.eyeSize && config.renderScale != 100) || config.weight < 40 || config.weight > 300)
         return 1001;
