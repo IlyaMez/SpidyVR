@@ -424,6 +424,26 @@ def screenshot(game, name):
     return str(path)
 
 
+def mirror_sample(game, stereo):
+    """Compare live view descriptors within a stable render frame, not tracking samples."""
+    from probe_stereo import snapshot
+    views = snapshot(game, stereo['SpidyStereoData'])
+    if not views or len(views['eyes']) != 2:
+        return None
+    addresses = [game.pointer(game.base+0x7a34dd0), *(eye['view'] for eye in views['eyes'])]
+    if not all(addresses):
+        return None
+    for _ in range(8):
+        raw = [game.read(address, 64) for address in addresses]
+        if any(len(pose) != 64 for pose in raw) or raw != [game.read(address, 64) for address in addresses]:
+            continue
+        monitor, left, right = [struct.unpack('<16f', pose) for pose in raw]
+        centre = [(left[i]+right[i])/2 for i in range(12, 15)]
+        return dict(position=list(monitor[12:15]), eye_centre=centre,
+                    eye_distance_m=math.dist(monitor[12:15], centre))
+    return None
+
+
 def state_names(game, pe, machine, names={}):
     out = []
     for offset, valid in ((0x70, 0x80), (0x98, 0xa8)):
@@ -560,7 +580,7 @@ def main():
                                  ('SpidyBodyStart', 'SpidyBodySubmit', 'SpidyBodyRoles', 'SpidyBodyCapture',
                                   'SpidyBodyStop', 'SpidyBodyData', 'SpidyBodyPoses', 'SpidyStart', 'SpidyStop',
                                   'SpidySetEyes', 'SpidyGpuStart', 'SpidyGpuStop', 'SpidyGpuData',
-                                  'SpidyGpuFreeze', 'SpidyAppearanceData'))
+                                  'SpidyGpuFreeze', 'SpidyAppearanceData', 'SpidyStereoData'))
         report['stereo_dll'] = digest
         code = call_with_payload(process, stereo['SpidyBodyStart'],
                                  struct.pack('<4I2Q', 0x53424346, 1, 32, game.pid, game.base, hero))
@@ -785,7 +805,9 @@ def main():
                 OUTPUT.mkdir(parents=True, exist_ok=True)
                 path = OUTPUT/f'eye-{label}.png'
                 write_rgb_png(path, width, height, bytes(rgb))
-                images[label] = dict(image=str(path), status=status)
+                images[label] = dict(image=str(path), status=status,
+                                     monitor=screenshot(game, f'monitor-{label}'),
+                                     mirror=mirror_sample(game, stereo))
                 print(label, json.dumps(images[label]), flush=True)
             if 'walk' in phases:
                 # Walking about: the stick swings round four ways, so the hero turns every 0.4 s. How far he
@@ -806,7 +828,8 @@ def main():
                     t = game.transform(game.pointer(hero))
                     walk.append(dict(t=round(time.monotonic()-started, 3), turn=status['turn_last'],
                                      hands=status['hand_error'], head=status['head_error'],
-                                     grounded=status['grounded'], position=t['position'] if t else None))
+                                     grounded=status['grounded'], position=t['position'] if t else None,
+                                     mirror=mirror_sample(game, stereo)))
                     if shot_taken is None and time.monotonic()-started > 2.1:
                         code = call_remote(process, stereo['SpidyGpuFreeze'])
                         gpu = gpu_snapshot(game, stereo['SpidyGpuData'])
@@ -822,6 +845,7 @@ def main():
                 turns = [w['turn'] for w in walk]
                 travelled = math.dist(walk[0]['position'], walk[-1]['position']) if walk[0]['position'] else None
                 report['walk'] = dict(image=shot_taken, turn_max=status['turn_max'],
+                                      monitor=screenshot(game, 'monitor-walk'),
                                       turn_mean=round(sum(turns)/len(turns), 5) if turns else None,
                                       hand_error_max=max(max(w['hands']) for w in walk),
                                       head_error_max=max(w['head'] for w in walk),

@@ -45,7 +45,7 @@ Swing::Swing(SwingConfig c) : config_(c) {
     const float nonnegative[] = {
         c.gravity,          c.reelSpeed,       c.airAcceleration, c.groundAcceleration, c.zipMultiplier,
         c.maxZipImpulse,    c.jumpSpeed,       c.pointLaunchWindow, c.zipLandingWindow, c.obstructionTime,
-        c.anchorClearance,  c.wallCarry,       c.wallWalkSpeed,   c.wallAcceleration,   c.wallBrake,
+        c.anchorClearance,  c.wallStep,        c.wallCarry,       c.wallWalkSpeed,   c.wallAcceleration,   c.wallBrake,
         c.wallJumpOut,      c.wallJumpUp,      c.wallJumpPause,   c.wallGrace,          c.crestSeconds,
         c.crestPush,        c.crestHop};
     for (float v : nonnegative)
@@ -55,6 +55,8 @@ Swing::Swing(SwingConfig c) : config_(c) {
         throw std::invalid_argument("Invalid rope range or fixed timestep");
     if (!std::isfinite(c.wallReach) || c.wallReach < c.wallClearance || c.wallReach > 10 || c.wallSlope >= 1)
         throw std::invalid_argument("Invalid wall reach or slope");
+    if (c.wallStep > 1)
+        throw std::invalid_argument("Invalid wall step");
     if (!std::isfinite(c.mountReach) || c.mountReach < 0 || c.mountReach > 10 || !(c.mountSeconds >= 0) ||
         !(c.mountHold >= 0) || !std::isfinite(c.mountHeight))
         throw std::invalid_argument("Invalid wall mount");
@@ -211,7 +213,55 @@ void Swing::senseWall(float dt, const Input& in, const WorldQueries& world) {
                 return;
             }
         const float closing = std::max(0.f, -dot(body_.velocity, n));
-        if (const auto hit = wallAlong(at, -n, config_.wallReach + .3f + closing * dt)) {
+        // Start outside a small projecting sill, so the ray still finds its
+        // front when the body's centre has already passed its edge. Look
+        // ahead before the capsule hits it and below the harness until the
+        // feet have cleared it. All samples must stay on this facade.
+        const float step = config_.wallStep;
+        const auto facade = [&](Vec3 from) -> std::optional<RayHit> {
+            auto hit = wallAlong(from + n * step, -n,
+                                 config_.wallReach + .3f + 2 * step + closing * dt);
+            if (!hit)
+                return {};
+            const float distance = dot(at - hit->point, n);
+            if (distance < -step || distance > config_.wallReach + step)
+                return {};
+            return hit;
+        };
+        auto hit = facade(at);
+        if (!rounding && step > 0) {
+            const Vec3 ahead = speed > .3f ? along / speed : Vec3{};
+            const float look = config_.wallClearance + std::min(speed * .2f, 2.f);
+            for (const Vec3 offset : {ahead * look, Vec3{0, -1.1f, 0}}) {
+                const float span = length(offset);
+                if (span < .01f)
+                    continue;
+                // An endpoint alone skips a thin sill. Trace along the
+                // facade as well, then sample just past its lip to find its
+                // outward face (the lip's own normal points up or down).
+                const float depth = std::max(dot(at - wall_.point, n),
+                                             hit ? dot(at - hit->point, n) : 0.f);
+                const Vec3 start = at - n * (depth - .05f), way = offset / span;
+                const auto edge = world.raycast(start, way, span);
+                std::optional<RayHit> lip;
+                if (edge && edge->fixed && finite(edge->point)) {
+                    const float travel = dot(edge->point - start, way);
+                    if (travel >= 0 && travel <= span)
+                        lip = facade(at + way * (travel + .02f));
+                }
+                for (const auto& next : {facade(at + offset), lip}) {
+                    if (!next || dot(next->normal, n) < .9f)
+                        continue;
+                    // A nearby parallel face may extend our contact footprint;
+                    // a new building or a deep overhang must not pull us onto it.
+                    const float rise = dot(next->point - wall_.point, n);
+                    if (std::abs(rise) > step || (hit && dot(next->point - hit->point, n) <= 0))
+                        continue;
+                    hit = next;
+                }
+            }
+        }
+        if (hit) {
             // A facade's sills and pilasters turn the normal for a moment.
             wall_.normal = normalized(n + (hit->normal - n) * (1 - std::exp(-dt / .08f)));
             wall_.point = hit->point;
@@ -219,7 +269,10 @@ void Swing::senseWall(float dt, const Input& in, const WorldQueries& world) {
             wallLost_ = 0;
             wrapWay_ = {};
             // Carried off it (a web's pull): the wall lets go.
-            if (wall_.distance > config_.wallReach && closing <= 0)
+            const float reach = dot(body_.velocity, n) < .2f
+                                    ? std::max(config_.wallReach, config_.wallClearance + step)
+                                    : config_.wallReach;
+            if (wall_.distance > reach && closing <= 0)
                 leaveWall();
             return;
         }

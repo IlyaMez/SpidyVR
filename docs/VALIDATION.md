@@ -1,5 +1,38 @@
 # Validation — 2026-10-10
 
+## Desktop mirror and small facade ledges — current build
+
+The user reports the camera behind the body in the desktop mirror only,
+and falling off buildings while walking across small ledges.
+
+`stereo_probe.cpp` now places the main view again immediately before the
+offscreen render jobs, using the same eye command and final player-travel
+offset as the eyes. The earlier placement still supplies culling and
+lighting. The fallback that hides an unsolved hero also covers this head
+mirror; the stock monitor option and flat-screen mode keep their cameras.
+
+`Swing::senseWall` looks along the facade for a ledge lip, samples its front
+before the capsule reaches it, and keeps clearance until the feet pass it.
+Tracing the lip also catches strips too thin for an endpoint sample. Shallow
+setbacks up to the 0.75 m step allowance stay attached while clearance
+settles; deeper setbacks and outward web pulls still release.
+
+Checks: full observer/XR build, 230/230 core checks, launcher checks, and
+103/103 Python checks pass. Three new regression checks cover 0.7 m
+projections, upward and downward passage over a 0.4 m sill, sideways passage
+over an 0.08 m strip in both directions, and shallow/deep setbacks and pulls,
+at 90, 30 and 20 Hz. Capsule clearance is checked along each requested step.
+The existing roof, corner, mount, wall-jump and web-pull checks still pass.
+
+Live check: the preceding build's stationary body probe produced matching
+headset and desktop views (`reports/mirror-before.json`, images preserved in
+`reports/mirror-before-images`). It did not reproduce the reported fault.
+The final moving-camera probe did not complete: one run rejected a module
+rebuilt after the game loaded it, and the last attempt found the game closed.
+The exact mirror failure and the ledges still need an in-game/headset check.
+`probe_game_body.py` now saves desktop images alongside the eyes and records
+the desktop camera's distance from the actual eye-view midpoint.
+
 ## One exposure for both eyes — current build
 
 The user, October 10: "there is a visual bug where a discrepancy happens in

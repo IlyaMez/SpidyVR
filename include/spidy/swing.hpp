@@ -44,6 +44,9 @@ struct SwingConfig {
     // wallReach. A wall: fixed, its normal within wallSlope of level.
     bool walls = false;
     float wallClearance = .9f, wallReach = 1.5f, wallSlope = .5f;
+    // Follow shallow facade steps and clear a sill before the native capsule
+    // reaches it. Deeper setbacks still end the wall.
+    float wallStep = .75f;
     // The speed along the wall goes on (a wall run), raised by up to
     // wallCarry of itself for the speed that went into the wall; gravity does
     // not pull along a wall. The stick walks the

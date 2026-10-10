@@ -288,6 +288,11 @@ int eyeView(uintptr_t view) {
             return static_cast<int>(eye);
     return -1;
 }
+bool headMirror(uintptr_t view) {
+    const auto primary = pointer(base + 0x7a34dd0);
+    return activeAligned.load(std::memory_order_relaxed) && primary && view &&
+           (view == primary || pointer(view + 0x1f40) == primary);
+}
 void nearInstance(unsigned eye, uintptr_t instance, const float* m, const float* hero) {
     // Diagnostic only: identify small pieces still drawn within the body,
     // measured from a point 0.9 m above the hero's feet.
@@ -323,25 +328,27 @@ void renderActor(void* context, void* actor, uint8_t visibility) {
         return;
     }
     // 1796d20 copies the scene view into context +8. The primary hide uses the
-    // game's actor visibility switch in maintain(); this per-eye check removes
+    // game's actor visibility switch in maintain(); this view check removes
     // anything still drawn as the hero or on the hero's root transform. It
     // changes no actor flags, animation state, or gameplay visibility. With
-    // the player's body on the hero (native_body), the eyes draw it.
+    // the player's body on the hero (native_body), the eyes draw it. A desktop
+    // view on the tracked head needs the same fallback as the eyes.
     if (enabled && actor && latchedHide.load(std::memory_order_relaxed)) {
         const int eye = eyeView(pointer(reinterpret_cast<uintptr_t>(context) + 8));
         const auto& hero = heroFrames[heroSlot.load(std::memory_order_acquire) % heroFrames.size()];
         const auto instance = reinterpret_cast<uintptr_t>(actor);
-        if (eye >= 0 && hero.instance) {
+        if ((eye >= 0 || headMirror(pointer(reinterpret_cast<uintptr_t>(context) + 8))) && hero.instance) {
             float m[16]{};
             const bool placed = instance != hero.instance && read(instance, m, sizeof(m));
             // The game's web tube and end cone are separate instances; never
             // treat them as avatar pieces.
             const bool web = placed && native_webs::webInstance(instance);
             if (instance == hero.instance || (placed && !web && sameRoot(m, hero.transform))) {
-                appearanceEvent(static_cast<unsigned>(eye), true);
+                if (eye >= 0)
+                    appearanceEvent(static_cast<unsigned>(eye), true);
                 return;
             }
-            if (placed && !web)
+            if (eye >= 0 && placed && !web)
                 nearInstance(static_cast<unsigned>(eye), instance, m, hero.transform);
         }
     }
@@ -971,6 +978,29 @@ void placeEyes() {
         // The HUD and the eyes should have moved with the player alike.
         const float mismatch = length(placed.offset - frameHead.offset);
         native_hud::publish([&](native_hud::Data& d) { d.offsetMismatch = std::max(d.offsetMismatch, mismatch); });
+    }
+    // The early submit sets up culling and lighting. Gameplay can still move
+    // the hero after it: use the eyes' final render-frame placement for the
+    // monitor too, before either view's render job is copied. Otherwise the
+    // desktop can look into the back while the eyes are already at the head.
+    // Do not replace the deliberately selected stock monitor or flat screen.
+    if (latchedImmersive && (config.createViews & 8)) {
+        Mat4 pose{};
+        native_eyes::Bounds lens{};
+        if (native_eyes::headView(desired, pose, lens)) {
+            pose[12] += placed.offset.x;
+            pose[13] += placed.offset.y;
+            pose[14] += placed.offset.z;
+            auto aligned = main;
+            reinterpret_cast<Lens>(base + 0x187bb00)(
+                &aligned, main.nearZ(), main.farZ(), lens.left, lens.right, lens.top, lens.bottom,
+                0, 0, main.values[0x428 / 4], main.values[0x42c / 4], false, false);
+            reinterpret_cast<SetPose>(base + 0x187ca10)(&aligned, pose.data());
+            if (native_view::valid(aligned)) {
+                originalSubmit(reinterpret_cast<void*>(primary), &aligned);
+                activeAligned = true;
+            }
+        }
     }
     for (auto& slot : eyes)
         // A load can replace the native view pool between frames. maintain()

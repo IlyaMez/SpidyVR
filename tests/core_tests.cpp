@@ -795,6 +795,94 @@ int main() {
         body=fly(fast,w,body,in,1);
         check(!fast.wall().on&&body.velocity.z<-9&&body.velocity.y<-1,"the run did not fly off the wall's end");
     });
+    test("wall walking clears shallow sills before the capsule reaches them", [] {
+        struct Facade : Building {
+            Building sill;
+            Facade() { sill.low={4.3f,12,-20};sill.high={5,12.4f,20}; }
+            std::optional<RayHit> raycast(Vec3 o,Vec3 d,float reach) const override {
+                const auto a=Building::raycast(o,d,reach),b=sill.raycast(o,d,reach);
+                return b&&(!a||length(b->point-o)<length(a->point-o))?b:a;
+            }
+        } w;
+        for(float dt:{1.f/90,1.f/30,.05f})for(bool down:{false,true}) {
+            Swing s(walled());Input in;
+            Body body=fly(s,w,{{0,down?16.f:9.f,0},{12,0,0},false},in,1.5f,dt);
+            check(s.wall().on,"no starting wall");
+            in.move={down?-1.f:1.f,0,0};
+            for(float t=0;t<1.8f;t+=dt) {
+                const auto next=s.predictNativeStep(dt,in,w,body);
+                check(s.wall().on,"a shallow sill dropped the wall");
+                // Upright native capsule: feet a metre below the harness,
+                // head 0.8 m above it, radius 0.3 m. Its swept height must
+                // not cross the sill while closer than that radius.
+                const float low=std::min(body.position.y,next.target.y)-1.f;
+                const float high=std::max(body.position.y,next.target.y)+.8f;
+                if(low<12.4f&&high>12.f&&std::max(body.position.x,next.target.x)>=4.f)
+                    throw std::runtime_error("capsule hit sill: dt="+std::to_string(dt)+
+                        " down="+std::to_string(down)+" y="+std::to_string(body.position.y)+
+                        " x="+std::to_string(body.position.x)+" next_x="+std::to_string(next.target.x));
+                body={next.target,next.velocity,false};
+            }
+            check(down?body.position.y<8:body.position.y>17,"the body stalled at the sill");
+            near(body.position.x,4.1f,.11f);
+        }
+    });
+    test("wall walking follows a shallow setback but releases a deep one and a web pull", [] {
+        struct Facade : Building {
+            Building upper;
+            Facade(float depth) { high.y=12;upper.low={5+depth,12,-20}; }
+            std::optional<RayHit> raycast(Vec3 o,Vec3 d,float reach) const override {
+                const auto a=Building::raycast(o,d,reach),b=upper.raycast(o,d,reach);
+                return b&&(!a||length(b->point-o)<length(a->point-o))?b:a;
+            }
+        };
+        for(float dt:{1.f/90,1.f/30,.05f}) {
+            Facade w(.7f);Swing s(walled());Input in;
+            Body body=fly(s,w,{{0,9,0},{12,0,0},false},in,1.5f,dt);
+            in.move={1,0,0};
+            for(float t=0;t<1.8f;t+=dt) {
+                const auto next=s.predictNativeStep(dt,in,w,body);
+                check(s.wall().on,"a shallow setback dropped the wall");
+                body={next.target,next.velocity,false};
+            }
+            near(body.position.x,4.8f,.11f);
+            in.move={};
+            for(int i=0;i<60;++i) {
+                body.velocity={-4,0,0};
+                body=fly(s,w,body,in,dt,dt);
+            }
+            check(!s.wall().on,"the setback kept a body pulled off it");
+            Facade deep(3);Swing off(walled());in.move={};
+            body=fly(off,deep,{{0,9,0},{12,0,0},false},in,1.5f,dt);
+            in.move={1,0,0};body=fly(off,deep,body,in,1.5f,dt);
+            check(!off.wall().on,"a deep setback became a small step");
+        }
+    });
+    test("wall walking clears a thin vertical facade strip in either direction", [] {
+        struct Facade : Building {
+            Building strip;
+            Facade() { strip.low={4.3f,0,-.04f};strip.high={5,30,.04f}; }
+            std::optional<RayHit> raycast(Vec3 o,Vec3 d,float reach) const override {
+                const auto a=Building::raycast(o,d,reach),b=strip.raycast(o,d,reach);
+                return b&&(!a||length(b->point-o)<length(a->point-o))?b:a;
+            }
+        } w;
+        for(float dt:{1.f/90,1.f/30,.05f})for(float way:{-1.f,1.f}) {
+            Swing s(walled());Input in;
+            Body body=fly(s,w,{{0,10,-way*3},{12,0,0},false},in,1.5f,dt);
+            in.move={0,0,way};
+            for(float t=0;t<1.3f;t+=dt) {
+                const auto next=s.predictNativeStep(dt,in,w,body);
+                check(s.wall().on,"a thin strip dropped the wall");
+                const float low=std::min(body.position.z,next.target.z)-.3f;
+                const float high=std::max(body.position.z,next.target.z)+.3f;
+                if(low<.04f&&high>-.04f)
+                    check(std::max(body.position.x,next.target.x)<4.f,"the capsule hit the strip");
+                body={next.target,next.velocity,false};
+            }
+            check(body.position.z*way>3,"the strip stopped sideways walking");
+        }
+    });
     test("walls leave a grounded body and a swing without walls alone", [] {
         Building w;Input in;
         Swing off;
