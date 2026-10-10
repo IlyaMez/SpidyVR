@@ -498,8 +498,8 @@ namespace {
 // The settings as XrData reports them: flags 1 web grab, 2 punch, 4 body,
 // 8 webs in open air, 16 web shooter, 32 aim markers; 64 a T-pose
 // calibration wanted (CALIBRATE BODY: ON RESUME); 128 flips (experimental);
-// 256 the trigger webs (WEB BUTTON: TRIGGER). hud: the HUD row (0 off, 1-3);
-// flipSpeed: FLIP SPEED, degrees a second.
+// 256 the trigger webs (WEB BUTTON: TRIGGER); 512 STAND ON WALLS. hud: the HUD
+// row (0 off, 1-3); flipSpeed: FLIP SPEED, degrees a second.
 struct ProbeSettings {
     uint32_t magic = 0x554e4d53, version = 5, bytes = sizeof(ProbeSettings), flags{};
     uint32_t snapTurn{}, haptics{}, screenSize{};
@@ -538,6 +538,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMenuStart(void* input) {
     v.calibrate = s.flags & 64;
     v.flips = s.flags & 128;
     v.triggerWebs = s.flags & 256;
+    v.standOnWalls = s.flags & 512;
     v.snapTurn = static_cast<int>(s.snapTurn);
     v.smoothTurn = static_cast<int>(s.smoothTurn);
     v.haptics = static_cast<int>(s.haptics);
@@ -563,7 +564,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMenuSample(void* output) {
     ReleaseSRWLockShared(&lock);
     s.flags = (v.webGrab ? 1u : 0u) | (v.punch ? 2u : 0u) | (v.body ? 4u : 0u) | (v.airWebs ? 8u : 0u) |
               (v.webShooter ? 16u : 0u) | (v.aimMarkers ? 32u : 0u) | (v.calibrate ? 64u : 0u) |
-              (v.flips ? 128u : 0u) | (v.triggerWebs ? 256u : 0u);
+              (v.flips ? 128u : 0u) | (v.triggerWebs ? 256u : 0u) | (v.standOnWalls ? 512u : 0u);
     s.snapTurn = static_cast<uint32_t>(v.snapTurn);
     s.smoothTurn = static_cast<uint32_t>(v.smoothTurn);
     s.haptics = static_cast<uint32_t>(v.haptics);

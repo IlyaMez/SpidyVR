@@ -82,6 +82,7 @@ private:
     const Runtime* runtime();
     void chooseDefaultRuntime();
     void start(bool memoryConfirmed);
+    void restartElevated();
     void rescan();
     void save() { saveSettings(settings_); }
 
@@ -100,6 +101,10 @@ private:
     bool scrollLog_{};
     std::string startError_;
     bool wantLowMemory_{}, wantClose_{}, closeAfterStop_{}, quit_{};
+    // A session ended because the game runs as administrator and Spidy does not: the offer to start
+    // again as administrator, and why that did not work.
+    bool sessionRan_{}, wantAdministrator_{};
+    std::string administratorError_;
     Outcome lastInstall_ = Outcome::idle;
     double lastRefresh_{};
     std::string shortcutMessage_;

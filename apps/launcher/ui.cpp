@@ -175,6 +175,11 @@ void App::poll() {
     if (lastInstall_ == Outcome::running && install != Outcome::running)
         rescan();
     lastInstall_ = install;
+    // A session that the game's administrator rights kept out: ask once, as it ends.
+    const bool sessionRuns = session_.running();
+    if (sessionRan_ && !sessionRuns && session_.exitCode() == spidy::launcher::kNeedsAdministratorExit)
+        wantAdministrator_ = true;
+    sessionRan_ = sessionRuns;
     update_ = updater_.status();
     // The new files are in place: this launcher closes, and main.cpp starts the new one.
     if (update_.state == UpdateState::installed)
@@ -241,6 +246,7 @@ std::vector<std::string> App::blockers() {
 
 void App::start(bool memoryConfirmed) {
     startError_.clear();
+    administratorError_.clear();
     if (!memoryConfirmed && scan_.freeCommitGb > 0 && scan_.freeCommitGb < neededCommitGb()) {
         wantLowMemory_ = true;
         return;
@@ -254,6 +260,12 @@ void App::start(bool memoryConfirmed) {
     if (!session_.start(scan_.python, scan_.root, args, report, startError_))
         return;
     save();
+}
+
+// Windows asks the player first; this launcher closes once the new one has started.
+void App::restartElevated() {
+    if (restartAsAdministrator(administratorError_))
+        quit_ = true;
 }
 
 // --- Widgets -----------------------------------------------------------------
@@ -1102,6 +1114,8 @@ void App::optionsCard(ImVec2 size) {
         static constexpr int sizes[] = {0, 1, 2, 3};
         stepCombo("##hud", kHudSizes, sizes, 4, &o.hud);
     });
+    option("Stand on walls", "Walking or stopped on a wall, your view turns so it is your floor; off, you stay upright.",
+           S(40), [&] { changed |= toggle("##walls", &o.standOnWalls); });
     option("Flips (experimental)", "In the air the left stick turns you over; tap A for one flip, hold A to stay.",
            S(40), [&] { changed |= toggle("##flips", &o.flips); });
     option("Flip speed", "How fast a flip turns you over, at full tilt of the left stick.", S(150), [&] {
@@ -1153,6 +1167,7 @@ void App::startBlock(ImVec2 size) {
     // What is happening, in two lines.
     std::string title, detail;
     Rgb tint = kText;
+    bool offerAdministrator = false;
     const auto lastLine = [&](auto&& match) -> std::string {
         for (auto it = log_.rbegin(); it != log_.rend(); ++it)
             if (match(*it))
@@ -1188,6 +1203,12 @@ void App::startBlock(ImVec2 size) {
         } else if (*code == 130) {
             title = "VR start cancelled";
             tint = kMuted;
+        } else if (*code == spidy::launcher::kNeedsAdministratorExit) {
+            title = "VR needs administrator rights";
+            detail = administratorError_.empty() ? "Steam or the game runs as administrator, so Spidy has to as well."
+                                                 : administratorError_;
+            tint = kError;
+            offerAdministrator = true;
         } else {
             title = *code == 2 ? "VR could not start" : format("VR stopped (code %lu)", *code);
             detail = error.rfind("Spidy VR unavailable: ", 0) == 0 ? error.substr(22) : error;
@@ -1219,6 +1240,17 @@ void App::startBlock(ImVec2 size) {
             session_.forceStop();
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Ends the launcher's session at once. Restart the game before the next VR session.");
+    }
+    // The offer stays under the message after the question was answered "Not now".
+    if (offerAdministrator) {
+        const float detailHeight = measure(fonts_.body, S(13), detail.c_str(), size.x - S(8)).y;
+        ImGui::SetCursorScreenPos(ImVec2(at.x + S(4), y + S(22) + detailHeight + S(3)));
+        ImGui::PushFont(fonts_.semibold, 13.5f);
+        if (link("Restart Spidy as administrator"))
+            restartElevated();
+        ImGui::PopFont();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Windows asks you to allow it. Spidy then opens again; close the game and press START VR.");
     }
     ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + size.y));
     ImGui::Dummy(ImVec2(size.x, 0));
@@ -1562,6 +1594,10 @@ void App::modals() {
         ImGui::OpenPopup("VR is running");
         wantClose_ = false;
     }
+    if (wantAdministrator_) {
+        ImGui::OpenPopup("Administrator rights needed");
+        wantAdministrator_ = false;
+    }
     const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     const auto dialog = [&](const char* name, const std::string& message, const char* yes, const char* no) -> int {
         int answer = -1;
@@ -1608,6 +1644,17 @@ void App::modals() {
                "Stop VR and close", "Keep playing") == 1) {
         session_.requestStop();
         closeAfterStop_ = true;
+    }
+    if (ImGui::IsPopupOpen("Administrator rights needed")) {
+        // The session's own words for what runs as administrator (Steam, or a game that is already running).
+        std::string reason;
+        for (auto it = log_.rbegin(); it != log_.rend() && reason.empty(); ++it)
+            if (it->text.rfind("Spidy VR unavailable: ", 0) == 0)
+                reason = it->text.substr(22) + "\n\n";
+        if (dialog("Administrator rights needed",
+                   reason + "Spidy can start again as administrator now; Windows asks you to allow it.",
+                   "Restart as administrator", "Not now") == 1)
+            restartElevated();
     }
 }
 

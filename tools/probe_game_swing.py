@@ -18,10 +18,10 @@ from probe_native_rays import snapshot as ray_snapshot, command as ray_command
 
 def snapshot(game, address):
     for _ in range(8):
-        raw = game.read(address, 240)
-        if len(raw) != 240:
+        raw = game.read(address, 272)
+        if len(raw) != 272:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53574441, 3, 240):
+        if struct.unpack_from('<3I', raw) != (0x53574441, 4, 272):
             raise RuntimeError('Native swing protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -38,6 +38,11 @@ def snapshot(game, address):
             result['webs'].append(dict(attached=bool(attached), body_id=body, anchor=(x,y,z), length=length, tension=tension))
         result.update(zip(('grounded','collision_flags','takeoff','misses','obstructed','tracking_lost'), struct.unpack_from('<6I',raw,200)))
         result.update(zip(('takeoff_phase','takeoff_attempts','takeoff_timeouts','native_contact'), struct.unpack_from('<4I',raw,224)))
+        # The surface that holds the player: 0 none, 1 the swing's own wall, 2 the game's wall crawl.
+        result['wall'] = struct.unpack_from('<I', raw, 240)[0]
+        result['wall_normal'] = struct.unpack_from('<3f', raw, 244)
+        result['wall_distance'] = struct.unpack_from('<f', raw, 256)[0]
+        result['walls'], result['wall_jumps'], result['mount'] = struct.unpack_from('<3I', raw, 260)
         return result
     return None
 

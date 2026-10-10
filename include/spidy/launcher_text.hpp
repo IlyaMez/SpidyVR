@@ -287,6 +287,8 @@ struct SessionOptions {
     // The trigger shoots and holds webs, and the grip reels them in and shoots web balls; off, the other way round.
     bool triggerWebs = false;
     int hud = 2; // the game's HUD in the headset: 0 off, 1 small, 2 medium, 3 large
+    // Walking a wall or stopped on it, your view turns so that the wall is your floor; off, you stay upright.
+    bool standOnWalls = true;
     // Your T-pose calibration in the headset (body_calibration.hpp): the eye height and arm length Spider-Man's
     // body is sized to, millimetres. Both 0: none yet, and VR asks for one at the first gameplay unless
     // calibrationPrompt is off (you skipped it).
@@ -323,6 +325,8 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
         args.emplace_back(L"--flips");
     if (options.triggerWebs)
         args.emplace_back(L"--trigger-webs");
+    if (!options.standOnWalls)
+        args.emplace_back(L"--no-stand-on-walls");
     if (calibrated(options)) {
         args.emplace_back(L"--eye-height");
         args.emplace_back(std::to_wstring(options.eyeHeightMm));
@@ -393,6 +397,8 @@ inline bool headsetSettings(std::string_view line, SessionOptions& options) {
             next.flips = number != 0;
         else if (key == "trigger_webs")
             next.triggerWebs = number != 0;
+        else if (key == "stand_on_walls")
+            next.standOnWalls = number != 0;
         else if (key == "swing_speed")
             next.swingSpeed = std::clamp(number, 10, 65);
         else if (key == "snap_turn")
@@ -440,6 +446,11 @@ inline LineKind classifyLine(std::string_view line) {
         return LineKind::good;
     return LineKind::normal;
 }
+
+// The exit code of a session that Windows keeps out of the game because the game runs as administrator and
+// the session does not (NEEDS_ADMINISTRATOR_EXIT in tools/vr_launcher.py): the launcher offers to start
+// again as administrator.
+inline constexpr unsigned long kNeedsAdministratorExit = 5;
 
 // "14.44.35211.0" style versions, compared field by field.
 inline std::array<int, 4> parseVersion(std::string_view text) {

@@ -134,13 +134,17 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(assess_swing(samples,final,True,(0,0,0))['passed'])
 
     def test_swing_feedback_and_two_anchor_boundaries(self):
-        raw = bytearray(240)
-        struct.pack_into('<4IQ9Q10f2I', raw, 0, 0x53574441,3,240,2,4,
+        raw = bytearray(272)
+        struct.pack_into('<4IQ9Q10f2I', raw, 0, 0x53574441,4,272,2,4,
                          *range(1,10), *range(10,19), .01,1,0)
         struct.pack_into('<2I5f',raw,144,1,0x3000123,1,2,3,40,50)
         struct.pack_into('<2I5f',raw,172,0,0xffffffff,4,5,6,70,80)
         struct.pack_into('<4I',raw,224,2,1,7,0)
+        struct.pack_into('<I4f3I',raw,240,1,-1,0,0,.9,3,2,1)
         result = swing_snapshot(Reader(raw,struct.pack('<Q',4)),0)
+        self.assertEqual((result['wall'],result['wall_normal'],result['walls'],result['wall_jumps'],
+                          result['mount']),(1,(-1,0,0),3,2,1))
+        self.assertAlmostEqual(result['wall_distance'],.9,places=6)
         self.assertEqual(result['source_step'],9)
         self.assertEqual(result['position'],(10,11,12))
         self.assertEqual(result['requested'],(16,17,18))
@@ -656,7 +660,7 @@ class ProtocolTests(unittest.TestCase):
                                      (collision_snapshot, 0x53435044, 2160),
                                      (movement_snapshot, 0x534d5044, 57408),
                                      (motion_snapshot, 0x534d5644, 176), (ray_snapshot, 0x53525944, 784),
-                                     (swing_snapshot,0x53574441,240),(timing_snapshot,0x5358544d,344),
+                                     (swing_snapshot,0x53574441,272),(timing_snapshot,0x5358544d,344),
                                      (appearance_snapshot,0x53415044,328),(eye_snapshot,0x53455353,112),
                                      (grab_snapshot,0x53475244,368),(body_snapshot,0x53424453,144),
                                      (punch_snapshot,0x53505544,160),(shooter_snapshot,0x53484f44,192)):
@@ -764,12 +768,12 @@ class ProtocolTests(unittest.TestCase):
 
     def test_xr_never_publishes_partly_updated_pose(self):
         raw = bytearray(800)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 19, 800, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 20, 800, 3, 4)
         self.assertIsNone(xr_snapshot(Reader(*([raw, struct.pack('<Q', 6)]*8)), 0))
 
     def test_xr_decodes_both_hands_and_status_message(self):
         raw = bytearray(800)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 19, 800, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 20, 800, 3, 4)
         struct.pack_into('<16f', raw, 160, *range(16))
         struct.pack_into('<16f', raw, 224, *range(16, 32))
         raw[288:295] = b'Tracked'
@@ -787,7 +791,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_xr_says_why_gameplay_was_unavailable_and_which_camera_ran(self):
         raw = bytearray(800)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 19, 800, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 20, 800, 3, 4)
         # A played scene whose camera the gate does not accept, the third player of the session,
         # and the menu button held on the virtual controller the game has read 900 times.
         struct.pack_into('<2I2Q2IQ', raw, 592, 8, 0x3872860, 3, 0x2aefe723280, 0x10, 1, 900)
@@ -806,7 +810,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_xr_counts_interacts_and_aim_markers(self):
         raw = bytearray(800)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 19, 800, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 20, 800, 3, 4)
         result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual((result['interacts'], result['aim_markers'], result['markers']), (0, False, 0))
         # Three B presses reached the game as its Y; markers on, 5000 drawn so far.
@@ -816,7 +820,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_xr_reports_the_vr_settings_and_the_settings_tab(self):
         raw = bytearray(800)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 19, 800, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 20, 800, 3, 4)
         # Markers on; web grab, webs in open air, the web shooter and body on, punching off; 48 m/s, half again
         # real gravity, 45 degree snap turns, smooth turning at 120 degrees a second, half vibration, the large
         # screen; two changes in the SPIDY VR tab, which the game built 7 times.
@@ -831,7 +835,8 @@ class ProtocolTests(unittest.TestCase):
                                                      punch=False, body=True, swing_speed=48.0, weight=150,
                                                      snap_turn=45, smooth_turn=120, haptics=50, screen_size=2,
                                                      flips=False, flip_speed=300, trigger_webs=False, hud=3,
-                                                     eye_height_mm=0, arm_length_mm=0, calibration_prompt=True))
+                                                     stand_on_walls=False, eye_height_mm=0, arm_length_mm=0,
+                                                     calibration_prompt=True))
         # The HUD switched off in the tab.
         struct.pack_into('<I', raw, 748, 0)
         self.assertEqual(xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)['vr_settings']['hud'], 0)
@@ -854,24 +859,33 @@ class ProtocolTests(unittest.TestCase):
         struct.pack_into('<I', raw, 664, 5 | 64)
         settings = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)['vr_settings']
         self.assertTrue(settings['trigger_webs'])
-        self.assertFalse(settings['flips'] or settings['air_webs'])
+        self.assertFalse(settings['flips'] or settings['air_webs'] or settings['stand_on_walls'])
+        # STAND ON WALLS: walking a wall or stopped on it, the view turns onto it.
+        struct.pack_into('<I', raw, 664, 5 | 128)
+        settings = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)['vr_settings']
+        self.assertTrue(settings['stand_on_walls'])
+        self.assertFalse(settings['flips'] or settings['trigger_webs'])
 
     def test_xr_reports_walls_the_game_held_the_player_on(self):
         raw = bytearray(800)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 19, 800, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 20, 800, 3, 4)
         result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual(result['surface'], dict(entries=0, frames=0, hero_up=[0, 0, 0], stand_off_m=0,
-                                                 head_height_m=0, head_clearance_m=0))
+                                                 head_height_m=0, head_clearance_m=0, view_tilt_deg=0))
+        # Standing on a wall: the view a quarter turn from the world's up.
+        struct.pack_into('<f', raw, 796, 90.0)
+        self.assertEqual(xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)['surface']['view_tilt_deg'], 90.0)
+        struct.pack_into('<f', raw, 796, 0.0)
         # Two stretches on a wall, 450 frames in all; the player's up along the wall's normal (+x); the head
         # 0.48 m off it, placed from the feet it would have been 0.02 m inside it.
         struct.pack_into('<IQ3f3f', raw, 708, 2, 450, 1, 0, 0, .48, -.02, .46)
         result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual(result['surface'], dict(entries=2, frames=450, hero_up=[1, 0, 0], stand_off_m=.48,
-                                                 head_height_m=-.02, head_clearance_m=.46))
+                                                 head_height_m=-.02, head_clearance_m=.46, view_tilt_deg=0))
 
     def test_xr_reports_the_t_pose_calibration(self):
         raw = bytearray(800)
-        struct.pack_into('<4IQ', raw, 0, 0x53585244, 19, 800, 3, 4)
+        struct.pack_into('<4IQ', raw, 0, 0x53585244, 20, 800, 3, 4)
         result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual(result['calibration'], dict(phase='none', hint=None, progress=0, done=0, skipped=0,
                                                      reach_m=[0, 0]))
@@ -896,12 +910,13 @@ class ProtocolTests(unittest.TestCase):
         args = Mock(no_aim_markers=False, no_web_grab=False, no_air_webs=False, no_web_shooter=False, no_punch=True,
                     no_body=False, swing_speed=32.0, weight=60, snap_turn=30, smooth_turn=0, haptics=100,
                     screen_size=1, flips=False, flip_speed=180, trigger_webs=False, hud=2, eye_height=0,
-                    arm_length=0, no_calibration_prompt=False)
+                    arm_length=0, no_calibration_prompt=False, no_stand_on_walls=False)
         start = start_settings(args)
         self.assertEqual(start, dict(aim_markers=True, web_grab=True, air_webs=True, web_shooter=True, punch=False,
                                      body=True, swing_speed=32.0, weight=60, snap_turn=30, smooth_turn=0,
                                      haptics=100, screen_size=1, flips=False, flip_speed=180, trigger_webs=False,
-                                     hud=2, eye_height_mm=0, arm_length_mm=0, calibration_prompt=True))
+                                     hud=2, stand_on_walls=True, eye_height_mm=0, arm_length_mm=0,
+                                     calibration_prompt=True))
         # Nothing changed, or no sample: no line.
         self.assertIsNone(settings_line(start, dict(vr_settings=dict(start))))
         self.assertIsNone(settings_line(start, None))
@@ -910,14 +925,15 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(settings_line(start, dict(vr_settings=changed)),
                          SETTINGS_LINE + 'aim_markers=1 web_grab=1 air_webs=0 web_shooter=0 punch=1 body=1 '
                                          'swing_speed=48 weight=150 snap_turn=0 smooth_turn=90 haptics=100 '
-                                         'screen_size=1 flips=0 flip_speed=180 trigger_webs=0 hud=2 eye_height_mm=0 '
-                                         'arm_length_mm=0 calibration_prompt=1')
+                                         'screen_size=1 flips=0 flip_speed=180 trigger_webs=0 hud=2 '
+                                         'stand_on_walls=1 eye_height_mm=0 arm_length_mm=0 calibration_prompt=1')
         # The experimental flips switched on in the headset go to the launcher too; so do their speed, the web
         # button and the HUD.
         self.assertIn(' flips=1 ', settings_line(start, dict(vr_settings=dict(start, flips=True))))
         self.assertIn(' flip_speed=240 ', settings_line(start, dict(vr_settings=dict(start, flip_speed=240))))
         self.assertIn(' trigger_webs=1 ', settings_line(start, dict(vr_settings=dict(start, trigger_webs=True))))
         self.assertIn(' hud=0 ', settings_line(start, dict(vr_settings=dict(start, hud=0))))
+        self.assertIn(' stand_on_walls=0 ', settings_line(start, dict(vr_settings=dict(start, stand_on_walls=False))))
         # A T-pose calibration in the headset goes to the launcher the same way; so does skipping it.
         self.assertTrue(settings_line(start, dict(vr_settings=dict(start, eye_height_mm=1630, arm_length_mm=590)))
                         .endswith(' eye_height_mm=1630 arm_length_mm=590 calibration_prompt=1'))

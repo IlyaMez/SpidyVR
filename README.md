@@ -107,6 +107,7 @@ Spidy changes nothing in the game's folder.
 | Webs on the trigger instead | Set **WEB BUTTON** to TRIGGER in VR settings (or *Web button* in the launcher): the trigger shoots and holds webs, the grip reels and shoots web balls |
 | Punch | A fast fist into a thug |
 | Walk and run / jump | **Left stick** / **A** (from the ground, a wall or a perch; no web zip in the air) |
+| Walls | Walk at one, or fly or jump into it, and you stay on it: at speed you run along it, then stop. **Left stick** walks it (pushed at the wall: up it), **A** jumps off, a web pulls you off. Walking it or stopped, your view turns so the wall is your floor (STAND ON WALLS in VR settings or the launcher) |
 | Flip (experimental, off by default: FLIPS and FLIP SPEED in VR settings or the launcher) | **Left stick** in the air: turns you over, as fast as you tilt it; let go to come back level. Tap **A** in the air: one flip toward where the stick points. Hold **A**: you stay turned while the stick rests |
 | Turn | **Right stick**: snap 30° (adjustable or off), or hold to turn smoothly with SMOOTH TURN on in VR settings |
 | Interact (the game's Y) | **B** |
@@ -125,6 +126,7 @@ a red cross misses, a turning ring of three arcs catches a prop or thug.
 |---|---|
 | "This game version is not supported" | The launcher's game line names your version and the fix. An older version or a changed `Spider-Man.exe`: in Steam, right-click the game > *Properties* > *Betas* > *None*, then *Installed Files* > *Verify integrity of game files*. A newer version needs a Spidy update. |
 | The headset is not found | Connect it first, check the VR runtime in the launcher, press *Check*. |
+| "VR needs administrator rights" (0.2.9 and older: "[WinError 5] Access is denied", then "No loaded player within three minutes") | Steam or the game runs as administrator, and Windows keeps other programs out of such a game. Choose *Restart as administrator* when the launcher asks (older versions: right-click Spidy Launcher > *Run as administrator*), close the game, press **START VR**. If that changes nothing, allow the Spidy folder in your antivirus. |
 | The picture breaks up | Close the game and start it from the launcher, which gives it the render memory VR needs. |
 | Low frame rate | Lower *Render resolution* in the launcher, or the streaming quality in Virtual Desktop. 90 Hz paces more evenly than 120 Hz. |
 | Blurry or jagged edges | Raise *Render resolution* in the launcher above 100% (try 125%); it costs frame rate and memory. |

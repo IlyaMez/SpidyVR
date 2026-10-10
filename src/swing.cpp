@@ -37,20 +37,27 @@ Vec3 projectTwoWebs(Vec3 p, const Web& a, const Web& b) {
 } // namespace
 
 Swing::Swing(SwingConfig c) : config_(c) {
-    const float positive[] = {c.radius,    c.maxRange,     c.minRope,    c.maxSpeed,
-                              c.yankSpeed, c.yankDistance, c.yankWindow, c.fixedStep};
+    const float positive[] = {c.radius,    c.maxRange,     c.minRope,    c.maxSpeed,      c.yankSpeed,
+                              c.yankDistance, c.yankWindow, c.fixedStep,  c.wallClearance, c.wallSlope};
     for (float v : positive)
         if (!std::isfinite(v) || v <= 0)
             throw std::invalid_argument("Invalid swing configuration");
     const float nonnegative[] = {
-        c.gravity,          c.reelSpeed,       c.airAcceleration, c.groundAcceleration,
-        c.zipMultiplier,    c.maxZipImpulse,   c.jumpSpeed,       c.pointLaunchWindow,
-        c.zipLandingWindow, c.obstructionTime, c.anchorClearance};
+        c.gravity,          c.reelSpeed,       c.airAcceleration, c.groundAcceleration, c.zipMultiplier,
+        c.maxZipImpulse,    c.jumpSpeed,       c.pointLaunchWindow, c.zipLandingWindow, c.obstructionTime,
+        c.anchorClearance,  c.wallCarry,       c.wallWalkSpeed,   c.wallAcceleration,   c.wallBrake,
+        c.wallJumpOut,      c.wallJumpUp,      c.wallJumpPause,   c.wallGrace,          c.crestSeconds,
+        c.crestPush,        c.crestHop};
     for (float v : nonnegative)
         if (!std::isfinite(v) || v < 0)
             throw std::invalid_argument("Invalid swing configuration");
     if (c.minRope > c.maxRange || c.fixedStep > .02f)
         throw std::invalid_argument("Invalid rope range or fixed timestep");
+    if (!std::isfinite(c.wallReach) || c.wallReach < c.wallClearance || c.wallReach > 10 || c.wallSlope >= 1)
+        throw std::invalid_argument("Invalid wall reach or slope");
+    if (!std::isfinite(c.mountReach) || c.mountReach < 0 || c.mountReach > 10 || !(c.mountSeconds >= 0) ||
+        !(c.mountHold >= 0) || !std::isfinite(c.mountHeight))
+        throw std::invalid_argument("Invalid wall mount");
 }
 void Swing::limitSpeed(float maxSpeed) {
     if (!std::isfinite(maxSpeed) || maxSpeed <= 0)
@@ -65,6 +72,270 @@ void Swing::setGravity(float gravity) {
 void Swing::allowAirAnchors(bool allowed) {
     config_.airAnchors = allowed;
 }
+void Swing::allowWalls(bool allowed) {
+    config_.walls = allowed;
+    if (!allowed)
+        leaveWall();
+}
+void Swing::leaveWall() {
+    if (wall_.on)
+        events_.push_back({EventKind::WallOff, -1, .2f});
+    wall_ = {};
+    wallLost_ = 0;
+    wrapWay_ = {};
+}
+void Swing::joinWall(const RayHit& hit) {
+    const Vec3 n = hit.normal;
+    const float into = -dot(body_.velocity, n);
+    Vec3 along = body_.velocity + n * into;
+    // Part of the speed into the wall goes on along it, the more the body
+    // already went that way: grazing the wall it keeps its speed, head on
+    // it stops.
+    if (const float speed = length(along), total = length(body_.velocity); into > 0 && speed > 1e-3f)
+        along = along * std::min(total / speed, 1 + config_.wallCarry * into / total);
+    // What still closes on the wall ends at its clearance (holdWall).
+    body_.velocity = along - n * into;
+    if (!wall_.on) {
+        wall_.seconds = 0;
+        events_.push_back({EventKind::WallOn, -1, std::clamp(into / 20, .2f, 1.f)});
+    }
+    wall_.on = true;
+    wall_.normal = n;
+    wall_.point = hit.point;
+    wall_.distance = dot(body_.position - hit.point, n);
+    wallLost_ = crest_ = 0;
+    wrapWay_ = {};
+}
+void Swing::offerWall(const RayHit& wall) {
+    const Vec3 n = normalized(wall.normal);
+    if (!config_.walls || !wall.fixed || !finite(wall.point) || length(n) < .5f ||
+        std::abs(n.y) > config_.wallSlope)
+        return;
+    mountWall_ = {wall.point, n, wall.surface, true};
+    offered_ = true;
+}
+void Swing::senseWall(float dt, const Input& in, const WorldQueries& world) {
+    sinceWallJump_ += dt;
+    const bool offered = offered_;
+    offered_ = mounting_ = false;
+    if (!config_.walls) {
+        leaveWall();
+        crest_ = mount_ = mountLeft_ = 0;
+        return;
+    }
+    const Vec3 at = body_.position;
+    // The wall a ray meets from outside: fixed, steep, facing the ray. The
+    // game's world takes unit directions only.
+    const auto wallAlong = [&](Vec3 from, Vec3 direction, float reach) -> std::optional<RayHit> {
+        direction = normalized(direction);
+        if (!finite(from) || length(direction) < .9995f || !(reach >= .02f))
+            return {};
+        const auto hit = world.raycast(from, direction, std::min(reach, 100.f));
+        if (!hit || !hit->fixed || !finite(hit->point) || !finite(hit->normal))
+            return {};
+        const Vec3 n = normalized(hit->normal);
+        if (length(n) < .5f || std::abs(n.y) > config_.wallSlope || dot(n, direction) > -.2f)
+            return {};
+        return RayHit{hit->point, n, hit->surface, true};
+    };
+    // The wall the stick walks the body at, level: within the mount's reach,
+    // and faced within `facing` (a cosine) of head on.
+    const auto walkedAt = [&](float facing) -> std::optional<RayHit> {
+        const Vec3 stick = finite(in.move) ? Vec3{in.move.x, 0, in.move.z} : Vec3{};
+        // From the tilt at which the game walks the player.
+        if (length(stick) < .35f)
+            return {};
+        const Vec3 way = normalized(stick);
+        const auto hit = wallAlong(at, way, config_.mountReach);
+        if (!hit || dot(hit->normal, way) > -facing)
+            return {};
+        return hit;
+    };
+    if (offered) {
+        mountLeft_ = config_.mountHold;
+        mountOffered_ = true;
+    }
+    if (body_.grounded) {
+        leaveWall();
+        crest_ = 0;
+        if (offered) {
+            mount_ = 0;
+            mounting_ = true;
+            return;
+        }
+        auto wall = walkedAt(.7f);
+        if (wall) {
+            const auto above =
+                wallAlong(at + Vec3{0, config_.mountHeight, 0}, -wall->normal, config_.mountReach + .5f);
+            if (!above || dot(above->normal, wall->normal) < .9f)
+                wall.reset();
+        }
+        mount_ = wall ? mount_ + dt : 0;
+        if (wall && mount_ >= config_.mountSeconds) {
+            mountWall_ = *wall;
+            mountLeft_ = config_.mountHold;
+            mountOffered_ = false;
+            mounting_ = true;
+        } else {
+            // A jump already asked for still ends on its wall.
+            mountLeft_ = std::max(0.f, mountLeft_ - dt);
+        }
+        return;
+    }
+    mount_ = 0;
+    if (mountLeft_ > 0) {
+        // Off the ground by the mount's jump: onto its wall, up it at a walk
+        // at most. Once more if the game stood the body again meanwhile.
+        mountLeft_ -= dt;
+        const Vec3 n = mountWall_.normal;
+        if (const float distance = dot(at - mountWall_.point, n);
+            !wall_.on && distance > -.2f && distance <= config_.mountReach + .5f) {
+            body_.velocity = mountOffered_ ? Vec3{}
+                                           : limited(body_.velocity - n * dot(body_.velocity, n),
+                                                     config_.wallWalkSpeed);
+            joinWall(mountWall_);
+            return;
+        }
+    }
+    if (wall_.on) {
+        wall_.seconds += dt;
+        const Vec3 n = wall_.normal;
+        const Vec3 along = body_.velocity - n * dot(body_.velocity, n);
+        const float speed = length(along);
+        const bool rounding = length(wrapWay_) > .5f;
+        // A wall ahead along this one (an inside corner): onto it.
+        if (speed > 1 && !rounding)
+            if (const auto next = wallAlong(at, along, speed * dt + config_.wallClearance + .2f);
+                next && dot(next->normal, n) < .9f) {
+                joinWall(*next);
+                return;
+            }
+        const float closing = std::max(0.f, -dot(body_.velocity, n));
+        if (const auto hit = wallAlong(at, -n, config_.wallReach + .3f + closing * dt)) {
+            // A facade's sills and pilasters turn the normal for a moment.
+            wall_.normal = normalized(n + (hit->normal - n) * (1 - std::exp(-dt / .08f)));
+            wall_.point = hit->point;
+            wall_.distance = dot(at - hit->point, wall_.normal);
+            wallLost_ = 0;
+            wrapWay_ = {};
+            // Carried off it (a web's pull): the wall lets go.
+            if (wall_.distance > config_.wallReach && closing <= 0)
+                leaveWall();
+            return;
+        }
+        // Rounding a corner, the body is not in front of the next face yet.
+        if (rounding && (wrapLeft_ -= dt) > 0)
+            return;
+        // At a walk, round the wall's end onto its next face. The body is
+        // beside that face's edge, a clearance out along the old wall: it
+        // goes on round the corner by itself (wallMotion) until the next
+        // face is beside it.
+        if (!rounding && speed > .3f && speed <= config_.wallWalkSpeed + 1) {
+            const Vec3 ahead = along / speed;
+            const Vec3 past = at + ahead * (speed * dt + .3f) - n * (wall_.distance + .4f);
+            if (const auto next = wallAlong(past, -ahead, speed * dt + 1.5f)) {
+                wall_.normal = next->normal;
+                wall_.point = next->point;
+                wall_.distance = dot(at - next->point, next->normal);
+                wallLost_ = 0;
+                wrapWay_ = normalized(-n - next->normal * dot(-n, next->normal));
+                wrapLeft_ = .8f;
+                body_.velocity = {};
+                return;
+            }
+        }
+        wrapWay_ = {};
+        wallLost_ += dt;
+        if (wallLost_ > config_.wallGrace) {
+            // Over the wall's top edge: on over it, onto the roof.
+            if (along.y > 1) {
+                crest_ = config_.crestSeconds;
+                crestNormal_ = n;
+                body_.velocity.y = std::max(body_.velocity.y, config_.crestHop);
+            }
+            leaveWall();
+        }
+        return;
+    }
+    if (sinceWallJump_ < config_.wallJumpPause)
+        return;
+    // Ahead of the body and to both its sides: a wall it meets head on, and
+    // one it grazes.
+    const Vec3 level{body_.velocity.x, 0, body_.velocity.z};
+    std::optional<RayHit> wall;
+    if (length(level) >= .5f) {
+        const Vec3 heading = normalized(level), side{-heading.z, 0, heading.x};
+        const float reach = 1.5f * config_.wallClearance + length(body_.velocity) * dt + .2f;
+        float nearest{};
+        for (const Vec3 direction : {heading, side, -side}) {
+            const auto hit = wallAlong(at, direction, reach);
+            if (!hit)
+                continue;
+            // Coming into it, and within its clearance by the end of this step.
+            const float distance = dot(at - hit->point, hit->normal),
+                        closing = -dot(body_.velocity, hit->normal);
+            if (closing > .5f && distance - closing * dt <= config_.wallClearance + .05f &&
+                (!wall || distance < nearest)) {
+                wall = hit;
+                nearest = distance;
+            }
+        }
+    }
+    // Pushed at a wall beside the body, the stick takes it with no speed
+    // into it, and none off it: a fall down a facade, a jump beside one.
+    if (!wall && (wall = walkedAt(.5f)))
+        body_.velocity -= wall->normal * std::max(0.f, dot(body_.velocity, wall->normal));
+    if (wall)
+        joinWall(*wall);
+}
+void Swing::wallMotion(float dt, const Input& in) {
+    const Vec3 n = wall_.normal;
+    const float out = dot(body_.velocity, n);
+    Vec3 along = body_.velocity - n * out;
+    if (length(wrapWay_) > .5f) {
+        // Round a corner, slowly enough to clear its edge while the next
+        // face pushes the body out to its clearance.
+        body_.velocity = wrapWay_ * 3 + n * out;
+        return;
+    }
+    // What of the stick points into the wall goes up it: pushed at a wall,
+    // the body climbs.
+    const Vec3 up = normalized(Vec3{0, 1, 0} - n * n.y);
+    Vec3 move = finite(in.move) ? limited(in.move, 1) : Vec3{};
+    const float into = -dot(move, n);
+    move = limited(move + n * into + up * into, 1);
+    if (const float tilt = length(move); tilt > .05f) {
+        // The stick walks the wall; a faster run keeps what it has that way.
+        const Vec3 way = move / tilt;
+        const Vec3 wanted = way * std::max(dot(along, way), config_.wallWalkSpeed * tilt);
+        along += limited(wanted - along, config_.wallAcceleration * dt);
+    } else if (!webs_[0].attached && !webs_[1].attached) {
+        if (const float speed = length(along); speed > 1e-4f) {
+            const float slower = speed > config_.wallWalkSpeed ? speed - config_.wallBrake * dt
+                                                               : speed * std::exp(-6 * dt) - dt;
+            along = along * (std::max(0.f, slower) / speed);
+        }
+    }
+    body_.velocity = limited(along + n * out, config_.maxSpeed);
+}
+void Swing::holdWall(float dt, float before, const World* collision) {
+    const Vec3 n = wall_.normal;
+    const float distance = dot(body_.position - wall_.point, n), out = dot(body_.velocity, n);
+    // No nearer than the clearance; a body already inside it (the facade
+    // stepped out, a corner) comes out at a walk. One the wall lets drift
+    // off comes back slowly, unless something carries it away.
+    const float nearest = std::min(config_.wallClearance, before + 4 * dt);
+    float shift{};
+    if (distance < nearest)
+        shift = nearest - distance;
+    else if (distance > config_.wallClearance + .1f && out < .2f)
+        shift = -std::min(distance - config_.wallClearance, 2 * dt);
+    if (shift != 0)
+        move(body_.position + n * shift, collision);
+    if (out < 0 && distance + shift <= config_.wallClearance + 1e-3f)
+        body_.velocity -= n * out;
+    wall_.distance = distance + shift;
+}
 void Swing::reset(Body b) {
     if (!finite(b.position) || !finite(b.velocity))
         throw std::invalid_argument("Invalid body");
@@ -77,6 +348,12 @@ void Swing::reset(Body b) {
     zipSpeed_ = 0;
     zipDirection_ = {};
     jumpHeld_ = jumpQueued_ = false;
+    wall_ = {};
+    wallLost_ = crest_ = 0;
+    wrapWay_ = {};
+    sinceWallJump_ = 100;
+    mount_ = mountLeft_ = 0;
+    mounting_ = offered_ = mountOffered_ = false;
 }
 void Swing::release(int i, EventKind reason) {
     if (webs_[i].attached)
@@ -263,7 +540,17 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
     sinceLanding_ += dt;
     const bool wasGrounded = body_.grounded;
     if (jumpQueued_) {
-        if (body_.grounded) {
+        if (wall_.on) {
+            // Off the wall: out from it and up, with what the body had along it.
+            const Vec3 n = wall_.normal;
+            body_.velocity = limited(body_.velocity - n * dot(body_.velocity, n) + n * config_.wallJumpOut +
+                                         Vec3{0, config_.wallJumpUp, 0},
+                                     config_.maxSpeed);
+            leaveWall();
+            sinceWallJump_ = 0;
+            mountLeft_ = 0;
+            events_.push_back({EventKind::WallJump, -1, 1});
+        } else if (body_.grounded) {
             body_.velocity.y = config_.jumpSpeed;
             if (pointLaunchReady()) {
                 Vec3 horizontal = normalized(Vec3{body_.velocity.x, 0, body_.velocity.z});
@@ -282,23 +569,35 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
         }
         jumpQueued_ = false;
     }
-    Vec3 steering = finite(in.move) ? limited(Vec3{in.move.x, 0, in.move.z}, 1) : Vec3{};
-    body_.velocity +=
-        steering * ((body_.grounded ? config_.groundAcceleration : config_.airAcceleration) * dt);
-    if (body_.grounded) {
-        const float damping = std::exp(-5 * dt);
-        body_.velocity.x *= damping;
-        body_.velocity.z *= damping;
+    const float wallBefore = wall_.on ? dot(body_.position - wall_.point, wall_.normal) : 0.f;
+    if (wall_.on) {
+        // On a wall the stick walks it, and gravity does not pull along it.
+        wallMotion(dt, in);
+        body_.grounded = false;
+    } else {
+        Vec3 steering = finite(in.move) ? limited(Vec3{in.move.x, 0, in.move.z}, 1) : Vec3{};
+        body_.velocity +=
+            steering * ((body_.grounded ? config_.groundAcceleration : config_.airAcceleration) * dt);
+        if (body_.grounded) {
+            const float damping = std::exp(-5 * dt);
+            body_.velocity.x *= damping;
+            body_.velocity.z *= damping;
+        }
+        // A native prediction has no sweep to cancel gravity at the floor. Keep
+        // the measured support until a jump or rope pull actually lifts the body.
+        const bool supported = !collision && body_.grounded && body_.velocity.y <= 0;
+        if (supported)
+            body_.velocity.y = 0;
+        else
+            body_.velocity.y -= config_.gravity * dt;
+        if (crest_ > 0) {
+            // Over a wall's top edge: on over the roof behind it.
+            crest_ -= dt;
+            body_.velocity -= crestNormal_ * (config_.crestPush * dt);
+        }
+        body_.velocity = limited(body_.velocity, config_.maxSpeed);
+        body_.grounded = supported;
     }
-    // A native prediction has no sweep to cancel gravity at the floor. Keep
-    // the measured support until a jump or rope pull actually lifts the body.
-    const bool supported = !collision && body_.grounded && body_.velocity.y <= 0;
-    if (supported)
-        body_.velocity.y = 0;
-    else
-        body_.velocity.y -= config_.gravity * dt;
-    body_.velocity = limited(body_.velocity, config_.maxSpeed);
-    body_.grounded = supported;
     move(body_.position + body_.velocity * dt, collision);
     for (int i = 0; i < 2; ++i) {
         auto& w = webs_[i];
@@ -359,6 +658,9 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             pull[i] += change;
             body_.velocity -= radial * change;
         }
+    // A web may pull along a wall or off it, never through it.
+    if (wall_.on)
+        holdWall(dt, wallBefore, collision);
     for (int i = 0; i < 2; ++i)
         webs_[i].tension = webs_[i].attached ? pull[i] / dt : 0;
     if (body_.grounded && !wasGrounded)
@@ -374,6 +676,7 @@ void Swing::update(float seconds, const Input& input, const World& world) {
         return;
     }
     inputs(seconds, input, world);
+    senseWall(seconds, input, world);
     accumulator_ += seconds;
     int steps = 0;
     while (accumulator_ + 1e-9 >= config_.fixedStep && steps++ < 13) {
@@ -419,6 +722,7 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
                 hand.sample = false;
         inputs(inputSeconds, input, world);
     }
+    senseWall(seconds, input, world);
     const auto count = static_cast<unsigned>(std::ceil(seconds / config_.fixedStep));
     const float dt = seconds / count;
     for (unsigned i = 0; i < count; ++i)

@@ -42,7 +42,7 @@ HOOKS = (0x1d1cf30, 0x7dc400, 0x72d640, 0x72d650, 0x72e1d0, 0x72d5f0, 0x72d610, 
 MAGIC = 0x554e4d53
 # ProbeSettings / ProbeSample flags, as XrData's settings bits plus the aim markers and a body calibration asked for.
 FLAGS = dict(web_grab=1, punch=2, body=4, air_webs=8, web_shooter=16, aim_markers=32, calibrate=64, flips=128,
-             trigger_webs=256)
+             trigger_webs=256, stand_on_walls=512)
 # The left stick pushed fully one way (x, y; up is +y).
 STICK = dict(up=(0, 32767), down=(0, -32767), left=(-32767, 0), right=(32767, 0))
 
@@ -120,15 +120,18 @@ def main():
 
     try:
         report['hooks_before'] = hook_bytes(game)
-        start_flags = FLAGS['web_grab'] | FLAGS['punch'] | FLAGS['body'] | FLAGS['air_webs'] | FLAGS['aim_markers']
+        start_flags = FLAGS['web_grab'] | FLAGS['punch'] | FLAGS['body'] | FLAGS['air_webs'] | \
+            FLAGS['aim_markers'] | FLAGS['stand_on_walls']
         code = call_with_payload(process, exports['SpidyMenuStart'], settings_payload(start_flags, 30, 100, 1, 33.0))
         if code:
             raise RuntimeError(f'SpidyMenuStart: {code}')
         report['hooked'] = {k: not v for k, v in hook_bytes(game).items()}
         before = sample(game, process, exports)
-        # Pause; Settings is the fifth line of the free-roam pause menu.
+        # Pause; Settings is the line above the last (QUIT), which Up from RESUME wraps to: two presses,
+        # however many lines the menu has (a hideout or a mission adds ABANDON MISSION above PHOTO MODE,
+        # and four presses down opened Photo Mode there on October 10).
         press('start', wait=1.2)
-        press('down', 'down', 'down', 'down')
+        press('up', 'up')
         press('a', wait=1.2)
         step('settings', tabs=before['tabs']+1, status=0)
         # Up from GAME wraps to the last tab, SPIDY VR.
@@ -136,7 +139,7 @@ def main():
         step('settings_last_tab')
         press('a', wait=1.2)
         step('spidy_vr', dict(trigger_webs=False, aim_markers=True, swing_speed=33.0, web_shooter=False, weight=80, hud=2,
-                              flip_speed=180))
+                              flip_speed=180, stand_on_walls=True))
         # The first row: WEB BUTTON, GRIP until stepped to TRIGGER.
         press('right', wait=.8)
         step('web_button_trigger', dict(trigger_webs=True, aim_markers=True), changes=1)
@@ -171,23 +174,27 @@ def main():
         step('hud_small', dict(hud=1, smooth_turn=60), changes=10)
         press('left', wait=.8)
         step('hud_off', dict(hud=0), changes=11)
+        # Standing on walls, on until switched off.
+        press('down')
+        press('right', wait=.8)
+        step('stand_on_walls_off', dict(stand_on_walls=False, hud=0), changes=12)
         # Down past the EXPERIMENTAL heading: the flips, off until switched on.
         press('down')
         press('right', wait=.8)
-        step('flips_on', dict(flips=True, hud=0), changes=12)
+        step('flips_on', dict(flips=True, stand_on_walls=False), changes=13)
         # The flip speed, 180 degrees a second until stepped up to 240.
         press('down')
         press('right', wait=.8)
-        step('flip_speed_240', dict(flip_speed=240, flips=True), changes=13)
+        step('flip_speed_240', dict(flip_speed=240, flips=True), changes=14)
         press('y', wait=1.2)
         step('reset_all_asks')
         press('a', wait=1.2)
-        # Spidy's defaults: ten settings changed back (the web button, aim markers, swing speed, weight, the
-        # calibration asked for, snap turn, smooth turn, the HUD, the flips, the flip speed). The web shooter, which
-        # the tab does not offer, stays as the probe started it.
+        # Spidy's defaults: eleven settings changed back (the web button, aim markers, swing speed, weight, the
+        # calibration asked for, snap turn, smooth turn, the HUD, standing on walls, the flips, the flip speed).
+        # The web shooter, which the tab does not offer, stays as the probe started it.
         step('reset_all', dict(trigger_webs=False, aim_markers=True, air_webs=True, swing_speed=32.0, weight=80,
-                               calibrate=False, snap_turn=30, smooth_turn=0, hud=2, flips=False, flip_speed=180,
-                               web_shooter=False, body=True), changes=23)
+                               calibrate=False, snap_turn=30, smooth_turn=0, hud=2, stand_on_walls=True, flips=False,
+                               flip_speed=180, web_shooter=False, body=True), changes=25)
         press('b', wait=.8)
         press('b', wait=.8)
         press('b', wait=1.5)

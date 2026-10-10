@@ -536,6 +536,7 @@ Settings loadSettings() {
         else if (key == "air_webs") o.airWebs = number() != 0;
         else if (key == "flips") o.flips = number() != 0;
         else if (key == "trigger_webs") o.triggerWebs = number() != 0;
+        else if (key == "stand_on_walls") o.standOnWalls = number() != 0;
         // eye_size (a square size, before October 8) is no longer read: 2048 x 2048 rendered one player's game
         // below the 2496 x 2688 their headset asked for, and it looked blurry.
         else if (key == "render_scale") o.renderScale = spidy::validRenderScale(number()) ? number() : 100;
@@ -580,7 +581,7 @@ void saveSettings(const Settings& settings) {
     file << "game=" << narrow(settings.gameExe) << "\nxr_runtime=" << narrow(settings.runtime)
          << "\nsmall_window=" << o.smallWindow << "\nstock_monitor_view=" << o.stockMonitorView
          << "\naim_markers=" << o.aimMarkers << "\nair_webs=" << o.airWebs << "\nflips=" << o.flips
-         << "\ntrigger_webs=" << o.triggerWebs
+         << "\ntrigger_webs=" << o.triggerWebs << "\nstand_on_walls=" << o.standOnWalls
          << "\nrender_scale=" << o.renderScale
          << "\nswing_speed=" << o.swingSpeed << "\nweight_percent=" << o.weight << "\nsnap_turn=" << o.snapTurn
          << "\nsmooth_turn=" << o.smoothTurn
@@ -1071,6 +1072,30 @@ std::wstring newReportPath(const std::wstring& root) {
     swprintf_s(name, L"game-vr-%04u%02u%02u-%02u%02u%02u.json", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
                now.wSecond);
     return (fs::path(root) / L"reports" / name).wstring();
+}
+
+bool restartAsAdministrator(std::string& error) {
+    wchar_t exe[MAX_PATH * 4];
+    const DWORD length = GetModuleFileNameW(nullptr, exe, static_cast<DWORD>(std::size(exe)));
+    DWORD code = ERROR_FILE_NOT_FOUND;
+    if (length && length < std::size(exe)) {
+        // main.cpp's --wait-for: the one-at-a-time lock is this launcher's until it has closed.
+        const std::wstring arguments = L"--wait-for " + std::to_wstring(GetCurrentProcessId());
+        const std::wstring folder = fs::path(exe).parent_path().wstring();
+        SHELLEXECUTEINFOW run{sizeof(run)};
+        run.lpVerb = L"runas";
+        run.lpFile = exe;
+        run.lpParameters = arguments.c_str();
+        run.lpDirectory = folder.c_str();
+        run.nShow = SW_SHOWNORMAL;
+        if (ShellExecuteExW(&run))
+            return true;
+        code = GetLastError();
+    }
+    error = code == ERROR_CANCELLED ? std::string()
+                                    : "Windows did not start Spidy as administrator (error " + std::to_string(code) +
+                                          "). Right-click Spidy Launcher and choose Run as administrator.";
+    return false;
 }
 
 std::wstring newStopEventName() {

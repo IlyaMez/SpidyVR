@@ -227,18 +227,19 @@ Input trackedSwingInput(const XrFrame& f, const Rig& rig, bool triggerWebs) {
 }
 void GameTrackingRig::reset() {
     const float snap = snap_, smooth = smooth_;
-    const bool flips = flips_, triggerWebs = triggerWebs_;
+    const bool flips = flips_, triggerWebs = triggerWebs_, standOnWalls = standOnWalls_;
     const FlipMotion flip = flip_;
     *this = {};
     snap_ = snap;
     smooth_ = smooth;
     flips_ = flips;
     triggerWebs_ = triggerWebs;
+    standOnWalls_ = standOnWalls;
     flip_ = flip;
     flip_.reset();
 }
 GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameForward, bool gameplay,
-                                        Vec3 surfaceUp, bool airborne) {
+                                        Vec3 surfaceUp, bool airborne, const SurfaceHold& surface) {
     GameMotionFrame out;
     out.swing.focused = false;
     pendingRecenter_ |= f.recentered;
@@ -253,6 +254,9 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         wasActive_ = false;
         flip_.reset();
         rig_.tilt = {};
+        surfaceTurn_ = {};
+        surfaceShift_ = {};
+        standing_ = false;
         return out;
     }
     const bool resumed = !wasActive_;
@@ -276,6 +280,8 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
             // A recenter ends a flip: level, the head kept where it was.
             flip_.reset();
             rig_.tilt = {};
+            surfaceTurn_ = {};
+            surfaceShift_ = {};
             rig_.preserveHead(lastHead_, f.head);
         }
     }
@@ -305,11 +311,15 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     const bool onSurface = finite(normal) && length(normal) > .5f &&
                            normal.y < (onSurface_ ? surfaceLeaveCos : surfaceEnterCos);
     const Vec3 away = normal.y < -surfaceEnterCos ? Vec3{0, -1, 0} : normalized(Vec3{normal.x, 0, normal.z});
+    // The wall or ceiling that holds the player: no flips there, and A is a
+    // jump off it.
+    const Vec3 held = normalized(surface.normal);
+    const bool holds = finite(held) && length(held) > .5f && finite(surface.anchor);
     // A flip tilts the tracking space about the head where it began.
     FlipMotion::Sample flip;
     flip.jump = f.jump;
-    flip.airborne = airborne;
-    flip.surface = onSurface;
+    flip.airborne = airborne && !holds;
+    flip.surface = onSurface || holds;
     if (handValid(f.hands[0])) {
         flip.stickX = f.hands[0].stickX;
         flip.stickY = f.hands[0].stickY;
@@ -324,9 +334,39 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         flip_.reset();
         rig_.tilt = {};
     }
+    // Standing on the surface: the tracking space turns onto it about the
+    // feet, each frame the short way from where its up is, so a corner's
+    // next face turns it on from the wall it is on; back level, what is left
+    // is a turn about the vertical, which the tracking space keeps.
+    const bool walks = handValid(f.hands[0]) && std::hypot(f.hands[0].stickX, f.hands[0].stickY) > .2f;
+    if (!holds || !standOnWalls_)
+        standing_ = false;
+    else if (surface.crawl ||
+             (std::isfinite(surface.speed) && surface.speed < (walks ? wallStrideSpeed : wallStandSpeed)))
+        standing_ = true;
+    {
+        const Quat rest = arc(surfaceTurn_.rotate({0, 1, 0}), standing_ ? held : Vec3{0, 1, 0});
+        const float left = 2 * std::atan2(length({rest.x, rest.y, rest.z}), rest.w);
+        const Vec3 shift = standing_ ? surface.anchor - feet : Vec3{};
+        if (left > 1e-4f) {
+            const float take = std::min(left, wallTurnRate * f.seconds);
+            surfaceTurn_ = unit(Quat::around({rest.x, rest.y, rest.z}, take) * surfaceTurn_);
+            surfaceShift_ += (shift - surfaceShift_) * (take / left);
+        } else {
+            surfaceShift_ += (shift - surfaceShift_) * (1 - std::exp(-f.seconds / .05f));
+            if (!standing_ && (surfaceTurn_.x != 0 || surfaceTurn_.y != 0 || surfaceTurn_.z != 0)) {
+                const float heading = 2 * std::atan2(surfaceTurn_.y, surfaceTurn_.w);
+                rig_.origin = feet + Quat::yaw(heading).rotate(rig_.origin - feet);
+                rig_.yaw += heading;
+                surfaceTurn_ = {};
+            }
+            if (!standing_ && length(surfaceShift_) < 1e-3f)
+                surfaceShift_ = {};
+        }
+    }
     const Vec3 unplacedHead = rig_.toWorld(f.head).position;
     Vec3 target{};
-    if (onSurface) {
+    if (onSurface && !standing_) {
         const float height = dot(unplacedHead - feet, away);
         surfaceSeconds_ = onSurface_ ? surfaceSeconds_ + f.seconds : 0.f;
         const float wanted =
@@ -343,7 +383,19 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     out.standOff = standOff_;
     if (onSurface)
         out.surfaceClearance = dot(unplacedHead + standOff_ - feet, away);
-    const Rig placed{rig_.origin + standOff_, rig_.yaw, rig_.tilt, rig_.pivot};
+    Rig placed{rig_.origin + standOff_, rig_.yaw, rig_.tilt, rig_.pivot};
+    const bool turned = surfaceTurn_.x != 0 || surfaceTurn_.y != 0 || surfaceTurn_.z != 0;
+    if (turned || length(surfaceShift_) > 0) {
+        // The level placement, turned about the feet and moved onto the
+        // surface, as one tracking space (its tilt about its origin).
+        const Quat yaw = Quat::yaw(rig_.yaw);
+        const Vec3 pivot = rig_.pivot - rig_.tilt.rotate(rig_.pivot);
+        placed.origin = feet + surfaceShift_ + surfaceTurn_.rotate(placed.origin - feet + yaw.rotate(pivot));
+        placed.tilt = unit(yaw.conjugate() * surfaceTurn_ * yaw * rig_.tilt);
+        placed.pivot = {};
+    }
+    out.standing = standing_;
+    out.viewTilt = std::acos(std::clamp(surfaceTurn_.rotate({0, 1, 0}).y, -1.f, 1.f));
     out.active = true;
     out.releaseWebs = longBreak || pendingRecenter_ || buttonsChanged_;
     pendingRecenter_ = buttonsChanged_ = false;
@@ -353,6 +405,11 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     // The left stick turns the flip: the player does not walk or drift.
     if (flip_.steering())
         out.swing.move = {};
+    // The game takes the stick as the player stands, level; the swing takes
+    // it as they see it: on a wall they stand on, along that wall.
+    const Vec3 levelMove = out.swing.move;
+    if (turned)
+        out.swing.move = surfaceTurn_.rotate(levelMove);
     if (out.releaseWebs)
         for (auto& hand : out.swing.hands)
             hand.tracked = false;
@@ -373,8 +430,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     // Existing native input bridge uses these bits for W/A/S/D/Space, the
     // virtual Xbox controller the stick itself. Rotate head-relative movement
     // into the stock camera's horizontal axes.
-    const float forward = dot(out.swing.move, gameForward),
-                right = dot(out.swing.move, cross(gameForward, {0, 1, 0}));
+    const float forward = dot(levelMove, gameForward), right = dot(levelMove, cross(gameForward, {0, 1, 0}));
     out.walkRight = right;
     out.walkForward = forward;
     if (forward > .3f)

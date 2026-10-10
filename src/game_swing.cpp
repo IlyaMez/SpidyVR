@@ -40,6 +40,9 @@ uint64_t deadline{}, inputDeadline{}, motionSerial{}, lastStep{}, worldIdentity{
 float predictedDt{};
 uint64_t predictedStep{};
 SwingTakeoff takeoffTransition;
+// The same jump for a player who goes up onto a wall from the ground or out
+// of the game's crawl (Swing::mounting): the wall takes the body as it leaves.
+SwingTakeoff mountTakeoff;
 LARGE_INTEGER frequency{};
 // Aim previews are made while sampled before this tick, once per input
 // command; the latest was made at aimMadeMs.
@@ -65,20 +68,30 @@ void relinquishMotion() {
     owned = false;
 }
 // The swing alone: a perched player's webs are let go, a grab keeps its target.
-void cancelSwing() {
+// keepWall: the player stays on the wall it is on (a paused game goes on from
+// there); otherwise the body may be anywhere by the next step.
+void cancelSwing(bool keepWall = false) {
     relinquishMotion();
     coasting = false;
     takeoffTransition.reset();
+    mountTakeoff.reset();
     solver.releaseAll();
+    if (!keepWall)
+        solver.leaveWall();
     inputClock.reset();
     inFlight.reset();
     predictedDt = 0;
     AcquireSRWLockExclusive(&output);
     InterlockedIncrement64(&SpidySwingData.sequence);
-    SpidySwingData.owned = SpidySwingData.takeoff = 0;
+    SpidySwingData.owned = SpidySwingData.takeoff = SpidySwingData.mount = 0;
     SpidySwingData.takeoffPhase = SpidySwingData.takeoffAttempts = 0;
     for (auto& web : SpidySwingData.webs)
         web = {};
+    if (!keepWall) {
+        SpidySwingData.wall = 0;
+        SpidySwingData.wallNormal = {};
+        SpidySwingData.wallDistance = 0;
+    }
     InterlockedIncrement64(&SpidySwingData.sequence);
     ReleaseSRWLockExclusive(&output);
 }
@@ -99,6 +112,7 @@ void coast() {
         return;
     coasting = true;
     takeoffTransition.reset();
+    mountTakeoff.reset();
     solver.releaseAll();
     inputClock.reset();
     game_grab::cancel();
@@ -107,6 +121,7 @@ void coast() {
     AcquireSRWLockExclusive(&output);
     InterlockedIncrement64(&SpidySwingData.sequence);
     SpidySwingData.takeoff = SpidySwingData.takeoffPhase = SpidySwingData.takeoffAttempts = 0;
+    SpidySwingData.mount = 0;
     for (auto& web : SpidySwingData.webs)
         web = {};
     InterlockedIncrement64(&SpidySwingData.sequence);
@@ -280,10 +295,11 @@ void visit(const native_rays::QueryContext& world) {
     // No step for 50 ms: a long frame, or a paused game. The next step goes on
     // from here; letting go dropped the player into the game's fall (InputHold).
     // With live input and no step for longer than a stutter, the game moves
-    // the player some other way (a perch): the swing lets go.
+    // the player some other way (a perch), or is paused: the swing lets go. A
+    // player on a wall is on it still when the steps come back.
     if (!fresh) {
         if (live && idle * 1000 > controlHoldMs)
-            cancelSwing();
+            cancelSwing(true);
         return;
     }
     if (motion.steps == lastStep)
@@ -310,6 +326,21 @@ void visit(const native_rays::QueryContext& world) {
     predictedDt = motion.dt;
     predictedStep = motion.steps;
     const float inputSeconds = focused ? inputClock.consume(c) : 0.f;
+    // The game's wall crawl turns its actor onto the surface and rocks it
+    // there (up to 14 degrees, several times a second): the surface's own
+    // normal is what a ray down the actor's up finds. In its crawl the game
+    // reports the body as standing (October 10 headset report); a wall it
+    // stands on so is the swing's as soon as the body is off it.
+    Vec3 crawl{};
+    const Vec3 actorUp = normalized({feet[4], feet[5], feet[6]});
+    if (!owned && finite(actorUp) && length(actorUp) > .9995f && actorUp.y < .866f) {
+        const auto hit = world.raycast(at + actorUp, -actorUp, 2.5f);
+        if (hit && hit->fixed && finite(hit->normal) && dot(normalized(hit->normal), actorUp) > .7f) {
+            crawl = normalized(hit->normal);
+            if (focused && motion.grounded)
+                solver.offerWall({hit->point, crawl, hit->surface, true});
+        }
+    }
     // A press aimed at something a web can catch belongs to the grab: the
     // swing gets the input without that hand's grip.
     const auto predicted = solver.predictNativeStep(motion.dt, focused ? game_grab::forSwing(in) : in, world,
@@ -355,10 +386,17 @@ void visit(const native_rays::QueryContext& world) {
                                  (zipped || pointLaunched) ? predicted.velocity : Vec3{}, pointLaunched);
     if (transition.resumed)
         requested = limited(requested + transition.launchVelocity - body.velocity, cap);
+    // A player who walks at a wall, or whom the game has on one in its crawl,
+    // comes onto the swing's wall by the game's own jump.
+    const auto mount = mountTakeoff.update(GetTickCount64(), solver.mounting(), body.grounded, collidable, true,
+                                           false, harness, motion.achievedVelocity, {});
     // Walking/landing and takeoff belong to the native state machine, even if
     // we owned flight on the preceding frame. Preserve held webs across this handoff.
-    const bool drive =
-        collidable && !body.grounded && !transition.waiting && (attached || owned || transition.resumed);
+    // A player the game's own jump or fall brought into a wall is the swing's
+    // from there: on the wall, then in flight off it.
+    const auto wall = solver.wall();
+    const bool drive = collidable && !body.grounded && !transition.waiting &&
+                       (attached || owned || transition.resumed || wall.on);
     if (drive) {
         native_movement::Command request;
         request.enabled = 1;
@@ -400,12 +438,22 @@ void visit(const native_rays::QueryContext& world) {
     d.owned = owned;
     d.grounded = motion.grounded;
     d.collisionFlags = motion.collisionFlags;
-    d.takeoff = transition.jump;
-    d.takeoffPhase = takeoffTransition.phase();
-    d.takeoffAttempts = takeoffTransition.attempts();
-    d.takeoffTimeouts += transition.timedOut;
+    const bool lifting = takeoffTransition.phase() != SwingTakeoff::Idle;
+    d.takeoff = transition.jump || mount.jump;
+    d.takeoffPhase = lifting ? takeoffTransition.phase() : mountTakeoff.phase();
+    d.takeoffAttempts = lifting ? takeoffTransition.attempts() : mountTakeoff.attempts();
+    d.takeoffTimeouts += transition.timedOut + mount.timedOut;
+    // After a jump the game did not make, the stick is the game's again.
+    const bool mounts =
+        mountTakeoff.phase() != SwingTakeoff::TimedOut && (mount.waiting || solver.mountBegun());
+    d.mount = !mounts ? 0u : length(crawl) > .5f ? 2u : 1u;
     d.nativeContact = motion.contact;
+    d.wall = static_cast<uint32_t>(wall.on && drive ? Surface::wall : length(crawl) > .5f ? Surface::game : Surface::none);
+    d.wallNormal = wall.on && drive ? wall.normal : crawl;
+    d.wallDistance = wall.on && drive ? wall.distance : 0.f;
     for (auto event : solver.events()) {
+        d.walls += event.kind == EventKind::WallOn;
+        d.wallJumps += event.kind == EventKind::WallJump;
         d.attaches += event.kind == EventKind::Attach;
         d.releases += event.kind == EventKind::Release || event.kind == EventKind::TrackingLost ||
                       event.kind == EventKind::Obstructed;
@@ -513,13 +561,18 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingRetarget(void* input) {
     return result;
 }
 // The VR settings during play: the speed limit, whether webs catch props and
-// thugs, whether they hold in open air, and the gravity (weight). All apply
-// from the next step; the visit holds `simulation`.
+// thugs, whether they hold in open air, the gravity (weight), and whether
+// walls are the swing's own. All apply from the next step; the visit holds
+// `simulation`.
 extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
+    // Version 3 settings (the probes') are shorter: read as many bytes as they say.
     Settings s;
-    if (!copy(&s, input, sizeof(s)) || s.magic != 0x53575354 || s.version != 3 || s.bytes != sizeof(s) ||
+    uint32_t header[3]{};
+    if (!copy(header, input, sizeof(header)) || (header[2] != settingsBytesV3 && header[2] != sizeof(s)) ||
+        !copy(&s, input, header[2]) || s.magic != 0x53575354 ||
+        !((s.version == 3 && s.bytes == settingsBytesV3) || (s.version == 4 && s.bytes == sizeof(s))) ||
         s.grab > 1 || !std::isfinite(s.maxSpeed) || s.maxSpeed <= 0 || s.maxSpeed > motionSpeedLimit ||
-        s.airWebs > 1 || !std::isfinite(s.gravity) || s.gravity < 0 || s.gravity > maxGravity)
+        s.airWebs > 1 || !std::isfinite(s.gravity) || s.gravity < 0 || s.gravity > maxGravity || s.walls > 1)
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
     DWORD result{};
@@ -532,6 +585,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         solver.limitSpeed(s.maxSpeed);
         solver.setGravity(s.gravity);
         solver.allowAirAnchors(s.airWebs != 0);
+        if (s.version >= 4)
+            solver.allowWalls(s.walls != 0);
         // A swing started without the grab (-NoWebGrab) offers it from now on.
         if (s.grab && !game_grab::offering() && driveMotion && sampleDriven) {
             config.grabKinds = game_grab::movableKinds;

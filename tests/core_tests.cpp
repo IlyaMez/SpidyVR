@@ -110,6 +110,58 @@ struct TwoAnchors : TestWorld {
         return in;
     }
 };
+// A building for the wall tests: a box whose faces are walls a ray meets from
+// outside, and whose top is a roof.
+struct Building : TestWorld {
+    Vec3 low{5, 0, -20}, high{15, 30, 20};
+    std::optional<RayHit> raycast(Vec3 o, Vec3 d, float distance) const override {
+        const float from[3]{o.x, o.y, o.z}, way[3]{d.x, d.y, d.z}, lo[3]{low.x, low.y, low.z},
+            hi[3]{high.x, high.y, high.z};
+        float enter = 0, leave = distance, normal[3]{};
+        for (int axis = 0; axis < 3; ++axis) {
+            if (std::abs(way[axis]) < 1e-8f) {
+                if (from[axis] < lo[axis] || from[axis] > hi[axis])
+                    return {};
+                continue;
+            }
+            float first = (lo[axis] - from[axis]) / way[axis], second = (hi[axis] - from[axis]) / way[axis];
+            float out = -1;
+            if (first > second) {
+                std::swap(first, second);
+                out = 1;
+            }
+            if (first > enter) {
+                enter = first;
+                normal[0] = normal[1] = normal[2] = 0;
+                normal[axis] = out;
+            }
+            leave = std::min(leave, second);
+            if (enter > leave)
+                return {};
+        }
+        if (enter <= 0)
+            return {};
+        return RayHit{o + d * enter, {normal[0], normal[1], normal[2]}, 7, true};
+    }
+    bool exists(std::uint64_t id) const override {
+        return id == 7;
+    }
+};
+SwingConfig walled() {
+    SwingConfig c;
+    c.walls = true;
+    return c;
+}
+// Flies a body through native steps: the game moves it where each prediction
+// asks, as a mover that meets nothing does.
+Body fly(Swing& s, const WorldQueries& w, Body body, const Input& in, float seconds, float dt = 1.f / 60) {
+    for (float t = 0; t < seconds - dt / 2; t += dt) {
+        const auto intent = s.predictNativeStep(dt, in, w, body);
+        check(intent.valid, "prediction rejected");
+        body = {intent.target, intent.velocity, false};
+    }
+    return body;
+}
 // Grab targets on a straight-line integrator: a commanded target moves as
 // the command's law gives it, under gravity; the others keep their velocity.
 struct GrabTargets : TargetQueries {
@@ -328,6 +380,17 @@ GameMotionFrame playFor(GameTrackingRig& rig, XrFrame& f, Vec3 feet, Vec3 up, fl
     for (int i = 0; i < static_cast<int>(seconds * 90 + .5f); ++i) {
         ++f.predictedDisplayTime;
         out = rig.update(f, feet, {0, 0, -1}, true, up);
+    }
+    return out;
+}
+// Plays `seconds` of 90 Hz frames with the player held on a surface (or, with
+// no normal, on none), its actor's up `up`.
+GameMotionFrame holdFor(GameTrackingRig& rig, XrFrame& f, Vec3 feet, const SurfaceHold& hold, float seconds,
+                        Vec3 up = {0, 1, 0}) {
+    GameMotionFrame out;
+    for (int i = 0; i < static_cast<int>(seconds * 90 + .5f); ++i) {
+        ++f.predictedDisplayTime;
+        out = rig.update(f, feet, {0, 0, -1}, true, up, true, hold);
     }
     return out;
 }
@@ -627,6 +690,251 @@ int main() {
         }
         check(obstructed&&!swing.webs()[0].attached,"lasting wall kept the web");
     });
+    test("a body that flies into a wall at an angle runs along it", [] {
+        // The wall: x = 5, facing -x. The body's centre keeps 0.9 m off it.
+        Building w;Swing s(walled());Input in;
+        Body body{{3.5f,10,0},{10,0,-10},false};
+        float nearest=100,joinedAt=0;bool joined{},on{};
+        for(int i=0;i<60;++i) {
+            const auto intent=s.predictNativeStep(1.f/60,in,w,body);
+            body={intent.target,intent.velocity,false};
+            nearest=std::min(nearest,5-body.position.x);
+            for(const auto& e:s.events())on|=e.kind==EventKind::WallOn;
+            if(s.wall().on&&!joined){joined=true;joinedAt=body.position.y;}
+        }
+        check(joined&&on&&s.wall().on,"the wall did not take the body");
+        near(s.wall().normal.x,-1);near(s.wall().distance,.9f,.02f);
+        check(nearest>.88f,"the body came nearer the wall than its clearance");
+        near(body.velocity.x,0,.01f);
+        // 10 m/s along it, raised for the 10 m/s into it, less the brake since.
+        check(body.velocity.z<-9&&body.velocity.z>-12.6f,"the run lost or gained too much speed");
+        // No gravity along the wall: the body keeps the little it fell at before
+        // (a second of free fall is 4.9 m).
+        check(joinedAt-body.position.y<1,"gravity pulled the body down the wall");
+        // Without the stick or a web the run slows, stops and stays.
+        body=fly(s,w,body,in,6);
+        check(s.wall().on&&length(body.velocity)<.05f,"the run never came to rest on the wall");
+        const float rested=body.position.y;
+        body=fly(s,w,body,in,1);
+        near(body.position.y,rested,.001f);
+    });
+    test("head on the body stops on the wall, the stick walks it and a jump leaves it", [] {
+        Building w;Swing s(walled());Input in;
+        Body body=fly(s,w,{{0,10,0},{12,0,0},false},in,1.5f);
+        check(s.wall().on,"no wall");near(length(body.velocity),0,.05f);near(body.position.x,4.1f,.02f);
+        // Pushed at the wall, the body climbs it; along it, it walks.
+        in.move={1,0,0};body=fly(s,w,body,in,.6f);
+        near(body.velocity.y,6,.05f);near(body.velocity.x,0,.01f);near(body.velocity.z,0,.01f);
+        in.move={0,0,-1};body=fly(s,w,body,in,.8f);
+        near(body.velocity.z,-6,.05f);near(body.velocity.y,0,.05f);near(body.position.x,4.1f,.02f);
+        // Away from the wall is down it.
+        in.move={-1,0,0};body=fly(s,w,body,in,.8f);
+        near(body.velocity.y,-6,.05f);
+        in.move={};body=fly(s,w,body,in,1);
+        near(length(body.velocity),0,.05f);
+        in.jump=true;
+        const auto jump=s.predictNativeStep(1.f/60,in,w,body);
+        bool jumped{};
+        for(const auto& e:s.events())jumped|=e.kind==EventKind::WallJump;
+        check(jumped&&!s.wall().on,"the jump did not leave the wall");
+        check(jump.velocity.x<-5.5f&&jump.velocity.y>4.5f,"the jump did not go out and up");
+        // Gravity is back, and the wall does not take the body again as it goes.
+        body=fly(s,w,{jump.target,jump.velocity,false},in,.5f);
+        check(!s.wall().on&&body.velocity.y<2&&body.position.x<2,"the body did not fly off the wall");
+    });
+    test("a web pulls the body off its wall and never through it", [] {
+        Building w;Swing s(walled());Input in;
+        Body body=fly(s,w,{{0,10,0},{12,0,0},false},in,1.5f);
+        check(s.wall().on,"no wall");
+        // Something carries the body off (the game reports that velocity).
+        for(int i=0;i<30;++i) {
+            const auto intent=s.predictNativeStep(1.f/60,in,w,{body.position,{-4,0,0},false});
+            near(intent.velocity.x,-4,.01f);
+            body={intent.target,intent.velocity,false};
+        }
+        check(!s.wall().on&&body.position.x<2.6f,"the wall kept a body that was carried off it");
+        // Pushed into it, the body stays at the wall's clearance.
+        Swing held(walled());
+        body=fly(held,w,{{0,10,0},{12,0,0},false},in,1.5f);
+        for(int i=0;i<30;++i) {
+            const auto intent=held.predictNativeStep(1.f/60,in,w,{body.position,{9,0,0},false});
+            check(intent.target.x<4.11f&&intent.velocity.x<.01f,"the body went into its wall");
+            body={intent.target,intent.velocity,false};
+        }
+        check(held.wall().on,"pushing at the wall lost it");
+    });
+    test("up over a wall's top edge the body hops onto the roof", [] {
+        Building w;Swing s(walled());Input in;
+        Body body=fly(s,w,{{0,28,0},{12,0,0},false},in,1);
+        check(s.wall().on,"no wall");
+        in.move={1,0,0}; // up the wall, to its top at 30 m and over
+        body=fly(s,w,body,in,1.2f);
+        check(!s.wall().on,"the wall went on above its top");
+        check(body.position.y>30&&body.velocity.x>1,"the body was not pushed on over the roof");
+        in.move={};body=fly(s,w,body,in,.6f);
+        check(body.position.x>5&&!s.wall().on,"the body did not come over the roof");
+    });
+    test("at a walk the body steps round a corner onto the next wall; a run flies off it", [] {
+        Building w;Swing s(walled());Input in;
+        // On the wall x = 5, three metres from its end at z = -20.
+        Body body=fly(s,w,{{0,10,-17},{12,0,0},false},in,1.5f);
+        check(s.wall().on,"no wall");
+        in.move={0,0,-1};
+        body=fly(s,w,body,in,1.2f);
+        check(s.wall().on,"walking off the wall's end lost it");
+        near(s.wall().normal.z,-1,.01f);near(s.wall().normal.x,0,.01f);
+        check(body.position.x>5,"the body did not come round the corner");
+        // Along the next face, at its clearance.
+        in.move={1,0,0};body=fly(s,w,body,in,1.5f);
+        check(s.wall().on,"the next wall did not hold");
+        near(body.position.z,-20.9f,.03f);near(body.velocity.x,6,.05f);
+        // A run past the same corner goes on in the air.
+        Swing fast(walled());in.move={};
+        body=fly(fast,w,{{0,10,-12},{10,0,-12},false},in,.5f);
+        check(fast.wall().on&&body.velocity.z<-12,"no run");
+        body=fly(fast,w,body,in,1);
+        check(!fast.wall().on&&body.velocity.z<-9&&body.velocity.y<-1,"the run did not fly off the wall's end");
+    });
+    test("walls leave a grounded body and a swing without walls alone", [] {
+        Building w;Input in;
+        Swing off;
+        Body body=fly(off,w,{{0,10,0},{12,0,0},false},in,1);
+        check(!off.wall().on&&body.position.x>10,"a swing without walls stopped at one");
+        Swing s(walled());body={{3.9f,1,0},{4,0,0},true};
+        for(int i=0;i<30;++i) {
+            s.predictNativeStep(1.f/60,in,w,body);
+            check(!s.wall().on,"a wall took a body that stands");
+        }
+        // Along a wall, not into it: none takes it.
+        Swing beside(walled());
+        fly(beside,w,{{3.9f,10,0},{0,0,-10},false},in,.5f);
+        check(!beside.wall().on,"a wall took a body that passed it");
+        // Switched off during play, the wall lets go.
+        Swing live(walled());
+        fly(live,w,{{0,10,0},{12,0,0},false},in,1);
+        check(live.wall().on,"no wall");
+        live.allowWalls(false);
+        check(!live.wall().on,"walls switched off kept the body");
+    });
+    test("walked at a wall the standing body mounts it by the game's jump", [] {
+        // The wall x = 5 faces -x; the body stands against it, its centre a metre up.
+        Building w;Swing s(walled());Input in;
+        const Body stands{{4.5f,1,0},{},true};
+        for(int i=0;i<30;++i) {
+            s.predictNativeStep(1.f/60,in,w,stands);
+            check(!s.mounting(),"a body that stands at a wall wants up it without the stick");
+        }
+        // Walked at it for a tenth of a second, it wants up: the caller makes the jump.
+        in.move={1,0,0};
+        int steps=0;
+        while(!s.mounting()&&steps<30){s.predictNativeStep(1.f/60,in,w,stands);++steps;}
+        check(s.mounting()&&steps>=6&&steps<=8,"the mount did not come a tenth of a second into the walk");
+        check(!s.wall().on,"a wall took a body that stands");
+        // From the first step of that walk the caller keeps the stick from the game.
+        Swing first(walled());
+        first.predictNativeStep(1.f/60,in,w,stands);
+        check(first.mountBegun()&&!first.mounting(),"the walk at the wall did not begin a mount");
+        // The game's jump lifts it at 11 m/s: the wall has it at once, and it
+        // goes up the wall at the walk's speed, out at the wall's clearance.
+        auto intent=s.predictNativeStep(1.f/60,in,w,{{4.5f,1.2f,0},{2,11,0},false});
+        bool on{};
+        for(const auto& e:s.events())on|=e.kind==EventKind::WallOn;
+        check(on&&s.wall().on&&!s.mounting(),"the wall did not take the body as it left the ground");
+        check(length(intent.velocity)<6.05f,"the jump's speed went on up the wall");
+        // As its jump begins the game reports the body standing for one more
+        // step, and then moving as the wall's push out to its clearance moved
+        // it: the wall has it again, with no speed off it.
+        s.predictNativeStep(1.f/60,in,w,{{4.45f,1.3f,0},{0,11,0},true});
+        check(!s.wall().on,"a wall kept a body that stands");
+        intent=s.predictNativeStep(1.f/60,in,w,{{4.4f,1.4f,0},{-4,6,0},false});
+        check(s.wall().on,"the wall did not take the body again");
+        check(intent.velocity.x>-.01f,"the body went on off its wall");
+        Body body=fly(s,w,{intent.target,intent.velocity,false},in,.5f);
+        check(s.wall().on,"the wall let the climbing body go");
+        near(body.velocity.y,6,.05f);near(body.position.x,4.1f,.02f);
+        // The stick let go before the body left the ground: the jump already
+        // asked for still ends on the wall, at rest.
+        Swing late(walled());
+        for(int i=0;i<8;++i)late.predictNativeStep(1.f/60,in,w,stands);
+        check(late.mounting(),"no mount");
+        in.move={};
+        late.predictNativeStep(1.f/60,in,w,stands);
+        check(!late.mounting(),"the mount went on without the stick");
+        body=fly(late,w,{{4.5f,1.2f,0},{0,11,0},false},in,1);
+        check(late.wall().on&&length(body.velocity)<.05f,"the jump did not end on its wall");
+    });
+    test("a stroll past a wall, a glance at it, a kerb and a far wall mount nothing", [] {
+        Building w;Input in;
+        const Body stands{{4.5f,1,0},{},true};
+        const auto mounts=[&](const WorldQueries& world,Vec3 stick,Body body,SwingConfig c=walled()) {
+            Swing s(c);
+            in.move=stick;
+            bool wants{};
+            for(int i=0;i<30;++i){s.predictNativeStep(1.f/60,in,world,body);wants|=s.mounting();}
+            return wants;
+        };
+        check(mounts(w,{1,0,0},stands),"no mount head on");
+        check(mounts(w,normalized({1,0,.8f}),stands),"no mount within 45 degrees of head on");
+        check(!mounts(w,{0,0,1},stands),"the stick along the wall mounted it");
+        check(!mounts(w,{-1,0,0},stands),"the stick away from the wall mounted it");
+        check(!mounts(w,normalized({1,0,1.3f}),stands),"a glance at the wall mounted it");
+        check(mounts(w,{.4f,0,0},stands),"no mount at the tilt that walks the player");
+        check(!mounts(w,{.3f,0,0},stands),"a stick barely tilted mounted the wall");
+        check(!mounts(w,{1,0,0},{{3,1,0},{},true}),"a wall two metres off was mounted");
+        // A kerb, a car: nothing there above the body's head.
+        Building kerb;kerb.high.y=1.8f;
+        check(!mounts(kerb,{1,0,0},stands),"a kerb was mounted");
+        check(!mounts(w,{1,0,0},stands,SwingConfig{}),"a swing without walls mounts one");
+    });
+    test("the game's crawl hands its wall to the swing as the body leaves it", [] {
+        // The game has the body on the wall x = 5 in its crawl: its feet on
+        // the wall, and reported as standing.
+        Building w;Swing s(walled());Input in;
+        const Body crawls{{5,11,0},{0,2,0},true};
+        const RayHit wall{{5,10,0},{-1,0,0},7,true};
+        s.offerWall(wall);
+        s.predictNativeStep(1.f/60,in,w,crawls);
+        check(s.mounting()&&!s.wall().on,"the crawl's wall asked for no jump");
+        // The offer is for one step.
+        s.predictNativeStep(1.f/60,in,w,crawls);
+        check(!s.mounting(),"an offer went on by itself");
+        // The game's jump throws the body off the wall, out and down: the
+        // swing has it at once, at rest, and brings it out to the clearance.
+        s.offerWall(wall);
+        s.predictNativeStep(1.f/60,in,w,crawls);
+        const auto intent=s.predictNativeStep(1.f/60,in,w,{{4.7f,10.8f,0},{-7,-12,0},false});
+        check(s.wall().on&&!s.mounting(),"the swing did not take the crawl's wall");
+        near(length(intent.velocity),0,.01f);
+        const Body body=fly(s,w,{intent.target,intent.velocity,false},in,.5f);
+        near(body.position.x,4.1f,.02f);near(body.position.y,10.8f,.02f);
+        // A ceiling and a wall the swing may not take are not offered.
+        Swing under(walled());
+        under.offerWall({{0,3,0},{0,-1,0},7,true});
+        under.predictNativeStep(1.f/60,in,w,crawls);
+        check(!under.mounting(),"a ceiling was offered");
+        Swing off;
+        off.offerWall(wall);
+        off.predictNativeStep(1.f/60,in,w,crawls);
+        check(!off.mounting(),"a swing without walls took an offer");
+    });
+    test("pushed at a wall beside it a falling body takes the wall", [] {
+        Building w;Swing s(walled());Input in;
+        // Down a facade a metre off it, with no speed into it.
+        Body body=fly(s,w,{{4,20,0},{0,-8,0},false},in,.2f);
+        check(!s.wall().on,"a wall took a body that fell past it");
+        in.move={1,0,0};
+        body=fly(s,w,body,in,1.5f);
+        check(s.wall().on,"the stick did not take the wall");
+        near(body.velocity.y,6,.1f);near(body.velocity.x,0,.01f);
+        // Drifting off it as the stick takes it, the body stays.
+        Swing drifting(walled());
+        body=fly(drifting,w,{{4,20,0},{-2,-8,0},false},in,1);
+        check(drifting.wall().on&&body.position.x>3.9f,"a body drifting off the wall left it");
+        // Pushed away from it or along it, the fall goes on.
+        Swing past(walled());in.move={0,0,1};
+        body=fly(past,w,{{4,20,0},{0,-8,0},false},in,.5f);
+        check(!past.wall().on,"the stick along a wall took it");
+    });
     test("game rig rejects focus loss stale frames bad lenses and stalls", [] {
         GameTrackingRig rig;auto f=trackedFrame();
         rig.update(f,{},{0,0,-1},true);
@@ -768,6 +1076,117 @@ int main() {
         // Off the wall, the head comes back over the feet.
         const auto off=playFor(rig,f,feet,{0,1,0},.6f);
         check(!off.onSurface,"standing again kept the wall");near(off.head[12],10,.002f);
+    });
+    test("game rig turns the view onto a wall once the player has come to rest on it", [] {
+        // The swing's wall, its normal +x: the body's centre (a metre over the
+        // feet) 0.9 m off it, so the wall is at x = 9.1.
+        GameTrackingRig rig;auto f=trackedFrame();const Vec3 feet{10,20,30},n{1,0,0};
+        SurfaceHold wall{n,feet+Vec3{0,1,0}-n*.9f,12,false};
+        // A run along it never turns the view.
+        auto out=holdFor(rig,f,feet,wall,.5f);
+        check(!out.standing,"a run stood on the wall");near(out.viewTilt,0);
+        near(out.headPose.position.x,10);near(out.headPose.position.y,21.7f);
+        // At rest the wall becomes the floor: up along its normal, the floor on
+        // it under the body, a quarter turn in 0.15 s.
+        wall.speed=.5f;
+        out=holdFor(rig,f,feet,wall,.1f);
+        check(out.standing&&out.viewTilt>.9f&&out.viewTilt<1.3f,"the view did not turn at 600 degrees a second");
+        out=holdFor(rig,f,feet,wall,.3f);
+        near(out.viewTilt,1.5707963f,.001f);
+        near(length(out.headPose.orientation.rotate({0,1,0})-n),0,.001f);
+        near(out.headPose.position.x,9.1f+1.7f,.002f);near(out.headPose.position.y,21,.002f);
+        near(out.headPose.position.z,30,.002f);
+        // Hands and eyes go with the head, and hand motion turns with the view.
+        near(length(out.hands[0].position-(Vec3{9.1f+1.2f,21,30}+Vec3{0,.3f,-.5f})),0,.002f);
+        near(length(trackingTurn(out.swing).rotate({0,1,0})-n),0,.001f);
+        // The stick goes where the player looks along the wall: turned to face
+        // the wall as they stood, that is up it. The game gets it level.
+        f.head.orientation=Quat::yaw(1.5707963f);f.hands[0].stickY=1;
+        out=holdFor(rig,f,feet,wall,.1f);
+        near(length(out.swing.move-Vec3{0,1,0}),0,.002f);
+        near(out.walkRight,-1,.002f);near(out.walkForward,0,.002f);
+        check(length(out.headPose.orientation.rotate({0,0,-1})-Vec3{0,1,0})<.002f,"the player does not look up the wall");
+        // Walking it, however fast, the view stays.
+        wall.speed=6;f.hands[0].stickY=0;f.head.orientation={};
+        out=holdFor(rig,f,feet,wall,.5f);
+        check(out.standing,"walking the wall turned the view back");near(out.viewTilt,1.5707963f,.001f);
+        // No flip there: A is a jump off the wall.
+        rig.flips(true);f.jump=true;
+        out=holdFor(rig,f,feet,wall,.3f);
+        near(length(out.headPose.orientation.rotate({0,1,0})-n),0,.001f);
+        f.jump=false;rig.flips(false);
+        // The wall lets go: level again as fast, over the feet, facing as before.
+        out=holdFor(rig,f,feet,{},.4f);
+        check(!out.standing,"standing on no wall");near(out.viewTilt,0,.001f);
+        near(out.headPose.position.x,10,.002f);near(out.headPose.position.y,21.7f,.002f);
+        near(length(out.headPose.orientation.rotate({0,0,-1})-Vec3{0,0,-1}),0,.002f);
+        near(length(out.swing.tilt.rotate({0,1,0})-Vec3{0,1,0}),0,.001f);
+    });
+    test("game rig turns the view as soon as the player walks the wall, not on a run the stick steers", [] {
+        GameTrackingRig rig;auto f=trackedFrame();const Vec3 feet{10,20,30},n{1,0,0};
+        SurfaceHold wall{n,feet+Vec3{0,1,0}-n*.9f,12,false};
+        f.hands[0].stickY=1;
+        auto out=holdFor(rig,f,feet,wall,.5f);
+        check(!out.standing,"a steered run stood on the wall");near(out.viewTilt,0);
+        // At the walk's 6 m/s with the stick held, the wall is the floor in
+        // 0.15 s: a player who walked up a wall kept the upright view until
+        // they let go of the stick (October 10 headset report).
+        wall.speed=6;
+        out=holdFor(rig,f,feet,wall,.1f);
+        check(out.standing&&out.viewTilt>.9f,"walking the wall kept the view upright");
+        out=holdFor(rig,f,feet,wall,.2f);
+        near(out.viewTilt,1.5707963f,.001f);
+        // Without the stick the same speed is a run coming to rest: upright
+        // until it has.
+        GameTrackingRig coasting;auto g=trackedFrame();
+        out=holdFor(coasting,g,feet,wall,.3f);
+        check(!out.standing,"a body coasting at a walk's speed stood on the wall");
+        wall.speed=1;
+        out=holdFor(coasting,g,feet,wall,.3f);
+        check(out.standing,"a body at rest did not stand on the wall");
+    });
+    test("game rig turns a corner with the wall and keeps the heading when the wall lets go", [] {
+        GameTrackingRig rig;auto f=trackedFrame();const Vec3 feet{10,20,30};
+        // On the wall +x, looking along it (-z); round its end the next face is -z.
+        SurfaceHold wall{{1,0,0},feet+Vec3{0,1,0}-Vec3{1,0,0}*.9f,0,false};
+        auto out=holdFor(rig,f,feet,wall,.4f);
+        near(length(out.headPose.orientation.rotate({0,0,-1})-Vec3{0,0,-1}),0,.002f);
+        wall.normal={0,0,-1};wall.anchor=feet+Vec3{0,1,0}-wall.normal*.9f;
+        out=holdFor(rig,f,feet,wall,.4f);
+        near(length(out.headPose.orientation.rotate({0,1,0})-wall.normal),0,.002f);
+        // Still along the wall, the way the body went round the corner.
+        near(length(out.headPose.orientation.rotate({0,0,-1})-Vec3{-1,0,0}),0,.002f);
+        out=holdFor(rig,f,feet,{},.4f);
+        near(out.viewTilt,0,.001f);
+        near(length(out.headPose.orientation.rotate({0,0,-1})-Vec3{-1,0,0}),0,.002f);
+        near(length(out.headPose.orientation.rotate({0,1,0})-Vec3{0,1,0}),0,.002f);
+        near(length(out.headPose.position-(feet+Vec3{0,1.7f,0})),0,.003f);
+        near(out.swing.trackingYaw,1.5707963f,.002f);
+        check(out.swing.tilt.x==0&&out.swing.tilt.y==0&&out.swing.tilt.z==0,"a level player kept a tilt");
+    });
+    test("game rig stands on the game's wall crawl at once, or stands off it with the view kept upright", [] {
+        // The game's crawl: the actor's feet on the wall (+x), its up along it.
+        const Vec3 feet{10,20,30},n{1,0,0};
+        const SurfaceHold crawl{n,feet,3,true};
+        GameTrackingRig rig;auto f=trackedFrame();
+        holdFor(rig,f,feet,{},.2f);
+        auto out=holdFor(rig,f,feet,crawl,.6f,n);
+        check(out.standing,"the crawl did not turn the view");near(out.viewTilt,1.5707963f,.001f);
+        near(length(out.headPose.position-(feet+n*1.7f)),0,.003f);near(length(out.standOff),0,.002f);
+        // STAND ON WALLS off: upright, and stood off the wall as before.
+        GameTrackingRig upright;upright.standOnWalls(false);auto g=trackedFrame();
+        holdFor(upright,g,feet,{},.2f);
+        out=holdFor(upright,g,feet,crawl,.6f,n);
+        check(!out.standing&&out.onSurface,"the view turned with STAND ON WALLS off");near(out.viewTilt,0);
+        near(out.headPose.position.x,10.5f,.002f);near(out.headPose.position.y,21.7f,.002f);
+        // Switched off on the wall, the view turns back; reset() keeps the setting.
+        rig.standOnWalls(false);
+        out=holdFor(rig,f,feet,crawl,.6f,n);
+        near(out.viewTilt,0,.001f);near(out.headPose.position.x,10.5f,.002f);
+        upright.reset();
+        g.predictedDisplayTime+=1000;
+        out=holdFor(upright,g,feet,crawl,.6f,n);
+        check(!out.standing,"reset() switched STAND ON WALLS back on");
     });
     test("game rig head stays still while the actor rocks on the wall", [] {
         // Measured in the game (reports/wall-crawl.json): on the wall the
@@ -3992,12 +4411,15 @@ int main() {
                 check(c && *c, "an empty choice");
         }
         check(headings == 4 && all[0].item == Item::none && all[6].item == Item::none && all[8].item == Item::none &&
-                  all[14].item == Item::none,
+                  all[15].item == Item::none,
               "the sections: webs, body, comfort, experimental");
-        check(all[15].item == Item::flips && all[15].choices.empty() && std::strcmp(all[14].title, "EXPERIMENTAL") == 0,
+        check(all[16].item == Item::flips && all[16].choices.empty() && std::strcmp(all[15].title, "EXPERIMENTAL") == 0,
               "the flips: a switch under EXPERIMENTAL");
-        check(all.size() == 17 && all[16].item == Item::flipSpeed && all[16].choices.size() == std::size(flipSpeeds),
+        check(all.size() == 18 && all[17].item == Item::flipSpeed && all[17].choices.size() == std::size(flipSpeeds),
               "the flip speed under the flips, the last row");
+        check(all[14].item == Item::standOnWalls && all[14].choices.empty() &&
+                  std::strcmp(all[14].title, "STAND ON WALLS") == 0,
+              "standing on walls: a switch, the last row of COMFORT");
         check(all[12].item == Item::screenSize && all[13].item == Item::hud && all[13].choices.size() == 4 &&
                   std::strcmp(all[13].choices[0], "OFF") == 0 && std::strcmp(all[13].choices[3], "LARGE") == 0,
               "the HUD after the game screen's size: OFF, SMALL, MEDIUM, LARGE");
@@ -4069,6 +4491,10 @@ int main() {
         check(!defaults.flips && choice(Item::flips, defaults) == 0 && defaultChoice(Item::flips) == 0 &&
                   choose(Item::flips, 1, v) && v.flips && choice(Item::flips, v) == 1,
               "the experimental flips: OFF by default, a switch to ON");
+        check(defaults.standOnWalls && choice(Item::standOnWalls, defaults) == 1 &&
+                  defaultChoice(Item::standOnWalls) == 1 && choose(Item::standOnWalls, 0, v) && !v.standOnWalls &&
+                  !choose(Item::standOnWalls, 0, v) && choose(Item::standOnWalls, 1, v) && v.standOnWalls,
+              "standing on walls: ON by default, a switch");
         check(!defaults.triggerWebs && choice(Item::webButton, defaults) == 0 && defaultChoice(Item::webButton) == 0 &&
                   choose(Item::webButton, 1, v) && v.triggerWebs && choice(Item::webButton, v) == 1 &&
                   !choose(Item::webButton, 1, v) && !choose(Item::webButton, 2, v),

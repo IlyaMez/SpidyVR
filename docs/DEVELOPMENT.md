@@ -266,7 +266,27 @@ of impact:
   the game 3 s like a pause; reads every step of the player's mover and fails
   on an airborne step without Spidy's command or a jump in vertical speed.
   `--modules DIR` runs it with another build's movement and ray modules.
-- `tools/probe_wall_crawl.py`: how the game holds the player on a wall, in a
+- `tools/probe_wall_run.py`: the swing's own walls in a freshly started game
+  loaded with the virtual controller: finds the nearest wall with world rays,
+  jumps, webs it and reels in until the swing has the player on it, then
+  walks along it and up it with the swing input's stick, stops, and jumps off
+  with its jump; reads every step of the player's mover and fails if one of
+  the game's own wall states appeared, a step on the wall was not the swing's
+  in the air mode, the centre was not about 0.9 m from the wall (world rays),
+  or the walk, the stop or the jump were off. `--walls off` runs the same
+  approach with the game's wall crawl, for comparison.
+- `tools/probe_wall_mount.py`: walking up onto a wall, in a freshly started
+  game loaded with the virtual controller: onto the wall as above, down it to
+  the ground with the swing input's stick, then the swing's stick at the wall
+  (the mount: the probe presses the controller's A while the swing asks for
+  the game's jump, as the VR worker does), a climb, down again, and into the
+  wall with the controller's stick alone until the game's crawl begins (the
+  hand-over). Fails if the wall did not take the player within 1.5 s of the
+  stick, the game's crawl began during the mount, the climb was not the
+  swing's at the walk's speed and clearance, or, the game's crawl once
+  begun, the swing's wall did not have the player within 2 s and keep him.
+- `tools/probe_wall_crawl.py`: how the game holds the player on a wall, with
+  the swing's walls switched off, in a
   freshly started game loaded with the virtual controller: finds the nearest
   wall with world rays, jumps, webs it and reels in until the game sticks the
   player to it, reads the player's actor (feet, up) and mover every few
@@ -376,7 +396,10 @@ left and right, switch the experimental FLIPS (off by default;
 `GameTrackingRig::flips`, XrConfig options bit 11, XrData settings bit 32)
 and step their FLIP SPEED (90 to 480 degrees a second at full tilt of the
 left stick, 180 by default; `GameTrackingRig::flipSpeed`, XrConfig and XrData
-`flipSpeed`); XrConfig and XrData are version 19.
+`flipSpeed`), and switch STAND ON WALLS (on by default: walking a wall or
+stopped on it, the view turns so the wall is the floor; `GameTrackingRig::standOnWalls`, XrConfig
+options bit 13 for off, XrData settings bit 128); XrConfig and XrData are
+version 20.
 X resets a setting, Y the
 whole tab (to Spidy's defaults). Web grabbing, the web
 shooter, your body and punching are not in it or in the launcher's options
@@ -459,6 +482,22 @@ session that ends before VR starts writes `game-vr-<time>.json` with the
 for the game's queue failed), the game's log copy and `game_modules` (overlays
 and capture tools loaded into the game). The October 7 Steam Frame player's
 folder had neither: the launcher had stopped looking for the queue.
+
+A game that runs as administrator (Steam started as administrator, or
+`Spider-Man.exe` set to) is closed to a session that does not: Windows
+refuses opening its process (error 5, "Access is denied"), for reading too.
+`vr_launcher.wait_for_game` asks Windows whether Steam, then the game, runs
+as administrator (`elevated`: the process token's elevation, which Windows
+answers for a process it otherwise keeps closed) and ends the launch with
+`NeedsAdministrator`, for Steam before anything is changed or started. The
+session then exits with code 5 (`NEEDS_ADMINISTRATOR_EXIT`,
+`kNeedsAdministratorExit` in the launcher), at which the launcher's window
+asks to start again as administrator (`restartAsAdministrator`: the `runas`
+verb with `--wait-for <pid>`, as after an update). A game that refuses for
+5 s (`REFUSAL_PATIENCE`) without that explanation ends the launch naming a
+security program, or administrator rights as the first thing to try where
+Windows does not say how the game runs. The startup report's `administrator`
+says whether the session itself ran as administrator.
 
 The session has no 20-second cutoff. Close the game normally, or press Ctrl+C
 in the launcher console to stop VR and restore the hooks. Keep that console

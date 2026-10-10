@@ -3,14 +3,16 @@ VR eyes go.
 
     python tools/probe_wall_crawl.py
 
-A player who flies into a wall sticks to it (the game's wall crawl, HeroStateWallCrawl*). In VR that looked like
-clipping through the wall. The probe finds the nearest wall around the player with world rays, jumps with the
-virtual Xbox controller, shoots a web at the wall and reels in until the game holds the player on it, lets go and
-watches. Throughout it reads every native step of the player's mover, the player's actor (feet, up, forward) and
+A player who flies into a wall with the swing's own walls off (--no-wall-run; tools/probe_wall_run.py has them
+on) sticks to it: the game's wall crawl, HeroStateWallCrawl*, which also takes a player who walks into a wall. In VR
+that looked like clipping through the wall. The probe switches the swing's walls off, finds the nearest wall
+around the player with world rays, jumps with the virtual Xbox controller, shoots a web at the wall and reels in
+until the game holds the player on it, lets go and watches. Throughout it reads every native step of the player's mover, the player's actor (feet, up, forward) and
 its state machine's states. On the wall it measures with rays where the wall is from the feet along the actor's
 up, and how far from it the eyes are: placed upright from the feet, as before, and stood off it as GameTrackingRig
-does now. Then it jumps off and watches the actor come upright. The game window is saved on the wall and after
-the jump.
+does with STAND ON WALLS off. It also reads the surface the swing module reports for the view that stands on the
+wall (game_swing::Data's wall: 2, the game's crawl, with the wall's own normal from a ray while the actor rocks).
+Then it jumps off and watches the actor come upright. The game window is saved on the wall and after the jump.
 
 It needs a freshly started game in free roam whose save was loaded with the virtual controller
 (`tools/probe_menu_pad.py start`, then `pad a --until-player`), the player perched or standing with a building
@@ -128,7 +130,7 @@ def main():
         rays, report['ray_hash'] = prepare(
             game.pid, process, ROOT/'build/windows-ninja/spidy_ray_bridge.dll', ROOT/'reports/ray-modules',
             ('SpidyRayStart', 'SpidyRayStop', 'SpidyRaySubmit', 'SpidyRayData', 'SpidySwingStart',
-             'SpidySwingSubmit', 'SpidySwingStop', 'SpidySwingData'))
+             'SpidySwingSubmit', 'SpidySwingStop', 'SpidySwingData', 'SpidySwingSettings'))
 
         def invoke(address, payload, what):
             code = call_with_payload(process, address, payload)
@@ -141,6 +143,9 @@ def main():
         invoke(rays['SpidySwingStart'], struct.pack('<4I4QI2fI', 0x53574346, 1, 64, game.pid, game.base, record,
                                                     mover, motion_module, 30000, 32., 6., 0), 'Native swing start')
         swing_active = True
+        # game_swing::Settings v4: no web grab, 32 m/s, webs hold in open air, and the walls the game's.
+        invoke(rays['SpidySwingSettings'], struct.pack('<4IfIfI', 0x53575354, 4, 32, 0, 32., 1, 6., 0),
+               'Swing settings')
         started = time.monotonic()
         serial = ray_serial = 0
         target = None
@@ -162,7 +167,8 @@ def main():
                              mover_flags=hex(m['mover_flags']), collision_flags=hex(m['collision_flags']),
                              velocity=[round(v, 2) for v in m['velocity']])
             if s:
-                entry.update(owned=s['owned'], web=any(w['attached'] for w in s['webs']))
+                entry.update(owned=s['owned'], web=any(w['attached'] for w in s['webs']), surface=s['wall'],
+                             surface_normal=[round(v, 4) for v in s['wall_normal']])
             entry['states'] = state_names(game, pe, machine) if machine else None
             last = samples[-1] if samples else None
             if not last or elapsed-last['seconds'] >= .02 or entry.get('states') != last.get('states') or \
@@ -342,7 +348,19 @@ def summarize(report):
         upright_after = next((round(s['seconds']-off, 3) for s in samples if s['seconds'] > off and s['tilt'] < 10),
                              None)
     airborne = [s for s in samples if s.get('contact') == 2]
-    return dict(
+    # The surface the swing module reported while the actor was turned: the game's crawl (2), and how far its
+    # normal was from the wall's own, in degrees, against how far the actor's up was.
+    wall_normal = norm(report['wall']['normal']) if report.get('wall') else None
+    reported = [s for s in tilted if s.get('surface') == 2 and wall_normal]
+
+    def off(v):
+        return math.degrees(math.acos(max(-1., min(1., dot(norm(v), wall_normal)))))
+    surface = dict(
+        samples_turned=len(tilted), reported_as_crawl=len(reported),
+        reported_as_swing_wall=sum(1 for s in samples if s.get('surface') == 1),
+        normal_off_wall_deg_max=round(max((off(s['surface_normal']) for s in reported), default=0), 2),
+        actor_up_off_wall_deg_max=round(max((off(s['up']) for s in reported), default=0), 2))
+    return dict(surface=surface,
         held=report.get('held'), wall=report.get('wall'),
         tilted_seconds=round(tilted[-1]['seconds']-tilted[0]['seconds'], 3) if tilted else 0,
         tilt_on_wall=[min(s['tilt'] for s in tilted), max(s['tilt'] for s in tilted)] if tilted else None,

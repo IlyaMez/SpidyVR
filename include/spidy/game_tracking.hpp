@@ -35,7 +35,37 @@ struct GameMotionFrame {
     Vec3 standOff{};
     bool onSurface{};
     float surfaceHeight{}, surfaceClearance{};
+    // The player stands on the surface that holds them (SurfaceHold): the
+    // tracking space turns onto it; and how far it leans from the world's up
+    // now, radians (0 level, a quarter turn on a wall).
+    bool standing{};
+    float viewTilt{};
 };
+// The wall or ceiling that holds the player, as the swing module reports it
+// (game_swing::Data's wall): the swing's own wall, or the game's wall crawl.
+// The XR worker passes the swing's own walls only: how the game's crawl takes
+// the stick is not measured yet, and a view turned onto a wall wants the
+// stick to go where the player looks along it.
+struct SurfaceHold {
+    Vec3 normal{}; // out of the surface, unit; zero: none holds the player
+    Vec3 anchor{}; // the point of it under the player's body, in the world
+    float speed{}; // the player's speed, m/s
+    bool crawl{};  // the game's wall crawl: its actor's feet are on the surface
+};
+// Standing on a wall (the STAND ON WALLS setting). Once the player walks the
+// surface that holds them (the left stick tilted, slower than wallStrideSpeed:
+// the swing's walk is 6 m/s), or has come to rest on it (slower than
+// wallStandSpeed; in the game's crawl at once), the tracking space turns so
+// that the surface is its floor: up along the surface's normal, the floor
+// under the player's body on the surface, a quarter turn in 0.15 s
+// (wallTurnRate, radians a second). Players asked for it near instant:
+// looking up a wall they stick to strains the neck, and a slow turn of the
+// world is the uncomfortable kind. It stays so on the wall, round its
+// corners included, until the surface lets go; then it turns back level as
+// fast, and keeps the heading it has. A run along a wall never turns it.
+// At rest only, a player who walked up a wall kept the upright view until
+// they let go of the stick (October 10 headset report).
+constexpr float wallStandSpeed = 1.5f, wallStrideSpeed = 7.5f, wallTurnRate = 10.5f;
 // The game sticks the player to walls and ceilings (its wall crawl): the
 // feet on the surface, the actor's up along its normal. A head placed upright
 // from those feet is on the wall, or inside it. It stands off the surface
@@ -138,9 +168,9 @@ class GameTrackingRig {
   public:
     // surfaceUp: the up of the player's actor, the world's while it stands.
     // airborne: the player is in the air, so A or the left stick flips now
-    // (FlipMotion).
+    // (FlipMotion). surface: the wall or ceiling that holds the player.
     GameMotionFrame update(const XrFrame&, Vec3 playerFeet, Vec3 gameForward, bool gameplay,
-                           Vec3 surfaceUp = {0, 1, 0}, bool airborne = false);
+                           Vec3 surfaceUp = {0, 1, 0}, bool airborne = false, const SurfaceHold& surface = {});
     // How far a flick of the right stick turns the player (0: it does not);
     // 30 degrees until set. reset() keeps it.
     void snapTurn(float radians) {
@@ -175,6 +205,13 @@ class GameTrackingRig {
         buttonsChanged_ |= on != triggerWebs_;
         triggerWebs_ = on;
     }
+    // Whether the view turns onto a wall the player stands on (the STAND ON
+    // WALLS setting); on until set. Off, it stays upright: beside the swing's
+    // wall, stood off the game's crawl. Switched off on a wall, the view turns
+    // back level. reset() keeps it.
+    void standOnWalls(bool on) {
+        standOnWalls_ = on;
+    }
     void reset();
 
   private:
@@ -189,5 +226,11 @@ class GameTrackingRig {
     float snap_ = .5235988f, smooth_{};
     // The stand-off wanted along the surface's normal, and the time on it.
     float surfaceDepth_{}, surfaceSeconds_{};
+    // Standing on a wall: the turn of the level tracking space about the
+    // player's feet, in the world's axes, and the way its floor has gone
+    // from the feet onto the surface.
+    Quat surfaceTurn_{};
+    Vec3 surfaceShift_{};
+    bool standing_{}, standOnWalls_ = true;
 };
 } // namespace spidy

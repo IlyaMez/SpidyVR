@@ -36,6 +36,39 @@ struct SwingConfig {
     // if longer) are the anchor's own facade, ledges and sills, not a wall.
     float obstructionTime = .15f, anchorClearance = 1.5f;
     bool airAnchors = true; // A clear ray attaches at maximum reach, including open sky.
+    // Walls: a body in the air that comes into a wall stays on it (WallHold).
+    // The game held such a body still for a second and then stuck it to the
+    // wall in its crawl, which only a jump left (October 9 headset reports).
+    // On a wall the body keeps wallClearance between its centre and the wall,
+    // so the game's own collision never meets it, and stays on it within
+    // wallReach. A wall: fixed, its normal within wallSlope of level.
+    bool walls = false;
+    float wallClearance = .9f, wallReach = 1.5f, wallSlope = .5f;
+    // The speed along the wall goes on (a wall run), raised by up to
+    // wallCarry of itself for the speed that went into the wall; gravity does
+    // not pull along a wall. The stick walks the
+    // wall at wallWalkSpeed (what of it points into the wall goes up it) and
+    // steers a faster run; without it or a web a run slows by wallBrake a
+    // second, and below the walk's speed the body stops and stays.
+    float wallCarry = .35f, wallWalkSpeed = 6, wallAcceleration = 24, wallBrake = 3;
+    // A jump leaves the wall: out from it and up, on top of the speed along
+    // it; no wall takes the body again within wallJumpPause.
+    float wallJumpOut = 6, wallJumpUp = 5, wallJumpPause = .3f;
+    // A wall the ray misses for wallGrace is gone (a recess, the wall's end).
+    // Lost while the body went up it, the body hops over its top edge and is
+    // pushed on over the roof for crestSeconds.
+    float wallGrace = .15f, crestSeconds = .4f, crestPush = 12, crestHop = 4.5f;
+    // A body on the ground cannot come into a wall: the game walks it, and
+    // put one that walked into a wall on it in its own crawl (all five crawls
+    // of the October 10 headset report began so). Walked at a wall within
+    // mountReach for mountSeconds, such a body wants up onto it (mounting()):
+    // the caller has the game jump, and the wall takes the body as it leaves
+    // the ground, at a walk at most, and again within mountHold: as its jump
+    // begins the game reports the body standing once more for a step (in the
+    // game, October 10). A wall, not a kerb or a car: it is there mountHeight
+    // above the body too. In the air the stick takes a wall within mountReach
+    // the same way, with no speed into it.
+    float mountReach = 1.3f, mountSeconds = .1f, mountHold = .5f, mountHeight = 1.2f;
 };
 struct HandInput {
     Pose aim{};                // world space, -Z forward
@@ -81,7 +114,26 @@ struct WebShot {
     std::optional<Web> web;
     std::optional<RayHit> hit;
 };
-enum class EventKind { Attach, Miss, Release, Zip, PointLaunch, TrackingLost, Obstructed };
+// The wall the body is on (SwingConfig's walls).
+struct WallHold {
+    bool on{};
+    Vec3 normal{};    // out of the wall, unit
+    Vec3 point{};     // on the wall beside the body
+    float distance{}; // the body's centre from the wall
+    float seconds{};  // on walls since it came onto one
+};
+enum class EventKind {
+    Attach,
+    Miss,
+    Release,
+    Zip,
+    PointLaunch,
+    TrackingLost,
+    Obstructed,
+    WallOn,   // the body came onto a wall; strength: how hard it came into it
+    WallOff,  // it left the wall, or the wall ended
+    WallJump, // it jumped off the wall
+};
 struct Event {
     EventKind kind;
     int hand;
@@ -117,6 +169,33 @@ class Swing {
     // (the VR settings); off, it misses. Webs already attached
     // keep their anchors.
     void allowAirAnchors(bool allowed);
+    // Whether a body in the air stays on the walls it comes into from now on
+    // (SwingConfig's walls); off, it leaves the one it is on.
+    void allowWalls(bool allowed);
+    // Off the wall at once, with no jump (the caller lost track of the body).
+    // releaseAll() keeps the wall: the body stays on it without input.
+    void leaveWall();
+    const WallHold& wall() const {
+        return wall_;
+    }
+    // After a prediction: the body stands and wants up onto a wall, because
+    // the stick walks it at one or the caller offered one (SwingConfig's
+    // mountReach). The caller makes the game's jump while this holds.
+    bool mounting() const {
+        return mounting_;
+    }
+    // The same from the first moment the stick walks the standing body at a
+    // wall. The caller keeps the stick from the game meanwhile: the game's
+    // crawl takes a body 0.1 s after it meets a wall it is walked into (in
+    // the game, October 10), as soon as the mount's own wait.
+    bool mountBegun() const {
+        return mounting_ || mount_ > 0;
+    }
+    // Before a prediction: a wall the game holds the body on in its own way
+    // (its wall crawl), which the swing takes as soon as the body is off it.
+    // A body that does not stand is taken at once, and arrives at rest: the
+    // jump that took it off was not the player's.
+    void offerWall(const RayHit& wall);
     // A web shot now along `aim` (world space, -Z forward) with the body at
     // `from`, without shooting it: the same test a grip press makes.
     WebShot shot(Pose aim, Vec3 from, const WorldQueries&) const;
@@ -149,6 +228,16 @@ class Swing {
     void inputs(float dt, const Input&, const WorldQueries&);
     void step(float dt, const Input&, const WorldQueries&, const World* collision);
     void move(Vec3 target, const World* collision);
+    // Walls, once per update: follows the wall the body is on (round an
+    // inside corner, and at a walk round an outside one), or finds the wall
+    // it is coming into.
+    void senseWall(float dt, const Input&, const WorldQueries&);
+    void joinWall(const RayHit&);
+    // The body's velocity on its wall for one step: the stick's, the brake.
+    void wallMotion(float dt, const Input&);
+    // Keeps the body at the wall's clearance; `before`: its distance from
+    // the wall as the step began.
+    void holdWall(float dt, float before, const World* collision);
     void release(int hand, EventKind reason = EventKind::Release);
     // Whether a hit on the line from `from` to `anchor` is a real wall between them.
     bool blocks(const RayHit& hit, Vec3 from, Vec3 anchor) const;
@@ -167,5 +256,20 @@ class Swing {
     float sinceZip_ = 100, sinceLanding_ = 100, zipSpeed_{};
     Vec3 zipDirection_{};
     bool jumpHeld_{}, jumpQueued_{};
+    WallHold wall_{};
+    // Time the wall's ray has missed, time since a wall jump, and what is
+    // left of the push over a wall's top edge, against crestNormal_.
+    float wallLost_{}, sinceWallJump_ = 100, crest_{};
+    Vec3 crestNormal_{};
+    // Rounding a corner onto the wall's next face: the way along that face,
+    // and the time left to come in front of it.
+    Vec3 wrapWay_{};
+    float wrapLeft_{};
+    // Mounting from the ground: how long the stick has walked at a wall, the
+    // wall that takes the body once it is in the air and for how long yet,
+    // and whether the caller offered that wall (now, and the one kept).
+    RayHit mountWall_{};
+    float mount_{}, mountLeft_{};
+    bool mounting_{}, offered_{}, mountOffered_{};
 };
 } // namespace spidy

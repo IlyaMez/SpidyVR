@@ -46,6 +46,10 @@ struct Values {
     // second (the tab's FLIP SPEED; FlipMotion::speed): 180 since October 9,
     // a quarter slower than the flips' first 240.
     int flipSpeed = 180;
+    // Walking a wall or stopped on it, your view turns so that the wall is
+    // your floor (the tab's STAND ON WALLS; GameTrackingRig::standOnWalls);
+    // off, you stay upright beside it.
+    bool standOnWalls = true;
     bool operator==(const Values&) const = default;
 };
 // The steps the game's Settings offer. The launcher's slider sets any swing
@@ -91,8 +95,9 @@ enum class Item : uint8_t {
     webButton,
     hud,
     flipSpeed,
+    standOnWalls,
 };
-inline constexpr Item lastItem = Item::flipSpeed;
+inline constexpr Item lastItem = Item::standOnWalls;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. A setting without choices is an ON/OFF switch, the game's own;
 // one with choices steps through them. Titles are upper case, as the game's
@@ -103,7 +108,7 @@ struct Row {
     const char* help{};
     std::span<const char* const> choices{};
 };
-const std::array<Row, 17>& rows();
+const std::array<Row, 18>& rows();
 // The choice a setting shows for these values: a switch 0 (off) or 1 (on), a
 // list its step nearest to the value (a launcher value between two steps
 // shows the nearer one, the lower on a tie).

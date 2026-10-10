@@ -24,6 +24,8 @@ param(
     [switch]$NoCalibrationPrompt,
     [switch]$Flips,
     [switch]$TriggerWebs,
+    [switch]$NoStandOnWalls,
+    [switch]$NoWallRun,
     [switch]$NoEyeOcclusion,
     [switch]$StockMonitorView,
     [switch]$FullDesktopView,
@@ -70,7 +72,8 @@ Write-Host 'Keep the game window in front on the desktop: the game pauses while 
 Write-Host 'Click both thumbsticks to switch between immersive VR and a flat game screen in the headset.'
 Write-Host "VR settings are in the game's own Settings: pause, Settings, then SPIDY VR (Up from GAME reaches it)."
 Write-Host 'There change the web button, aim markers, webs in open air, swing speed, weight, your body calibration,'
-Write-Host 'snap turn, smooth turn, vibration, screen size, the HUD, and the experimental flips and flip speed during play.'
+Write-Host 'snap turn, smooth turn, vibration, screen size, the HUD, standing on walls, and the experimental flips and'
+Write-Host 'flip speed during play.'
 Write-Host "Press a $web to shoot that hand's web. Keep it held to swing; release it to let go."
 Write-Host "Swing speed cap: $SwingSpeed m/s. Press the $reel while a web is attached to reel in."
 if($TriggerWebs) { Write-Host 'Web button: the trigger (the grip reels in and shoots web balls).' }
@@ -80,6 +83,8 @@ $report=Join-Path $projectRoot "reports\game-vr-$stamp.json"
 $captureArgs=@()
 if($CaptureImages) { $captureArgs=@('--capture-images') }
 if($TriggerWebs) { $captureArgs+=@('--trigger-webs') }
+if($NoStandOnWalls) { $captureArgs+=@('--no-stand-on-walls'); Write-Host 'Stand on walls off: on a wall your view stays upright.' }
+if($NoWallRun) { $captureArgs+=@('--no-wall-run'); Write-Host "Wall running off: the game's own wall crawl takes you at a wall." }
 if($OverlayWebs) { $captureArgs+=@('--overlay-webs'); Write-Host 'Webs: Spidy overlay strands.' }
 else { Write-Host "Webs: the game's own web lines (add -OverlayWebs for Spidy's strands)." }
 if($NoWebGrab) { $captureArgs+=@('--no-web-grab'); Write-Host 'Web grab off: webs only swing.' }

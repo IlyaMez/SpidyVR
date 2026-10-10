@@ -9,6 +9,26 @@ sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'tools'))
 import vr_display as display
 import vr_launcher as launcher
 
+ELEVATED=launcher.elevated
+
+
+def no_real_processes(test):
+    """No test asks Windows about the processes running here (Steam, a game); nothing runs as administrator."""
+    for name,answer in (('elevated',False),('process_ids',[])):
+        patcher=patch.object(launcher,name,return_value=answer)
+        setattr(test,name,patcher.start())
+        test.addCleanup(patcher.stop)
+
+
+def clock(test):
+    """Time that passes only while the launcher sleeps; returns it as a one-item list."""
+    now=[0.]
+    for name,stand_in in (('monotonic',lambda: now[0]),('sleep',lambda seconds: now.__setitem__(0,now[0]+seconds))):
+        patcher=patch.object(launcher.time,name,stand_in)
+        patcher.start()
+        test.addCleanup(patcher.stop)
+    return now
+
 
 class FakeRegistry:
     """The game's keys: `values` is the graphics key, `keys` every key by path."""
@@ -38,6 +58,7 @@ class DesktopViewTests(unittest.TestCase):
     def setUp(self):
         self.folder=tempfile.TemporaryDirectory()
         self.backup=pathlib.Path(self.folder.name)/'reports'/'desktop-view-before-vr.json'
+        no_real_processes(self)
 
     def tearDown(self):
         self.folder.cleanup()
@@ -180,6 +201,9 @@ class DesktopViewTests(unittest.TestCase):
 
 
 class LauncherTests(unittest.TestCase):
+    def setUp(self):
+        no_real_processes(self)
+
     def test_player_requires_one_hero_and_matching_movement_record(self):
         game=Mock()
         hero=dict(kind='hero_local',actor_record='0x123')
@@ -240,6 +264,112 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(early.mock_calls,[call(42),call(43)])
         first.close.assert_called_once()
         second.close.assert_not_called()
+
+    def test_an_administrators_game_ends_the_launch_at_once(self):
+        # A player's Quest Link launch reported on October 10: "render memory module unavailable ([WinError 5])",
+        # three minutes of asking, then "No loaded player within three minutes. Load a save".
+        self.elevated.side_effect=lambda pid=None: pid==42
+        early=Mock()
+        with patch.object(launcher,'find_game',return_value=42),patch.object(launcher,'Game') as opened, \
+             patch.object(launcher.time,'sleep') as slept:
+            with self.assertRaisesRegex(launcher.NeedsAdministrator,'Spider-Man is running as administrator'):
+                launcher.wait_for_game(early=early,ready=lambda game: True)
+        self.assertEqual((early.mock_calls,opened.mock_calls,slept.mock_calls),([],[],[]))
+        # A launcher that runs as administrator itself goes on.
+        self.elevated.side_effect=lambda pid=None: True
+        game=Mock(pid=42)
+        with patch.object(launcher,'find_game',return_value=42),patch.object(launcher,'Game',return_value=game):
+            self.assertIs(launcher.wait_for_game(early=early,ready=lambda game: True),game)
+        early.assert_called_once_with(42)
+
+    def test_an_administrators_steam_is_refused_before_anything_changes(self):
+        missing=RuntimeError('Spider-Man is not running.')
+        self.process_ids.return_value=[7]
+        self.elevated.side_effect=lambda pid=None: pid==7
+        prepare=Mock()
+        with patch.object(launcher,'find_game',side_effect=missing), \
+             patch.object(launcher.pathlib.Path,'is_file',return_value=True), \
+             patch.object(launcher.subprocess,'Popen') as launch:
+            with self.assertRaisesRegex(launcher.NeedsAdministrator,'Steam runs as administrator'):
+                launcher.wait_for_game(prepare=prepare)
+        self.process_ids.assert_called_once_with('steam.exe')
+        self.assertEqual((prepare.mock_calls,launch.mock_calls),([],[]))
+        # A Steam that is not running and is set to run as administrator: Windows refuses starting it.
+        self.process_ids.return_value=[]
+        with patch.object(launcher,'find_game',side_effect=missing), \
+             patch.object(launcher.pathlib.Path,'is_file',return_value=True), \
+             patch.object(launcher.subprocess,'Popen',side_effect=OSError(None,'requires elevation',None,740)):
+            with self.assertRaisesRegex(launcher.NeedsAdministrator,'Steam runs as administrator'):
+                launcher.wait_for_game()
+        # Any other refusal to start Steam stays what it is.
+        with patch.object(launcher,'find_game',side_effect=missing), \
+             patch.object(launcher.pathlib.Path,'is_file',return_value=True), \
+             patch.object(launcher.subprocess,'Popen',side_effect=FileNotFoundError(2,'No such file')):
+            with self.assertRaises(FileNotFoundError): launcher.wait_for_game()
+
+    def test_a_game_that_keeps_refusing_ends_the_launch_with_the_reason(self):
+        now=clock(self)
+        denied=PermissionError(13,'Access is denied')
+        def refused(game=False,own=False):
+            self.elevated.side_effect=lambda pid=None: own if pid is None else game
+            now[0]=0.
+            with patch.object(launcher,'find_game',return_value=42),patch.object(launcher,'Game',side_effect=denied):
+                with self.assertRaises(RuntimeError) as raised: launcher.wait_for_game(ready=lambda game: True)
+            # Within the patience a starting process is given, not the three minutes.
+            self.assertAlmostEqual(now[0],launcher.REFUSAL_PATIENCE,delta=.1)
+            return raised.exception
+        # Nothing runs as administrator, or Spidy does too: something else on the PC guards the game.
+        for own in (False,True):
+            error=refused(own=own)
+            self.assertNotIsInstance(error,launcher.NeedsAdministrator)
+            self.assertRegex(str(error),'Access is denied.*security program')
+        # Windows does not say how the game runs: administrator rights are the first thing to try.
+        error=refused(game=None)
+        self.assertIsInstance(error,launcher.NeedsAdministrator)
+        self.assertRegex(str(error),'Access is denied.*may be running as administrator')
+        # An administrator's game that had no answer yet when it was first seen.
+        answers=iter([False,None])
+        self.elevated.side_effect=lambda pid=None: next(answers,pid==42)
+        now[0]=0.
+        with patch.object(launcher,'find_game',return_value=42),patch.object(launcher,'Game',side_effect=denied):
+            with self.assertRaisesRegex(launcher.NeedsAdministrator,'Spider-Man is running as administrator'):
+                launcher.wait_for_game(ready=lambda game: True)
+
+    def test_a_process_that_refuses_for_a_moment_is_opened(self):
+        now=clock(self)
+        game=Mock(pid=42)
+        denied=PermissionError(13,'Access is denied')
+        with patch.object(launcher,'find_game',return_value=42), \
+             patch.object(launcher,'Game',side_effect=[denied,denied,game]):
+            self.assertIs(launcher.wait_for_game(ready=lambda game: True),game)
+        self.assertAlmostEqual(now[0],.1)
+
+    def test_a_launch_that_runs_out_of_time_says_what_was_missing(self):
+        clock(self)
+        missing=RuntimeError('Spider-Man is not running.')
+        with patch.object(launcher,'find_game',side_effect=missing), \
+             patch.object(launcher.pathlib.Path,'is_file',return_value=True),patch.object(launcher.subprocess,'Popen'):
+            with self.assertRaisesRegex(RuntimeError,'did not start within three minutes'):
+                launcher.wait_for_game(ready=lambda game: True)
+        with patch.object(launcher,'find_game',return_value=42), \
+             patch.object(launcher,'Game',side_effect=OSError(None,'Only part of the request was completed',None,299)):
+            with self.assertRaisesRegex(RuntimeError,'could not open the game.*Only part'):
+                launcher.wait_for_game(ready=lambda game: True)
+        with patch.object(launcher,'find_game',return_value=42),patch.object(launcher,'Game',return_value=Mock(pid=42)), \
+             patch.object(launcher,'ready_player',return_value=False):
+            with self.assertRaisesRegex(RuntimeError,'No loaded player'): launcher.wait_for_game()
+
+    def test_windows_says_whether_this_process_runs_as_administrator(self):
+        self.assertIn(ELEVATED(),(True,False))
+        # A process that cannot be opened (the idle process): no answer, not a guess.
+        self.assertIsNone(ELEVATED(0))
+
+    def test_only_a_missing_administrator_right_offers_the_restart(self):
+        import run_game_vr
+        self.assertEqual(run_game_vr.exit_code(launcher.NeedsAdministrator('as administrator')),
+                         launcher.NEEDS_ADMINISTRATOR_EXIT)
+        self.assertEqual((launcher.NEEDS_ADMINISTRATOR_EXIT,run_game_vr.exit_code(RuntimeError('no headset')),
+                          run_game_vr.exit_code(PermissionError(13,'Access is denied'))),(5,2,2))
 
     def test_render_memory_module_retries_a_starting_process_but_not_its_own_refusal(self):
         exports=dict(SpidyRenderMemoryStart=0x1000,SpidyRenderMemoryStop=0x2000,SpidyRenderMemoryData=0x3000)

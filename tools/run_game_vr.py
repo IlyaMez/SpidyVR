@@ -25,7 +25,8 @@ from probe_stereo import frame_snapshot, render_memory_snapshot, snapshot as ste
 from probe_native_rays import snapshot as ray_snapshot
 from probe_game_swing import snapshot as swing_snapshot
 from probe_native_motion import snapshot as motion_snapshot
-from vr_launcher import LauncherLock, alive, bring_to_front, wait_for_game, enlarge_render_memory, RENDER_MEMORY_HOOKS
+from vr_launcher import (LauncherLock, alive, bring_to_front, wait_for_game, enlarge_render_memory, elevated,
+                         RENDER_MEMORY_HOOKS, NeedsAdministrator, NEEDS_ADMINISTRATOR_EXIT)
 import vr_display
 import xr_runtime
 
@@ -390,7 +391,7 @@ def start_settings(a):
                 swing_speed=round(a.swing_speed, 1), weight=a.weight,
                 snap_turn=a.snap_turn, smooth_turn=a.smooth_turn, haptics=a.haptics, screen_size=a.screen_size,
                 flips=a.flips, flip_speed=a.flip_speed, trigger_webs=a.trigger_webs, hud=a.hud,
-                eye_height_mm=a.eye_height,
+                stand_on_walls=not a.no_stand_on_walls, eye_height_mm=a.eye_height,
                 arm_length_mm=a.arm_length, calibration_prompt=not a.no_calibration_prompt)
 
 
@@ -434,7 +435,7 @@ def snapshot(game, address):
         raw = game.read(address, 800)
         if len(raw) != 800:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53585244, 19, 800):
+        if struct.unpack_from('<3I', raw) != (0x53585244, 20, 800):
             raise RuntimeError('Game XR protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -485,8 +486,9 @@ def snapshot(game, address):
         phase, hint, progress = struct.unpack_from('<2If', raw, 752)
         eye_height, arm_length, calibrations, skips, calibration_flags = struct.unpack_from('<5I', raw, 764)
         reach = struct.unpack_from('<2f', raw, 784)
-        # The flip speed: degrees a second at full tilt of the left stick.
-        flip_speed, = struct.unpack_from('<I', raw, 792)
+        # The flip speed: degrees a second at full tilt of the left stick. Then how far the view leans from the
+        # world's up now, degrees: 90 while the player stands on a wall (STAND ON WALLS).
+        flip_speed, view_tilt = struct.unpack_from('<If', raw, 792)
         result.update(vr_settings=dict(aim_markers=bool(aim_markers), web_grab=bool(flags & 1),
                                        air_webs=bool(flags & 8), web_shooter=bool(flags & 16),
                                        punch=bool(flags & 2), body=bool(flags & 4),
@@ -494,6 +496,7 @@ def snapshot(game, address):
                                        smooth_turn=smooth_turn, haptics=haptics, screen_size=screen_size,
                                        flips=bool(flags & 32), flip_speed=flip_speed,
                                        trigger_webs=bool(flags & 64), hud=hud,
+                                       stand_on_walls=bool(flags & 128),
                                        eye_height_mm=eye_height, arm_length_mm=arm_length,
                                        calibration_prompt=not calibration_flags & 1),
                       setting_changes=changes,
@@ -510,7 +513,7 @@ def snapshot(game, address):
         stand_off, height, clearance = struct.unpack_from('<3f', raw, 732)
         result.update(surface=dict(entries=entries, frames=frames, hero_up=[round(v, 3) for v in up],
                                    stand_off_m=round(stand_off, 3), head_height_m=round(height, 3),
-                                   head_clearance_m=round(clearance, 3)))
+                                   head_clearance_m=round(clearance, 3), view_tilt_deg=round(view_tilt, 1)))
         return result
     return None
 
@@ -888,6 +891,12 @@ def had_vr(pid, modules_of=modules):
         return False  # closing, or still being set up; the XR start refuses a second session anyway
 
 
+def exit_code(error):
+    """What a session that could not start tells the launcher's window: 2, or the code at which it offers to
+    start again as administrator."""
+    return NEEDS_ADMINISTRATOR_EXIT if isinstance(error, NeedsAdministrator) else 2
+
+
 def settle_display(running):
     """Restore the game settings saved for a VR launch (vr_display) once the game has closed."""
     if not vr_display.pending() or getattr(settle_display, 'deferred', False):
@@ -925,6 +934,12 @@ def main():
     p.add_argument('--flip-speed', type=int, default=180,
                    help='How fast a flip turns you at full tilt of the left stick, in degrees a second (90..480; '
                         'default 180)')
+    p.add_argument('--no-stand-on-walls', action='store_true',
+                   help='Walking a wall or stopped on it, your view stays upright beside it instead of turning so '
+                        'that the wall is your floor')
+    p.add_argument('--no-wall-run', action='store_true',
+                   help="A player who flies into a wall is the game's, as before: its wall crawl holds him still, "
+                        'then sticks him to the wall (for comparison; no setting offers it)')
     p.add_argument('--trigger-webs', action='store_true',
                    help='The trigger shoots and holds webs, and the grip reels in and shoots web balls (the two '
                         'swapped)')
@@ -1004,6 +1019,8 @@ def session(a, startup):
         watch_stop_event(a.stop_event)
     # First: nothing later can start VR in such a game.
     startup.stage = 'checking the running game'
+    # An administrator's game is closed to a session without those rights (NeedsAdministrator).
+    startup.fields['administrator'] = elevated()
     if game_running() and had_vr(find_game()):
         raise RuntimeError(VR_RAN)
     startup.stage = 'finding the headset'
@@ -1103,7 +1120,7 @@ def session(a, startup):
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
                                            'SpidyBodyData', 'SpidySlowMotionData', 'SpidyHudData'))
-        config = struct.pack('<4I7Q2IfI', 0x53585243, 19, 648, game.pid, game.base, queue,
+        config = struct.pack('<4I7Q2IfI', 0x53585243, 20, 648, game.pid, game.base, queue,
                              bridge_module, ray_module, motion_module, 0, 0,
                              int(a.seconds*1000), a.size, a.swing_speed,
                              int(a.capture_images) | (2 if a.overlay_webs else 0) |
@@ -1112,7 +1129,8 @@ def session(a, startup):
                              (64 if a.no_punch else 0) | (128 if a.no_aim_markers else 0) |
                              (256 if a.no_air_webs else 0) | (512 if a.no_web_shooter else 0) |
                              (1024 if a.no_calibration_prompt else 0) | (2048 if a.flips else 0) |
-                             (4096 if a.trigger_webs else 0)) + \
+                             (4096 if a.trigger_webs else 0) | (8192 if a.no_stand_on_walls else 0) |
+                             (16384 if a.no_wall_run else 0)) + \
             runtime_path(manifest) + struct.pack('<10I', a.snap_turn, a.haptics, a.screen_size, a.smooth_turn,
                                                  a.render_scale, a.weight, a.eye_height, a.arm_length, a.hud,
                                                  a.flip_speed)
@@ -1437,4 +1455,4 @@ if __name__ == '__main__':
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
         print(f'Spidy VR unavailable: {error}', file=sys.stderr)
         settle_display(game_running())
-        sys.exit(2)
+        sys.exit(exit_code(error))

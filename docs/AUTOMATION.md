@@ -175,8 +175,12 @@ holding, done; `hint`: what the panel asks for; `progress`; `done` and
 `skipped` this session; `reach_m`, each arm at the last one) and, in
 `vr_settings`, `eye_height_mm`, `arm_length_mm` and `calibration_prompt`, so
 the session's last line hands a calibration made or skipped to the launcher;
-`body` has `arm_scale`. XrConfig and XrData are version 19 (648 and 800
-bytes; `hud`, the HUD setting, 0 off to 3 large, is in `vr_settings` and
+`body` has `arm_scale`. XrConfig and XrData are version 20 (648 and 800
+bytes; `stand_on_walls` is in `vr_settings`, off with `--no-stand-on-walls`,
+and `surface.view_tilt_deg` is how far the view leans now, 90 standing on a
+wall; `--no-wall-run` leaves walls to the game's crawl; swing samples carry
+`wall` (0 none, 1 the swing's wall, 2 the game's crawl), `wall_normal`,
+`wall_distance`, `walls` and `wall_jumps`, swing data version 4; `hud`, the HUD setting, 0 off to 3 large, is in `vr_settings` and
 `--hud`; `flip_speed`, degrees a second at full tilt, in `vr_settings` and
 `--flip-speed`); the body's status is version 2 (144 bytes).
 
@@ -373,8 +377,10 @@ starts the fight: thugs around may shoot the standing hero.
 ### The SPIDY VR tab in the game's Settings
 
 `python tools/probe_menu.py` after `tools/probe_menu_pad.py start` and
-`pad a --until-player` (a loaded save, in free roam or anywhere the pause menu
-has Settings fifth): it starts the tab's hooks with test values
+`pad a --until-player` (a loaded save, anywhere the pause menu has Settings
+above its last line, which Up twice from RESUME reaches: a hideout's or a
+mission's menu has ABANDON MISSION more than free roam's): it starts the tab's
+hooks with test values
 (`SpidyMenuStart`: 33 m/s, the web shooter off), pauses with the virtual Xbox
 controller, moving with its left stick as the Touch controllers do, opens
 Settings, goes Up to SPIDY VR and opens it, then sets WEB BUTTON to TRIGGER,
@@ -383,12 +389,12 @@ switches webs in open air off and resets them with X, steps the swing speed to
 40 m/s and the weight to 100%, sets CALIBRATE BODY to ON RESUME (a calibration
 asked for; without a headset nothing calibrates), snap turn to 45 degrees,
 smooth turn to 60 degrees a second, steps the HUD from MEDIUM to SMALL and
-OFF, switches the experimental FLIPS on, steps FLIP SPEED from 180 to 240
-degrees a second, and resets the tab with Y and A (23 changes in all; the web
-shooter, which the tab does not offer, stays off). The menu probe's structs
-are version 5. The FLIPS step is new on October 8 (thirteenth build), the WEB
-BUTTON step on October 9, the HUD steps in its seventh build, the FLIP SPEED
-step in its ninth; none has run in the game yet.
+OFF, switches STAND ON WALLS off, switches the experimental FLIPS on, steps
+FLIP SPEED from 180 to 240 degrees a second, and resets the tab with Y and A
+(25 changes in all; the web shooter, which the tab does not offer, stays
+off). The menu probe's structs are version 5 (flag 512: STAND ON WALLS). All
+20 steps passed in the game on October 10 (second build), the first run with
+the FLIPS, WEB BUTTON, HUD, FLIP SPEED and STAND ON WALLS steps.
 After each step
 it reads `SpidyMenuSample` (what the tab holds, the tabs built, the changes)
 and captures the window. It fails if a step left other values than expected or
@@ -432,10 +438,67 @@ the player landed within a window, a gravity over 30 m/s² was not refused
 (2001), a module did not stop, or a hook entry was not restored. Report:
 `reports/weight-probe.json` (`--output`).
 
+### Walls the swing keeps the player on
+
+`python tools/probe_wall_run.py` after `tools/probe_menu_pad.py start` and
+`pad a --until-player` (a loaded save; a building within 50 m). It finds the
+nearest wall as the crawl probe below does, jumps with the virtual
+controller's A, webs the wall and reels until the swing reports the player on
+its own wall (`wall` 1), lets the web go and waits, then gives the swing
+input's stick along the wall for 1.5 s, at the wall (up it) for 1.5 s, none
+for 0.8 s, and its jump. It records every step of the mover, the swing's wall
+state and the actor, and casts a ray from the player's centre at the wall in
+each phase. It fails unless the swing took the player; none of the game's own
+wall states appeared from the reel to the jump (the mover sweeping out of the
+air mode while unsupported, `0x2060005`, or the actor tilted past 45
+degrees); every step on the wall was driven in the air mode; the centre was
+0.65 to 1.25 m from the wall; the walk reached 4.5 m/s along and up; the stop
+was under 0.3 m/s; the jump left at over 3 m/s out and 2 up and the wall did
+not take the player again; the modules stopped and the hook entries were
+restored. `--walls off` sends the swing's settings with the walls the game's
+and records what the game does with the same approach (no checks but the
+clean stop). Report: `reports/wall-run.json` (`--output`), the game window on
+the wall and after the jump in `reports/wall-run/`. A run took 10 s after the
+save loaded (October 10); each needs a fresh game.
+
+### Walking up onto a wall
+
+`python tools/probe_wall_mount.py` after `tools/probe_menu_pad.py start` and
+`pad a --until-player` (a loaded save; a building within 50 m). It gets the
+player onto the nearest wall as the probe above does and walks him down it
+with the swing input's stick (away from the wall is down it) until the game
+stands him. The mount: the swing's stick at the wall for up to 3 s, the
+virtual controller's A pressed while the swing's data has `takeoff` (the
+game's jump, which the VR worker presses in a session), until `wall` is 1;
+then 1.5 s more of the stick (the climb) and 0.8 s of none. The hand-over:
+down the wall again, the controller's stick forward for 0.35 s to see which
+way it walks him, then that stick at the wall, the swing given none, until
+the actor turns (the game's crawl) or `mount` is 2; if the swing's wall took
+him first (off a ledge he falls at the wall), down again and once more from
+the ground below, up to three times. The controller's stick stops while
+`mount` is set, as the worker's does. It fails unless the wall took him
+within 1.5 s of the stick; no sample of the mount had the actor past 30
+degrees or the crawl's collision mode (`0x2060005`); the climb's median speed
+up was over 4.5 m/s with every step the swing's; his centre was 0.65 to
+1.25 m from the wall climbing and stopped (world rays); and, where the game's
+crawl began, the swing's wall had him within 2 s of it, still 1.5 s later,
+at that clearance by the swing's own normal for the wall. Its summary has the
+times from the stick to `mount`, the jump, the ground left and the wall, and
+from the crawl's first sample to the jump, the first step on the swing's wall
+and the step from which it kept him. Report: `reports/wall-mount.json`
+(`--output`), the game window in `reports/wall-mount/`. A run took 25 s after
+the save loaded (October 10); each needs a fresh game.
+
 ### Walls the game sticks the player to
 
 `python tools/probe_wall_crawl.py` after `tools/probe_menu_pad.py start` and
 `pad a --until-player` (the same loaded save; a building within 50 m). It
+switches the swing's own walls off (they would take the player first), and
+its summary's `surface` has what the swing reported while the actor was
+turned: the game's crawl (`wall` 2) and how far its normal was from the
+wall's own against how far the actor's up was. On October 10 it did not
+reach the crawl from the user's save (a wall 17.7 m off: the reel ended with
+the player hanging on the web 1.5 m from it). It
 casts 48 world rays from the hand (16 headings, level and 12 degrees up and
 down) and takes the nearest wall 6-50 m away, preferring one level or above,
 jumps with the virtual controller's A, webs the wall and reels until the

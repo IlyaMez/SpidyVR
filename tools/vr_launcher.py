@@ -11,7 +11,7 @@ import pathlib
 import subprocess
 import time
 from bridge_game import prepare as load_module
-from capture_game_state import Game, LIVE_VTABLES, find_game, open_process, close
+from capture_game_state import Game, LIVE_VTABLES, find_game, open_process, close, process_ids
 from observe_game import call_remote
 
 ROOT=pathlib.Path(__file__).resolve().parents[1]
@@ -23,9 +23,28 @@ RENDER_RING_MB=512
 # game's start, so they are no sign of another session's leftovers.
 RENDER_MEMORY_HOOKS=(0x1872d90,0x1872b90)
 STEAM_APP_ID='1817070'
-_exit_code=c.WinDLL('kernel32',use_last_error=True).GetExitCodeProcess
+# Seconds a new game process may refuse to be opened before the refusal counts as final.
+REFUSAL_PATIENCE=5
+# The session's exit code for NeedsAdministrator: the launcher's window then offers to start again as
+# administrator (kNeedsAdministratorExit in include/spidy/launcher_text.hpp).
+NEEDS_ADMINISTRATOR_EXIT=5
+RUN_AS_ADMINISTRATOR='start Spidy as administrator too (right-click Spidy Launcher > Run as administrator)'
+STEAM_AS_ADMINISTRATOR=('Steam runs as administrator on this PC, so the game it starts does too, and Windows keeps '
+                        f'Spidy out of such a game. Either {RUN_AS_ADMINISTRATOR}, or have Steam start without '
+                        'administrator rights; then press START VR.')
+GAME_AS_ADMINISTRATOR=('Spider-Man is running as administrator, and Windows keeps Spidy out of such a game. Close '
+                       f'the game, {RUN_AS_ADMINISTRATOR}, then press START VR.')
+_kernel32=c.WinDLL('kernel32',use_last_error=True)
+_exit_code=_kernel32.GetExitCodeProcess
 _exit_code.argtypes=[w.HANDLE,c.POINTER(w.DWORD)]
 _exit_code.restype=w.BOOL
+_current_process=_kernel32.GetCurrentProcess
+_current_process.restype=w.HANDLE
+_advapi32=c.WinDLL('advapi32',use_last_error=True)
+_open_token=_advapi32.OpenProcessToken
+_open_token.restype,_open_token.argtypes=w.BOOL,(w.HANDLE,w.DWORD,c.POINTER(w.HANDLE))
+_token_information=_advapi32.GetTokenInformation
+_token_information.restype,_token_information.argtypes=w.BOOL,(w.HANDLE,c.c_int,c.c_void_p,w.DWORD,c.POINTER(w.DWORD))
 _user32=c.WinDLL('user32',use_last_error=True)
 for _function,_result,_arguments in (
         (_user32.GetForegroundWindow,w.HWND,()),(_user32.SetForegroundWindow,w.BOOL,(w.HWND,)),
@@ -49,6 +68,47 @@ class _Input(c.Structure):
 def alive(game):
     code=w.DWORD()
     return bool(game.handle and _exit_code(game.handle,c.byref(code)) and code.value==259)
+
+
+class NeedsAdministrator(RuntimeError):
+    """The game runs as administrator and this session does not, so Windows refuses every way into the
+    game. Nothing but starting Spidy as administrator, or the game without, changes that."""
+
+
+def elevated(pid=None):
+    """Whether a process (this one by default) runs as administrator; None where Windows does not say.
+
+    Windows answers this for a process it otherwise keeps closed: an administrator's game refuses
+    reads and writes to a program without those rights, but not this question.
+    """
+    process=_current_process() if pid is None else open_process(0x1000,False,pid)
+    if not process: return None
+    token=w.HANDLE()
+    try:
+        if not _open_token(process,0x0008,c.byref(token)): return None
+        try:
+            value,size=w.DWORD(),w.DWORD()
+            # TokenElevation
+            return bool(value.value) if _token_information(token,20,c.byref(value),4,c.byref(size)) else None
+        finally: close(token)
+    finally:
+        if pid is not None: close(process)
+
+
+def refusal(pid,error):
+    """Why Windows keeps refusing Spidy the game process `pid`, as the error that ends the launch."""
+    if not elevated():
+        game=elevated(pid)
+        if game: return NeedsAdministrator(GAME_AS_ADMINISTRATOR)
+        if game is None:
+            return NeedsAdministrator(
+                f'Windows refuses Spidy access to the game ({error}). The game may be running as administrator or '
+                f'under another Windows account: close it, {RUN_AS_ADMINISTRATOR}, then press START VR. If that '
+                'changes nothing, a security program is guarding the game: allow the Spidy folder in it.')
+    return RuntimeError(
+        f'Windows refuses Spidy access to the game ({error}), and not because the game runs as administrator: a '
+        'security program (antivirus) on this PC is probably keeping Spidy out. Allow the Spidy folder in it, '
+        'close the game, then press START VR.')
 
 
 def bring_to_front(pid,wait=.5):
@@ -173,15 +233,22 @@ def wait_for_game(timeout=180,prepare=None,early=None,ready=None):
     if pid is None:
         steam=steam_executable()
         if not steam: raise RuntimeError('Steam was not found. Start Spider-Man and run this launcher again.')
+        # Before anything is changed or started: an administrator's Steam starts an administrator's game.
+        if not elevated() and any(elevated(process) for process in process_ids('steam.exe')):
+            raise NeedsAdministrator(STEAM_AS_ADMINISTRATOR)
         if prepare: prepare()
         # -nolauncher is present in the supported Spider-Man executable.
-        subprocess.Popen([str(steam),'-applaunch',STEAM_APP_ID,'-nolauncher'])
+        try: subprocess.Popen([str(steam),'-applaunch',STEAM_APP_ID,'-nolauncher'])
+        except OSError as error:
+            # ERROR_ELEVATION_REQUIRED: a Steam that is not running yet, set to run as administrator.
+            if getattr(error,'winerror',None)!=740: raise
+            raise NeedsAdministrator(STEAM_AS_ADMINISTRATOR) from error
         print('Starting Spider-Man. Select your save and Continue; VR will attach automatically.'
               if ready is ready_player else 'Starting Spider-Man.',flush=True)
     else:
         print('Using the running game. Load your save; VR will attach automatically.'
               if ready is ready_player else 'Using the running game.',flush=True)
-    game=prepared=None
+    game=prepared=refused=unopened=None
     started=time.monotonic()
     try:
         while time.monotonic()-started<timeout:
@@ -194,18 +261,31 @@ def wait_for_game(timeout=180,prepare=None,early=None,ready=None):
             if game is None or game.pid!=current:
                 if game: game.close()
                 game=None
-                # First: checking the executable takes half a second of the three there are.
-                if early and current!=prepared:
-                    prepared=current
-                    early(current)
+                if current!=prepared:
+                    prepared,refused=current,None
+                    # An administrator's game stays closed to this session however long it asks. A player's
+                    # launch reported on October 10 asked for three minutes, then blamed a save not loaded.
+                    if not elevated() and elevated(current): raise NeedsAdministrator(GAME_AS_ADMINISTRATOR)
+                    # First: checking the executable takes half a second of the three there are.
+                    if early: early(current)
                 try: game=Game(current)
-                except OSError:
-                    time.sleep(.05); continue  # the process is still being set up
+                except OSError as error:
+                    unopened=error
+                    # A process still being set up refuses for a moment; one that keeps refusing is closed.
+                    if isinstance(error,PermissionError):
+                        if refused is None: refused=time.monotonic()
+                        if time.monotonic()-refused>=REFUSAL_PATIENCE: raise refusal(current,error) from error
+                    time.sleep(.05); continue
             if ready(game):
                 if ready is ready_player: print('Player found. Starting VR.',flush=True)
                 return game
             time.sleep(.5)
-        raise RuntimeError('No loaded player within three minutes. Load a save, then run the launcher again.')
+        if game: raise RuntimeError('No loaded player within three minutes. Load a save, then run the launcher again.')
+        if prepared is None:
+            raise RuntimeError('Spider-Man did not start within three minutes. Look at Steam: it may be updating '
+                               'the game or asking something. Then press START VR again.')
+        raise RuntimeError(f'Spidy could not open the game within three minutes ({unopened}). Close the game, '
+                           'then press START VR again.')
     except BaseException:
         if game: game.close()
         raise

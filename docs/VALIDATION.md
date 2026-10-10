@@ -1,6 +1,218 @@
-# Validation — 2026-10-09
+# Validation — 2026-10-10
 
-## FLIP SPEED, 180 degrees a second by default — current build
+## Walking up onto a wall, and the view while walking it — current build
+
+The user, October 10, after the first session with the walls: "frequently wall
+walking isnt triggred properly and the regular game wallcrawling mechanic
+clicks it, also when walking towards a wall and starting to walk on it the
+perspective change happens only once i let go of the joystick".
+
+**What the report shows.** `dist\Spidy-0.2.9\reports\game-vr-20261010-112053.json`
+(the second build, 627 s of samples; swing samples matched to the mover's by
+`source_step`, the XR samples by the best overlap of a turned view with the
+swing's wall: 105 samples later, 3417 of 3418 turned samples on it).
+The swing's walls took the player 46 times (`walls` 19 to 65), 8 jumps off.
+The game's crawl (`wall` 2: the actor turned, a ray down its up meets the
+wall) held him five times, 36.4 s in all: at 243.1 s (10.1 s), 430.0 s (9.6 s),
+439.7 s (7.0 s), 483.2 s (5.2 s) and 491.1 s (4.5 s), each straight out of a
+stretch on the ground, speed 3 to 5 m/s into a wall and then 0: at 429.68 s he
+stops against the wall, at 429.83 s the mover is `0x80a6` / `0x2060005` and
+rising. In the crawl the game reports the body as standing (`grounded` 1 in
+all 709 crawl samples), so the swing, which leaves a standing body alone,
+never saw a wall there. The view: `view_tilt_deg` 0 through all five. On the
+swing's walls it turned only below 1.5 m/s: from 73.5 s he walks up a wall at
+6.0 m/s for 29 s, tilt 0 until he stops; likewise 20.0 s (15 s), 203.6 s.
+Also in it, unchanged by this build: a walk up a wall over a ledge 3 to 4 m
+deep flies over the ledge onto the next wall (72.7 s, 500.4 s: the top edge's
+hop, 2.3 m high under the swing's gravity), and at 305.9 s a wall run at
+28.5 m/s met something on the wall no ray saw and stopped dead, the game's
+fall taking him for 0.45 s.
+
+**What changed.** `Swing::senseWall` takes the input. A standing body
+(`SwingConfig::mountReach` 1.3 m, `mountSeconds` 0.1, `mountHold` 0.5,
+`mountHeight` 1.2): a ray along the level stick (tilt 0.35 or more) meets a
+wall it faces within 45 degrees, and a second ray 1.2 m higher meets the same
+wall; held for 0.1 s, `mounting()`; from the first step, `mountBegun()`.
+`game_swing` runs a second `SwingTakeoff` on it (the game's jump: 60 ms
+released, pressed up to 160 ms) and reports `Data::mount` (1; the last field
+of version 4, unused before), on which the XR worker keeps the stick and the
+walking keys from the game (`swingNativeKeys` with the mount as owned flight,
+`game_pad::Walk` zero). Off the ground within `mountHold` of the last
+mounting step, the body joins that wall with its speed along it, at most the
+walk's; again if the game stood it in between. In the air a wall within
+`mountReach` that the stick faces within 60 degrees is joined with no closing
+speed, the speed off it removed. The game's crawl: its normal is now found
+before the solver's step, and while the game reports the body standing it is
+offered to the solver (`Swing::offerWall`), which asks for the same jump
+(`mount` 2) and joins that wall at rest. `GameTrackingRig`: standing latches
+below `wallStrideSpeed` (7.5 m/s) while the left stick is tilted past 0.2, as
+well as below `wallStandSpeed` (1.5).
+
+**Checked in the game, no headset** (`tools/probe_wall_mount.py`, the user's
+save at the Fisk site, the brick wall 17.7 m off, three fresh games):
+
+| | run 1 (first build of it) | run 3 (this build) |
+| --- | --- | --- |
+| stick at the wall to `mount` | 0.11 s (after the wait) | 0.00 s |
+| to the game's jump asked | 0.17 s | 0.16 s |
+| to off the ground, and on the swing's wall | 0.23 s | 0.22 s |
+| the game's crawl during the mount | none | none |
+| climb, stick held | lost the wall after 0.17 s | 6.0 m/s, every step the swing's |
+| centre from the wall (world ray) | 3.2 m, falling | 0.90 m climbing, 0.90 m stopped |
+| crawl began after meeting the wall | 0.09 s | 0.06 s |
+| crawl to the jump asked | 0.24 s | 0.23 s |
+| crawl to the swing's wall for good | never (2 steps, then off) | 0.66 s, at rest, 0.90 m |
+
+Run 1's failure, by its samples: at 14.547 s the mover leaves the ground
+(`grounded` 0) and the wall takes the body; the next step reports `grounded`
+1 again with the mover in its air flags (`0x80a0` / `0x2060010`, contact 0),
+the wall lets go and the command is given up; the step after, airborne, the
+body moves as the first command moved it, (-3.8, 6.0, 1.3) m/s: 4 m/s off the
+wall, the push out to the clearance. The stick took the wall again with that
+speed, which nothing removed, and 0.17 s later he was past the wall's reach.
+Run 2 (the fixes) passed the mount; its hand-over never met the game's crawl,
+because the controller walked the player off the 0.8 m ledge he stood on, and
+the swing's wall took him as he fell at the wall. The probe now goes down
+again from there and walks him into the wall from the ground. Run 3's
+hand-over: crawl at 23.266 s; `wall` 2 from 31 degrees of tilt (23.391 s);
+`mount` 2 and the jump asked for at 23.500 s; at 23.657 s the game leaves the
+crawl (`0x80a6` / `0x2060000`, contact 2, 78 degrees) and the swing has the
+wall for two steps; the game then stands him at the wall's foot (36 samples,
+0.19 s) and jumps (9.4 m/s up, 5.8 off the wall); at 23.907 s the swing has
+the wall again, brings him to 0.90 m and holds him at rest, the mover in the
+air mode, until the probe's own jump 1.3 s later.
+The save: `slot0-s.save` rewritten by the game at 12:03 (its autosave on
+loading); the other ten files byte-identical to the backup
+(`reports\backups\save-before-wall-mount-20261010-120230`).
+
+**Checks.** 226 core (5 new: "walked at a wall the standing body mounts it by
+the game's jump", "a stroll past a wall, a glance at it, a kerb and a far wall
+mount nothing", "the game's crawl hands its wall to the swing as the body
+leaves it", "pushed at a wall beside it a falling body takes the wall", "game
+rig turns the view as soon as the player walks the wall, not on a run the
+stick steers"), 22 launcher, 101 Python.
+
+**Not verified.** The headset: the hop, the view turning during the climb,
+mounts nobody meant (fights beside walls, walking up to something on a wall).
+The XR worker's part (the stick kept from the game during a mount) ran only
+as the probe's stand-in for it. The hand-over higher than a metre above the
+ground, except by the user's own A press in the 11:20 session (253.3 s).
+
+## Walls: run, stop, walk, jump, and a view that stands on them — preceding build
+
+The user, October 10: "autosticking, walking on walls and wallrunning feels
+prettly bad right now - autostick mechaninsm is clunlky both to get on and off
+a surface, you need to jump off walls using a, maybe lets align camera to
+orient by the new (floor). for wallrunning (specifically while actively
+swinging lets make it better feeling".
+
+**What the reports show.** The October 9 sessions (`dist\Spidy-0.2.7`
+15:37, `dist\Spidy-0.2.8` 19:51; motion and swing samples matched by time).
+A swing that meets a wall: the mover goes from `0x8020` / `0x2060010` to
+`0x80a0` / `0x2060000` at contact 2 (sweeping, out of the air mode, the game's
+air events stop). There a command with any part into the wall is carried out
+not at all, its part along the wall included (19:51 at 161.2 s: requested
+(29.1, -0.5, 13.3) m/s, achieved 0 for 1.0 s); one with none is (436.0 s),
+and the air mode comes back when the body has left the wall. After 1.0 s in
+that state the game turns the actor onto the wall (`0x80a6` / `0x2060005`, 0.6
+to 0.7 s), then holds it in its crawl (`0x8001` / `0x2060000`, contact 0),
+which the takeoff's jump leaves in 0.5 s when it lands outside the turn and
+1.4 s when it does not. 160.9 s to 164.0 s: 28 m/s to 0, 3.1 s on the wall.
+The game's classes for it (RTTI names in the executable): `HeroStateWallGrasp`,
+`HeroStateWallRunIdle`, `HeroStateWallRunToWallCrawl`, `HeroStateWallCrawlEnter`,
+`...Idle`, `...Move`, `...ToJump`.
+
+**What changed.** `Swing` (`SwingConfig::walls`, on in the game's swing):
+`senseWall` once a native step, `wallMotion` and `holdWall` each solver step.
+Off a wall three rays (the level heading and both its sides, 1.5 clearances
+plus the step's travel long) find a fixed surface within `wallSlope` of
+vertical that faces the ray; the body joins it when it closes on it faster
+than 0.5 m/s and would be within `wallClearance` (0.9 m, centre to wall) by
+the step's end. On it one ray down the wall's normal follows it (the normal
+eased over 0.08 s), one along the travel finds an inside corner, and, the
+wall's ray missing at a walk, one from beyond the wall's end finds the next
+face, which the body rounds at 3 m/s. Joining: the speed along the wall times
+min(|v|/along, 1 + `wallCarry` x into/|v|). On the wall: no gravity; the
+stick's direction with its part into the wall turned up the wall, at
+`wallWalkSpeed` (6 m/s) or the run's own speed that way, by `wallAcceleration`
+(24 m/s^2); without stick or web `wallBrake` (3 m/s^2) above the walk's speed
+and a stop below it; never nearer than the clearance, back to it at 2 m/s
+from further, out to it at 4 m/s from nearer. A jump: out `wallJumpOut` (6),
+up `wallJumpUp` (5), no wall again for `wallJumpPause` (0.3 s). The wall's ray
+missing for `wallGrace` (0.15 s) ends it; going up it then, a hop
+(`crestHop`, 4.5 m/s) and a push over the roof for `crestSeconds`. More than
+`wallReach` (1.5 m) from it and not closing: off. `releaseAll` keeps the
+wall, `leaveWall` does not. `game_swing`: the swing drives while a wall holds
+the body, also from the game's own jump or fall; a pause keeps the wall
+(`cancelSwing(true)`); `Data` version 4 (272 bytes: `wall` 0 none / 1 the
+swing's / 2 the game's crawl, `wallNormal`, `wallDistance`, `walls`,
+`wallJumps`), the crawl's normal from a ray down the actor's up; `Settings`
+version 4 (32 bytes, `walls`; version 3 still read). `GameTrackingRig`:
+`SurfaceHold` and `standOnWalls`; standing (speed under `wallStandSpeed`,
+1.5 m/s, then until the wall lets go) turns the level tracking space about
+the feet at `wallTurnRate` (a quarter turn in 0.15 s), each frame the short
+way from where its up is, with its floor moved onto the wall under the body;
+level again, the turn left about the vertical goes into the yaw. The swing's
+stick is turned with it, the game's stays level. No flip on a wall. The XR
+worker passes the swing's own walls only (the game's crawl: upright and stood
+off, as before). `vr_settings::Values::standOnWalls` (on), row 14 STAND ON
+WALLS, the last of COMFORT (18 rows); XrConfig version 20 (options bit 13 the
+view upright, bit 14 the walls the game's; up to 32767), XrData version 20
+(settings bit 128, `viewTilt` degrees at 796 where `spare` was). Launcher
+`SessionOptions::standOnWalls`, `--no-stand-on-walls`, `stand_on_walls` in
+launcher.ini and the headset's line, "Stand on walls"; `launch-game-vr.ps1
+-NoStandOnWalls`, `-NoWallRun`.
+
+**In the game, no headset** (`tools/probe_wall_run.py`, the user's save in a
+Fisk hideout, October 10; `reports/wall-run.json`, `reports/wall-run/`). The
+nearest wall: brick, 17.68 m from the hand, level, normal (-0.945, 0, 0.327),
+the ray 21 degrees off it. Jump, web, reel: 23.7 m/s into the wall and 21.0
+along it at 1.95 s, when the swing had the body on the wall (0.84 s after the
+reel began; 0.81 s on the first run). By 2.08 s the speed into it was gone:
+22.9 m/s along the wall and 7.0 up, the centre 0.901 m from the wall (world
+ray; 0.900 to 0.917 by the swing over 5.1 s). On every step of those 5.1 s
+the mover was `0x10008020` / `0x2060010`, contact 2, driven (status 2), two
+air events a step, the actor's tilt 0: none of the game's wall states. The run
+slowed from 22.9 to 19.7 m/s in 1.1 s (3 m/s^2); the stick against it turned
+it at 24 m/s^2 to 6.01 m/s the other way, level; the stick at the wall: 6.00
+m/s up; let go: 0.00 m/s within 0.6 s, the height unchanged for 0.3 s after;
+the jump: 6.01 m/s out, 4.3 m/s up 0.1 s later, then the swing's gravity.
+All eight of the probe's checks passed, on the first build and again on the
+last. With `--walls off` (`reports/wall-run-off.json`): the same reel met the
+wall at 2.19 s, the mover went to `0x80a0` / `0x2060000` for 0.44 s, the speed
+from 31 to 2.6 m/s, and the body fell 63 m to the street.
+`tools/probe_menu.py`: 20 steps, no failures; STAND ON WALLS switched off as
+the twelfth change, RESET ALL put eleven settings back (25 changes), the hooks
+restored. Its first run opened Photo Mode: the hideout's pause menu has ABANDON
+MISSION above PHOTO MODE; it now presses Up twice from RESUME.
+`tools/probe_wall_crawl.py` (now with the swing's walls off, and reading the
+surface the swing reports) did not reach the game's crawl from this spot: the
+reel ended with the body hanging on its web 1.5 m from the wall. The crawl's
+reported normal is therefore not checked in the game.
+Saves: `slot0-s.save` was written by the game at 11:09 (its autosave); the
+others are byte-identical to `reports/backups/save-before-wall-run-20261010-104456`.
+
+**Checks.** 221 core checks pass; 9 new: a body flying into a wall at an
+angle runs along it at the clearance, no gravity along it, and comes to rest;
+head on it stops, the stick walks it (at the wall: up; away: down) and a jump
+leaves it for good; a web's pull takes the body off and never through; over
+the top edge it is pushed on over the roof; at a walk it rounds a corner onto
+the next face, a run flies off; walls leave a standing body, a passing one and
+a swing without walls alone, and let go when switched off; the view turns only
+once the player rests, in 0.15 s, with head, hands, hand motion and the stick,
+stays while walking, takes no flip, and comes back level over the feet; a
+corner's next face turns it on and the heading is kept when the wall lets go;
+the game's crawl turns it at once, and with STAND ON WALLS off it stands off
+as before. The settings tab's rows, the launcher's options and line, and the
+Python readers have the new setting and versions: 22 launcher checks, 101
+Python checks.
+
+**Not checked.** The headset: the feel of all of it, and the view's turn at
+all outside its unit checks. In the game: a corner, a top edge, a facade with
+ledges or recesses, low frame rates, a pause on a wall. The game's crawl with
+the view turned (not passed to the view). Not in the play folder.
+
+## FLIP SPEED, 180 degrees a second by default — preceding build
 
 The user, October 9: "lets also do this much like how you can change the
 speed of turning and weight in the game it'd be cool to have different flip

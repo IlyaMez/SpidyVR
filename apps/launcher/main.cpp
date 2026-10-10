@@ -175,9 +175,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         }
         LocalFree(args);
     }
-    // One launcher at a time: a second start brings the first one forward.
+    // One launcher at a time: a second start brings the first one forward. A first one that runs as
+    // administrator keeps its lock closed to a second that does not (access denied, no handle).
     HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\SpidyLauncher");
-    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    if (const DWORD result = GetLastError();
+        result == ERROR_ALREADY_EXISTS || (!single && result == ERROR_ACCESS_DENIED)) {
         if (HWND other = FindWindowW(kClass, nullptr)) {
             ShowWindow(other, SW_RESTORE);
             SetForegroundWindow(other);

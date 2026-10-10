@@ -68,16 +68,21 @@ def checked_snapshot(flags, pid, patience=2):
         if error != 24 or time.monotonic() >= deadline: raise c.WinError(error)
         time.sleep(.01)
 
-def find_game():
+def process_ids(name):
+    """The ids of the running processes with this file name (lower case)."""
     handle = checked_snapshot(2, 0)
     entry = ProcessEntry(); entry.size = c.sizeof(entry)
     matches = []
     try:
         ok = first_process(handle, c.byref(entry))
         while ok:
-            if entry.name.lower() == 'spider-man.exe': matches.append(entry.pid)
+            if entry.name.lower() == name: matches.append(entry.pid)
             ok = next_process(handle, c.byref(entry))
     finally: close(handle)
+    return matches
+
+def find_game():
+    matches = process_ids('spider-man.exe')
     if not matches: raise RuntimeError('Spider-Man is not running. Load free roam before live capture.')
     if len(matches) != 1: raise RuntimeError('More than one Spider-Man process exists; close the extra instance.')
     return matches[0]

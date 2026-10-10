@@ -176,6 +176,9 @@ void openUrl(const char* url);
 void openPath(const std::wstring& path);
 std::optional<std::wstring> browseForGame(HWND owner, const std::wstring& current);
 bool createShortcuts(std::string& error);
+// Starts this launcher again as administrator (Windows asks first); the new one waits for this one to
+// close. False when it did not start, with `error` empty when the player declined Windows' question.
+bool restartAsAdministrator(std::string& error);
 std::wstring newReportPath(const std::wstring& root);
 std::wstring newStopEventName();
 

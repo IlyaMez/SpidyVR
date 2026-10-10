@@ -143,6 +143,26 @@ Moving
   Y .................... game menu (map, suits, skills)
   Click both sticks .... switch between VR and a flat game screen
 
+Walls
+  Walk at one .......... push the left stick straight at a wall beside you
+                         and you hop onto it and walk on up it. Falling
+                         past a wall, push at it and it takes you
+  Fly or jump into one . you stay on it, an arm's length off. At speed you
+                         run along it with the speed you had, and nothing
+                         pulls you down it; without the left stick or a web
+                         you slow down, stop and stay
+  Left stick ........... walks the wall where you look along it; pushed at
+                         the wall, up it. It steers a run, too
+  A .................... jumps off the wall, out and up
+  A web ................ pulls you off the wall, or along it
+  The wall's top ....... go up over it and you hop onto the roof; at a walk
+                         you step round a corner onto the next wall
+  STAND ON WALLS ....... walking a wall or stopped on it, your view turns so
+                         that the wall is your floor, and turns back when you
+                         leave it. A run along a wall never turns it. Off
+                         (Settings > SPIDY VR, or "Stand on walls" in the
+                         launcher), you stay upright beside the wall
+
 Slow motion (as in Blade & Sorcery)
   Click the left stick . the world slows to a third of its speed, easing in;
                          click again and it eases back. Your head and hands
@@ -227,6 +247,20 @@ IF SOMETHING IS WRONG
 - "VR already ran in this game" (older versions: "Game XR start: 1000"):
   VR starts once per game launch. Close the game (Spider-Man.exe gone from
   Task Manager), then press START VR.
+- "VR needs administrator rights": Steam or the game runs as administrator
+  on your PC, and Windows keeps a program without those rights out of such
+  a game. Choose "Restart as administrator" when the launcher asks (Windows
+  asks you to allow it), close the game if it is running, then press START
+  VR. Or have Steam start without administrator rights.
+- "Windows refuses Spidy access to the game ... a security program": your
+  antivirus is guarding the game. Allow the Spidy folder in it, close the
+  game, then press START VR.
+- "render memory module unavailable ([WinError 5] Access is denied)", then
+  "No loaded player within three minutes" (version 0.2.9 and older): Windows
+  kept Spidy out of the game, for one of the two reasons above. Close the
+  game, right-click Spidy Launcher, choose "Run as administrator" and press
+  START VR; if nothing changes, allow the Spidy folder in your antivirus.
+  Newer versions say which it is.
 - VR does not start and the game stays flat: send the whole "reports"
   folder. The newest game-vr-...-console.log holds everything the launcher
   showed, and the report beside it says where it stopped.
@@ -269,6 +303,9 @@ IF SOMETHING IS WRONG
 - The HUD is too small, too large or in the way: HUD in Settings > SPIDY VR
   (or "HUD" in the launcher's options): SMALL, MEDIUM, LARGE, or OFF.
 - The game asks for Y (Triangle) to interact: in VR that is B.
+- The view turning onto a wall makes you uneasy: switch STAND ON WALLS off in
+  Settings > SPIDY VR (or "Stand on walls" in the launcher's options). You
+  still stay on walls, upright beside them.
 - A flip you did not mean, or flips make you uneasy: switch FLIPS off in
   Settings > SPIDY VR (or "Flips (experimental)" in the launcher's options).
   It is off unless you switched it on. Flips too fast or too slow: FLIP

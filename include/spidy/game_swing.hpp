@@ -29,6 +29,8 @@ inline SwingConfig physicsConfig(const Config& c) {
     physics.airAcceleration = 4;
     physics.maxZipImpulse = 18;
     physics.zipMultiplier = 4.5f;
+    // Walls are the swing's own from the start (Settings::walls).
+    physics.walls = true;
     return physics;
 }
 // MoverStandard applies a velocity command during the physics step after the
@@ -119,8 +121,14 @@ struct WebState {
     Vec3 anchor{};
     float length{}, tension{};
 };
+// Data::wall: what holds the player on a wall or a ceiling now.
+enum class Surface : uint32_t {
+    none,
+    wall, // the swing's own wall (SwingConfig's walls): wall running, walking
+    game, // the game's wall crawl (its actor turned onto the surface)
+};
 struct Data {
-    uint32_t magic = 0x53574441, version = 3, bytes = sizeof(Data), status{};
+    uint32_t magic = 0x53574441, version = 4, bytes = sizeof(Data), status{};
     int64_t sequence{};
     uint64_t qpc{}, steps{}, controlled{}, serial{}, attaches{}, releases{}, zips{}, world{}, sourceStep{};
     Vec3 position{}, velocity{}, requested{};
@@ -129,6 +137,19 @@ struct Data {
     WebState webs[2];
     uint32_t grounded{}, collisionFlags{}, takeoff{}, misses{}, obstructed{}, trackingLost{};
     uint32_t takeoffPhase{}, takeoffAttempts{}, takeoffTimeouts{}, nativeContact{};
+    // Version 4: the surface that holds the player (Surface), its normal out
+    // of it as the world's rays find it (the game's actor rocks on a wall), and
+    // the body's centre's distance from it (the swing's wall; the game's crawl
+    // has the feet on it: 0). Then the walls the swing took the player onto
+    // so far, and the jumps off them. mount: a standing player is going up
+    // onto the swing's wall by the game's jump (Swing::mountBegun), 1 walked
+    // at a wall, 2 out of the game's own crawl; the player's stick stays away
+    // from the game meanwhile (it walked him on into the wall, and into its
+    // crawl).
+    uint32_t wall{};
+    Vec3 wallNormal{};
+    float wallDistance{};
+    uint32_t walls{}, wallJumps{}, mount{};
 };
 static_assert(sizeof(Config) == 64 && sizeof(Hand) == 52 && sizeof(Command) == 184 &&
               offsetof(Command, tilt) == commandBytesV2);
@@ -139,19 +160,24 @@ static_assert(sizeof(Config) == 64 && sizeof(Hand) == 52 && sizeof(Command) == 1
 // 65 m/s, which the movement module is started with for that reason.
 // airWebs: a web that meets nothing within reach holds in open air there;
 // off, it misses (Swing::allowAirAnchors). gravity: the swing's, m/s^2 (the
-// VR settings' weight), up to maxGravity.
+// VR settings' weight), up to maxGravity. Version 4, walls: a player in the
+// air stays on the walls it comes into (Swing::allowWalls); off, the game's
+// own wall crawl takes it as before. Version 3 (settingsBytesV3, the
+// probes') ends before it and leaves the walls as they are.
 struct Settings {
-    uint32_t magic = 0x53575354, version = 3, bytes = sizeof(Settings), grab = 1;
+    uint32_t magic = 0x53575354, version = 4, bytes = sizeof(Settings), grab = 1;
     float maxSpeed = 32;
     uint32_t airWebs = 1;
     float gravity = 6;
+    uint32_t walls = 1;
 };
-static_assert(sizeof(Settings) == 28);
+constexpr uint32_t settingsBytesV3 = 28;
+static_assert(sizeof(Settings) == 32 && offsetof(Settings, walls) == settingsBytesV3);
 // The movement module's own limit: every speed the VR settings offer.
 constexpr float motionSpeedLimit = 65;
 // The most gravity a swing takes, m/s^2: every weight the VR settings offer.
 constexpr float maxGravity = 30;
-static_assert(sizeof(WebState) == 28 && sizeof(Data) == 240);
+static_assert(sizeof(WebState) == 28 && sizeof(Data) == 272 && offsetof(Data, wall) == 240);
 // The player is in the air: Spidy's own flight, or the game's jump or fall,
 // where the mover is unsupported and in its airborne mode (collision flags
 // 0x10: the steps the game's air state runs). A perch, a wall crawl and a

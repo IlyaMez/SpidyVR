@@ -36,7 +36,7 @@
 #include <windows.h>
 using namespace spidy;
 struct XrConfig {
-    uint32_t magic = 0x53585243, version = 19, bytes = sizeof(XrConfig), pid{};
+    uint32_t magic = 0x53585243, version = 20, bytes = sizeof(XrConfig), pid{};
     // record and mover are no longer used: VR starts with the game, before
     // there is a player, and finds each new player itself (game_player).
     uint64_t base{}, queue{}, bridgeModule{}, rayModule{}, motionModule{}, record{}, mover{};
@@ -54,13 +54,16 @@ struct XrConfig {
     // bit 10: no T-pose calibration at the first gameplay of a session without
     // one (the player skipped it before; the SPIDY VR tab still offers it);
     // bit 11: flips, experimental (A and the left stick in the air flip the player; FlipMotion);
-    // bit 12: the trigger webs and the grip reels (WEB BUTTON: TRIGGER)
+    // bit 12: the trigger webs and the grip reels (WEB BUTTON: TRIGGER);
+    // bit 13: the view stays upright on walls (STAND ON WALLS: OFF);
+    // bit 14: walls are the game's (its wall crawl takes a player who flies
+    // into one, as before the swing's own walls)
     uint32_t options{};
     // OpenXR runtime manifest the launcher chose; empty: Virtual Desktop's if
     // installed, else Windows' active runtime.
     wchar_t runtime[260]{};
-    // The rest of the VR settings a session starts from (options bits 3, 5-9,
-    // 11 and 12, swingSpeed, weight, hud and flipSpeed give the others):
+    // The rest of the VR settings a session starts from (options bits 3, 5-9
+    // and 11-13, swingSpeed, weight, hud and flipSpeed give the others):
     // degrees per snap turn (0: none), controller vibration in percent, the
     // game screen's size (0-2), degrees a second of smooth turning (0: the
     // stick snap turns).
@@ -87,7 +90,7 @@ enum GateReason : uint32_t {
     gateTracking = 16,    // the headset's pose or timing was not usable
 };
 struct XrData {
-    uint32_t magic = 0x53585244, version = 19, bytes = sizeof(XrData), status{};
+    uint32_t magic = 0x53585244, version = 20, bytes = sizeof(XrData), status{};
     int64_t sequence{};
     uint64_t frames{}, tracked{}, submitted{}, dropped{}, leftHands{}, rightHands{}, serial{}, generation{};
     uint32_t nativeKeys{}, error{};
@@ -121,7 +124,8 @@ struct XrData {
     // The VR settings now: the SPIDY VR tab in the game's Settings changes
     // them during play (X the aim markers, too). settings bits: 1 web grab,
     // 2 punch, 4 body, 8 webs in open air, 16 web shooter, 32 flips, 64 the
-    // trigger webs (WEB BUTTON: TRIGGER; the grip reels). Then the changes
+    // trigger webs (WEB BUTTON: TRIGGER; the grip reels), 128 STAND ON WALLS.
+    // Then the changes
     // made in that tab so far, the times the game built its Settings with it,
     // whether its hooks are in, and why it is missing (game_menu: 93xx-94xx
     // not hooked, 95xx not built).
@@ -153,8 +157,11 @@ struct XrData {
     float calibrationProgress{};
     uint32_t eyeHeightMm{}, armLengthMm{}, calibrations{}, calibrationSkips{}, calibrationFlags{};
     float calibrationReach[2]{};
-    // The flip speed now, degrees a second at full tilt (FLIP SPEED). spare is 0.
-    uint32_t flipSpeed{}, spare{};
+    // The flip speed now, degrees a second at full tilt (FLIP SPEED), and how
+    // far the view leans from the world's up now, degrees: 0 level, 90 while
+    // the player stands on a wall (GameMotionFrame::viewTilt).
+    uint32_t flipSpeed{};
+    float viewTilt{};
 };
 static_assert(sizeof(XrData) == 800);
 // Slow motion (slow_motion.hpp, game_time.hpp): what the player did with it
@@ -357,6 +364,7 @@ DWORD WINAPI run(void*) {
         values.webShooter = !(config.options & 512);
         values.flips = config.options & 2048;
         values.triggerWebs = config.options & 4096;
+        values.standOnWalls = !(config.options & 8192);
         values.swingSpeed = config.swingSpeed;
         values.snapTurn = static_cast<int>(config.snapTurn);
         values.smoothTurn = static_cast<int>(config.smoothTurn);
@@ -410,6 +418,9 @@ DWORD WINAPI run(void*) {
         WebTimeline webTimes;
         bool attachedBefore[2]{};
         uint64_t zipBefore{};
+        // Walls the swing took the player onto, and jumps off them, by the
+        // previous frame.
+        uint32_t wallsBefore{}, wallJumpsBefore{};
         // Punches each hand had landed by the previous frame.
         bool punchStarted{};
         uint64_t punchesBefore[2]{};
@@ -529,6 +540,7 @@ DWORD WINAPI run(void*) {
             rig.flips(values.flips);
             rig.flipSpeed(static_cast<float>(values.flipSpeed) * 3.14159265f / 180);
             rig.triggerWebs(values.triggerWebs);
+            rig.standOnWalls(values.standOnWalls);
             native_hud::setSize(values.hud);
             if (swingStarted && swingSettings) {
                 game_swing::Settings s;
@@ -536,6 +548,7 @@ DWORD WINAPI run(void*) {
                 s.maxSpeed = values.swingSpeed;
                 s.airWebs = values.airWebs;
                 s.gravity = vr_settings::gravity(values.weight);
+                s.walls = !(config.options & 16384);
                 if (const auto code = swingSettings(&s)) {
                     const auto text = "VR settings: the swing did not take them (" + std::to_string(code) + ")";
                     message(3, 0, text.c_str());
@@ -678,12 +691,26 @@ DWORD WINAPI run(void*) {
                     // The player's up (its actor's second row): a wall's normal
                     // while the game holds it on one. Spidy's own flight is on none.
                     const Vec3 heroUp{body[4], body[5], body[6]};
+                    // The wall that holds the player, as the latest swing sample
+                    // has it (no older than a tenth of a second): the swing's own
+                    // wall, its floor on the wall beside the body's centre. The
+                    // game's crawl (Surface::game) is not passed on: the game
+                    // takes the stick there in its own way, which is not measured
+                    // yet, so the view stays upright and stood off it as before.
+                    const Vec3 feet{body[12], body[13], body[14]};
+                    SurfaceHold hold;
+                    if (swingState.status && swingState.wall == static_cast<uint32_t>(game_swing::Surface::wall) &&
+                        swingState.qpc &&
+                        static_cast<int64_t>(swingState.qpc) > now.QuadPart - frequency.QuadPart / 10) {
+                        hold.normal = swingState.wallNormal;
+                        hold.anchor = feet + Vec3{0, 1, 0} - hold.normal * swingState.wallDistance;
+                        hold.speed = length(swingState.velocity);
+                    }
                     // A or the left stick in the air flips the player (FlipMotion),
                     // in the air as the latest swing sample has it.
-                    motion = rig.update(controller, {body[12], body[13], body[14]},
-                                        {camera[8], camera[9], camera[10]}, gameplay,
+                    motion = rig.update(controller, feet, {camera[8], camera[9], camera[10]}, gameplay,
                                         swingState.owned ? Vec3{0, 1, 0} : heroUp,
-                                        game_swing::airborne(swingState, now.QuadPart, frequency.QuadPart));
+                                        game_swing::airborne(swingState, now.QuadPart, frequency.QuadPart), hold);
                     if (motion.active && motion.onSurface) {
                         surfaceEntries += !wasOnSurface;
                         ++surfaceFrames;
@@ -947,6 +974,15 @@ DWORD WINAPI run(void*) {
                                             frame.predictedDisplayTime);
                         }
                         zipBefore = swingState.zips;
+                        // Onto a wall, and off it with a jump: both hands feel it.
+                        if (input.focused && swingState.status &&
+                            (swingState.walls > wallsBefore || swingState.wallJumps > wallJumpsBefore)) {
+                            const float pulse = swingState.wallJumps > wallJumpsBefore ? .6f : .45f;
+                            runtime.haptic(0, pulse);
+                            runtime.haptic(1, pulse);
+                        }
+                        wallsBefore = swingState.walls;
+                        wallJumpsBefore = swingState.wallJumps;
                         game_punch::Data punch{};
                         if (punchStarted && !samplePunch(&punch))
                             for (unsigned i = 0; i < 2; ++i) {
@@ -988,8 +1024,14 @@ DWORD WINAPI run(void*) {
                     const bool steering = motion.active && !flatScreen && controlsVisible;
                     motion.nativeKeys = airJump.update(
                         motion.nativeKeys, game_swing::airborne(swingState, now.QuadPart, frequency.QuadPart));
+                    // Going up onto a wall (game_swing::Data::mount), the game
+                    // gets the jump alone: the stick walked the player on into
+                    // the wall, and into the game's own crawl.
+                    const bool mounting =
+                        swingState.status && swingState.mount && swingState.qpc &&
+                        static_cast<int64_t>(swingState.qpc) > now.QuadPart - frequency.QuadPart / 10;
                     const auto keys = swingNativeKeys(
-                        steering, swingState.owned != 0, motion.nativeKeys,
+                        steering, swingState.owned != 0 || mounting, motion.nativeKeys,
                         static_cast<SwingTakeoff::Phase>(swingState.takeoffPhase), swingState.takeoff != 0);
                     controls(keys);
                     if (padInstalled) {
@@ -998,8 +1040,8 @@ DWORD WINAPI run(void*) {
                         // player with it and ignores the bridge's keys.
                         game_pad::Walk walk;
                         if (steering && !swingState.owned) {
-                            walk.right = motion.walkRight;
-                            walk.forward = motion.walkForward;
+                            walk.right = mounting ? 0 : motion.walkRight;
+                            walk.forward = mounting ? 0 : motion.walkForward;
                             // B is the game's Y: interact, or web strike in a fight.
                             // Not while a web carries the player, nor while it skips
                             // the calibration.
@@ -1038,7 +1080,8 @@ DWORD WINAPI run(void*) {
                         d.aimMarkers = values.aimMarkers;
                         d.settings = (values.webGrab ? 1u : 0u) | (values.punch ? 2u : 0u) | (values.body ? 4u : 0u) |
                                      (values.airWebs ? 8u : 0u) | (values.webShooter ? 16u : 0u) |
-                                     (values.flips ? 32u : 0u) | (values.triggerWebs ? 64u : 0u);
+                                     (values.flips ? 32u : 0u) | (values.triggerWebs ? 64u : 0u) |
+                                     (values.standOnWalls ? 128u : 0u);
                         d.snapTurn = static_cast<uint32_t>(values.snapTurn);
                         d.smoothTurn = static_cast<uint32_t>(values.smoothTurn);
                         d.haptics = static_cast<uint32_t>(values.haptics);
@@ -1047,6 +1090,7 @@ DWORD WINAPI run(void*) {
                         d.weight = static_cast<uint32_t>(values.weight);
                         d.hud = static_cast<uint32_t>(values.hud);
                         d.flipSpeed = static_cast<uint32_t>(values.flipSpeed);
+                        d.viewTilt = motion.active ? motion.viewTilt * 180 / 3.14159265f : 0.f;
                         d.settingChanges = settingChanges;
                         const auto menu = game_menu::telemetry();
                         d.menuTabs = menu.tabs;
@@ -1638,11 +1682,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     if (worker)
         return 1000; // one bounded XR session per process during validation
     if (!read(reinterpret_cast<uintptr_t>(input), &config, sizeof(config)) || config.magic != 0x53585243 ||
-        config.version != 19 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
+        config.version != 20 || config.bytes != sizeof(config) || config.pid != GetCurrentProcessId() ||
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
-        !config.motionModule || config.options > 8191 || config.snapTurn > 90 || config.haptics > 100 ||
+        !config.motionModule || config.options > 32767 || config.snapTurn > 90 || config.haptics > 100 ||
         config.screenSize > 2 || config.smoothTurn > 360 || config.hud > 3 || config.flipSpeed < 90 ||
         config.flipSpeed > 480 || !std::isfinite(config.swingSpeed) || config.swingSpeed < 1 ||
         config.swingSpeed > 65 || (config.durationMs && config.durationMs < 2000) || config.durationMs > 25000 ||

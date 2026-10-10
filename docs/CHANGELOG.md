@@ -3,7 +3,176 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 9, tenth build): VR starts where Windows refuses
+**Latest build (October 10, third build): walk at a wall and you are on it,
+and the wall is your floor as soon as you walk it.** After your first session
+with the walls you said that wall walking often does not start and the game's
+own wall crawl takes over, and that walking towards a wall and up it, the
+view turns only once you let go of the stick. Your session report
+(`dist\Spidy-0.2.9`, 11:20, 627 s) shows both. The swing's walls took you 46
+times and the game's crawl five times, 36 s in all with the view upright: all
+five began on the ground, when you walked into a wall. The swing's walls
+only took a body in the air; a walk into a wall was left to the game, which
+turned you onto the wall 0.15 s after you met it. And the view turned only
+below 1.5 m/s: at 73.5 s you walked a wall at 6 m/s for 29 s upright, until
+you stopped.
+Now the swing sees the left stick walk you at a wall: within 1.3 m of it
+(from your middle), the stick within 45 degrees of straight at it, the wall
+there above your head too, so a kerb or a car is none. From that moment the
+game no longer gets your stick, which had walked you on into the wall and
+into its crawl; a tenth of a second on, the game jumps for you, and the
+swing's wall has you as your feet leave the ground, going up it at the walk's
+6 m/s while you hold the stick. In the air the stick takes a wall beside you
+the same way, with no speed into it: walk off a roof, push at the facade as
+you fall, and you are on it and climbing.
+Where the game's crawl begins all the same (a wall the mount does not see:
+lower than your head, met at a glance), the swing has the game jump you out
+of it and takes that wall, at rest.
+**STAND ON WALLS** now turns your view as soon as you walk the wall (the
+left stick tilted, at up to 7.5 m/s) as well as when you have stopped; a run
+the stick steers stays upright as before. So a walk at a wall goes on as one
+motion: a short hop, the view pitches back in 0.15 s, and the stick you were
+holding forward walks you on up the wall.
+In the game without a headset (`tools/probe_wall_mount.py`, new; your save,
+the same brick wall; three runs, the third with this build): the probe gets
+the player onto the wall as before, walks him down it to a ledge 0.79 m from
+the wall, and pushes the swing's stick at the wall. The game stopped getting
+the stick at once; its jump was asked for 0.16 s in; at 0.22 s he was off the
+ground and on the swing's wall, the game's crawl never began, and he climbed
+at 6.0 m/s, his centre 0.90 m from the wall by a world ray, every step the
+swing's. Then the hand-over: from the ground the probe walks him into the
+wall with the controller's stick alone, as the game walks a player. The
+game's crawl began 0.06 s after he met the wall; the swing asked for the jump
+0.23 s later, the game put him back on his feet at the wall's foot and jumped,
+and 0.66 s after the crawl began he was on the swing's wall at rest, 0.90 m
+off it, and stayed (0.42 s in the crawl, where a crawl lasted until you
+pressed A). The first run found what the checks could not: as its jump begins
+the game reports the player standing again for one step, and the wall that
+had just taken him let go, after which the push out to the wall's clearance
+came back as speed off the wall and he drifted away. The wall now takes him
+again within half a second of the mount, and the stick takes a wall with no
+speed off it.
+The swing's data stays version 4 (its last, unused field is now `mount`);
+XrConfig and XrData stay version 20. `spidy_ray_bridge.dll`,
+`spidy_stereo_probe.dll` and the launcher changed (its "Stand on walls" text).
+226 core checks pass, 5 new (the mount and the step in which the game stands
+the body again, what mounts nothing, the crawl's hand-over, the stick taking
+a wall in a fall, the view while walking); 22 launcher checks; 101 Python
+checks.
+Not tried: the headset. Whether the hop onto the wall and the view turning
+as you go up feel right is yours to say, and whether walls take you when you
+do not mean it: in a fight beside a wall, or walking up to something on one
+(you now stop about a metre short of a wall you walk straight at, and hop
+on). In the game the crawl's hand-over was met once, a metre above the
+ground; higher up, your 11:20 session has it by your own A press (253.3 s:
+out of the crawl and on the swing's wall within 0.06 s).
+
+**Preceding build (October 10, second build): walls are yours. Fly into one and
+you run along it, stop on it, walk it and jump off; stopped, your view turns so
+the wall is your floor.** You said that sticking to walls, walking on them and
+wall running felt bad: the stick is clunky to get on and off, only A leaves a
+wall, and running along a wall in a swing should feel better; and you
+suggested turning the camera to the new floor. Your two October 9 sessions
+show what the game did. A swing that met a wall put the game into a wall
+state of its own, in which any movement with a part into the wall moves
+nothing: you hung still against the wall for a second, the game then turned
+you onto it in its crawl (0.6 to 0.7 s more), and from there only A, or a web
+above you, got you off, through the game's jump. A wall touch cost 2 to 3
+seconds and all your speed (28 m/s to 0 in one of them).
+The swing now keeps you on the wall itself. Short rays find a wall you are
+coming into, and you stay 0.9 m off it, where the game's own collision never
+meets it, so the game goes on as if you were in the air and none of its wall
+states start. On the wall nothing pulls you down along it. What you had of
+speed along the wall goes on, a little more for a hit at an angle: a wall
+run. Without the left stick or a web the run slows (3 m/s a second) until you
+stop and stay; head on, you stop at once. The left stick walks the wall at
+6 m/s where you look along it; pushed at the wall, up it. A faster run keeps
+its speed while the stick points its way, and the stick steers it. **A** jumps
+off, out from the wall and up, with the speed you had along it; a web pulls
+you off it or along it. Up over the wall's top edge you hop onto the roof. At
+a walk you step round a corner onto the next face; a run flies off the
+wall's end. A jump of the game's own into a wall lands you on it the same
+way. Both hands buzz when a wall takes you and when you jump off.
+**STAND ON WALLS** (on; Settings > SPIDY VR under COMFORT, or "Stand on walls"
+in the launcher): once you have come to rest on a wall, your view turns in
+0.15 s so that the wall is your floor, your feet on it, and stays so while
+you walk it, round its corners too; when the wall lets you go it turns back as
+fast and keeps the way you face. A run along a wall never turns it. Players
+on Discord asked for the same, near instant, because looking up a wall
+strains the neck. Off, you stay upright beside the wall.
+Walking into a wall from the ground is still the game's own crawl, with the
+view upright and stood off it as before: how the game takes the stick there
+is not measured yet, and a turned view wants the stick to go where you look.
+In the game without a headset (`tools/probe_wall_run.py`, your save, a brick
+wall 17.7 m off, webbed and reeled into at 31 m/s): the swing had the player
+on the wall 0.84 s after the reel began, his centre 0.90 m from it by a world
+ray, at 23 m/s along the wall where the game used to stop him; for the 5.1 s
+on the wall the game's mover stayed in its air mode under the swing's command
+on every step and its wall states never appeared. He slowed by 3 m/s a
+second, turned to the stick, walked along at 6.0 m/s and up at 6.0 m/s,
+stopped and stayed (0.00 m/s), and the jump left at 6.0 m/s out and up. With
+the swing's walls off, the same reel ended in the game's wall state at
+2.6 m/s and a 63 m fall to the street. `tools/probe_menu.py` switched STAND ON
+WALLS off in the game's own Settings among its 20 steps, all as expected (it
+now reaches Settings with Up twice from RESUME: your save is in a Fisk
+hideout, whose pause menu has one line more, and four presses down opened
+Photo Mode).
+The swing's data and settings are version 4, XrConfig and XrData version 20,
+so the whole package goes together. `--no-stand-on-walls` and `--no-wall-run`
+(the game's crawl as before, for comparison) on `run_game_vr.py`.
+221 core checks pass, 9 new (the run, the stop, the stick, the jump, a web's
+pull, the top edge, the corner, what walls leave alone; the view's turn, a
+corner's, and the game's crawl); 22 launcher checks; 101 Python checks.
+Not tried: the headset. How the run, the stop and above all the turning view
+feel is yours to say; the view's turn has only its unit checks, since it runs
+in the headset's worker. In the game the corner, the top edge and facades with
+ledges were not met. Not in the play folder.
+
+**Preceding build (October 10, first build): a game that runs as administrator
+is named at once, and the launcher offers to start again as administrator.**
+A player's launch (Quest 3 on a cable, Meta Quest Link, a French Windows)
+printed "WARNING: render memory module unavailable ([WinError 5] Accès
+refusé.)" when the game started, said nothing for three minutes, and ended
+with "No loaded player within three minutes. Load a save, then run the
+launcher again." Windows had refused the launcher the game's process. The
+render memory module's 2.5 s of asking ended in the warning; the wait for
+the game then took every refusal for a process still being set up until its
+three minutes were over, and its last message is about a save this launch
+never came to. The log does not say why Windows refused. The usual reason
+is a game that runs as administrator (Steam started as administrator, or
+Spider-Man.exe set to) with a launcher that does not; the other is a
+security program guarding the game.
+The session now asks Windows whether Steam, and then the game, runs as
+administrator, which Windows answers for a process it otherwise keeps
+closed. An administrator's Steam ends the launch before anything is changed
+or started, and an administrator's game the moment its process appears. A
+Steam that is not running and is set to run as administrator, which Windows
+refuses to start from the launcher, ends it the same way. The message names
+what runs as administrator and what to do, and the launcher's window asks "Administrator
+rights needed" with *Restart as administrator*: Windows asks to allow it,
+and the launcher opens again with those rights. After "Not now" the offer
+stays under START VR. A game that refuses for 5 s without that explanation
+ends the launch naming a security program (allow the Spidy folder in it), or
+administrator rights as the first thing to try where Windows does not say
+how the game runs. A launch that runs out of its three minutes says what was
+missing: the game never started (look at Steam), or it could not be opened
+(with Windows' error); "No loaded player" is left for a game that was open.
+A second launcher started while one runs as administrator no longer opens
+beside it. The startup report has `administrator` (whether the session
+itself ran as administrator).
+7 new launcher protocol checks: an administrator's game, before the render
+memory module is tried; an administrator's Steam, before the game's settings
+change; a refusal that lasts, by who runs as administrator; one that passes;
+the three ways to run out of time; the question itself; the exit code. All
+101 checks in the 6 Python suites pass, and 22 launcher checks (1 new: the
+error line and the exit code). In the launcher's window, a stand-in session
+that ran the real wait with a Steam "running as administrator" ended with
+exit code 5 before starting anything, and the question, "Not now" and the
+offer under START VR were as described. Not run: the restart itself
+(Windows' prompt needs a click), a game that does run as administrator, and
+the player's PC. The core checks were not rerun (nothing in the modules
+changed). Not in the play folder.
+
+**Preceding build (October 9, tenth build): VR starts where Windows refuses
 changes to the game's settings.** A player's 0.2.8 launch (Virtual Desktop,
 Quest 3) ended before the game started with "Spidy VR unavailable: [WinError
 5] Access is denied" and a traceback. Before it starts the game, the launcher

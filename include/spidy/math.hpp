@@ -74,6 +74,16 @@ struct Quat {
         return {axis.x * s, axis.y * s, axis.z * s, std::cos(r / 2)};
     }
 };
+// The shortest turn that takes the unit vector `from` to the unit vector `to`;
+// between opposite ones, half a turn about an axis across them.
+inline Quat arc(Vec3 from, Vec3 to) {
+    const float d = dot(from, to);
+    if (d < -.99999f)
+        return Quat::around(cross(from, std::abs(from.x) < .9f ? Vec3{1, 0, 0} : Vec3{0, 0, 1}), 3.14159265f);
+    const Vec3 c = cross(from, to);
+    const float n = std::sqrt(dot(c, c) + (1 + d) * (1 + d));
+    return {c.x / n, c.y / n, c.z / n, (1 + d) / n};
+}
 struct Pose {
     Vec3 position{};
     Quat orientation{};
