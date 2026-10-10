@@ -23,7 +23,14 @@ start it checks the PC and shows what it finds:
   integrity of game files*); only a newer version needs a Spidy update.
 - **The VR runtime:** every registered OpenXR runtime, after *Automatic* (the
   default since October 7; `xr_runtime=auto` in `launcher.ini`, which replaced
-  `runtime=`, so every earlier install starts on Automatic). Automatic leaves
+  `runtime=`, so every earlier install starts on Automatic). Registered means
+  Windows' active runtime, the Khronos registry's `AvailableRuntimes`, and
+  SteamVR by the folder OpenVR's own file names
+  (`%LOCALAPPDATA%\openvr\openvrpaths.vrpath`, its `runtime` list, with
+  `steamxr_win64.json` in it): SteamVR is in the registry only while it is the
+  active runtime, so beside an installed Virtual Desktop or Meta Quest Link
+  app a Steam Link headset had no SteamVR to choose or to ask (0.2.9 and
+  older). Automatic leaves
   the choice to each session: `xr_runtime.detect` asks Virtual Desktop (asking
   it starts nothing), then SteamVR if `vrserver.exe` runs and Meta Quest Link
   if `OVRServer_x64.exe` runs, then Windows' active runtime, and takes the first
@@ -37,8 +44,6 @@ start it checks the PC and shows what it finds:
 - **The Visual C++ runtime:** 14.40 or newer, which the modules need. *Install*
   downloads Microsoft's installer, runs it only if Microsoft signed it, and
   checks again. The launcher itself is linked statically and needs nothing.
-- **Memory** Windows can still promise programs, against `VR_COMMIT_MB` in
-  `tools/run_game_vr.py`; below that, START VR asks before it starts.
 - **Spidy's own files:** the modules, Python, and a writable folder.
 
 START VR runs `tools/run_game_vr.py` with the chosen options and shows its
@@ -528,10 +533,8 @@ they are of. For an explicit square size instead, use
 On this PC (RTX 5090, the user's save, without a headset, October 8) 150% of
 3072 x 3264 rendered 66 frames a second looking ahead and 71 turning, against
 90 and 103 at 100%, with the GPU 92% busy; it took 2.5 GB more video memory
-and as much more commit, about 108 bytes per extra eye pixel
-(`EYE_COMMIT_BYTES` in `run_game_vr.py`, which the memory warning and the
-launcher's memory figure use). Aim markers are drawn at their 100% size
-whatever the scale.
+and as much more commit, about 108 bytes per extra eye pixel. Aim markers are
+drawn at their 100% size whatever the scale.
 
 The new launcher, automatic dimensions, and thumbstick toggle are built. Their
 combined headset check was deferred at the user's request. Returning to VR
@@ -591,10 +594,12 @@ allocations count as well. In VR at 3072 x 3264 per eye the game takes about
 17 GB of promises. On October 5 this PC had 61.6 GB of RAM with half of it
 free, but other programs held about 50 GB of promises and the page file was
 4 GB, which left 14-15 GB. The game went past that. Windows enlarges a system-managed page file when this happens, and while
-it does, requests for memory can stall or fail. When less than about 19 GB is
-left, the launcher prints a warning and waits for Enter before it starts the
-game, and the report records `free_commit_mb` at the start and at its lowest.
-Either of these makes room:
+it does, requests for memory can stall or fail. The report records
+`free_commit_mb` at the start and at its lowest. Until October 10 the launcher
+had a Memory row and asked before a start with less than about 19 GB left, and
+the session printed a warning; all three are gone (the row was rarely green,
+on a PC with 32 GB of RAM too, and players asked how to make it so). Either of
+these makes room:
 
 - Close large programs before a session: browsers, chat apps, game launchers.
 - Give Windows a larger page file. System Properties > Advanced > Performance
@@ -621,7 +626,15 @@ each eye, Spidy sets only:
   the render scale, with private scene buffers at that size;
 - the tracked eye pose and asymmetric headset lens, with zero lens jitter;
 - the active post-processing profile and the main camera's display path;
-- the main camera's current exposure, so both eyes share auto-exposure;
+- the main camera's exposure, so both eyes are drawn equally bright. The game
+  adapts exposure on the GPU, per view: a view's luminance pass (`18449f0`)
+  averages the view's own image and moves the view's "Adapted Lum" buffer
+  (view `+16f0`) towards it, later draws read that buffer (`t67`), and the
+  tone mapper multiplies the image by it (`189c710`, `t11`). Each eye's render
+  job reads the main view's buffer instead of its own (`shareExposure` in
+  `src/stereo_probe.cpp`, since October 10's sixth build; until then each eye
+  was exposed for what it alone saw). The numbers the game reads back to the
+  processor (`+1708`, `+170c`) are copied from the main view as well;
 - the HUD's sRGB overlay setup pass, which the game skips for secondary views;
 - avatar visibility while immersive VR is active (this also hides the avatar
   and its shadow on the monitor).
@@ -691,9 +704,18 @@ What Spidy does:
   setting's width (`native_hud::halfWidth`: 50, 60 or 70 degrees across), all
   three scales changed alike. A transform set any later (at `0x1920240`, where
   the eyes are placed) did not reach the frame's render. The frame's head is
-  latched once (`latchHead`, at the first camera submit): the active view, the
-  panel, its markers and the eyes all use that command and that travel, so the
-  panel never trails the eyes (`offsetMismatch` stays 0).
+  latched once (`latchHead`, at the first camera submit, after the game has
+  moved the player): the active view, the panel and the eyes all use that
+  command and that travel, so the panel never trails the eyes
+  (`offsetMismatch` stays 0). The game projects the markers before it moves
+  the player, so they take `earlyHead`: the newest command's head, moved to
+  where the frame will draw the player (`native_eyes::HeroTravel`: where the
+  last frame drew him plus that frame's travel); `markerMismatch` is the
+  furthest that head was from the frame's. From October 9's fifth build to
+  October 10's third (0.2.8, 0.2.9) the markers latched the frame's head
+  themselves, with the last frame's player: the active view, which the
+  monitor shows, and the panel trailed the eyes by a frame of travel (up to
+  1.35 m in a swing; `active_view_lag_frames` in the session reports).
 - **Lazy follow.** The panel faces where `native_hud::Follow` turned it, not
   the head's exact way. The XR worker updates it every headset frame from the
   head's orientation in the tracking space (the room): it holds still while

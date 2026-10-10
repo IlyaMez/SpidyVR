@@ -1,5 +1,6 @@
 """Other PCs: Steam anywhere, any OpenXR runtime, and the launcher window's stop signal."""
 import ctypes as c
+import json
 import pathlib
 import signal
 import struct
@@ -64,6 +65,30 @@ class RuntimeTests(unittest.TestCase):
             xr_runtime.choose(r'Z:\nope\runtime.json')
         with self.assertRaisesRegex(RuntimeError,'Virtual Desktop'):
             xr_runtime.choose(None,lambda: (None,[]),pathlib.Path(self.folder.name)/'none.json')
+
+    def test_steamvr_is_found_by_openvrs_path_file_when_the_registry_does_not_list_it(self):
+        # Steam Link beside Virtual Desktop: Windows' active runtime is Virtual Desktop and the registry's
+        # list holds it and Meta's, so SteamVR is known only by OpenVR's own file (its folder twice, in
+        # two spellings, as SteamVR writes it).
+        paths=pathlib.Path(self.folder.name)/'openvrpaths.vrpath'
+        folder=str(self.steamvr.parent)
+        paths.write_text(json.dumps(dict(config=['x'],runtime=[folder.lower(),folder,r'Z:\gone\SteamVR'],version=1)))
+        found=xr_runtime.steamvr(paths)
+        self.assertEqual(found,[str(self.steamvr.resolve())]*2+[r'Z:\gone\SteamVR\steamxr_win64.json'])
+        with unittest.mock.patch.object(xr_runtime,'steamvr',return_value=found):
+            self.assertEqual(xr_runtime.registered()[1][-3:],found)
+        listing=lambda: (str(self.vd),[str(self.oculus),str(self.vd),*found])
+        self.assertEqual([r['name'] for r in xr_runtime.runtimes(listing,self.vd)],
+                         ['Virtual Desktop','Meta Quest Link','SteamVR'])
+        asked=[]
+        manifest,_=xr_runtime.detect(listing,self.vd,self.asker('SteamVR',asked),{'vrserver.exe','ovrserver_x64.exe'})
+        self.assertEqual((manifest.samefile(self.steamvr),asked),(True,['Virtual Desktop','SteamVR']))
+        # No SteamVR, a file that is not OpenVR's, a runtime that is no list: nothing, and no error.
+        self.assertEqual(xr_runtime.steamvr(pathlib.Path(self.folder.name)/'none.vrpath'),[])
+        paths.write_text('not json')
+        self.assertEqual(xr_runtime.steamvr(paths),[])
+        paths.write_text(json.dumps(dict(runtime=folder)))
+        self.assertEqual(xr_runtime.steamvr(paths),[])
 
     def asker(self,has_headset,asked):
         """A headset probe that finds the headset only in the runtime named `has_headset`."""

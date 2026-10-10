@@ -76,12 +76,11 @@ private:
 
     std::vector<std::string> blockers();
     // The eye size the options ask for: the render scale of the checked headset's recommendation, or of
-    // 3072 x 3264 (VR_COMMIT_MB's) before a check; and what the game in VR then commits, in GB.
+    // 3072 x 3264 before a check.
     std::array<uint32_t, 2> eyeSize();
-    double neededCommitGb();
     const Runtime* runtime();
     void chooseDefaultRuntime();
-    void start(bool memoryConfirmed);
+    void start();
     void restartElevated();
     void rescan();
     void save() { saveSettings(settings_); }
@@ -100,13 +99,12 @@ private:
     size_t logCount_{};
     bool scrollLog_{};
     std::string startError_;
-    bool wantLowMemory_{}, wantClose_{}, closeAfterStop_{}, quit_{};
+    bool wantClose_{}, closeAfterStop_{}, quit_{};
     // A session ended because the game runs as administrator and Spidy does not: the offer to start
     // again as administrator, and why that did not work.
     bool sessionRan_{}, wantAdministrator_{};
     std::string administratorError_;
     Outcome lastInstall_ = Outcome::idle;
-    double lastRefresh_{};
     std::string shortcutMessage_;
     // Updates: the player's copy of Spidy (empty in a checkout), and the banner's state.
     std::wstring installFolder_;

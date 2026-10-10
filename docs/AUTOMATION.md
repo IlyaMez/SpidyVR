@@ -213,8 +213,7 @@ stretch in which `eye_jobs_reclaimed` climbs, new pairs fall, and the game's
 frame rate rises is the game dropping eye views for lack of that memory.
 
 The report also records `free_commit_mb`: what Windows could still promise to
-programs at the start, with each sample, and at its lowest. The launcher warns
-before starting when that is less than a session takes. The game's own log
+programs at the start, with each sample, and at its lowest. The game's own log
 gives the same figure as `Avail page file` at startup and in its crash record.
 A crash record's address has lost its upper 32 bits. Restore them from the
 module base (`0x1199cfbb` with the module at `7ff70fd40000` is `7ff71199cfbb`),
@@ -235,7 +234,11 @@ renderer, `pad a --until-player` plays the title and main menu with the virtual
 Xbox controller until a player exists, `pad start`, `pad down` or `pad --left 0
 -1` play any menu, `shot NAME` saves the window, and `player --follow` compares
 the in-process player search with the outside one, hands the player to the
-input bridge and samples the gameplay gate. What they need:
+input bridge and samples the gameplay gate. `tools/probe_exposure.py` (free
+roam) saves both eyes at each head pose twice, exposed each on its own
+(`SpidyEyeExposure(1)`, as before October 10's sixth build) and from the
+game's own view, and compares how bright the part of the scene both eyes see
+is in each. What they need:
 
 - A fresh game process for every run. Each Spidy module (rays, movement, swing,
   eye views, GPU capture) starts once per process, and a second start is

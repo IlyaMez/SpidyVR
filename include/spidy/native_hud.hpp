@@ -214,7 +214,11 @@ struct Data {
     // Frames placed where the XR worker's Follow put the panel (the rest face
     // the way the head does); the degrees between the head's direction and the
     // panel's at the last placement, and the most so far.
-    uint32_t size{}, spare{};
+    // markerMismatch: the game projects a frame's markers before it moves the
+    // player, from a head moved to where the frame should draw him; the
+    // largest distance so far from there to the head the frame then got (m).
+    uint32_t size{};
+    float markerMismatch{};
     uint64_t hiddenFrames{}, hiddenDraws{}, followedFrames{};
     float followAngle{}, followAngleMax{};
 };
@@ -227,8 +231,9 @@ template <class F> void publish(F&& change) {
     change(beginEdit());
     endEdit();
 }
-// This frame's head for the HUD (main thread): set by the frame latch in
-// stereo_probe.cpp.
+// This frame's head for the HUD's markers (main thread): the frame's own from
+// stereo_probe.cpp once the game has moved the player, before that the one
+// foreseen for it.
 struct Head {
     Mat4 pose{};  // native view pose, moved with the player to the frame
     Mat4 panel{}; // the same at the head, turned the way the panel faces

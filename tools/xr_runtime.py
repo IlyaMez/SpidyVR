@@ -20,6 +20,8 @@ PROBE = ROOT/'build/windows-ninja/spidy_headset_probe.exe'
 KHRONOS = r'SOFTWARE\Khronos\OpenXR\1'
 VIRTUAL_DESKTOP = (pathlib.Path(os.environ.get('ProgramFiles', r'C:\Program Files'))/
                    'Virtual Desktop Streamer/OpenXR/virtualdesktop-openxr.json')
+# Where OpenVR programs read SteamVR's folder from.
+OPENVR_PATHS = pathlib.Path(os.environ.get('LOCALAPPDATA', ''))/'openvr/openvrpaths.vrpath'
 # Recognisable runtimes by a piece of their manifest path; the manifest's own name is the fallback.
 KNOWN = (('virtualdesktop', 'Virtual Desktop'), ('steamxr', 'SteamVR'), ('oculus', 'Meta Quest Link'),
          ('mixedreality', 'Windows Mixed Reality'), ('pimax', 'Pimax'), ('varjo', 'Varjo'),
@@ -37,8 +39,29 @@ def _machine_key(path):
     return winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY)
 
 
+def steamvr(paths=OPENVR_PATHS):
+    """SteamVR's OpenXR manifests, by the folders OpenVR's path file lists as its runtime.
+
+    The Khronos registry names SteamVR only while it is Windows' active runtime: with Virtual Desktop
+    or the Meta Quest Link app active, a headset on Steam Link had no SteamVR to choose or to ask.
+    """
+    try:
+        folders = json.loads(pathlib.Path(paths).read_text(encoding='utf-8-sig'))['runtime']
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+    if not isinstance(folders, list):
+        return []
+    found = []
+    for folder in folders:
+        if isinstance(folder, str):
+            # As Windows spells it: the file keeps a lower-case copy of the folder too.
+            manifest = pathlib.Path(folder)/'steamxr_win64.json'
+            found.append(str(manifest.resolve() if manifest.is_file() else manifest))
+    return found
+
+
 def registered():
-    """(active manifest or None, every manifest the Khronos registry lists)."""
+    """(active manifest or None, every manifest the Khronos registry lists, then SteamVR's own)."""
     active, available = None, []
     try:
         with _machine_key(KHRONOS) as key:
@@ -51,7 +74,7 @@ def registered():
                 available.append(winreg.EnumValue(key, index)[0])
     except OSError:
         pass
-    return active, available
+    return active, available+steamvr()
 
 
 def name(manifest):

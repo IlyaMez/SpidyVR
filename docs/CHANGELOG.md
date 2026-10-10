@@ -3,7 +3,146 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 10, third build): walk at a wall and you are on it,
+**Latest build (October 10, sixth build): both eyes get one brightness.** You
+reported that brightness and shadows differ between your eyes: standing on
+the side of a building, the eye that sees more sky and the eye nearer the
+city come out differently, and they swap when you turn round; you suspected
+an auto brightness worked out per eye. It is exactly that.
+The game sets its exposure (how bright it draws the picture) on the graphics
+card, one view at a time: it averages what the view shows, lets a small
+buffer of the view's follow that average, and its last pass multiplies the
+picture by that buffer. Each of your eyes is a view of its own with a buffer
+of its own, so each eye was exposed for what it alone saw. A headset's lenses
+see further outward than inward, so the left eye's picture holds more of what
+is on your left: put the sky there, and that eye is drawn darker. Spidy has
+copied "the main camera's exposure" to the eyes since its first VR builds,
+but those were the numbers the game reads back to the processor, which its
+last pass does not use.
+Now each eye's render job reads the buffer of the game's own view, the one on
+the monitor, which sits on your head and covers both lenses while you are in
+VR: one exposure for both eyes, worked out from everything you see.
+Measured in the game without the headset (`tools/probe_exposure.py`, new),
+from your save on the construction site at sunset, both eyes drawn the old
+way and the new way at each head pose. The brightness of the part of the
+scene both eyes see, left eye over right eye:
+
+| Head | Each eye on its own | One exposure |
+| --- | --- | --- |
+| level, four directions | 1.28, 0.63, 1.42, 1.26 | 1.000, 1.000, 1.001, 1.000 |
+| on its right side (right eye below) | 0.43 | 1.001 |
+| on its left side | 2.22 | 1.000 |
+
+So with a level head one eye was a quarter to a half brighter than the other,
+and with your head on its side, as when you stand on a wall and look along
+it, more than twice. In every pose the eye with more sky was the darker one.
+`spidy_stereo_probe.dll` changed, and `run_game_vr.py` reads one new counter,
+`appearance.exposure_shared` in the session report: the eye images that took
+the game view's exposure, two a frame. No protocol version changed (the
+counter takes an unused field). 227 core checks pass; 103 Python checks, 1
+new (the probe's comparison of what both eyes see, and that it fails when the
+eyes still differ). Your saves: all identical but `slot0-s.save`, which the
+game saved itself after Continue, as in every probe.
+In your play folder (`dist\Spidy-0.2.9`) since 13:19: the module and
+`run_game_vr.py` (the folder's own, with the new counters only), the earlier
+files in its `reports\backups\play-folder-before-exposure-20261010-131936`.
+The module carries the fourth build below as well.
+Not tried: the headset. The numbers say the two pictures now match; whether
+anything else still differs between your eyes (shadows were part of your
+report, and with one eye up to twice as bright they could not match) is for
+you to see. If it does, say where you were looking.
+
+**Preceding build (October 10, fifth build): the launcher finds SteamVR beside
+Virtual Desktop, and the memory row is gone.** A player on Steam Link, with
+Virtual Desktop's streamer running on the PC as well, could not start VR
+(the chat, October 10): START VR said "No headset found (Virtual Desktop:
+Headset unavailable ... (-35); Meta Quest Link: Headset unavailable ...
+(-35))", and the VR runtime list held Automatic, Virtual Desktop and Meta
+Quest Link, so there was no SteamVR to choose either. A player the night
+before, without Virtual Desktop, had the same ("its only showing up as quest
+link not steamvr").
+The launcher and the session took the runtimes from Windows' OpenXR registry:
+the active runtime and its `AvailableRuntimes` list. SteamVR is in that
+registry only while it is the active runtime; it is not on the list on this
+PC or in either player's launcher. With Virtual Desktop or the Meta Quest
+Link app active, SteamVR was unknown: not listed, and never asked by
+Automatic although `vrserver.exe` ran. This PC has it the same way today:
+SteamVR installed, Virtual Desktop active, the list holding Virtual Desktop
+and Meta's, and 0.2.9 showing those two. (Steam Link worked here on October 7
+because SteamVR was the active runtime then.)
+Now SteamVR is also found where OpenVR programs find it:
+`%LOCALAPPDATA%\openvr\openvrpaths.vrpath` names its folder, and
+`steamxr_win64.json` in that folder is its runtime. The launcher
+(`openXrRuntimes`) and the session (`xr_runtime.steamvr`) both read it, so
+the list shows SteamVR, and Automatic asks it after Virtual Desktop whenever
+SteamVR runs. The launcher's JSON reader moved from `launcher_update.hpp` to
+`launcher_text.hpp` for this, unchanged.
+The Memory row, the "Low on memory" question before a start and the
+session's memory warning are removed, as you asked: a player with 32 GB of
+RAM never saw the row green and asked how to get it so. With everything in
+order the last row now reads "Windows and Spidy's files". Session reports
+still record `free_commit_mb` at the start and at its lowest.
+The launcher, `tools/xr_runtime.py`, `tools/run_game_vr.py` and the players'
+README changed; no module and no protocol version did. 23 launcher checks
+pass, 1 new (the path file as SteamVR writes it, folders in another alphabet
+written plainly and as escapes, a byte order mark, files that are not it);
+103 Python checks, 1 new (SteamVR found by the file, listed, and asked by
+Automatic when it runs). On this PC the launcher built from this tree lists
+Automatic, Virtual Desktop, Meta Quest Link and SteamVR and has no memory
+row; 0.2.9's code lists Virtual Desktop and Meta Quest Link.
+Not run: a headset over Steam Link with this build (SteamVR was not started
+here), so a session through the SteamVR found this way is untried; the core
+checks and the game, which this build does not touch.
+For players on 0.2.9 and older, SteamVR's Settings > OpenXR > "Set SteamVR
+as OpenXR runtime" puts SteamVR in the launcher's list (in PLAYERS.md).
+
+**Preceding build (October 10, fourth build): the monitor shows your head's view
+again in a swing, and the HUD keeps its distance.** Players reported that
+since 0.2.8 the game window shows Spider-Man from behind, without his head,
+whenever they swing, so first-person footage recorded from the monitor is
+spoiled (#spidy-bugs "Camera", October 9: "tested in v0.2.7 and it's
+working"; a 0.2.9 clip in the chat on October 10).
+The monitor shows the game's own view, which Spidy moves to your head every
+frame, and, like the eyes, on with you to where the frame draws you. Since
+the HUD build (October 9, fifth) the eyes, that view and the HUD panel take
+one head per frame, fixed at its first use. The first use turned out to be
+the HUD placing its world markers, which the game does before it moves you:
+that head still had the last frame's position. The eyes work out their own
+travel later and were right, so nothing showed in the headset's view of the
+world. The game's view and the HUD panel were one frame of travel behind
+them: nothing while you stand, most of a metre in a swing. From there the
+view looks at your own back, and your body has no head, because the head is
+hidden for the eyes.
+Your own session reports have it. In the 0.2.9 session (October 10, 11:20)
+the game's view was placed from another position than the eyes in 41,727 of
+53,825 frames, up to 0.90 m behind, and the HUD panel with it
+(`offset_mismatch_m` 0.90, which should be 0); in the 0.2.8 session (October
+9, 19:51) 18,788 of 24,543 frames, up to 1.35 m. The sessions of October 5
+and 6, before the HUD build, have none in 42,614 frames. The panel hangs 2 m
+ahead, so 0.9 m of trail in a swing straight ahead put it 1.1 m from your
+eyes, nearly twice as large, moving in and out with your speed.
+Now the frame's head is fixed after the game has moved you, at the game
+camera's submit, as before the HUD build: the game's view, the panel and the
+eyes are placed from one position again. The markers, placed earlier, get a
+head of their own: the newest head pose, moved to where the frame will draw
+you, which is where the last frame drew you plus the travel that frame made.
+A step longer than 5 m (fast travel, a respawn) is not carried on.
+`spidy_stereo_probe.dll` changed, and `run_game_vr.py` reads one new counter:
+`hud.marker_mismatch_m` in the session report, the furthest the markers'
+head was from the frame's. No protocol version changed (the counter takes
+SpidyHudData's unused field). 227 core checks pass, 1 new (the position
+foreseen for the next frame: standing, moving, after a teleport or a gap, and
+that a head moved there sits where the eyes are); the launcher's checks; 101
+Python checks. `tools/probe_web_frames.py --views 13` now reports
+`monitor_view` for a swing in the game without a headset, and `--modules`
+loads another build's module for a before and after.
+Not run: the game. I asked and you chose to look in the headset yourself, so
+neither the probe's new report nor the fix has been in the game. To check:
+swing and watch the game window, which should stay inside your head; in the
+session report `active_view_lag_frames` and `hud.offset_mismatch_m` should
+stay 0, and `hud.marker_mismatch_m` should be a few centimetres. Not tried
+either: whether the HUD's markers sit steadier over their targets at speed.
+
+**Preceding build (October 10, third build): walk at a wall and you are on it,
 and the wall is your floor as soon as you walk it.** After your first session
 with the walls you said that wall walking often does not start and the game's
 own wall crawl takes over, and that walking towards a wall and up it, the

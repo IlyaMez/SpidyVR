@@ -166,6 +166,71 @@ class StereoProtocolTests(unittest.TestCase):
         self.assertFalse(assess(frame_summary, frame_summary)['passed'])
         self.assertFalse(assess(summarize([]), frame_summary)['passed'])
 
+    def test_exposure_probe_compares_what_both_eyes_see_and_requires_alike_shared_images(self):
+        import math
+        from probe_exposure import head_eyes, shared_columns, block_light, compare_light, assess, view_light
+        from probe_hud import INNER, OUTER
+        for roll in (0, 90, -90, 30):
+            (left, left_fov), (right, _) = head_eyes((100., 50., -20.), (.6, .8), math.radians(10), math.radians(roll))
+            for m in (left, right):
+                right_axis, down, forward = m[0:3], m[4:7], m[8:11]
+                # Native rows are right, down, forward: right x down must give forward.
+                cross = (right_axis[1]*down[2]-right_axis[2]*down[1], right_axis[2]*down[0]-right_axis[0]*down[2],
+                         right_axis[0]*down[1]-right_axis[1]*down[0])
+                for a, b in zip(cross, forward):
+                    self.assertAlmostEqual(a, b)
+            self.assertAlmostEqual(math.dist(left[12:15], right[12:15]), .064)
+            # Rolled to its right the head's right eye is the lower one: straight below the left at 90.
+            self.assertAlmostEqual(left[13]-right[13], .064*math.sin(math.radians(roll))*math.cos(math.radians(10)))
+            self.assertGreater(-left_fov[0], left_fov[1])
+        # The lenses overlap between the inner edges: the left image's last columns are the right's first.
+        width, height = 480, 96
+        columns = shared_columns(width)
+        self.assertAlmostEqual(columns/width, 2*math.tan(INNER)/(math.tan(INNER)+math.tan(OUTER)), places=2)
+
+        def image(shift, gain):
+            """A far scene, brighter to the right, as an eye whose lens starts `shift` columns into it draws it."""
+            rows = bytearray()
+            for y in range(height):
+                for x in range(width):
+                    value = min(255, int((40+(x+shift)//4+y//2)*gain))
+                    rows += bytes((value, value, value, 255))
+            return bytes(rows)
+        left_image = image(0, 1)
+        same = compare_light(block_light(left_image, width, height, width-columns, columns),
+                             block_light(image(width-columns, 1), width, height, 0, columns))
+        self.assertEqual((same['median'], same['total'], same['tenths']), (1, 1, [1, 1]))
+        self.assertGreater(same['blocks'], 500)
+        darker = compare_light(block_light(left_image, width, height, width-columns, columns),
+                               block_light(image(width-columns, .8), width, height, 0, columns))
+        # sRGB values 0.8 times as high are about 0.6 times the light.
+        self.assertAlmostEqual(darker['median'], 1/.8**2.3, delta=.12)
+        # Black and white say nothing about exposure.
+        black = block_light(bytes(width*height*4), width, height, 0, columns)
+        self.assertEqual(compare_light(black, black), dict(blocks=0, median=None, total=None, tenths=None))
+
+        def capture(own, shared, own_jobs=0, jobs=140):
+            return dict(images=dict(own=dict(median=own), shared=dict(median=shared)),
+                        shared_jobs=dict(own=own_jobs, shared=jobs))
+        self.assertEqual(assess(dict(level=capture(1.0, 1.0), wall=capture(1.31, 1.01)), .03),
+                         dict(measured=True, switched=True, shared_alike=True, reproduced=True, passed=True))
+        # The fix under test: eyes that still differ with the shared exposure must fail.
+        self.assertFalse(assess(dict(wall=capture(1.31, 1.2)), .03)['passed'])
+        self.assertFalse(assess(dict(wall=capture(1.31, .9)), .03)['passed'])
+        # A view that is alike on both sides shows no old difference, which is not a failure.
+        level = assess(dict(level=capture(1.01, 1.0)), .03)
+        self.assertEqual((level['reproduced'], level['passed']), (False, True))
+        # The shared phase must have shared, and the comparison phase must not have.
+        self.assertFalse(assess(dict(wall=capture(1.31, 1.0, jobs=0)), .03)['passed'])
+        self.assertFalse(assess(dict(wall=capture(1.0, 1.0, own_jobs=300)), .03)['passed'])
+        self.assertFalse(assess(dict(wall=capture(None, None)), .03)['passed'])
+        self.assertFalse(assess({}, .03)['passed'])
+        # A view's luminance: in use at +1708 and +170c, its own newest reading at +1720 and +1724.
+        raw = struct.pack('<2f2Q2f', .5, .25, 0x1111, 0x2222, .75, .125)
+        self.assertEqual(view_light(Reader([raw]), 0x1000),
+                         dict(adapted=.5, measured=.25, own_adapted=.75, own_measured=.125))
+        self.assertIsNone(view_light(Reader([raw[:8]]), 0x1000))
+
     def test_load_probe_eyes_pass_the_native_eye_check_and_report_occlusion(self):
         import math
         from probe_vr_load import eye_rig, eye_command, summarize

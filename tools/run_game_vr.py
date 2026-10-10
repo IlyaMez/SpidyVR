@@ -41,13 +41,6 @@ GAME_HOOKS = (*HOOKS, 0x2e67010, 0x1fbe360, 0x1fbda50, 0xa7b3a0, 0x1f9db60,
               # The HUD in VR (native_hud.hpp): its panel's placement, its texture's stream, the render command
               # that draws its second movie, and the projections of its world markers.
               0x73ab80, 0x2104400, 0x1d2b6c0, 0x1f10ad0, 0x1f10b60)
-# What the game process commits in a VR session at 3072 x 3264 per eye (16.7-17.1 GB on October 5),
-# with Spidy's render memory ring and some room to grow.
-VR_COMMIT_MB = 19000
-# Larger eyes commit more: their scene buffers are video memory, which Windows commits for the game as
-# well. Bytes per pixel of the two eyes beyond 3072 x 3264 each: 105-109 on October 8, eyes of 4608 x 4896
-# against 3072 x 3264 in tools/probe_vr_load.py (2.5-2.6 GB more, in video memory too).
-EYE_COMMIT_BYTES = 110
 # The render scale's range in percent (spidy::minimumRenderScale and maximumRenderScale).
 RENDER_SCALES = (50, 200)
 # What a session takes as a T-pose calibration, millimetres (body_calibration.hpp): the eye height and the arm
@@ -143,14 +136,6 @@ def process_commit_mb(pid):
         close(process)
 
 
-def game_commit_mb():
-    """What a game that is already running has been promised, or None when no single game runs."""
-    try:
-        return process_commit_mb(find_game())
-    except RuntimeError:
-        return None
-
-
 def scaled_eye_size(width, height, percent, limit=MAX_EYE_SIZE):
     """The eye size for `percent` of the runtime's recommended `width` x `height`, as spidy::scaledEyeSize
     computes it: the recommendation itself at 100, else in multiples of 8, shrunk with its shape to fit
@@ -165,13 +150,6 @@ def scaled_eye_size(width, height, percent, limit=MAX_EYE_SIZE):
     return int(w), int(h)
 
 
-def vr_commit_mb(recommended, percent=100, size=0):
-    """What the game in VR commits with eyes `size` pixels square, or `percent` of the `recommended` eye
-    size: VR_COMMIT_MB, and more for eyes larger than 3072 x 3264."""
-    width, height = (size, size) if size else scaled_eye_size(*recommended, percent) if recommended else (0, 0)
-    return VR_COMMIT_MB+max(0, 2*(width*height-3072*3264)*EYE_COMMIT_BYTES >> 20)
-
-
 def rendering_line(width, height, percent, size, recommended):
     """The console's line on the eye size the session renders, beside what the headset asked for."""
     line = f'Rendering {width} x {height} pixels per eye'
@@ -184,37 +162,6 @@ def rendering_line(width, height, percent, size, recommended):
     if (width, height) == wanted:
         return f'{line} ({of}).'
     return f'{line} ({of} would be {wanted[0]} x {wanted[1]}, more than the VR runtime takes).'
-
-
-def commit_warning(free_mb, game_mb=None, needed_mb=VR_COMMIT_MB):
-    """Text for the console when Windows has less memory left to promise than a VR session takes.
-
-    Windows then grows its page file while the game plays, and requests for memory stall or fail
-    meanwhile; the session of 14:39 on October 5 crashed with 0.6 GB left. `game_mb` is what a
-    game that is already running holds of the total.
-    """
-    needed = needed_mb-(game_mb or 0)
-    if free_mb is None or free_mb >= needed:
-        return None
-    return (f'WARNING: Windows can promise programs only {free_mb/1024:.1f} GB more memory, and '
-            f"{'VR takes about' if game_mb else 'the game in VR takes about'} {needed/1024:.0f} GB"
-            f"{' on top of the running game' if game_mb else ''}. Close large programs (browsers, chat and "
-            'launcher apps) or enlarge the Windows page file, or the game may stall and can crash.')
-
-
-def announce_low_memory(warning, interactive, ask=input):
-    """Print the memory warning. At a console, the person there decides whether to go on.
-
-    Ctrl+C at the question cancels the launch before anything has been started or changed.
-    """
-    if not warning:
-        return
-    print(warning, flush=True)
-    if interactive:
-        try:
-            ask('Press Enter to start anyway, or Ctrl+C to stop and make room first. ')
-        except EOFError:
-            pass
 
 
 def frame_rates(samples):
@@ -637,6 +584,7 @@ def appearance_snapshot(game, address):
         active_aligned, active_rejected = struct.unpack_from('<2Q', raw, 216)
         active_bounds = struct.unpack_from('<4f', raw, 232)
         active_shift = struct.unpack_from('<f', raw, 248)[0]
+        exposure_shared = struct.unpack_from('<I', raw, 252)[0]
         shared_hero, lag_last, lag_max, lag_sum = struct.unpack_from('<Q2fd', raw, 256)
         web_start_last, web_start_max = struct.unpack_from('<2f', raw, 280)
         gap_frames, gap_last, gap_max, gap_sum = struct.unpack_from('<Q2fd', raw, 288)
@@ -654,7 +602,9 @@ def appearance_snapshot(game, address):
                     web_updates=web_updates, active_view_aligned=active_aligned,
                     active_view_rejected=active_rejected,
                     active_view_fov_deg=lens_degrees(*active_bounds) if active_aligned else None,
-                    active_view_shift_m=active_shift, shared_hero_frames=shared_hero,
+                    active_view_shift_m=active_shift,
+                    # Eye images exposed from the game's own view (two a frame); 0 = each eye on its own.
+                    exposure_shared=exposure_shared, shared_hero_frames=shared_hero,
                     hero_lag_last_m=lag_last, hero_lag_max_m=lag_max,
                     hero_lag_mean_m=lag_sum/shared_hero if shared_hero else 0.0,
                     web_start_error_m=web_start_last if web_start_last >= 0 else None,
@@ -824,6 +774,9 @@ def hud_snapshot(game, address):
         layer_status, restored = struct.unpack_from('<2I', raw, 144)
         result.update(layer_status=layer_status, restored=bool(restored))
         result['size'] = struct.unpack_from('<I', raw, 152)[0]
+        # Markers are projected before the game moves the player, from the head foreseen for the frame: the
+        # largest distance from it to the frame's head (0 from builds before October 10's fourth).
+        result['marker_mismatch_m'] = round(struct.unpack_from('<f', raw, 156)[0], 4)
         result.update(zip(('hidden_frames', 'hidden_draws', 'followed_frames'), struct.unpack_from('<3Q', raw, 160)))
         result.update(zip(('follow_angle', 'follow_angle_max'),
                           (round(v, 2) for v in struct.unpack_from('<2f', raw, 184))))
@@ -1027,9 +980,6 @@ def session(a, startup):
     manifest, runtime = preflight(a.xr_runtime)
     startup.fields['xr_runtime'] = runtime
     startup.stage = 'starting the game'
-    announce_low_memory(commit_warning(free_commit_mb(), game_commit_mb(),
-                                       vr_commit_mb(runtime['recommended_eye'], a.render_scale, a.size)),
-                        bool(sys.stdin and sys.stdin.isatty()))
 
     def prepare_display():
         try:

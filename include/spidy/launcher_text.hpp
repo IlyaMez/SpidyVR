@@ -1,6 +1,6 @@
 #pragma once
-// Text handling for the Spidy launcher: Steam's VDF files, constants read from
-// the Python tools, command lines, and log lines. No Windows calls, so the
+// Text handling for the Spidy launcher: Steam's VDF files, JSON, constants read
+// from the Python tools, command lines, and log lines. No Windows calls, so the
 // checks in tests/launcher_tests.cpp run anywhere.
 #include "body_calibration.hpp"
 #include "eye_resolution.hpp"
@@ -127,8 +127,8 @@ inline SteamApp steamApp(std::string_view manifest) {
 }
 
 // The value of a module-level Python constant (`NAME = "text"` or `NAME = 123`).
-// The launcher reads the supported build's hash and the VR memory need from the
-// tools themselves, so each fact keeps one source.
+// The launcher reads the supported build's hash and version from the tools
+// themselves, so each fact keeps one source.
 inline std::optional<std::string> pythonConstant(std::string_view source, std::string_view name) {
     size_t at = 0;
     while ((at = source.find(name, at)) != std::string_view::npos) {
@@ -161,6 +161,216 @@ inline std::optional<std::string> pythonConstant(std::string_view source, std::s
     return std::nullopt;
 }
 
+// A JSON value: enough of JSON to read GitHub's answers and OpenVR's path file.
+struct Json {
+    enum class Type { null, boolean, number, string, array, object };
+    Type type = Type::null;
+    bool boolean{};
+    double number{};
+    std::string string;
+    std::vector<Json> items;
+    std::vector<std::pair<std::string, Json>> members;
+
+    // An object's member named `key`; nullptr when there is none.
+    const Json* get(std::string_view key) const {
+        for (const auto& [name, value] : members)
+            if (name == key)
+                return &value;
+        return nullptr;
+    }
+    // A string member's text; empty for anything else.
+    std::string text(std::string_view key) const {
+        const Json* value = get(key);
+        return value && value->type == Type::string ? value->string : std::string();
+    }
+};
+
+namespace detail {
+class JsonReader {
+public:
+    explicit JsonReader(std::string_view text) : s_(text) {}
+
+    std::optional<Json> read() {
+        Json value;
+        if (!this->value(value, 0))
+            return std::nullopt;
+        space();
+        return i_ == s_.size() ? std::optional<Json>(std::move(value)) : std::nullopt;
+    }
+
+private:
+    void space() {
+        while (i_ < s_.size() && (s_[i_] == ' ' || s_[i_] == '\t' || s_[i_] == '\n' || s_[i_] == '\r'))
+            ++i_;
+    }
+
+    bool word(std::string_view text) {
+        if (s_.substr(i_, text.size()) != text)
+            return false;
+        i_ += text.size();
+        return true;
+    }
+
+    bool hex4(size_t at, unsigned& code) const {
+        if (at + 4 > s_.size())
+            return false;
+        const auto [end, error] = std::from_chars(s_.data() + at, s_.data() + at + 4, code, 16);
+        return error == std::errc() && end == s_.data() + at + 4;
+    }
+
+    static void utf8(std::string& out, unsigned code) {
+        if (code < 0x80) {
+            out += static_cast<char>(code);
+        } else if (code < 0x800) {
+            out += static_cast<char>(0xC0 | code >> 6);
+            out += static_cast<char>(0x80 | (code & 0x3F));
+        } else if (code < 0x10000) {
+            out += static_cast<char>(0xE0 | code >> 12);
+            out += static_cast<char>(0x80 | (code >> 6 & 0x3F));
+            out += static_cast<char>(0x80 | (code & 0x3F));
+        } else {
+            out += static_cast<char>(0xF0 | code >> 18);
+            out += static_cast<char>(0x80 | (code >> 12 & 0x3F));
+            out += static_cast<char>(0x80 | (code >> 6 & 0x3F));
+            out += static_cast<char>(0x80 | (code & 0x3F));
+        }
+    }
+
+    bool string(std::string& out) {
+        if (!word("\""))
+            return false;
+        while (i_ < s_.size()) {
+            const char c = s_[i_++];
+            if (c == '"')
+                return true;
+            if (static_cast<unsigned char>(c) < 0x20)
+                return false;
+            if (c != '\\') {
+                out += c;
+                continue;
+            }
+            if (i_ >= s_.size())
+                return false;
+            switch (const char escape = s_[i_++]) {
+            case '"':
+            case '\\':
+            case '/': out += escape; break;
+            case 'b': out += '\b'; break;
+            case 'f': out += '\f'; break;
+            case 'n': out += '\n'; break;
+            case 'r': out += '\r'; break;
+            case 't': out += '\t'; break;
+            case 'u': {
+                unsigned code{};
+                if (!hex4(i_, code))
+                    return false;
+                i_ += 4;
+                // A character beyond the first 64K is two escapes, a surrogate pair; half of one is U+FFFD.
+                if (code >= 0xD800 && code < 0xDC00) {
+                    unsigned low{};
+                    if (s_.substr(i_, 2) == "\\u" && hex4(i_ + 2, low) && low >= 0xDC00 && low < 0xE000) {
+                        code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+                        i_ += 6;
+                    } else {
+                        code = 0xFFFD;
+                    }
+                } else if (code >= 0xDC00 && code < 0xE000) {
+                    code = 0xFFFD;
+                }
+                utf8(out, code);
+                break;
+            }
+            default: return false;
+            }
+        }
+        return false;
+    }
+
+    bool value(Json& out, int depth) {
+        // GitHub nests a few levels; a deeper text is not an answer of theirs.
+        if (depth > 64)
+            return false;
+        space();
+        if (i_ >= s_.size())
+            return false;
+        const char c = s_[i_];
+        if (c == '{') {
+            ++i_;
+            out.type = Json::Type::object;
+            space();
+            if (word("}"))
+                return true;
+            for (;;) {
+                space();
+                std::string name;
+                if (!string(name))
+                    return false;
+                space();
+                if (!word(":"))
+                    return false;
+                Json member;
+                if (!value(member, depth + 1))
+                    return false;
+                out.members.emplace_back(std::move(name), std::move(member));
+                space();
+                if (word("}"))
+                    return true;
+                if (!word(","))
+                    return false;
+            }
+        }
+        if (c == '[') {
+            ++i_;
+            out.type = Json::Type::array;
+            space();
+            if (word("]"))
+                return true;
+            for (;;) {
+                Json item;
+                if (!value(item, depth + 1))
+                    return false;
+                out.items.push_back(std::move(item));
+                space();
+                if (word("]"))
+                    return true;
+                if (!word(","))
+                    return false;
+            }
+        }
+        if (c == '"') {
+            out.type = Json::Type::string;
+            return string(out.string);
+        }
+        if (word("true")) {
+            out.type = Json::Type::boolean;
+            out.boolean = true;
+            return true;
+        }
+        if (word("false")) {
+            out.type = Json::Type::boolean;
+            return true;
+        }
+        if (word("null"))
+            return true;
+        size_t end = i_;
+        while (end < s_.size() && std::string_view("+-0123456789.eE").find(s_[end]) != std::string_view::npos)
+            ++end;
+        const char* first = s_.data() + i_;
+        const auto [stop, error] = std::from_chars(first, s_.data() + end, out.number);
+        if (end == i_ || error != std::errc() || stop != s_.data() + end)
+            return false;
+        out.type = Json::Type::number;
+        i_ = end;
+        return true;
+    }
+
+    std::string_view s_;
+    size_t i_ = 0;
+};
+} // namespace detail
+
+inline std::optional<Json> parseJson(std::string_view text) { return detail::JsonReader(text).read(); }
+
 // A friendly name for an OpenXR runtime manifest path, as tools/xr_runtime.py names it.
 inline std::string runtimeLabel(std::string_view manifest) {
     std::string lowered(manifest);
@@ -180,6 +390,20 @@ inline std::string runtimeLabel(std::string_view manifest) {
         if (lowered.find(piece) != std::string::npos)
             return std::string(label);
     return {};
+}
+
+// The folders an OpenVR path file (%LOCALAPPDATA%\openvr\openvrpaths.vrpath, JSON) lists as its
+// "runtime": where SteamVR is installed, as tools/xr_runtime.py's steamvr reads it.
+inline std::vector<std::string> openVrRuntimes(std::string_view paths) {
+    if (paths.substr(0, 3) == "\xEF\xBB\xBF")
+        paths.remove_prefix(3);
+    std::vector<std::string> folders;
+    const auto root = parseJson(paths);
+    if (const Json* runtime = root ? root->get("runtime") : nullptr)
+        for (const Json& folder : runtime->items)
+            if (folder.type == Json::Type::string)
+                folders.push_back(folder.string);
+    return folders;
 }
 
 // The headset check's line, from spidy_headset_probe.exe's output or from
@@ -232,14 +456,6 @@ inline std::optional<std::array<uint32_t, 2>> recommendedEye(std::string_view ou
     if (std::from_chars(x + 1, end, eye[1]).ec != std::errc() || !validEyeSize(eye[0]) || !validEyeSize(eye[1]))
         return std::nullopt;
     return eye;
-}
-
-// What the game in VR commits, in GB: `baseMb` (run_game_vr.py's VR_COMMIT_MB, measured at 3072 x 3264 per
-// eye) and `bytesPerPixel` (its EYE_COMMIT_BYTES) for each pixel of the two eyes beyond that, as its
-// vr_commit_mb counts it.
-inline double vrCommitGb(double baseMb, double bytesPerPixel, std::array<uint32_t, 2> eye) {
-    const double extra = 2 * (static_cast<double>(eye[0]) * eye[1] - 3072.0 * 3264) * bytesPerPixel / (1 << 20);
-    return (baseMb + std::max(0.0, extra)) / 1024;
 }
 
 // Quotes one argument so CommandLineToArgvW (and Python) read it back unchanged.

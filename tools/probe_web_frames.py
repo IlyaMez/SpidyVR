@@ -20,6 +20,14 @@ moves the game's own view to the eyes as a VR session does. Start the game with
 `python tools\vr_launcher.py` to give it Spidy's larger ring, or with
 `--ring 0` there to see the overflow on the game's own.
 
+With `--views 13` the report's `monitor_view` says whether that view, which the
+monitor shows, and the HUD panel were placed from the same player position as
+the eyes in every frame, and how far the head the HUD's markers were projected
+from was from the frame's head. 0.2.8 and 0.2.9 placed the view and the panel a
+frame of travel behind the eyes: the monitor showed the player's back in a
+swing. `--modules DIR` takes spidy_stereo_probe.dll from another build (a
+play folder's), for a comparison.
+
 Load a save, stand or perch somewhere with open space, and run this with the
 game window in the foreground. The game must be restarted before another run.
 """
@@ -41,7 +49,7 @@ from probe_native_motion import snapshot as motion_snapshot
 from probe_native_rays import snapshot as ray_snapshot, command as ray_command
 from probe_stereo import snapshot as stereo_snapshot, frame_snapshot, render_memory_snapshot
 from probe_stereo_gpu import discover_queue, snapshot as gpu_snapshot
-from run_game_vr import appearance_snapshot, rgb_rows, write_rgb_png
+from run_game_vr import appearance_snapshot, hud_snapshot, rgb_rows, write_rgb_png
 from vr_launcher import enlarge_render_memory, RENDER_MEMORY_HOOKS
 
 ENTRIES = (*HOOKS, 0x2e67010, 0x1fbe360, 0x1fbda50, 0xa7b3a0, 0x1f9db60, 0x18a0bb0, 0x189bd30, 0x186cc00,
@@ -143,6 +151,22 @@ def assess(late, frame):
                 passed=bool(late_missed and frame_hits))
 
 
+def monitor_view(appearance, hud, frame):
+    """The game's own view (the monitor's) and the HUD panel against the eyes of the same frames: the frames
+    that view was placed from another player position than the eyes and the furthest (m), the furthest the panel
+    was moved from the eyes' travel (m), and the furthest the markers' head was from the frame's (m)."""
+    if not appearance or not appearance['active_view_aligned']:
+        return None
+    result = dict(frames=appearance['active_view_aligned'], lag_frames=appearance['active_view_lag_frames'],
+                  lag_max_m=round(appearance['active_view_lag_max_m'], 4),
+                  frame_travel_m=round(frame.get('mean_frame_travel_m', 0), 4))
+    if hud:
+        result.update(panel_mismatch_m=hud['offset_mismatch_m'], marker_projections=hud['marker_projections'],
+                      marker_mismatch_m=hud['marker_mismatch_m'])
+    result['with_the_eyes'] = not result['lag_frames'] and not result.get('panel_mismatch_m')
+    return result
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--speed', type=float, default=32, help='swing speed cap in m/s')
@@ -151,6 +175,8 @@ def main():
     p.add_argument('--size', type=int, default=512)
     p.add_argument('--views', type=int, default=5, choices=(5, 13),
                    help='13 also moves the game view to the eyes, as in a VR session')
+    p.add_argument('--modules', type=pathlib.Path, default=ROOT/'build/windows-ninja',
+                   help='folder with spidy_stereo_probe.dll')
     p.add_argument('--output', type=pathlib.Path, default=ROOT/'reports/web-frames.json')
     a = p.parse_args()
     if not 1 <= a.speed <= 65 or not 0 <= a.gravity <= 30 or not 2 <= a.hold <= 10 or not 64 <= a.size <= 2048:
@@ -158,7 +184,7 @@ def main():
     game = Game(find_game())
     process = None
     stops = []  # (name, export) in the order to stop
-    result = dict(speed=a.speed, gravity=a.gravity, hold=a.hold, size=a.size)
+    result = dict(speed=a.speed, gravity=a.gravity, hold=a.hold, size=a.size, modules=str(a.modules))
     try:
         pe = PE(game.path.read_bytes())
         entries = {rva: pe.bytes(rva, 16) for rva in (*ENTRIES, *RENDER_MEMORY_HOOKS)}
@@ -195,12 +221,12 @@ def main():
         rays, _ = prepare(game.pid, process, ROOT/'build/windows-ninja/spidy_ray_bridge.dll', ROOT/'reports/ray-modules',
                           ('SpidyRayStart', 'SpidyRaySubmit', 'SpidyRayData', 'SpidyRayStop', 'SpidySwingStart',
                            'SpidySwingSubmit', 'SpidySwingStop', 'SpidySwingData'))
-        eyes_dll, digest = prepare(game.pid, process, ROOT/'build/windows-ninja/spidy_stereo_probe.dll',
+        eyes_dll, digest = prepare(game.pid, process, a.modules/'spidy_stereo_probe.dll',
                                    ROOT/'reports/stereo-modules',
                                    ('SpidyStart', 'SpidyStop', 'SpidyStereoData', 'SpidySetEyes', 'SpidyStereoFrames',
                                     'SpidyGpuStart', 'SpidyGpuStop', 'SpidyGpuData', 'SpidyGpuFreeze',
                                     'SpidyEyePlacement', 'SpidyWebsStart', 'SpidyWebsSubmit', 'SpidyWebsStop',
-                                    'SpidyAppearanceData'))
+                                    'SpidyAppearanceData', 'SpidyHudData'))
         # Already loaded if the game was started by tools/vr_launcher.py; otherwise it only reports.
         render_module = enlarge_render_memory(game.pid)
         stops.append(('render_memory', render_module['SpidyRenderMemoryStop']))
@@ -318,6 +344,7 @@ def main():
                         captures.append(dict(label=label, seconds=elapsed, error=code))
             time.sleep(.004)
         appearance = appearance_snapshot(game, eyes_dll['SpidyAppearanceData'])
+        hud = hud_snapshot(game, eyes_dll['SpidyHudData'])
         frames = frame_snapshot(game, eyes_dll['SpidyStereoFrames'])
         render_memory = render_memory_snapshot(game, render_module['SpidyRenderMemoryData'])
         codes = {}
@@ -332,6 +359,7 @@ def main():
                       assessment=assess(late_summary, frame_summary), captures=captures,
                       image_folder=str(folder), expected_pixel=expected_pixel(a.size),
                       flight=flight_summary(motion_samples), appearance=appearance, frames=frames,
+                      monitor_view=monitor_view(appearance, hud, frame_summary), hud=hud,
                       render_memory=render_memory,
                       entries_restored=all(game.read(game.base+rva, 16) == code for rva, code in entries.items()),
                       samples=samples, swing_samples=swing_samples, motion_samples=motion_samples)
@@ -342,7 +370,7 @@ def main():
         a.output.parent.mkdir(parents=True, exist_ok=True)
         a.output.write_text(json.dumps(result, indent=2)+'\n')
         print(json.dumps({k: result[k] for k in ('placed_in_maintenance', 'placed_before_render', 'assessment',
-                                                 'captures', 'flight', 'render_memory', 'stops',
+                                                 'captures', 'flight', 'monitor_view', 'render_memory', 'stops',
                                                  'entries_restored')}, indent=2))
         print('eye jobs', {k: frames[k] for k in ('left_copies', 'left_begins', 'reclaimed')} if frames else None)
         print(f"Web frame check {'passed' if result['passed'] else 'failed'}; report: {a.output.resolve()}")

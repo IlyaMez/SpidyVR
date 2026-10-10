@@ -434,6 +434,12 @@ std::vector<Runtime> openXrRuntimes() {
         }
         RegCloseKey(key);
     }
+    // The registry names SteamVR only while it is Windows' active runtime; OpenVR's path file says where it is.
+    const std::wstring localAppData = knownFolder(FOLDERID_LocalAppData);
+    const std::string openVr =
+        localAppData.empty() ? std::string() : readText(fs::path(localAppData) / L"openvr" / L"openvrpaths.vrpath");
+    for (const auto& folder : text::openVrRuntimes(openVr))
+        manifests.push_back(truePath((fs::path(widen(folder)) / L"steamxr_win64.json").wstring()));
     std::vector<Runtime> runtimes;
     for (const auto& manifest : manifests) {
         if (manifest.empty() || !isFile(manifest) ||
@@ -637,11 +643,6 @@ void Scanner::run(Settings settings) {
             scan.expectedHash = *hash;
         if (auto version = text::pythonConstant(inspect, "EXPECTED_VERSION"))
             scan.expectedVersion = *version;
-        const std::string session = readText(root / L"tools/run_game_vr.py");
-        if (auto need = text::pythonConstant(session, "VR_COMMIT_MB"))
-            scan.neededCommitGb = std::atof(need->c_str()) / 1024;
-        if (auto bytes = text::pythonConstant(session, "EYE_COMMIT_BYTES"))
-            scan.eyeCommitBytes = std::atof(bytes->c_str());
         scan.python = findPython(scan.root);
         if (!scan.python.empty()) {
             std::string output;
@@ -685,9 +686,6 @@ void Scanner::run(Settings settings) {
                        isFile(fs::path(system) / L"msvcp140.dll");
     scan.vcVersion = fileVersion((fs::path(system) / L"msvcp140.dll").wstring(), runtimeVersion);
     scan.vcCurrent = scan.vcInstalled && runtimeVersion >= kMinimumRuntime;
-    MEMORYSTATUSEX memory{sizeof(memory)};
-    if (GlobalMemoryStatusEx(&memory))
-        scan.freeCommitGb = static_cast<double>(memory.ullAvailPageFile) / (1ull << 30);
     scan.build = scan.gameExe.empty() ? Build::unknown : Build::checking;
     scan.done = true;
     {

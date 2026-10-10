@@ -1,6 +1,105 @@
 # Validation — 2026-10-10
 
-## Walking up onto a wall, and the view while walking it — current build
+## One exposure for both eyes — current build
+
+The user, October 10: "there is a visual bug where a discrepancy happens in
+brightness and shadow rendering between left and right eye. there's an auto
+brightness or something and it's calculated per eye I think and looks bad -
+for example standing on the side of a building - one eye that sees more of
+the sky is brighter than one that's closer to the city, if I rotate around to
+look the other way they flip".
+
+**What the executable shows** (offline, `tools/research_game.py`; shaders
+from its embedded DXBC with `D3DDisassemble`).
+
+- A view's setup (`189ce20`) makes it an "Adapted Lum" buffer (`+16f0`: four
+  floats; its shader view at `+16f8`, its writable view at `+1700`), a
+  256-bin "Lum Histogram" (`+1728`) and a readback of each (`+16a0`,
+  `+16c0`). A view made with a parent (mode 2) has the parent's buffers
+  passed to its own (`1893fd0`'s last argument); offscreen views such as the
+  eyes are made without a parent.
+- The luminance pass `18449f0` runs per view on the render thread: it sums
+  log luminance over the view's image, then a one-thread compute shader
+  (`g_LumAccumBuffer`, `g_RWAdaptedLumBuffer`) moves element 3 of the view's
+  buffer towards the new value at the pass's rate and stores the compensated
+  luminance in element 0, its inverse in element 1 and the measured value in
+  element 2. It then binds the buffer's shader view at `t67` for all graphics
+  stages (`g_AdaptedLumBuffer`) and queues the readback.
+- The tone mapper `1846c20` binds `189c710(view)`, the same shader view, at
+  `t11`; eleven tone-map compute shaders declare it (`g_TmAdaptedLumBuffer`),
+  and the one disassembled multiplies the radiance by element 1 times
+  `m_AcesMiddleGray` and does not read the constant made from the processor's
+  copy (`m_InvAdaptationLum`, from view `+1708`).
+- `18a01c0` reads the readback into `+1720`/`+1724`, and `189bd30` moves
+  `+1708`/`+170c` towards those. Spidy's `update` hook copied the main view's
+  `+1708`/`+170c` (and, until this build, `+1720`/`+1724`) into each eye: the
+  processor's numbers were shared, the picture's exposure was not.
+- Render jobs work on a per-frame copy of the view's first `0x1f70` bytes
+  (`19223e0`, stored at settings `+4b0`); the luminance pass, the tone mapper
+  and the readback all take the buffer from that copy.
+
+**What changed.** `shareExposure` (`src/stereo_probe.cpp`), in the `copyJob`
+hook: the eye's copy gets the main view's shader view at `+16f8` (as
+`189c710` picks it: the view's own buffer, else its render buffers'
+`+12ae8`), when the main view exists (pool bit 0) and both have a buffer.
+The eye's own buffer and its writable view stay, so the eye's pass still
+adapts its own buffer and reads it back (`+1720`: what the eye would have
+used), and nothing writes the main view's buffer but the main view. The
+`update` hook copies only `+1708`/`+170c` now. `0x189c710`'s first bytes are
+checked at start with the other entries. `SpidyEyeExposure(1)` turns the
+sharing off for comparison. `SpidyAppearanceData.exposureShared` (the unused
+field at 252, no version change) counts the copies; `run_game_vr.py` reports
+it as `appearance.exposure_shared`.
+
+**Checks.**
+
+- Core: 227/227. Python: 103, 1 new (the probe's head with roll; the columns
+  both lenses see; block light of a scene drawn by two eyes, equal and 0.8
+  times as bright; black images; the assessment fails when shared images
+  differ, when the shared phase did not share, or the own phase did).
+- In the game, `tools/probe_exposure.py` (report `reports/exposure-probe.json`,
+  images in `reports/exposure-probe-eyes`), eyes 1536 x 1632, views 29, the
+  user's save on the Fisk construction site (-208, 63, 2611) at sunset, HUD
+  off. Per pose: 4 s each eye on its own, both eyes saved, 1 s shared, both
+  saved. Left eye over right eye, median of the block ratios over the part
+  both lenses see (428 to 575 blocks of 576), linear light:
+
+  | Pose | Own | Shared | Adapted luminance: game view, left, right |
+  | --- | --- | --- | --- |
+  | level | 1.278 | 1.0002 | 0.472, 0.427, 0.518 |
+  | roll 90 (right eye below) | 0.430 | 1.0005 | 0.413, 0.630, 0.315 |
+  | roll -90 | 2.224 | 0.9996 | 0.442, 0.343, 0.655 |
+  | yaw 90 | 0.628 | 0.9997 | 0.477, 0.668, 0.437 |
+  | yaw 180 | 1.419 | 1.0013 | 0.149, 0.138, 0.174 |
+  | yaw 270 | 1.264 | 0.9998 | 0.207, 0.191, 0.225 |
+
+  The eye with the higher luminance of its own (more sky in its lens) is the
+  darker one in every pose. `exposure_shared` rose by 0 in each own phase and
+  by 244 to 298 in each shared second; the processor's copies in use were the
+  game view's in all three views (0.47197 against 0.47199).
+  The blocks spread around that median in the shared images (a tenth below
+  0.83 to 0.96, a tenth above 1.02 to 1.12): near things sit at different
+  places in the two images, among them two dark pieces of the hero's head
+  right in front of the probe's eyes (they look like the mask's eye lenses;
+  the probe runs no body, and they are in the own images too).
+- Stops: eye views 0, GPU 0. The game closed with WM_CLOSE in 1.5 s; display
+  settings restored. Saves: `slot0-s.save` re-saved by the game after
+  Continue (13:16:55), the other ten files byte-identical.
+- Play folder `dist\Spidy-0.2.9`, 13:19: `spidy_stereo_probe.dll`
+  (`9e6ff833`, the build the probe ran) and `tools\run_game_vr.py` (the
+  folder's file plus the `exposure_shared` and `marker_mismatch_m` reads;
+  the tree's file has other sessions' launcher changes) hash-verified, import
+  check 42, backup in its
+  `reports\backups\play-folder-before-exposure-20261010-131936`.
+
+**Not tested.** The headset. Other things that may differ per eye (the
+per-view "Fog Color Map" at `+1030`, screen-space effects) were not examined;
+the shared images' medians leave no room for an overall difference at these
+six poses. A session whose main view is not on the head (`-StockMonitorView`)
+exposes both eyes for the stock camera's picture. In a session report,
+`appearance.exposure_shared` should be twice the eye frames.
+
+## Walking up onto a wall, and the view while walking it — preceding build
 
 The user, October 10, after the first session with the walls: "frequently wall
 walking isnt triggred properly and the regular game wallcrawling mechanic

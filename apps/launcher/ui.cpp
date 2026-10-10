@@ -149,18 +149,7 @@ void App::poll() {
         save();
     }
     const bool firstResult = latest.done && !scan_.done;
-    const double now = ImGui::GetCurrentContext() ? ImGui::GetTime() : 0;
-    // Memory and the game process change while the launcher is open.
-    if (scan_.done && latest.done && now - lastRefresh_ > 2) {
-        MEMORYSTATUSEX memory{sizeof(memory)};
-        if (GlobalMemoryStatusEx(&memory))
-            scan_.freeCommitGb = static_cast<double>(memory.ullAvailPageFile) / (1ull << 30);
-        lastRefresh_ = now;
-    }
-    const double freshCommit = scan_.freeCommitGb;
     scan_ = latest;
-    if (scan_.done && freshCommit > 0 && !firstResult)
-        scan_.freeCommitGb = freshCommit;
     if (firstResult || !runtime())
         chooseDefaultRuntime();
     const size_t before = log_.size();
@@ -212,10 +201,6 @@ std::array<uint32_t, 2> App::eyeSize() {
     return spidy::scaledEyeSize(eye[0], eye[1], static_cast<uint32_t>(settings_.options.renderScale));
 }
 
-double App::neededCommitGb() {
-    return spidy::launcher::vrCommitGb(scan_.neededCommitGb * 1024, scan_.eyeCommitBytes, eyeSize());
-}
-
 // A chosen runtime that is no longer installed gives way to Automatic.
 void App::chooseDefaultRuntime() {
     if (runtime() || settings_.runtime == kAutoRuntime || scan_.runtimes.empty())
@@ -244,13 +229,9 @@ std::vector<std::string> App::blockers() {
     return reasons;
 }
 
-void App::start(bool memoryConfirmed) {
+void App::start() {
     startError_.clear();
     administratorError_.clear();
-    if (!memoryConfirmed && scan_.freeCommitGb > 0 && scan_.freeCommitGb < neededCommitGb()) {
-        wantLowMemory_ = true;
-        return;
-    }
     const auto report = newReportPath(scan_.root);
     const auto* chosen = runtime();
     const auto args = spidy::launcher::sessionArguments(settings_.options, report, chosen ? chosen->manifest : L"",
@@ -902,15 +883,12 @@ void App::setupCard(float width) {
         });
     }
     const Outcome install = vcInstall_.state();
-    const double neededGb = neededCommitGb();
-    const bool memoryOk = scan_.freeCommitGb >= neededGb;
     const bool filesOk = !scan_.root.empty() && scan_.missing.empty() && !scan_.python.empty() && scan_.writable;
-    if (scan_.done && scan_.vcCurrent && memoryOk && filesOk && install != Outcome::running && install != Outcome::warning) {
+    if (scan_.done && scan_.vcCurrent && filesOk && install != Outcome::running && install != Outcome::warning) {
         const std::string detail =
-            format("Visual C++ runtime %s  \xC2\xB7  %.0f GB free for programs (VR takes about %.0f)  \xC2\xB7  Python %s",
-                   scan_.vcVersion.c_str(), scan_.freeCommitGb, neededGb,
+            format("Visual C++ runtime %s  \xC2\xB7  Python %s", scan_.vcVersion.c_str(),
                    scan_.pythonVersion.empty() ? "found" : scan_.pythonVersion.c_str());
-        setupRow(Mark::ok, "Windows, memory and Spidy's files", detail, S(98), [&] {
+        setupRow(Mark::ok, "Windows and Spidy's files", detail, S(98), [&] {
             if (secondaryButton("Open folder", S(98)))
                 openPath(scan_.root);
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
@@ -948,20 +926,6 @@ void App::setupCard(float width) {
                 vcInstall_.start();
             ImGui::EndDisabled();
         }) : std::function<void()>());
-    }
-    // Memory Windows can still promise.
-    {
-        Mark mark = Mark::busy;
-        std::string detail = "Checking...";
-        if (scan_.done) {
-            mark = memoryOk ? Mark::ok : Mark::warning;
-            detail = memoryOk ? format("%.0f GB available for programs; the game in VR takes about %.0f GB.",
-                                       scan_.freeCommitGb, neededGb)
-                              : format("Only %.1f GB available for programs; the game in VR takes about %.0f GB. Close "
-                                       "browsers, chat apps and other launchers, or enlarge the Windows page file.",
-                                       scan_.freeCommitGb, neededGb);
-        }
-        setupRow(mark, "Memory", detail, 0, {});
     }
     // Spidy's own files.
     {
@@ -1157,7 +1121,7 @@ void App::startBlock(ImVec2 size) {
     const ImVec2 buttonSize(size.x, S(62));
     if (!running) {
         if (bigButton("##start", kPlay, "START VR", buttonSize, true, reasons.empty()))
-            start(false);
+            start();
     } else if (!session_.stopRequested()) {
         if (bigButton("##stop", kStop, "STOP VR", buttonSize, false))
             session_.requestStop();
@@ -1586,10 +1550,6 @@ void App::updatesCard(float width) {
 }
 
 void App::modals() {
-    if (wantLowMemory_) {
-        ImGui::OpenPopup("Low on memory");
-        wantLowMemory_ = false;
-    }
     if (wantClose_) {
         ImGui::OpenPopup("VR is running");
         wantClose_ = false;
@@ -1632,13 +1592,6 @@ void App::modals() {
         ImGui::PopStyleVar();
         return answer;
     };
-    if (dialog("Low on memory",
-               format("Windows can promise programs only %.1f GB more memory, and the game in VR takes about %.0f GB. "
-                      "Close browsers, chat apps and other launchers, or enlarge the Windows page file; otherwise the "
-                      "game may stall or crash.",
-                      scan_.freeCommitGb, neededCommitGb()),
-               "Start anyway", "Cancel") == 1)
-        start(true);
     if (dialog("VR is running", "Closing Spidy stops VR first: it restores the game and saves the session report. The "
                                 "game keeps running.",
                "Stop VR and close", "Keep playing") == 1) {

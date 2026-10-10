@@ -66,8 +66,7 @@ coming. Questions, bugs, clips: come say hi on
 - **A PC VR headset with an OpenXR runtime.** Played on Quest 3 with
   [Virtual Desktop](https://www.vrdesktop.net/) and with SteamVR (Steam Link);
   other SteamVR headsets and Quest Link should work.
-- **About 19 GB of memory Windows can give programs** (RAM plus page file). The
-  launcher shows how much you have.
+- **About 19 GB of memory Windows can give programs** (RAM plus page file).
 
 ## Install and play
 
@@ -87,7 +86,7 @@ windows. If the headset shows a still picture, click the game window once.
 
 - Finds the game in your Steam libraries and checks it is the supported build.
 - Finds the OpenXR runtime your headset is connected to (or the one you choose) and checks the headset.
-- Checks the Visual C++ runtime, available memory and Spidy's own files.
+- Checks the Visual C++ runtime and Spidy's own files.
 - Starts the game with the larger render memory VR needs, in a small window that
   saves GPU time, and puts your window settings back afterwards.
 - Remembers your options, and saves a report of every session in `reports\`.
@@ -130,7 +129,6 @@ a red cross misses, a turning ring of three arcs catches a prop or thug.
 | The picture breaks up | Close the game and start it from the launcher, which gives it the render memory VR needs. |
 | Low frame rate | Lower *Render resolution* in the launcher, or the streaming quality in Virtual Desktop. 90 Hz paces more evenly than 120 Hz. |
 | Blurry or jagged edges | Raise *Render resolution* in the launcher above 100% (try 125%); it costs frame rate and memory. |
-| A memory warning before start | Close big programs (browsers, chat apps), or [give Windows a larger page file](docs/DEVELOPMENT.md#memory-for-a-vr-session). |
 | Web balls fly when you meant to reel | The trigger (the grip with WEB BUTTON: TRIGGER) reels only while that hand's web is attached; on a hand without a web it shoots. |
 
 More fixes are in the [players' guide](docs/PLAYERS.md). When you report a

@@ -135,6 +135,33 @@ class FrameHero {
   private:
     uint64_t seen_{};
 };
+// Where a frame will draw the hero, asked before its gameplay has moved him
+// (the HUD places its world markers first): where the last frame's views were
+// placed from, moved on by the travel that frame made. A longer step is a
+// teleport and is not carried on.
+class HeroTravel {
+  public:
+    // The hero position frame `frame`'s views were placed from.
+    void placed(uint64_t frame, Vec3 hero, float limit = 5) {
+        const Vec3 step = hero - hero_;
+        travel_ = known_ && frame == frame_ + 1 && finite(step) && length(step) <= limit ? step : Vec3{};
+        hero_ = hero;
+        frame_ = frame;
+        known_ = finite(hero);
+    }
+    // Where frame `frame` will draw him; false unless the frame before it was placed.
+    bool ahead(uint64_t frame, Vec3& hero) const {
+        if (!known_ || frame != frame_ + 1)
+            return false;
+        hero = hero_ + travel_;
+        return true;
+    }
+
+  private:
+    Vec3 hero_{}, travel_{};
+    uint64_t frame_{};
+    bool known_{};
+};
 // World offset the native views applied to the command rendered in a scene
 // generation. Overlays add it to their eye and hand poses for that image.
 bool renderOffset(uint64_t generation, Vec3& offset);

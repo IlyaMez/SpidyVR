@@ -58,9 +58,6 @@ class DisplayPermissionTests(unittest.TestCase):
                 shown = io.StringIO()
                 with patch.object(run_game_vr, 'game_running', return_value=False), \
                      patch.object(run_game_vr, 'preflight', return_value=('runtime.json', {'recommended_eye': None})), \
-                     patch.object(run_game_vr, 'free_commit_mb', return_value=None), \
-                     patch.object(run_game_vr, 'game_commit_mb', return_value=None), \
-                     patch.object(run_game_vr, 'announce_low_memory'), \
                      patch.object(run_game_vr, 'wait_for_game', side_effect=wait_for_game), \
                      patch.object(display, 'prepare_launch', side_effect=PermissionError(13, 'Access is denied')) as prepare, \
                      patch.object(display, 'pending', return_value=pending), patch('sys.stdout', shown):

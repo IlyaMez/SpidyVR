@@ -2517,6 +2517,44 @@ int main() {
         near(length((wrist+shared)-(eye+shared)-(wrist-eye)),0);
         near(length((wrist+shared)-(eye+late)-(wrist-eye)),.71f);
     });
+    test("a head asked for before the game moves the player goes where the frame will draw him", [] {
+        // The HUD projects its markers before the frame's gameplay. A head latched
+        // there (0.2.8, 0.2.9) had the last frame's player: the monitor's view and
+        // the HUD panel trailed the eyes by a frame of travel, 0.9 m in a swing.
+        native_eyes::HeroTravel t;
+        Vec3 hero{};
+        check(!t.ahead(1,hero),"a player foreseen before any frame placed him");
+        t.placed(7,{100,50,-20});
+        check(t.ahead(8,hero),"the frame after a placed one not foreseen");
+        near(length(hero-Vec3{100,50,-20}),0);
+        // 27 m/s at 30 frames a second: each frame draws him 0.9 m on.
+        t.placed(8,{100.9f,50,-20});
+        check(t.ahead(9,hero),"a moving player not foreseen");
+        near(length(hero-Vec3{101.8f,50,-20}),0);
+        check(!t.ahead(8,hero)&&!t.ahead(10,hero),"a frame other than the next foreseen");
+        // The eyes of frame 9 are placed from where he then is; the foreseen
+        // head is there too, the one from frame 8's player 0.9 m behind.
+        GameTrackingRig rig;
+        const auto m=rig.update(trackedFrame(),{100.2f,50,-20},{1,0,0},true);
+        const Vec3 drawn{101.8f,50,-20};
+        Vec3 eyes{}, foreseen{}, stale{};
+        check(native_eyes::reanchorOffset(m.anchor,drawn,eyes)&&native_eyes::reanchorOffset(m.anchor,hero,foreseen)&&
+              native_eyes::reanchorOffset(m.anchor,{100.9f,50,-20},stale),"normal travel rejected");
+        near(length(foreseen-eyes),0);near(length(stale-eyes),.9f);
+        // A teleport (fast travel, a respawn) is not carried on, nor a frame
+        // that follows one without a head.
+        t.placed(9,{400,50,-20});
+        check(t.ahead(10,hero),"the frame after a teleport not foreseen");
+        near(length(hero-Vec3{400,50,-20}),0);
+        t.placed(12,{401,50,-20});
+        check(t.ahead(13,hero),"the frame after a gap not foreseen");
+        near(length(hero-Vec3{401,50,-20}),0);
+        t.placed(13,{std::numeric_limits<float>::quiet_NaN(),0,0});
+        check(!t.ahead(14,hero),"an invalid position foreseen");
+        t.placed(14,{402,50,-20});t.placed(15,{402.5f,50,-20});
+        check(t.ahead(16,hero),"travel after an invalid position lost");
+        near(length(hero-Vec3{403,50,-20}),0);
+    });
     test("native ray batches reject unsafe geometry and expired commands", [] {
         native_rays::Command c;
         c.serial=1; c.count=2;

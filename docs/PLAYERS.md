@@ -14,8 +14,7 @@ WHAT YOU NEED
   through Virtual Desktop (https://www.vrdesktop.net/) and through SteamVR
   (Steam Link). Other SteamVR headsets and Meta Quest Link should work too.
   The launcher finds the runtime your headset is connected to.
-- About 19 GB of memory Windows can give programs (RAM plus page file). The
-  launcher shows how much you have.
+- About 19 GB of memory Windows can give programs (RAM plus page file).
 
 
 INSTALL
@@ -244,6 +243,11 @@ IF SOMETHING IS WRONG
   SteamVR), then press Check in the launcher. On Automatic it shows which VR
   runtime has your headset; if it picks the wrong one, choose yours in the
   list.
+- Steam Link or another SteamVR headset, and SteamVR is not in the
+  launcher's VR runtime list (version 0.2.9 and older, when Virtual Desktop
+  or the Meta Quest Link app is installed too): in SteamVR open Settings >
+  OpenXR and press "Set SteamVR as OpenXR runtime", then press Re-check in
+  the launcher. Newer versions find SteamVR by themselves.
 - "VR already ran in this game" (older versions: "Game XR start: 1000"):
   VR starts once per game launch. Close the game (Spider-Man.exe gone from
   Task Manager), then press START VR.

@@ -42,7 +42,9 @@ struct Data {
     uint64_t activeAligned{}, activeRejected{};
     float activeBounds[4]{};
     float activeShift{};
-    uint32_t reserved{};
+    // Eye render jobs that read the main view's adapted luminance (auto
+    // exposure) instead of the eye's own.
+    uint32_t exposureShared{};
     // Anchored frames whose eyes were placed from the hero position the game's
     // web lines started from that frame, and how far the hero's render
     // transform was from it when the eyes were placed, in metres.

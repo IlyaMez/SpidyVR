@@ -101,6 +101,9 @@ uint64_t frameIndex{}, placedFrame{};
 // Diagnostic comparison only (SpidyEyePlacement): place eyes in maintenance,
 // as builds before October 5 did.
 std::atomic<bool> lateEyes{};
+// Diagnostic comparison only (SpidyEyeExposure): each eye is exposed from its
+// own adapted luminance, as builds before October 10's sixth did.
+std::atomic<bool> ownExposure{};
 using InitBuffers = bool (*)(void*, const void*, const char*);
 InitBuffers originalInitBuffers{};
 void* initBuffersHook{};
@@ -125,11 +128,18 @@ float stockHalfWidth{};
 // The head of one frame (main thread): the eye command the frame's views
 // render, the player's travel to the frame, and the head view and lens that
 // gives (pose moved by the travel). Latched at the frame's first camera submit
-// (activeView), or later at the first HUD use without one. The engine's active
-// view, the HUD panel, its markers and the eyes all take it, so they agree on
-// the head in every frame: a transform set any later than the game's own HUD
-// placement (in placeEyes, at 1920240) did not reach the frame's render, so
-// the panel is placed in that placement's hook, before the eyes.
+// (activeView), or later at the HUD's placement without one: both come after
+// the frame's gameplay has moved the player. The engine's active view, the HUD
+// panel and the eyes all take it, so they agree on the head in every frame: a
+// transform set any later than the game's own HUD placement (in placeEyes, at
+// 1920240) did not reach the frame's render, so the panel is placed in that
+// placement's hook, before the eyes.
+// The HUD projects its world markers earlier, before the player has moved.
+// They take earlyHead(): the newest command's head, moved to where the frame
+// will draw the player (heroTravel). They latched the frame's head themselves
+// from October 9's fifth build to October 10's third, with the last frame's
+// player: the active view, which the monitor shows, and the panel trailed the
+// eyes by a frame of travel, up to 1.35 m in a swing.
 struct FrameHead {
     uint64_t frame = UINT64_MAX;
     native_eyes::Command command{};
@@ -142,7 +152,7 @@ struct FrameHead {
     Mat4 panel{};
     bool followed{};
 };
-FrameHead frameHead;
+FrameHead frameHead, earlyFrameHead;
 // The HUD panel's render instance while the HUD is off and the eyes are shown:
 // renderActor leaves it out of the eye views (main thread sets it).
 std::atomic<uintptr_t> hiddenHud{};
@@ -177,6 +187,8 @@ std::atomic<uint64_t> latchedSerial{}, generation{};
 EyeJobTable jobs; // jobLock
 // Hero rope-update samples already used by eye placement and the active view.
 native_eyes::FrameHero placedHero, activeHero;
+// Hero positions the frames' heads were placed from (main thread).
+native_eyes::HeroTravel heroTravel;
 bool read(uintptr_t p, void* out, size_t n) {
     __try {
         if (p < 0x10000)
@@ -404,41 +416,76 @@ void updateHero(bool immersive, bool hide) {
 }
 bool heroPosition(Vec3& position);
 bool retiring();
-// This frame's head (FrameHead), latched at its first use in the frame.
-const FrameHead& latchHead() {
-    if (frameHead.frame == frameIndex)
-        return frameHead;
+// The newest eye command's head for this frame, not yet moved with the player.
+FrameHead commandHead() {
     FrameHead head;
     head.frame = frameIndex;
     AcquireSRWLockShared(&commandLock);
     head.command = command;
     head.controlled = head.command.enabled && GetTickCount64() < commandDeadline;
     ReleaseSRWLockShared(&commandLock);
+    if (enabled && head.controlled && head.command.enabled == 1 && !retiring() &&
+        native_eyes::headView(head.command, head.pose, head.lens)) {
+        head.viewed = true;
+        Quat relative{};
+        head.followed = native_hud::followed(head.command.serial, relative);
+        head.panel = native_hud::turned(head.pose, relative);
+    }
+    return head;
+}
+// Moves a head with the player to the frame that draws him at `hero`: the
+// same render-frame correction placeEyes() gives the eyes.
+void moveHead(FrameHead& head, Vec3 hero) {
+    native_eyes::reanchorOffset(head.command.anchor, hero, head.offset);
+    for (Mat4* m : {&head.pose, &head.panel}) {
+        (*m)[12] += head.offset.x;
+        (*m)[13] += head.offset.y;
+        (*m)[14] += head.offset.z;
+    }
+}
+// This frame's head (FrameHead), latched at its first use in the frame: after
+// the frame's gameplay has moved the player.
+const FrameHead& latchHead() {
+    if (frameHead.frame == frameIndex)
+        return frameHead;
     // This frame's rope-update sample of the hero, if one ran since the last
     // frame (taken once a frame, immersive or not, as FrameHero requires).
     uint64_t ropeSamples{};
     Vec3 ropeHero{}, rendered{};
     native_webs::heroSample(ropeSamples, ropeHero);
     const bool shared = activeHero.fresh(ropeSamples, ropeHero);
-    if (enabled && head.controlled && head.command.enabled == 1 && !retiring() &&
-        native_eyes::headView(head.command, head.pose, head.lens)) {
-        // The same render-frame correction placeEyes() gives the eyes: the
-        // rope-update sample, else the hero's render transform.
-        if (head.command.anchored && (shared || heroPosition(rendered))) {
-            native_eyes::reanchorOffset(head.command.anchor, shared ? ropeHero : rendered, head.offset);
-            activeHeroPosition = shared ? ropeHero : rendered;
-            activeHeroPlaced = true;
-        }
-        head.pose[12] += head.offset.x;
-        head.pose[13] += head.offset.y;
-        head.pose[14] += head.offset.z;
-        head.viewed = true;
-        Quat relative{};
-        head.followed = native_hud::followed(head.command.serial, relative);
-        head.panel = native_hud::turned(head.pose, relative);
+    frameHead = commandHead();
+    // The player is where that sample has him, else at the hero's render transform.
+    if (frameHead.viewed && frameHead.command.anchored && (shared || heroPosition(rendered))) {
+        activeHeroPosition = shared ? ropeHero : rendered;
+        activeHeroPlaced = true;
+        moveHead(frameHead, activeHeroPosition);
+        heroTravel.placed(frameIndex, activeHeroPosition);
     }
-    frameHead = head;
+    if (frameHead.viewed && earlyFrameHead.frame == frameIndex && earlyFrameHead.viewed) {
+        // This frame's markers went to the head earlyHead() foresaw.
+        const auto& early = earlyFrameHead.pose;
+        const auto& pose = frameHead.pose;
+        const float apart = length(Vec3{early[12] - pose[12], early[13] - pose[13], early[14] - pose[14]});
+        native_hud::publish([&](native_hud::Data& d) { d.markerMismatch = std::max(d.markerMismatch, apart); });
+    }
     return frameHead;
+}
+// This frame's head for a use that may come before the frame's gameplay has
+// moved the player (the HUD's marker projections): the frame's own once it is
+// latched; until then the newest command's, moved to where the frame will draw
+// him, or where he is now when the last frame did not place one.
+const FrameHead& earlyHead() {
+    if (frameHead.frame == frameIndex)
+        return frameHead;
+    if (earlyFrameHead.frame == frameIndex)
+        return earlyFrameHead;
+    earlyFrameHead = commandHead();
+    Vec3 hero{};
+    if (earlyFrameHead.viewed && earlyFrameHead.command.anchored &&
+        (heroTravel.ahead(frameIndex, hero) || heroPosition(hero)))
+        moveHead(earlyFrameHead, hero);
+    return earlyFrameHead;
 }
 // While immersive, the HUD panel goes in front of this frame's head, facing
 // the way the XR worker's Follow turned it.
@@ -584,6 +631,34 @@ bool initBuffers(void* buffers, const void* description, const char* name) {
     }
     return originalInitBuffers(buffers, description, name);
 }
+// The game adapts exposure on the GPU, one view at a time. A view's luminance
+// pass (18449f0) averages the view's own image, moves the view's "Adapted Lum"
+// buffer (+16f0: the buffer, +16f8 its shader view, +1700 its writable view)
+// towards it, and binds the shader view for the view's later draws (t67); the
+// tone mapper multiplies the image by that buffer (189c710, t11). Each eye had
+// its own, so each eye was exposed for what it alone saw: the eye with more
+// sky in its lens came out darker than the other (a quarter to a half with a
+// level head, twice with the head on its side), and they swapped when the
+// head turned round. A render job works on the frame's copy of its view
+// (19223e0), so each eye's copy now carries the main view's shader view: both
+// eyes take the exposure of the game's own view, which is on the head and
+// covers both lenses while immersive. The eye still adapts its own buffer,
+// which nothing reads.
+bool shareExposure(uintptr_t job) {
+    uint64_t pool{};
+    const auto primary = pointer(base + 0x7a34dd0);
+    if (ownExposure || !(config.createViews & 4) || !read(base + 0x7a34dd8, &pool, 8) || !(pool & 1) ||
+        !primary || !pointer(job + 0x16f0))
+        return false;
+    // As 189c710 picks it: the view's own buffer, else its render buffers'.
+    const auto buffers = pointer(primary + 0x1640);
+    const auto shared =
+        pointer(primary + 0x16f0) ? pointer(primary + 0x16f8) : buffers ? pointer(buffers + 0x12ae8) : 0;
+    if (!shared)
+        return false;
+    std::memcpy(reinterpret_cast<void*>(job + 0x16f8), &shared, 8);
+    return true;
+}
 void copyJob(void* view, void* settings, void* a, void* b, bool c) {
     originalCopyJob(view, settings, a, b, c);
     if (!enabled)
@@ -593,6 +668,13 @@ void copyJob(void* view, void* settings, void* a, void* b, bool c) {
             const auto job = reinterpret_cast<void*>(pointer(reinterpret_cast<uintptr_t>(settings) + 0x4b0));
             if (!job)
                 return;
+            if (shareExposure(reinterpret_cast<uintptr_t>(job))) {
+                AcquireSRWLockExclusive(&telemetry);
+                InterlockedIncrement64(&SpidyAppearanceData.sequence);
+                ++SpidyAppearanceData.exposureShared;
+                InterlockedIncrement64(&SpidyAppearanceData.sequence);
+                ReleaseSRWLockExclusive(&telemetry);
+            }
             AcquireSRWLockExclusive(&jobLock);
             auto& d = SpidyStereoFrames;
             InterlockedIncrement64(&d.sequence);
@@ -676,19 +758,18 @@ void update(void* view) {
             ++updates[i];
     originalUpdate(view);
     if (enabled && (view == eyes[0].load() || view == eyes[1].load()) && owned(view)) {
-        // The main view's exposure history is fed by its luminance readback.
-        // Secondary views start with zero history. Share the current exposure
-        // values between eyes, while keeping their buffers and histories owned
-        // separately. Native 18a01c0 and 189bd30 identify these four scalars.
+        // +1708 and +170c are the processor's copy of the view's adapted and
+        // measured luminance: 18a01c0 reads the "Adapted Lum" buffer back into
+        // +1720 and +1724, and 189bd30 (above) moves these two towards them.
+        // The tone mapper's constants and the game's own code read them. The
+        // eyes take the main view's, as their images do (shareExposure); what
+        // each eye measured for itself stays in +1720 and +1724.
         const auto primary = pointer(base + 0x7a34dd0);
         float exposure[2]{};
         if (read(primary + 0x1708, exposure, sizeof(exposure)) && std::isfinite(exposure[0]) &&
             std::isfinite(exposure[1]) && exposure[0] > 0 && exposure[1] > 0 && exposure[0] < 1e6f &&
-            exposure[1] < 1e6f) {
-            auto bytes = static_cast<uint8_t*>(view);
-            std::memcpy(bytes + 0x1708, exposure, sizeof(exposure));
-            std::memcpy(bytes + 0x1720, exposure, sizeof(exposure));
-        }
+            exposure[1] < 1e6f)
+            std::memcpy(static_cast<uint8_t*>(view) + 0x1708, exposure, sizeof(exposure));
     }
 }
 void copyFinal(void* view) {
@@ -1162,7 +1243,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
         const unsigned char hudPlaceBytes[] = {0x40, 0x55, 0x53, 0x48, 0x8d, 0xac, 0x24, 0xc8, 0xfe,
                                                0xff, 0xff, 0x48, 0x81, 0xec, 0x38, 0x02, 0x00, 0x00};
         const unsigned char setTransformBytes[] = {0x40, 0x53, 0x48, 0x83, 0xec, 0x40, 0x0f, 0x10, 0x02, 0x33, 0xc0};
+        // A view's adapted luminance for shaders: its own buffer at +16f0.
+        const unsigned char adaptedLumBytes[] = {0x48, 0x8d, 0x81, 0xf0, 0x16, 0x00, 0x00, 0x48, 0x8b, 0x10};
         if (!entry(0x18a0bb0, maintainBytes, sizeof(maintainBytes)) ||
+            !entry(0x189c710, adaptedLumBytes, sizeof(adaptedLumBytes)) ||
             !entry(0x1899ab0, submitBytes, sizeof(submitBytes)) ||
             !entry(0x164703f, cameraSubmitBytes, sizeof(cameraSubmitBytes)) ||
             !entry(0x187ca10, poseBytes, sizeof(poseBytes)) ||
@@ -1363,13 +1447,21 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyEyePlacement(void* late) {
     lateEyes = late != nullptr;
     return 0;
 }
+// Diagnostic: 1 exposes each eye from its own adapted luminance, as before
+// October 10's sixth build; 0 shares the main view's again.
+// tools/probe_exposure.py compares the two in the running game.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyEyeExposure(void* own) {
+    ownExposure = own != nullptr;
+    return 0;
+}
 extern "C" float SpidyFlatAspect() {
     return flatAspect.load();
 }
 uint32_t spidy::native_hud::eyes(Head& out) {
     if (!enabled || !(config.createViews & 4) || lateEyes || GetCurrentThreadId() != mainThread.load())
         return 0;
-    const auto& head = latchHead();
+    // The game projects its markers before it moves the player (earlyHead).
+    const auto& head = earlyHead();
     if (!head.controlled)
         return 0;
     if (head.command.enabled == 2)

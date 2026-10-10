@@ -60,9 +60,6 @@ struct Scan {
     std::vector<Runtime> runtimes;
     bool vcInstalled{}, vcCurrent{};
     std::string vcVersion;
-    double freeCommitGb{}, neededCommitGb = 19;
-    // What each pixel of the two eyes beyond 3072 x 3264 adds to that (run_game_vr.py's EYE_COMMIT_BYTES).
-    double eyeCommitBytes = 110;
 };
 
 struct Settings {

@@ -10,9 +10,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]/'tools'))
 from probe_stereo_gpu import snapshot as gpu_snapshot, save_eye_images
 from run_game_vr import (snapshot as xr_snapshot, accepted as accepted_xr, timing_snapshot, frame_rates,
                          appearance_snapshot, eye_snapshot, save_eye_snapshot, rgb_rows, crop_origin,
-                         game_memory, keep_game_log, commit_warning, VR_COMMIT_MB, body_snapshot,
+                         game_memory, keep_game_log, body_snapshot,
                          punch_snapshot, shooter_snapshot, start_settings, settings_line, SETTINGS_LINE,
-                         scaled_eye_size, vr_commit_mb, rendering_line, EYE_COMMIT_BYTES,
+                         scaled_eye_size, rendering_line,
                          slow_motion_snapshot, hud_snapshot, GAME_HOOKS)
 from probe_collision import snapshot as collision_snapshot
 from probe_movement import snapshot as movement_snapshot
@@ -67,6 +67,9 @@ class ProtocolTests(unittest.TestCase):
                          (5, 4, 1, 900))
         self.assertEqual((result['active_view_aligned'], result['active_view_rejected']), (120, 3))
         self.assertEqual(result['active_view_shift_m'], 3.5)
+        self.assertEqual(result['exposure_shared'], 0)
+        struct.pack_into('<I', raw, 252, 240)
+        self.assertEqual(appearance_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)['exposure_shared'], 240)
         struct.pack_into('<Q2fd', raw, 256, 8, .25, .75, 2.0)
         result = appearance_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)
         self.assertEqual((result['shared_hero_frames'], result['hero_lag_last_m'], result['hero_lag_max_m'],
@@ -263,9 +266,11 @@ class ProtocolTests(unittest.TestCase):
         struct.pack_into('<3f5f', raw, 64, 14.4446, 10.682, 11, 20, .8125, 2, .577, 0)
         struct.pack_into('<4I4Q2I', raw, 96, 1920, 1080, 1920, 1080, 0, 0, 2840, 4988, 0, 0)
         # The large HUD; none left out; 2400 placements where the XR worker's follow turned the panel, which
-        # last faced 1.5 degrees from the head and at most 31.25.
-        struct.pack_into('<2I3Q2f', raw, 152, 3, 0, 0, 0, 2400, 1.5, 31.25)
+        # last faced 1.5 degrees from the head and at most 31.25. The markers' head was at most 0.0625 m from
+        # the frame's.
+        struct.pack_into('<If3Q2f', raw, 152, 3, .0625, 0, 0, 2400, 1.5, 31.25)
         result = hud_snapshot(Reader(raw, struct.pack('<q', 6)), 0)
+        self.assertEqual(result['marker_mismatch_m'], .0625)
         self.assertEqual((result['game_frames'], result['placed_frames'], result['rejected_frames']), (2930, 2494, 3))
         self.assertEqual((result['game_distance'], result['view_half_width'], result['distance']), (20, .8125, 2))
         self.assertEqual((result['texture'], result['game_texture']), ([1920, 1080], [1920, 1080]))
@@ -418,45 +423,16 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(keep_game_log(folder/'game-vr-2.json', folder/'missing.log'), (None, []))
             self.assertFalse((folder/'game-vr-2-game.log').exists())
 
-    def test_memory_warning_only_when_windows_cannot_promise_a_vr_session(self):
-        self.assertIsNone(commit_warning(None))  # unknown: nothing to say
-        self.assertIsNone(commit_warning(VR_COMMIT_MB))
-        # October 5: 14.5 GB left with the game closed.
-        text = commit_warning(14848)
-        self.assertRegex(text, r'^WARNING: Windows can promise programs only 14\.5 GB more memory, and the game in '
-                               r'VR takes about 19 GB\. Close large programs')
-        self.assertIn('page file', text)
-        # A game that is already running holds part of the total: 14.6 GB after loading, measured.
-        self.assertIsNone(commit_warning(VR_COMMIT_MB-14557, 14557))
-        self.assertIn('only 4.3 GB more memory, and VR takes about 4 GB on top of the running game. Close',
-                      commit_warning(VR_COMMIT_MB-14558, 14557))
-        self.assertIsNone(commit_warning(4096, needed_mb=4096))
-        self.assertIsNotNone(commit_warning(4095, needed_mb=4096))
-        # A game that already holds more than a session takes needs nothing more.
-        self.assertIsNone(commit_warning(0, VR_COMMIT_MB+1))
-        # The running game's share is read from Windows; this process stands in for the game.
+    def test_memory_windows_promised_a_process_is_read_for_the_reports(self):
+        # This process stands in for the game.
         import os
         import run_game_vr
-        with patch.object(run_game_vr, 'find_game', return_value=os.getpid()):
-            self.assertTrue(4 < run_game_vr.game_commit_mb() < 4096)
-        with patch.object(run_game_vr, 'find_game', side_effect=RuntimeError('Spider-Man is not running.')):
-            self.assertIsNone(run_game_vr.game_commit_mb())
+        self.assertTrue(4 < run_game_vr.process_commit_mb(os.getpid()) < 4096)
         self.assertIsNone(run_game_vr.process_commit_mb(0))  # no such process to ask
-        # At a console the person there decides; an unattended run only prints.
-        ask = Mock()
-        with patch('builtins.print') as shown:
-            run_game_vr.announce_low_memory(None, True, ask)
-            run_game_vr.announce_low_memory(text, False, ask)
-            ask.assert_not_called()
-            shown.assert_called_once_with(text, flush=True)
-            run_game_vr.announce_low_memory(text, True, ask)
-            ask.assert_called_once()
-            run_game_vr.announce_low_memory(text, True, Mock(side_effect=EOFError))
-            with self.assertRaises(KeyboardInterrupt):  # cancels the launch
-                run_game_vr.announce_low_memory(text, True, Mock(side_effect=KeyboardInterrupt))
+        self.assertGreater(run_game_vr.free_commit_mb(), 0)
 
-    def test_the_render_scale_sizes_the_eyes_and_the_memory_they_take(self):
-        # core_tests.cpp's cases for spidy::scaledEyeSize: the console and the warning count as the DLL does.
+    def test_the_render_scale_sizes_the_eyes(self):
+        # core_tests.cpp's cases for spidy::scaledEyeSize: the console counts as the DLL does.
         self.assertEqual(scaled_eye_size(3072, 3264, 100), (3072, 3264))
         self.assertEqual(scaled_eye_size(2500, 2690, 100), (2500, 2690))
         self.assertEqual(scaled_eye_size(3072, 3264, 150), (4608, 4896))
@@ -468,14 +444,6 @@ class ProtocolTests(unittest.TestCase):
         width, height = scaled_eye_size(3072, 3264, 200, 5000)
         self.assertEqual((width % 8, height), (0, 5000))
         self.assertAlmostEqual(width/height, 3072/3264, delta=.003)
-        # Eyes larger than VR_COMMIT_MB's 3072 x 3264 need more memory; smaller ones no less.
-        self.assertEqual(vr_commit_mb([3072, 3264]), VR_COMMIT_MB)
-        self.assertEqual(vr_commit_mb([2496, 2688]), VR_COMMIT_MB)
-        self.assertEqual(vr_commit_mb(None, 150), VR_COMMIT_MB)
-        self.assertEqual(vr_commit_mb([3072, 3264], 150), VR_COMMIT_MB+(2*(4608*4896-3072*3264)*EYE_COMMIT_BYTES >> 20))
-        self.assertEqual(vr_commit_mb([2496, 2688], 100, 4096), VR_COMMIT_MB+(2*(4096*4096-3072*3264)*EYE_COMMIT_BYTES >> 20))
-        # Measured October 8: 2.5-2.6 GB more for eyes of 150% of 3072 x 3264.
-        self.assertTrue(2500 < vr_commit_mb([3072, 3264], 150)-VR_COMMIT_MB < 2800)
         # The console says what the size is of, and when the runtime took less.
         self.assertEqual(rendering_line(4608, 4896, 150, 0, [3072, 3264]),
                          "Rendering 4608 x 4896 pixels per eye (150% of the headset's 3072 x 3264).")

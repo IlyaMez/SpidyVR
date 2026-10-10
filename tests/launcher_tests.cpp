@@ -98,9 +98,9 @@ int main() {
     });
     test("constants come from the Python tools", [] {
         const std::string source = "\"\"\"doc EXPECTED_SHA256 = 'no'\"\"\"\nimport x\nEXPECTED_SHA256 = \"e297d4\"\n"
-                                   "VR_COMMIT_MB = 19000\n# VR_COMMIT_MB = 1\nOTHER_VR_COMMIT_MB = 5\n";
+                                   "MAX_EYE_SIZE = 8192\n# MAX_EYE_SIZE = 1\nOTHER_MAX_EYE_SIZE = 5\n";
         check(pythonConstant(source, "EXPECTED_SHA256") == std::optional<std::string>("e297d4"), "string at a line start");
-        check(pythonConstant(source, "VR_COMMIT_MB") == std::optional<std::string>("19000"), "number, not a comment");
+        check(pythonConstant(source, "MAX_EYE_SIZE") == std::optional<std::string>("8192"), "number, not a comment");
         check(!pythonConstant(source, "MISSING"), "missing");
     });
     test("runtime names match tools/xr_runtime.py", [] {
@@ -111,6 +111,32 @@ int main() {
         check(runtimeLabel(R"(C:\Program Files\Oculus\Support\oculus-runtime\oculus_openxr_64.json)") == "Meta Quest Link",
               "Oculus");
         check(runtimeLabel(R"(C:\elsewhere\runtime.json)").empty(), "unknown");
+    });
+    test("OpenVR's path file says where SteamVR is", [] {
+        // As SteamVR writes it: its folder twice, in two spellings, after other lists.
+        const std::string paths = "{\n\t\"config\" : \n\t[\n\t\t\"c:\\\\program files (x86)\\\\steam\\\\config\"\n\t],\n"
+                                  "\t\"external_drivers\" : \n\t[\n\t\t\"C:\\\\Program Files\\\\Virtual Desktop "
+                                  "Streamer\\\\OpenVRDriver\"\n\t],\n\t\"jsonid\" : \"vrpathreg\",\n\t\"runtime\" : \n\t[\n"
+                                  "\t\t\"c:\\\\program files (x86)\\\\steam\\\\steamapps\\\\common\\\\SteamVR\",\n"
+                                  "\t\t\"C:\\\\Program Files (x86)\\\\Steam\\\\steamapps\\\\common\\\\SteamVR\"\n\t],\n"
+                                  "\t\"version\" : 1\n}\n";
+        check(openVrRuntimes(paths) ==
+                  std::vector<std::string>{R"(c:\program files (x86)\steam\steamapps\common\SteamVR)",
+                                           R"(C:\Program Files (x86)\Steam\steamapps\common\SteamVR)"},
+              "SteamVR's folders");
+        // A library named in another alphabet, written as escapes or as it is; a character of two escapes.
+        const std::string games = "\xD0\x98\xD0\xB3\xD1\x80\xD1\x8B";
+        check(openVrRuntimes(R"({"runtime":["D:\\\u0418\u0433\u0440\u044b\\SteamVR","D:/)" + games +
+                             R"(/SteamVR","E:\\\ud83d\ude00"]})") ==
+                  std::vector<std::string>{"D:\\" + games + "\\SteamVR", "D:/" + games + "/SteamVR",
+                                           "E:\\\xF0\x9F\x98\x80"},
+              "escaped characters");
+        check(openVrRuntimes(R"({"log":["runtime"],"runtime":[]})").empty(), "no runtime listed");
+        check(openVrRuntimes(R"({"runtime":"C:\\SteamVR"})").empty(), "not a list");
+        check(openVrRuntimes("\xEF\xBB\xBF{\"runtime\":[\"C:\\\\SteamVR\", 7]}") == std::vector<std::string>{"C:\\SteamVR"},
+              "a byte order mark; an entry that is no text");
+        check(openVrRuntimes("").empty() && openVrRuntimes("{\"runtime\" : [ \"C:\\\\Steam").empty(),
+              "an empty file, a cut one");
     });
     test("the headset check names the headset and the runtime it was found in", [] {
         const char* probe = "Headset available: Oculus Quest3; position tracking=1; orientation tracking=1. No session "
@@ -210,7 +236,7 @@ int main() {
         args = sessionArguments(options, L"r.json", L"", L"");
         check(args.size() == 9 && args[7] == L"--flip-speed" && args[8] == L"90", "the flip speed at least 90");
     });
-    test("the headset check's eye size and the memory larger eyes take", [] {
+    test("the headset check's eye size", [] {
         const char* probe = "Headset available: Oculus Quest3; position tracking=1; orientation tracking=1. No session "
                             "was started.\r\nRecommended eye 0: 2496x2688\r\nRecommended eye 1: 2496x2688\r\n";
         const auto eye = recommendedEye(probe);
@@ -219,10 +245,6 @@ int main() {
                   !recommendedEye("Recommended eye 0: 2496 x 2688\n") &&
                   !recommendedEye("Not Recommended eye 0: 2496x2688\n"),
               "no size, an invalid one, another format, another line");
-        check(vrCommitGb(19000, 150, {3072, 3264}) == 19000.0 / 1024, "VR_COMMIT_MB at its own eye size");
-        check(vrCommitGb(19000, 150, {2496, 2688}) == 19000.0 / 1024, "never less for smaller eyes");
-        const double larger = vrCommitGb(19000, 150, {4608, 4896});
-        check(larger > 22.0 && larger < 22.1, "150% of 3072 x 3264: 2 x 12.5 megapixels more at 150 bytes");
     });
     test("what the VR settings were left at in the headset becomes the next session's options", [] {
         SessionOptions options;
