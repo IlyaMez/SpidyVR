@@ -81,7 +81,7 @@ class HeadClearance {
     // body, the rays' start, where no wall is. eyes: the eyes' middle where
     // the headset puts it. Returns how far the eyes (and all placed with
     // them) move.
-    Vec3 update(float seconds, Vec3 body, Vec3 eyes) {
+    Vec3 update(float seconds, Vec3 body, Vec3 eyes, bool tightCorners = false) {
         const float dt = std::isfinite(seconds) ? std::clamp(seconds, 0.f, .1f) : 0.f;
         // Older by this update once it is done: found this frame, a surface
         // counts now whatever it keeps.
@@ -101,10 +101,11 @@ class HeadClearance {
         eyes_ = eyes;
         // The push the surfaces ask of the eyes as the headset puts them, and
         // the push now let go toward it.
-        const Vec3 wanted = clear(eyes, {});
+        const unsigned passes = tightCorners ? 32u : 2u;
+        const Vec3 wanted = clear(eyes, {}, passes);
         push_ += (wanted - push_) * (1 - std::exp(-dt / releaseSeconds));
         // Never inside: each surface holds the eyes off itself at once.
-        push_ = clear(eyes, push_);
+        push_ = clear(eyes, push_, passes);
         // Nor behind the body's middle, along the way from it to the eyes.
         const Vec3 out = eyes - body_;
         if (length(out) > 1e-3f && dot(eyes + push_ - body_, out) < 0)
@@ -119,16 +120,17 @@ class HeadClearance {
     // headset puts them (so a push never hides the surface that asked for
     // it), and from the eyes as pushed along `look`, to each side of it and
     // `up`.
-    std::array<Ray, rays> next(Vec3 look, Vec3 side, Vec3 up) const {
+    std::array<Ray, rays> next(Vec3 look, Vec3 side, Vec3 up, float anticipation = 0.f) const {
         std::array<Ray, rays> out{};
         const Vec3 at = eyes_ + push_;
         const Vec3 way = eyes_ - body_;
         if (length(way) > .05f)
             out[0] = {body_, normalized(way), length(way) + margin};
         const Vec3 ways[]{look, side, side * -1.f, up};
+        const float extra = std::isfinite(anticipation) ? std::clamp(anticipation, 0.f, 1.f) : 0.f;
         for (unsigned i = 0; i < 4; ++i)
             if (finite(ways[i]) && length(ways[i]) > .5f)
-                out[i + 1] = {at, normalized(ways[i]), margin + (i == 0 ? .1f : .02f)};
+                out[i + 1] = {at, normalized(ways[i]), margin + (i == 0 ? .1f : .02f) + extra};
         return out;
     }
     // The push now, frames pushed more than a centimetre, the most so far.
@@ -154,10 +156,12 @@ class HeadClearance {
     };
     // The least further push past `from` that holds eyes + push `margin` off
     // every surface near them that the body is in front of, along their
-    // normals (two passes: an inside corner).
-    Vec3 clear(Vec3 eyes, Vec3 from) const {
+    // normals. Close climbing needs more passes where angled walls oppose
+    // one another: clearing one can put the eyes back into the other.
+    Vec3 clear(Vec3 eyes, Vec3 from, unsigned passes) const {
         Vec3 push = from;
-        for (int pass = 0; pass < 2; ++pass)
+        for (unsigned pass = 0; pass < passes; ++pass) {
+            const Vec3 before = push;
             for (const auto& p : planes_) {
                 if (p.age > p.keep || length(p.point - (eyes + push)) > p.reach ||
                     dot(body_ - p.point, p.normal) <= 0)
@@ -166,6 +170,9 @@ class HeadClearance {
                 if (d < margin)
                     push += p.normal * (margin - d);
             }
+            if (length(push - before) < 1e-5f)
+                break;
+        }
         return push;
     }
     std::array<Plane, kept> planes_{};

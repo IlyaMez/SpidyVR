@@ -513,6 +513,43 @@ in the launcher's options)
                          at full tilt unless you change it (90 to 480;
                          Settings > SPIDY VR or "Flip speed" in the launcher)
 
+Realistic flips (experimental, off until you switch REALISTIC FLIPS on in
+Settings > SPIDY VR; while it is on it takes the place of the flips above)
+  On a web ............. moving faster than MINIMUM FLIGHT SPEED (3 m/s), your
+                         body turns toward the web's pull, as hard as
+                         ROTATION STRENGTH says; where you face stays yours
+  Let go of the web .... the swing's spin goes on (SWING MOMENTUM) and dies
+                         away as ANGULAR DRAG says
+  Swing your arms ...... in the air, faster than MINIMUM HAND SPEED, and you
+                         turn with them, as much as HAND MOMENTUM says; swing
+                         them back the other way to slow down. A spin can go
+                         past a whole turn
+  A in the air ......... stops the spin and brings you upright (AIR ROTATION
+                         BRAKE); landing does too
+  Left stick in the air  with FLIPS on as well: let go of it once in the air,
+                         then it steers the turn
+  MAX ROTATION SPEED and ROTATION RESPONSE set how fast you can turn and how
+  soon a turn gets there.
+
+Hand wall climbing (experimental, off until you switch HAND WALL CLIMBING on
+in Settings > SPIDY VR)
+  On a wall ............ with the left stick at rest you stay upright beside
+                         the wall, a little crouched, your eyes 40 cm from
+                         it (WALL CAMERA DISTANCE: 20 to 100 cm)
+  Squeeze a grip ....... with that hand within about 18 cm of the wall: the
+                         palm holds on, open, with a short buzz. Pull it down
+                         to climb, sideways to go along, up to go down; two
+                         hands share the pull. Let go and squeeze again for
+                         a new hold. The grips do this whichever WEB BUTTON
+                         you chose
+  Both grips held ...... roll both controllers the same way to turn your
+                         view along the wall, up to 90 degrees a second; they
+                         shoot no webs until you let go
+  Left stick ........... runs along the wall, steered by turning your head
+                         left or right; let go to climb again
+  A .................... jumps off the wall
+  Round a corner ....... your view turns onto the building's next side
+
 Menus and cutscenes show on a screen in the headset. There the controllers act
 as an Xbox controller: left stick moves, A selects, B goes back, grips switch
 tabs, the menu button is Start.
@@ -549,15 +586,23 @@ VR settings
   SWINGING ....... the swing speed limit and your weight.
   COMFORT ........ snap turn, smooth turn and controller vibration.
   DISPLAY ........ the game screen's size, its 3D depth and the HUD's size
-                   (OFF hides it in VR).
+                   (OFF hides it in VR). NEAR CLIP: how near your eyes things
+                   still show, 2 cm unless you change it (1 to 10 cm; the
+                   game's own camera keeps 10 cm, which hid hands held up
+                   before your face).
   BODY ........... CALIBRATE BODY: set it to ON RESUME and resume, and the
                    T-pose panel asks for your measurements again.
   EXPERIMENTAL ... FLIPS (off until you switch it on) lets the left stick
                    and A in the air flip you, and FLIP SPEED sets how fast.
+                   HAND WALL CLIMBING (off until you switch it on, above)
+                   and its WALL CAMERA DISTANCE. REALISTIC FLIPS (off until
+                   you switch it on, above) and the nine rows that tune it.
   Changes apply at once. The launcher starts your next session with them;
-  its options show them too. Playing the game on its screen instead of VR
-  is on the pause menu itself: SWITCH TO GAME SCREEN, under RESUME (each
-  session starts in VR).
+  its options show them too. NEAR CLIP and the EXPERIMENTAL rows below FLIP
+  SPEED are only in the tab: Spidy keeps them in
+  %APPDATA%\Spidy\spidy_vr.ini, beside the launcher's own settings. Playing
+  the game on its screen instead of VR is on the pause menu itself: SWITCH
+  TO GAME SCREEN, under RESUME (each session starts in VR).
   WEB STYLE: REALISTIC webs are ropes. They bend round whatever comes
   between you and where they stick, lamp posts and signs too, and a swing
   can take you down to just over the street. ARCADE webs go through lamp

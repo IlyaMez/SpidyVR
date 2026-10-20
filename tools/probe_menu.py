@@ -178,8 +178,8 @@ def main():
         step('hud_small', dict(hud=1, smooth_turn=60), changes=10)
         press('left', wait=.8)
         step('hud_off', dict(hud=0), changes=11)
-        # Down past the BODY heading: a calibration at the next gameplay.
-        press('down')
+        # Down past NEAR CLIP and the BODY heading: a calibration at the next gameplay.
+        press('down', 'down')
         press('right', wait=.8)
         step('calibrate_on_resume', dict(calibrate=True, hud=0), changes=12)
         # Down past the EXPERIMENTAL heading: the flips, off until switched on.

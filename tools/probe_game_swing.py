@@ -16,6 +16,23 @@ from probe_native_motion import snapshot as motion_snapshot
 from probe_native_rays import snapshot as ray_snapshot, command as ray_command
 
 
+def climb_snapshot(game, address):
+    """Sticky-palm contacts, independent of the existing swing telemetry."""
+    for _ in range(8):
+        raw = game.read(address, 48)
+        if len(raw) != 48:
+            return None
+        if struct.unpack_from('<3I', raw) != (0x53434c44, 1, 48):
+            raise RuntimeError('Wall contact protocol mismatch')
+        if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address + 16, 8):
+            continue
+        left, right, hands, reserved = struct.unpack_from('<2Q2I', raw, 24)
+        if hands > 3 or reserved:
+            raise RuntimeError('Invalid wall contact state')
+        return dict(status=struct.unpack_from('<I', raw, 12)[0], contacts=[left, right], hands=hands)
+    return None
+
+
 def snapshot(game, address):
     for _ in range(8):
         raw = game.read(address, 272)
@@ -47,7 +64,7 @@ def snapshot(game, address):
     return None
 
 
-def command(serial, origin, anchor=None, held=False, focused=True, sample_seconds=.01):
+def command(serial, origin, anchor=None, held=False, focused=True, sample_seconds=.01, wall_rotate=None):
     raw = bytearray(168)
     struct.pack_into('<4IQ2I', raw, 0, 0x5357434d, 2, 168, int(focused), serial, 100, 0)
     quaternion = (0,0,0,1)
@@ -63,6 +80,17 @@ def command(serial, origin, anchor=None, held=False, focused=True, sample_second
     struct.pack_into('<fI', raw, 152, sample_seconds, 0)
     # Sample times must increase with every command; time.monotonic_ns() repeats within a timer tick.
     struct.pack_into('<Q', raw, 160, time.perf_counter_ns())
+    if wall_rotate is not None:
+        # Version 5 (hand wall climbing): level, both grips at the origin, the first squeezed when held, and
+        # the wall roll's flag.
+        if not isinstance(wall_rotate, bool):
+            raise ValueError('wall_rotate must be a boolean')
+        raw.extend(bytes(240 - len(raw)))
+        struct.pack_into('<2I', raw, 4, 5, 240)
+        struct.pack_into('<4f', raw, 168, 0, 0, 0, 1)
+        struct.pack_into('<6f', raw, 200, *origin, *origin)
+        struct.pack_into('<2f', raw, 224, float(held), 0)
+        struct.pack_into('<I', raw, 232, int(wall_rotate))
     return bytes(raw)
 
 

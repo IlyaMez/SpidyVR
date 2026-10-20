@@ -250,6 +250,7 @@ void Swing::leaveWall() {
     if (wall_.on)
         events_.push_back({EventKind::WallOff, -1, .2f});
     wall_ = {};
+    climbing_ = {};
     wallLost_ = 0;
     wrapWay_ = {};
 }
@@ -264,6 +265,8 @@ void Swing::joinWall(const RayHit& hit) {
     // (-0.71, 0, -0.71), distance -0.35 to -0.67, "got oob completely").
     if (!finite(n) || dot(body_.position - hit.point, n) < -.05f)
         return;
+    if (wall_.on && dot(n, wall_.normal) < .8f && !handClimb_)
+        climbing_ = {};
     // Nor the face of the wall the game's crawl had the body on, met from
     // behind it (supportSurface).
     if (backLeft_ > 0 && dot(n, back_.normal) < -.5f && dot(hit.point - back_.point, back_.normal) < .05f)
@@ -409,7 +412,7 @@ void Swing::senseWall(float dt, const Input& in, const WorldQueries& world) {
         const float speed = length(along);
         const bool rounding = length(wrapWay_) > .5f;
         // A wall ahead along this one (an inside corner): onto it.
-        if (speed > 1 && !rounding)
+        if (speed > (handClimb_ ? .1f : 1.f) && !rounding)
             if (const auto next = wallAlong(at, along, speed * dt + config_.wallClearance + .2f);
                 next && dot(next->normal, n) < .9f) {
                 joinWall(*next);
@@ -470,7 +473,19 @@ void Swing::senseWall(float dt, const Input& in, const WorldQueries& world) {
             wall_.point = hit->point;
             wall_.distance = dot(at - hit->point, wall_.normal);
             wallLost_ = 0;
-            wrapWay_ = {};
+            if (rounding && handClimb_) {
+                // Keep going a little past the edge after the new facade is
+                // beside us. Stopping at its first ray leaves the camera and
+                // shoulders hanging out beyond the corner during the turn.
+                if (!wrapSeated_) {
+                    wrapEnd_ = dot(at, wrapWay_) + .85f;
+                    wrapSeated_ = true;
+                }
+                if (dot(at, wrapWay_) >= wrapEnd_ || (wrapLeft_ -= dt) <= 0)
+                    wrapWay_ = {};
+            } else {
+                wrapWay_ = {};
+            }
             // Carried off it (a web's pull): the wall lets go.
             const float reach = dot(body_.velocity, n) < .2f
                                     ? std::max(config_.wallReach, config_.wallClearance + step)
@@ -486,7 +501,7 @@ void Swing::senseWall(float dt, const Input& in, const WorldQueries& world) {
         // beside that face's edge, a clearance out along the old wall: it
         // goes on round the corner by itself (wallMotion) until the next
         // face is beside it.
-        if (!rounding && speed > .3f && speed <= config_.wallWalkSpeed + 1) {
+        if (!rounding && speed > (handClimb_ ? .05f : .3f) && speed <= config_.wallWalkSpeed + 1) {
             const Vec3 ahead = along / speed;
             const Vec3 past = at + ahead * (speed * dt + .3f) - n * (wall_.distance + .4f);
             if (const auto next = wallAlong(past, -ahead, speed * dt + 1.5f)) {
@@ -495,7 +510,8 @@ void Swing::senseWall(float dt, const Input& in, const WorldQueries& world) {
                 wall_.distance = dot(at - next->point, next->normal);
                 wallLost_ = 0;
                 wrapWay_ = normalized(-n - next->normal * dot(-n, next->normal));
-                wrapLeft_ = .8f;
+                wrapLeft_ = handClimb_ ? 1.3f : .8f;
+                wrapSeated_ = false;
                 body_.velocity = {};
                 return;
             }
@@ -551,16 +567,87 @@ void Swing::senseWall(float dt, const Input& in, const WorldQueries& world) {
     if (wall)
         joinWall(*wall);
 }
+std::optional<RayHit> Swing::wallContact(const HandInput& hand, const WorldQueries& world) const {
+    const Vec3 n = wall_.normal;
+    const float distance = dot(hand.wallPosition - wall_.point, n);
+    if (!finite(hand.wallPosition) || distance > .18f)
+        return {};
+    // Start outside the current wall even when the tracked palm passed into
+    // it. Project the palm onto the facade, then confirm solid wall there.
+    const Vec3 outside = hand.wallPosition + n * (.35f - distance);
+    const auto hit = world.raycast(outside, -n, .6f);
+    if (hit && hit->fixed && world.exists(hit->surface) && finite(hit->point) && finite(hit->normal) &&
+        dot(hit->normal, n) > .8f)
+        return hit;
+    return {};
+}
+bool Swing::wallHand(int i, const Input& in, const WorldQueries& world) const {
+    if (i < 0 || i > 1 || !handClimb_ || !wall_.on || webs_[i].attached ||
+        (finite(in.move) && length(in.move) > .2f))
+        return false;
+    const auto& h = in.hands[i];
+    if (!in.focused || !h.tracked || !finite(h.wallPosition) || !finite(h.gripRelativeToHead) ||
+        !std::isfinite(h.wallGrip) || h.wallGrip <= .35f)
+        return false;
+    if (climbing_[i].attached)
+        return true;
+    return wallContact(h, world).has_value();
+}
+void Swing::climbInputs(const Input& in, const WorldQueries& world) {
+    for (int i = 0; i < 2; ++i) {
+        auto& c = climbing_[i];
+        const auto& h = in.hands[i];
+        const bool valid = handClimb_ && wall_.on && in.focused && h.tracked &&
+                           !(finite(in.move) && length(in.move) > .2f) && finite(h.gripRelativeToHead) &&
+                           finite(h.wallPosition) && std::isfinite(h.wallGrip);
+        const bool held = valid && h.wallGrip > (c.held ? .35f : .65f);
+        const bool press = held && !c.held;
+        c.held = valid ? held : true;
+        if (!held || (c.attached && !world.exists(c.surface)))
+            c.attached = false;
+        if (press && !webs_[i].attached && wallHand(i, in, world)) {
+            const auto hit = wallContact(h, world);
+            if (hit) {
+                c.attached = true;
+                c.surface = hit->surface;
+                c.previous = h.gripRelativeToHead;
+                events_.push_back({EventKind::WallGrip, i, .45f});
+            }
+        }
+        c.rate = {};
+        if (c.attached) {
+            c.rate = limited(trackingTurn(in).rotate(c.previous - h.gripRelativeToHead) /
+                                 std::max(climbSeconds_, 1e-3f), 3.f);
+            c.rate -= wall_.normal * dot(c.rate, wall_.normal);
+            c.previous = h.gripRelativeToHead;
+            hands_[i].held = true;
+        }
+    }
+}
 void Swing::wallMotion(float dt, const Input& in) {
     const Vec3 n = wall_.normal;
-    const float out = dot(body_.velocity, n);
-    Vec3 along = body_.velocity - n * out;
     if (length(wrapWay_) > .5f) {
-        // Round a corner, slowly enough to clear its edge while the next
-        // face pushes the body out to its clearance.
-        body_.velocity = wrapWay_ * 3 + n * out;
+        // The short clearance move around an outside edge must finish even
+        // with a sticky palm. Otherwise its zero normal pull pins the body
+        // beside the new face until the hold times out.
+        const float speed = handClimb_ && wrapSeated_ ? 1.5f : 3.f;
+        body_.velocity = wrapWay_ * speed + n * dot(body_.velocity, n);
         return;
     }
+    if (handClimb_ && climbingHands()) {
+        Vec3 pull{};
+        unsigned count{};
+        for (const auto& hand : climbing_)
+            if (hand.attached) {
+                pull += hand.rate;
+                ++count;
+            }
+        // Two hands share the body: equal pulls move it once, never twice.
+        body_.velocity = limited(pull / static_cast<float>(count), config_.maxSpeed);
+        return;
+    }
+    const float out = dot(body_.velocity, n);
+    Vec3 along = body_.velocity - n * out;
     // What of the stick points into the wall goes up it: pushed at a wall,
     // the body climbs.
     const Vec3 up = normalized(Vec3{0, 1, 0} - n * n.y);
@@ -612,6 +699,7 @@ void Swing::reset(Body b) {
     body_ = b;
     webs_ = {};
     hands_ = {};
+    climbing_ = {};
     events_.clear();
     accumulator_ = 0;
     sinceZip_ = sinceLanding_ = 100;
@@ -754,6 +842,7 @@ WebShot Swing::shot(Pose aim, Vec3 from, const WorldQueries& world) const {
     return out;
 }
 void Swing::releaseAll() {
+    climbing_ = {};
     for (int i = 0; i < 2; ++i) {
         release(i);
         hands_[i].sample = false;
@@ -766,6 +855,8 @@ void Swing::releaseAll() {
     zipDirection_ = {};
 }
 void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
+    climbSeconds_ = dt;
+    climbInputs(in, world);
     jumpQueued_ |= in.jump && !jumpHeld_;
     const bool leap = std::isfinite(in.leap) && in.leap > 0;
     if (leap && !leapHeld_)
@@ -816,6 +907,11 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
         }
         // Squeezing the grip shoots this hand's web; holding it keeps the web.
         const bool held = s.held ? h.grip > .35f : h.grip > .65f;
+        if (climbing_[i].attached) {
+            s.held = true;
+            s.sample = false;
+            continue;
+        }
         const bool shoot = held && !s.held;
         s.held = held;
         if (w.attached && (!held || (!w.airAnchor && !world.exists(w.surface))))
@@ -1166,6 +1262,9 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     if (!(inputSeconds > 0))
         for (auto& hand : hands_)
             hand.rate = {};
+    if (!(inputSeconds > 0))
+        for (auto& hand : climbing_)
+            hand.rate = {};
     if (inputSeconds > 0) {
         // The first sample after a gap in input (a long frame, a moment
         // without focus) starts each hand's motion afresh: travel across the
@@ -1173,6 +1272,8 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
         if (inputSeconds > .1f)
             for (auto& hand : hands_)
                 hand.sample = false;
+        if (inputSeconds > .1f)
+            climbing_ = {};
         inputs(inputSeconds, input, world);
     }
     senseWall(seconds, input, world);

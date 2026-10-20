@@ -36,6 +36,7 @@ struct HandPoseInput {
     bool shot{};
     // An enemy is marked or within a fist's reach: a fast hand is a punch.
     bool fighting{};
+    bool wallContact{}; // sticky palm, never a fist or a web-shooting pose
 };
 struct HandPose {
     float fist{}, shoot{}; // each 0..1; the shooting pose goes over the fist
@@ -60,7 +61,7 @@ class HandPoser {
     explicit HandPoser(const HandPoseTuning& tuning = {}) : t_(tuning) {}
     // One headset frame, `seconds` after the last.
     HandPose update(float seconds, const HandPoseInput& in) {
-        if (!in.tracked) {
+        if (!in.tracked || in.wallContact) {
             fist_ = shoot_ = ball_ = held_ = 0;
             pressed_ = false;
             return {};

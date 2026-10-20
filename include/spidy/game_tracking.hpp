@@ -2,9 +2,10 @@
 #include "head_clearance.hpp"
 #include "native_rays.hpp"
 #include "native_view.hpp"
+#include "realistic_flip.hpp"
 #include "swing.hpp"
 #include "tracking.hpp"
-#include "realistic_flip.hpp"
+#include "wall_roll.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -52,6 +53,8 @@ struct GameMotionFrame {
     // tracking space turns onto it; and how far it leans from the world's up
     // now, radians (0 level, a quarter turn on a wall).
     bool standing{};
+    float wallRoll{};
+    bool wallRotate{};
     float viewTilt{};
     // For the player's body: the up the view stands him along (the world's
     // until it turns onto a surface), the point of that surface under his
@@ -63,6 +66,9 @@ struct GameMotionFrame {
     // How far the eyes, and the hands and the body placed with them, moved
     // out of what the world is built of (HeadClearance), metres in the world.
     Vec3 headPush{};
+    Quat bodyTilt() const {
+        return standing ? flipTilt : swing.tilt;
+    }
 };
 // The wall or ceiling that holds the player, as the swing module reports it
 // (game_swing::Data's wall): the swing's own wall, or the game's wall crawl.
@@ -80,6 +86,15 @@ struct SurfaceHold {
     float speed{}; // the player's speed, m/s
     bool crawl{};  // the game's wall crawl: its actor's feet are on the surface
 };
+// The native collision capsule's centre is clear even when a projecting
+// pillar covers the point half a metre off the facade used by the crawl.
+inline Vec3 headCollisionOrigin(Vec3 feet, Vec3 bodyUp, const SurfaceHold& surface, bool physicalClimb) {
+    const Vec3 n = normalized(surface.normal);
+    const bool holds = finite(n) && length(n) > .5f && finite(surface.anchor);
+    if (holds && !(physicalClimb && std::abs(n.y) < .5f))
+        return surface.anchor + n * .5f;
+    return feet + (finite(bodyUp) && length(bodyUp) > .5f ? normalized(bodyUp) : Vec3{0, 1, 0});
+}
 // Standing on a wall (the STAND ON WALLS setting). Once the player walks the
 // surface that holds them (the left stick tilted, slower than wallStrideSpeed:
 // the swing's walk is 6 m/s), or has come to rest on it (slower than
@@ -189,7 +204,11 @@ class FlipMotion {
     // turn; a tap's flip and the way back level go as much faster or slower.
     // A turn in holdTurnSeconds until set; reset() keeps it.
     void speed(float radiansPerSecond);
-    float steeringRate() const { return 6.2831853f / holdTurnSeconds * scale_; }
+    // The stick's turn at full tilt, radians a second (what speed() set):
+    // REALISTIC FLIPS steer by it.
+    float steeringRate() const {
+        return 6.2831853f / holdTurnSeconds * scale_;
+    }
     // Level at once (a menu, a recenter, another player). A held A stays held:
     // it flips again only once let go and pressed in the air; a held stick
     // flips again only once let go in the air.
@@ -301,13 +320,29 @@ class GameTrackingRig {
     // After an update: the rays for the next batch, along the head's own
     // look, side and up.
     std::array<HeadClearance::Ray, HeadClearance::rays> clearanceRays(Vec3 look, Vec3 side, Vec3 up) const {
-        return clearance_.next(look, side, up);
+        const bool closeClimb = handClimb_ && !standing_ && length(climbNormal_) > .5f;
+        return clearance_.next(look, side, up, closeClimb ? .75f : 0.f);
     }
     const HeadClearance& clearance() const {
         return clearance_;
     }
-    void automaticFlips(RealisticFlipSettings settings) { autoSettings_=settings; }
-    void flight(RealisticFlight sample) { flight_=sample; }
+    void handClimb(bool on) {
+        handClimb_ = on;
+        if (!on)
+            wallRoll_.reset();
+    }
+    void wallDistance(float metres) {
+        wallDistance_ = std::isfinite(metres) ? std::clamp(metres, HeadClearance::margin, 1.f) : .4f;
+    }
+    // REALISTIC FLIPS (RealisticFlip), from the VR settings; off, the flips
+    // are FlipMotion's. reset() keeps them.
+    void automaticFlips(RealisticFlipSettings settings) {
+        autoSettings_ = settings;
+    }
+    // The swing's flight for the next update: its velocity and its webs' pull.
+    void flight(RealisticFlight sample) {
+        flight_ = sample;
+    }
     void reset();
 
   private:
@@ -333,6 +368,14 @@ class GameTrackingRig {
     Quat surfaceTurn_{};
     Vec3 surfaceShift_{};
     bool standing_{}, standOnWalls_ = true;
+    bool handClimb_{};
+    float wallDistance_ = .4f;
+    WallRollGesture wallRoll_;
+    Vec3 climbNormal_{}, runNormal_{}, runAhead_{};
+    Quat climbView_{};
+    float runYaw_{}, runHeadYaw_{};
+    bool wallRunning_{};
+    float runIdleSeconds_{};
     float headroom_{};
     Vec3 headDrop_{};
     HeadClearance clearance_{};
