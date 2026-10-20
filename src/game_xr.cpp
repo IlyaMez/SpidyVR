@@ -10,6 +10,7 @@
 #include "spidy/game_bridge_protocol.hpp"
 #include "spidy/game_grab.hpp"
 #include "spidy/game_menu.hpp"
+#include "spidy/near_clip.hpp"
 #include "spidy/game_offers.hpp"
 #include "spidy/game_pad.hpp"
 #include "spidy/game_prompts.hpp"
@@ -799,6 +800,7 @@ DWORD WINAPI run(void*) {
         values.hud = static_cast<int>(config.hud);
         values.flipSpeed = static_cast<int>(config.flipSpeed);
         values.screenDepth = static_cast<int>(config.screenDepth);
+        values.nearClipMm = near_clip::getMillimetres();
         values = vr_settings::sanitized(values);
         game_menu::publish(values);
         uint32_t settingChanges{};
@@ -1537,10 +1539,14 @@ DWORD WINAPI run(void*) {
                     game_prompts::setRewriting(false);
                     (void)promptHelp;
                     // A change in the SPIDY VR tab takes effect at once.
+                    const int previousNearClipMm = values.nearClipMm;
                     if (game_menu::take(values)) {
+                        if (values.nearClipMm != previousNearClipMm)
+                            near_clip::setMillimetres(values.nearClipMm);
                         ++settingChanges;
                         applySettings();
                     }
+                    values.nearClipMm = near_clip::getMillimetres();
                     game_menu::publish(values);
                     const uint32_t gate =
                         (player.hero ? 0 : gateNoPlayer) | (bridgeRunning ? 0 : gateBridge) |

@@ -9726,8 +9726,8 @@ int main() {
         }
         // The sections (the player, October 19: "sort the options in spidy vr
         // settings ingame into nice sections"), each with a setting in the tab.
-        const std::pair<size_t, const char*> sections[] = {{0, "WEBS"},     {5, "SWINGING"}, {8, "COMFORT"},
-                                                           {12, "DISPLAY"}, {17, "BODY"},    {19, "EXPERIMENTAL"}};
+        const std::pair<size_t, const char*> sections[] = {{1, "WEBS"},     {6, "SWINGING"}, {9, "COMFORT"},
+                                                           {13, "DISPLAY"}, {18, "BODY"},    {20, "EXPERIMENTAL"}};
         check(headings == std::size(sections), "the sections: webs, swinging, comfort, display, body, experimental");
         for (const auto& [at, title] : sections) {
             check(all[at].item == Item::none && std::strcmp(all[at].title, title) == 0, "a section out of place");
@@ -9736,9 +9736,9 @@ int main() {
                 ++next;
             check(next < all.size() && all[next].item != Item::none, "a section with no setting in the tab");
         }
-        check(all[20].item == Item::flips && all[20].choices.empty() && std::strcmp(all[19].title, "EXPERIMENTAL") == 0,
+        check(all[21].item == Item::flips && all[21].choices.empty() && std::strcmp(all[20].title, "EXPERIMENTAL") == 0,
               "the flips: a switch under EXPERIMENTAL");
-        check(all.size() == 22 && all[21].item == Item::flipSpeed && all[21].choices.size() == std::size(flipSpeeds),
+        check(all.size() == 23 && all[22].item == Item::flipSpeed && all[22].choices.size() == std::size(flipSpeeds),
               "the flip speed under the flips, the last row");
         // The wall view has no row of its own any more: it turned only while
         // Spidy held the player on a wall, so it was never a choice of its own
@@ -9748,35 +9748,35 @@ int main() {
         // then "also merge the two options").
         for (const auto& row : all)
             check(row.item != Item::standOnWalls, "the wall view still has a row of its own");
-        check(all[14].item == Item::screenSize && all[16].item == Item::hud && all[16].choices.size() == 4 &&
-                  std::strcmp(all[16].choices[0], "OFF") == 0 && std::strcmp(all[16].choices[3], "LARGE") == 0,
+        check(all[15].item == Item::screenSize && all[17].item == Item::hud && all[17].choices.size() == 4 &&
+                  std::strcmp(all[17].choices[0], "OFF") == 0 && std::strcmp(all[17].choices[3], "LARGE") == 0,
               "the HUD after the game screen's rows: OFF, SMALL, MEDIUM, LARGE");
-        check(all[15].item == Item::screenDepth && std::strcmp(all[15].title, "GAME SCREEN 3D") == 0 &&
-                  all[15].choices.size() == 4 && std::strcmp(all[15].choices[0], "OFF") == 0 &&
-                  std::strcmp(all[15].choices[3], "HIGH") == 0,
+        check(all[16].item == Item::screenDepth && std::strcmp(all[16].title, "GAME SCREEN 3D") == 0 &&
+                  all[16].choices.size() == 4 && std::strcmp(all[16].choices[0], "OFF") == 0 &&
+                  std::strcmp(all[16].choices[3], "HIGH") == 0,
               "the game screen's depth under its size: OFF, LOW, MEDIUM, HIGH");
         // Webs are always physical (the user, October 15: "remove non physical web, no need for it").
         for (const auto& row : all)
             check(std::strcmp(row.title, "PHYSICAL WEBS") != 0, "webs can still be made non-physical");
-        check(all[13].item == Item::view && std::strcmp(all[13].title, "VR VIEW") == 0 && all[13].choices.size() == 2 &&
-                  std::strcmp(all[13].choices[0], "VR") == 0 && std::strcmp(all[13].choices[1], "GAME SCREEN") == 0,
+        check(all[14].item == Item::view && std::strcmp(all[14].title, "VR VIEW") == 0 && all[14].choices.size() == 2 &&
+                  std::strcmp(all[14].choices[0], "VR") == 0 && std::strcmp(all[14].choices[1], "GAME SCREEN") == 0,
               "the view above the game screen's rows: VR, or GAME SCREEN");
         // VR VIEW is on the pause menu's first page, beside RESUME, and no other row is.
         for (const auto& row : all)
             check(row.page == (row.item == Item::view), "a row on the wrong page");
-        check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
-                  all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
-                  std::strcmp(all[1].choices[1], "ARCADE") == 0,
+        check(all[2].item == Item::webStyle && std::strcmp(all[2].title, "WEB STYLE") == 0 &&
+                  all[2].choices.size() == 2 && std::strcmp(all[2].choices[0], "REALISTIC") == 0 &&
+                  std::strcmp(all[2].choices[1], "ARCADE") == 0,
               "the web style first under WEBS: REALISTIC, or ARCADE");
-        check(all[2].item == Item::webButton && all[2].choices.size() == 2 &&
-                  std::strcmp(all[2].choices[0], "GRIP") == 0 && std::strcmp(all[2].choices[1], "TRIGGER") == 0,
+        check(all[3].item == Item::webButton && all[3].choices.size() == 2 &&
+                  std::strcmp(all[3].choices[0], "GRIP") == 0 && std::strcmp(all[3].choices[1], "TRIGGER") == 0,
               "the web button under the web style: GRIP, or TRIGGER");
-        check(all[3].item == Item::aimMarkers && all[4].item == Item::airWebs, "the aim markers, then the air webs");
-        check(all[6].item == Item::swingSpeed && all[7].item == Item::weight, "SWINGING: the swing speed, the weight");
-        check(all[9].item == Item::snapTurn && all[10].item == Item::smoothTurn && all[11].item == Item::haptics,
+        check(all[4].item == Item::aimMarkers && all[5].item == Item::airWebs, "the aim markers, then the air webs");
+        check(all[7].item == Item::swingSpeed && all[8].item == Item::weight, "SWINGING: the swing speed, the weight");
+        check(all[10].item == Item::snapTurn && all[11].item == Item::smoothTurn && all[12].item == Item::haptics,
               "COMFORT: snap and smooth turning, the vibration");
-        check(all[18].item == Item::calibrate && all[18].choices.size() == 2 &&
-                  std::strcmp(all[18].choices[1], "ON RESUME") == 0,
+        check(all[19].item == Item::calibrate && all[19].choices.size() == 2 &&
+                  std::strcmp(all[19].choices[1], "ON RESUME") == 0,
               "the body's calibration: NO, or ON RESUME");
         // Every setting has a row but the wall view, which the launcher's one
         // "Wall running" now carries along with who holds you on the wall.
@@ -9793,6 +9793,27 @@ int main() {
                   choicesOf(Item::airWebs) == 0 && choicesOf(Item::aimMarkers) == 0,
               "lists: one choice per step; switches: the game's own ON and OFF");
         check(choicesOf(Item::calibrate) == 2, "the calibration's switch names its two choices");
+    });
+    test("near clip menu keeps geometry close to the headset", [] {
+        using namespace vr_settings;
+        Values v;
+        check(v.nearClipMm == 20 && defaultChoice(Item::nearClip) == 2,
+              "near clip defaults to two centimetres");
+        constexpr int expected[] = {10, 15, 20, 30, 50, 75, 100};
+        for (int index = 0; index < static_cast<int>(std::size(expected)); ++index) {
+            choose(Item::nearClip, index, v);
+            check(v.nearClipMm == expected[index] && choice(Item::nearClip, v) == index,
+                  "near clip choice must round-trip");
+        }
+        const auto before = v;
+        check(!choose(Item::nearClip, -1, v) && !choose(Item::nearClip, 7, v) && v == before,
+              "near clip rejects out of range choices");
+        v.nearClipMm = 0;
+        check(sanitized(v).nearClipMm == 10, "near clip lower bound");
+        v.nearClipMm = 1000;
+        check(sanitized(v).nearClipMm == 100, "near clip upper bound");
+        check(rows()[0].item == Item::nearClip && rows()[0].choices.size() == std::size(expected),
+              "near clip appears first");
     });
     test("VR settings choices: switches and lists round-trip, launcher values show the nearest step", [] {
         using namespace vr_settings;

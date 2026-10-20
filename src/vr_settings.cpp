@@ -27,6 +27,8 @@ constexpr const char* hudChoices[] = {"OFF", "SMALL", "MEDIUM", "LARGE"};
 constexpr const char* flipSpeedChoices[] = {"90\xC2\xB0/S",  "120\xC2\xB0/S", "150\xC2\xB0/S", "180\xC2\xB0/S",
                                             "240\xC2\xB0/S", "300\xC2\xB0/S", "360\xC2\xB0/S", "480\xC2\xB0/S"};
 constexpr const char* depthChoices[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
+constexpr int nearClips[] = {10, 15, 20, 30, 50, 75, 100};
+constexpr const char* nearClipChoices[] = {"1 CM", "1.5 CM", "2 CM", "3 CM", "5 CM", "7.5 CM", "10 CM"};
 constexpr int screenSizes[] = {0, 1, 2};
 constexpr int hudSizes[] = {0, 1, 2, 3};
 constexpr int depthSteps[] = {0, 1, 2, 3};
@@ -39,6 +41,8 @@ static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(sna
 // A list setting's steps, or none for a switch.
 std::span<const int> steps(Item item) {
     switch (item) {
+    case Item::nearClip:
+        return nearClips;
     case Item::swingSpeed:
         return swingSpeeds;
     case Item::snapTurn:
@@ -63,6 +67,8 @@ std::span<const int> steps(Item item) {
 }
 float numberOf(Item item, const Values& v) {
     switch (item) {
+    case Item::nearClip:
+        return static_cast<float>(v.nearClipMm);
     case Item::swingSpeed:
         return v.swingSpeed;
     case Item::snapTurn:
@@ -111,6 +117,7 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
 } // namespace
 
 Values sanitized(Values v) {
+    v.nearClipMm = std::clamp(v.nearClipMm, 10, 100);
     v.swingSpeed = std::isfinite(v.swingSpeed) ? std::clamp(v.swingSpeed, 1.f, 65.f) : 32.f;
     v.snapTurn = std::clamp(v.snapTurn, 0, 90);
     v.smoothTurn = std::clamp(v.smoothTurn, 0, 360);
@@ -122,9 +129,11 @@ Values sanitized(Values v) {
     v.screenDepth = std::clamp(v.screenDepth, 0, 3);
     return v;
 }
-const std::array<Row, 22>& rows() {
+const std::array<Row, 23>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 22> all{{
+    static const std::array<Row, 23> all{{
+        {Item::nearClip, "NEAR CLIP",
+         "Closest distance before geometry is hidden. Lower keeps nearby arms visible.", nearClipChoices},
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -189,6 +198,9 @@ bool choose(Item item, int index, Values& v) {
         return false;
     const Values before = v;
     switch (item) {
+    case Item::nearClip:
+        v.nearClipMm = s[index];
+        break;
     case Item::swingSpeed:
         v.swingSpeed = static_cast<float>(s[index]);
         break;

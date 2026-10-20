@@ -9,14 +9,61 @@
 #include "spidy/native_hud.hpp"
 #include "spidy/native_view.hpp"
 #include "spidy/native_webs.hpp"
+#include "spidy/near_clip.hpp"
 #include <MinHook.h>
 #include <atomic>
 #include <cstdint>
 #include <initializer_list>
+#include <string>
 #include <intrin.h>
 #include <windows.h>
 using namespace spidy;
 using native_view::Descriptor;
+HINSTANCE nearClipModule{};
+std::atomic<int> nearClipMm{20};
+SRWLOCK nearClipLock = SRWLOCK_INIT;
+uint64_t nearClipPoll{};
+std::wstring nearClipSettingsPath() {
+    wchar_t path[32768]{};
+    if (!GetModuleFileNameW(nearClipModule, path, 32768))
+        return {};
+    std::wstring directory = path;
+    const auto slash = directory.find_last_of(L"\\/");
+    if (slash == std::wstring::npos)
+        return {};
+    directory.resize(slash);
+    return directory + L"\\SpidyNearClip.ini";
+}
+void readNearClip() {
+    AcquireSRWLockExclusive(&nearClipLock);
+    const auto now = GetTickCount64();
+    if (!nearClipPoll || now - nearClipPoll >= 500) {
+        nearClipPoll = now;
+        const auto path = nearClipSettingsPath();
+        if (!path.empty())
+            nearClipMm = std::clamp(static_cast<int>(GetPrivateProfileIntW(
+                L"VR", L"NearClipMm", 20, path.c_str())), 10, 100);
+    }
+    ReleaseSRWLockExclusive(&nearClipLock);
+}
+int spidy::near_clip::getMillimetres() {
+    readNearClip();
+    return nearClipMm.load();
+}
+void spidy::near_clip::setMillimetres(int millimetres) {
+    AcquireSRWLockExclusive(&nearClipLock);
+    nearClipMm = std::clamp(millimetres, 10, 100);
+    const auto path = nearClipSettingsPath();
+    if (!path.empty()) {
+        const auto text = std::to_wstring(nearClipMm.load());
+        WritePrivateProfileStringW(L"VR", L"NearClipMm", text.c_str(), path.c_str());
+    }
+    nearClipPoll = GetTickCount64();
+    ReleaseSRWLockExclusive(&nearClipLock);
+}
+float spidy::near_clip::metres() {
+    return static_cast<float>(nearClipMm.load(std::memory_order_relaxed)) / 1000.f;
+}
 struct Config {
     uint32_t magic, version, bytes, pid;
     uint64_t base;
@@ -1186,8 +1233,9 @@ bool activeView(const Descriptor* incoming, Descriptor& out) {
     bool placed = head.viewed;
     if (placed) {
         out = stock;
-        // Keep the stock camera's clip planes and temporal jitter.
-        reinterpret_cast<Lens>(base + 0x187bb00)(&out, stock.nearZ(), stock.farZ(), lens.left, lens.right,
+        // A head-mounted camera needs a shorter near plane than the stock
+        // third-person camera so nearby body geometry remains visible.
+        reinterpret_cast<Lens>(base + 0x187bb00)(&out, near_clip::metres(), stock.farZ(), lens.left, lens.right,
                                                  lens.top, lens.bottom, 0, 0, stock.values[0x428 / 4],
                                                  stock.values[0x42c / 4], false, false);
         reinterpret_cast<SetPose>(base + 0x187ca10)(&out, pose.data());
@@ -1352,6 +1400,7 @@ void enqueueCommand(void* list, uint32_t command, uint64_t order, void* payload)
 // each eye's previous camera equal to its current one, so motion vectors and
 // temporal anti-aliasing saw no camera motion.
 void placeEyes() {
+    readNearClip();
     Descriptor main{};
     const auto primary = pointer(base + 0x7a34dd0);
     const bool render = read(primary, &main, sizeof(main)) && native_view::valid(main) && !retiring();
@@ -1444,7 +1493,7 @@ void placeEyes() {
             pose[14] += placed.offset.z;
             auto aligned = main;
             reinterpret_cast<Lens>(base + 0x187bb00)(
-                &aligned, main.nearZ(), main.farZ(), lens.left, lens.right, lens.top, lens.bottom,
+                &aligned, near_clip::metres(), main.farZ(), lens.left, lens.right, lens.top, lens.bottom,
                 0, 0, main.values[0x428 / 4], main.values[0x42c / 4], false, false);
             reinterpret_cast<SetPose>(base + 0x187ca10)(&aligned, pose.data());
             if (native_view::valid(aligned)) {
@@ -1506,8 +1555,9 @@ void placeEyes() {
             const float aspect = static_cast<float>(config.width) / config.height;
             const auto& fov = desired.eyes[index].fov;
             const auto jitter = eyeJitter();
+            const float nearZ = controlled && desired.enabled == 1 ? near_clip::metres() : main.nearZ();
             reinterpret_cast<Lens>(base + 0x187bb00)(
-                &descriptor, main.nearZ(), main.farZ(), controlled ? std::tan(fov[0]) : -aspect,
+                &descriptor, nearZ, main.farZ(), controlled ? std::tan(fov[0]) : -aspect,
                 controlled ? std::tan(fov[1]) : aspect, controlled ? -std::tan(fov[3]) : -1,
                 controlled ? -std::tan(fov[2]) : 1, 0, 0, jitter[0], jitter[1], false, false);
             reinterpret_cast<SetPose>(base + 0x187ca10)(&descriptor, pose.data());
@@ -2154,8 +2204,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStop(void*) {
     return result;
 }
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
-    if (reason == DLL_PROCESS_ATTACH)
+    if (reason == DLL_PROCESS_ATTACH) {
+        nearClipModule = instance;
         DisableThreadLibraryCalls(instance);
+    }
     return TRUE;
 }
 // Diagnostic: 1 places the eyes in view maintenance, as before October 5; 0
