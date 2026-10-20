@@ -10,7 +10,6 @@
 #include "spidy/game_bridge_protocol.hpp"
 #include "spidy/game_grab.hpp"
 #include "spidy/game_menu.hpp"
-#include "spidy/near_clip.hpp"
 #include "spidy/game_offers.hpp"
 #include "spidy/game_pad.hpp"
 #include "spidy/game_prompts.hpp"
@@ -33,6 +32,7 @@
 #include "spidy/native_eye_history.hpp"
 #include "spidy/native_hud.hpp"
 #include "spidy/native_webs.hpp"
+#include "spidy/near_clip.hpp"
 #include "spidy/offer_pointing.hpp"
 #include "spidy/presentation_gate.hpp"
 #include "spidy/slow_motion.hpp"
@@ -51,6 +51,7 @@
 #include <vector>
 #include <windows.h>
 #include <mmsystem.h>
+#include <shlobj.h>
 using namespace spidy;
 struct XrConfig {
     uint32_t magic = 0x53585243, version = 23, bytes = sizeof(XrConfig), pid{};
@@ -432,6 +433,7 @@ BridgeCall startSwing{}, submitSwing{}, sampleSwing{}, stopSwing{}, retargetSwin
 // Each web's edges (game_swing::Bends): optional, without it a web round an
 // edge is drawn to that edge.
 BridgeCall sampleBends{};
+BridgeCall sampleClimb{};
 BridgeCall startPunch{}, samplePunch{}, stopPunch{}, swingSettings{}, sampleStrike{};
 // Spider-Sense (game_sense, in the same module as the punches): optional, an
 // older module draws no warnings.
@@ -564,6 +566,51 @@ struct LayerSwitches {
             SetEnvironmentVariableA(variable.c_str(), nullptr);
     }
 };
+// Where the settings only the SPIDY VR tab offers are kept
+// (vr_settings::tabOnlyText): beside the launcher's launcher.ini, so every
+// Spidy folder and every build finds them (this module runs from a copy
+// staged per build).
+std::wstring tabOnlyPath() {
+    PWSTR folder{};
+    std::wstring path;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &folder)) && folder)
+        path = std::wstring(folder) + L"\\Spidy\\spidy_vr.ini";
+    CoTaskMemFree(folder);
+    return path;
+}
+std::string readTabOnly() {
+    const auto path = tabOnlyPath();
+    if (path.empty())
+        return {};
+    const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                    OPEN_EXISTING, 0, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return {};
+    std::string text(4096, '\0');
+    DWORD size{};
+    if (!ReadFile(file, text.data(), static_cast<DWORD>(text.size()), &size, nullptr))
+        size = 0;
+    CloseHandle(file);
+    text.resize(size);
+    return text;
+}
+// Written whole and then put in place, so a crash mid-write keeps the last.
+bool writeTabOnly(const std::string& text) {
+    const auto path = tabOnlyPath();
+    if (path.empty())
+        return false;
+    CreateDirectoryW(path.substr(0, path.find_last_of(L'\\')).c_str(), nullptr);
+    const auto written = path + L".new";
+    const HANDLE file = CreateFileW(written.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return false;
+    DWORD size{};
+    const bool whole = WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &size, nullptr) &&
+                       size == text.size();
+    CloseHandle(file);
+    return whole &&
+           MoveFileExW(written.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+}
 DWORD WINAPI run(void*) {
     bool nativeStarted = false, gpuStarted = false, raysStarted = false, swingStarted = false, websStarted = false,
          bodyStarted = false;
@@ -800,8 +847,9 @@ DWORD WINAPI run(void*) {
         values.hud = static_cast<int>(config.hud);
         values.flipSpeed = static_cast<int>(config.flipSpeed);
         values.screenDepth = static_cast<int>(config.screenDepth);
-        values.nearClipMm = near_clip::getMillimetres();
-        values = vr_settings::sanitized(values);
+        // And those only the tab offers, as it left them (tabOnlyPath).
+        values = vr_settings::withTabOnly(values, readTabOnly());
+        std::string tabOnlySaved = vr_settings::tabOnlyText(values);
         game_menu::publish(values);
         uint32_t settingChanges{};
         // aims are each hand's latest preview.
@@ -839,6 +887,8 @@ DWORD WINAPI run(void*) {
         }
         game_swing::Data swingState;
         game_swing::Bends swingBends;
+        game_swing::ClimbData climbState;
+        game_swing::ClimbPulses climbPulses;
         // What each hand's web holds, when it caught a thug instead of a wall.
         game_grab::Data grabState;
         uint32_t grabPhases[2]{};
@@ -1063,6 +1113,7 @@ DWORD WINAPI run(void*) {
             s.gravity = vr_settings::gravity(values.weight);
             s.walls = !(config.options & 16384);
             s.arcade = values.arcadeWebs;
+            s.handClimb = values.handClimb;
             sentSwingSettings = s;
             swingSettingsSent = true;
             // A hand-over owns the walls while it lasts; the player's own
@@ -1084,7 +1135,10 @@ DWORD WINAPI run(void*) {
             rig.flipSpeed(static_cast<float>(values.flipSpeed) * 3.14159265f / 180);
             rig.triggerWebs(values.triggerWebs);
             rig.standOnWalls(values.standOnWalls);
+            rig.handClimb(values.handClimb);
+            rig.wallDistance(static_cast<float>(values.wallDistance) / 100.f);
             native_hud::setSize(values.hud);
+            near_clip::set(values.nearClipMm);
             sendSwingSettings();
             if (swingStarted && startPunch && samplePunch) {
                 if (values.punch && !punchStarted) {
@@ -1443,8 +1497,11 @@ DWORD WINAPI run(void*) {
                         const Vec3 held = normalized(hold.normal);
                         const Vec3 bodyUp = swingState.owned ? Vec3{0, 1, 0} : normalized(heroUp);
                         const bool holds = finite(held) && length(held) > .5f && finite(hold.anchor);
-                        rig.bodyCentre(holds ? hold.anchor + held * .5f
-                                             : feet + (length(bodyUp) > .5f ? bodyUp : Vec3{0, 1, 0}));
+                        // A thick corner pillar can cover the old half-metre
+                        // point. Start climbing camera rays inside the actual
+                        // native capsule so its front cannot be ignored.
+                        rig.bodyCentre(
+                            headCollisionOrigin(feet, bodyUp, hold, values.handClimb && swingState.owned));
                         if (holds)
                             rig.surfaceFound({hold.anchor, held}, true);
                         if (rayResults)
@@ -1539,14 +1596,15 @@ DWORD WINAPI run(void*) {
                     game_prompts::setRewriting(false);
                     (void)promptHelp;
                     // A change in the SPIDY VR tab takes effect at once.
-                    const int previousNearClipMm = values.nearClipMm;
                     if (game_menu::take(values)) {
-                        if (values.nearClipMm != previousNearClipMm)
-                            near_clip::setMillimetres(values.nearClipMm);
                         ++settingChanges;
                         applySettings();
+                        if (auto text = vr_settings::tabOnlyText(values); text != tabOnlySaved) {
+                            if (!writeTabOnly(text))
+                                message(3, 0, "VR settings: the SPIDY VR tab's own settings were not saved");
+                            tabOnlySaved = std::move(text);
+                        }
                     }
-                    values.nearClipMm = near_clip::getMillimetres();
                     game_menu::publish(values);
                     const uint32_t gate =
                         (player.hero ? 0 : gateNoPlayer) | (bridgeRunning ? 0 : gateBridge) |
@@ -1788,6 +1846,7 @@ DWORD WINAPI run(void*) {
                     }
                     if (swingStarted) {
                         game_swing::Command input;
+                        input.wallRotate = motion.wallRotate;
                         input.serial = ++serial;
                         input.focused = motion.active && !flatScreen && controlsVisible;
                         input.sampleTimeNs = frame.predictedDisplayTime > 0 ? frame.predictedDisplayTime : 1;
@@ -1808,9 +1867,19 @@ DWORD WINAPI run(void*) {
                             const auto& hand = motion.swing.hands[i];
                             input.hands[i] = {hand.aim, hand.gripRelativeToHead, hand.tracked, hand.trigger,
                                               hand.grip};
+                            input.wallPositions[i] = motion.grips[i].position;
+                            input.wallGrips[i] = hand.tracked ? frame.hands[i].squeeze : 0.f;
                         }
                         check(submitSwing(&input), "Tracked swing input");
                         check(sampleSwing(&swingState), "Native swing feedback");
+                        if (!sampleClimb || sampleClimb(&climbState) || climbState.magic != 0x53434c44 ||
+                            climbState.version != 1 || climbState.bytes != sizeof(climbState))
+                            climbState = {};
+                        const unsigned wallPulses =
+                            climbPulses.update(climbState, input.focused && values.handClimb);
+                        for (unsigned i = 0; i < 2; ++i)
+                            if (wallPulses & (1u << i))
+                                runtime.haptic(i, .45f, .045f);
                         if (!sampleBends || sampleBends(&swingBends))
                             swingBends = {};
                         // Nothing here changes who holds the player on a wall
@@ -2941,6 +3010,8 @@ DWORD WINAPI run(void*) {
                             gripsSeen[i] = tracked;
                             HandPoseInput doing;
                             doing.tracked = tracked;
+                            doing.wallContact = motion.active && !flatScreen && values.handClimb &&
+                                                climbState.status && (climbState.hands & (1u << i));
                             doing.web = motion.swing.hands[i].grip;
                             doing.squeeze = hand.squeeze;
                             doing.speed = speed;
@@ -2960,7 +3031,7 @@ DWORD WINAPI run(void*) {
                         // A flip's tilt in world axes: the body turns with the player.
                         // Standing on a surface, the body already stands along it:
                         // only a flip's own turns it further (none on a wall).
-                        if (const Quat tilt = motion.standing ? motion.flipTilt : motion.swing.tilt;
+                        if (const Quat tilt = motion.bodyTilt();
                             tilt.x != 0 || tilt.y != 0 || tilt.z != 0) {
                             const Quat yaw = Quat::yaw(motion.swing.trackingYaw);
                             pose.tilt = yaw * tilt * yaw.conjugate();
@@ -3683,6 +3754,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     submitSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingSubmit"));
     sampleSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingSample"));
     sampleBends = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingBends"));
+    sampleClimb = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyClimbSample"));
     rayResults = reinterpret_cast<const native_rays::Data*>(GetProcAddress(rays, "SpidyRayData"));
     stopSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingStop"));
     retargetSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingRetarget"));

@@ -201,6 +201,39 @@ struct Building : TestWorld {
         return id == 7;
     }
 };
+// Convex facade pairs at arbitrary angles, optionally cut by a chamfer.
+struct AngledBuilding : World {
+    std::vector<HeadClearance::Surface> faces;
+    Vec3 nextNormal{};
+    AngledBuilding(float degrees, float side, bool bevel = false) {
+        const float radians = degrees * 3.14159265f / 180;
+        nextNormal = {-std::cos(radians), 0, side * std::sin(radians)};
+        faces = {{{5, 0, 0}, {-1, 0, 0}}, {{5, 0, 0}, nextNormal},
+                 {{25, 0, 0}, {1, 0, 0}}, {{0, 0, -side * 20}, {0, 0, -side}},
+                 {{0, 0, 0}, {0, -1, 0}}, {{0, 30, 0}, {0, 1, 0}}};
+        if (bevel)
+            faces.push_back({{5, 0, -side * .4f}, normalized(Vec3{-1, 0, side})});
+    }
+    std::optional<RayHit> raycast(Vec3 from, Vec3 way, float reach) const override {
+        float enter = 0, leave = reach;
+        Vec3 normal{};
+        for (const auto& face : faces) {
+            const float distance = dot(from - face.point, face.normal), speed = dot(way, face.normal);
+            if (std::abs(speed) < 1e-7f) {
+                if (distance > 0) return {};
+                continue;
+            }
+            const float t = -distance / speed;
+            if (speed < 0 && t > enter) { enter = t; normal = face.normal; }
+            if (speed > 0) leave = std::min(leave, t);
+            if (enter > leave) return {};
+        }
+        if (enter <= 0 || length(normal) < .5f) return {};
+        return RayHit{from + way * enter, normal, 71, true};
+    }
+    MoveResult sweep(Vec3, Vec3 to, float) const override { return {to, {}, false}; }
+    bool exists(uint64_t id) const override { return id == 71; }
+};
 SwingConfig walled() {
     SwingConfig c;
     c.walls = true;
@@ -1287,6 +1320,1267 @@ int main() {
         hanging(0);     // its hold 0.3 m of slack below
         hanging(-.2f);  // moved further down the web: the hold would have been 0.2 m too short
         hanging(.25f);  // moved up beside the other
+    });
+    test("hand climbing: either grip pulls up, sideways and down without firing webs", [] {
+        constexpr float dt = 1.f / 60;
+        for (int hand = 0; hand < 2; ++hand) {
+            Building w;
+            Swing s(walled());
+            s.allowHandClimb(true);
+            Input in;
+            Body body{{4.1f, 10, 0}, {1, 0, 0}, false};
+            auto advance = [&] {
+                const auto motion = s.predictNativeStep(dt, in, w, body);
+                check(motion.valid, "climb prediction failed");
+                body = {motion.target, motion.velocity, false};
+            };
+            advance();
+            check(s.wall().on, "the test body did not reach the wall");
+            auto& h = in.hands[hand];
+            h.tracked = true;
+            h.wallPosition = {4.95f, 10, 0};
+            h.gripRelativeToHead = {.4f, 0, 0};
+            advance(); // release once after coming onto the wall
+            h.wallGrip = h.grip = 1;
+            advance();
+            check(s.climbingHands() == (1u << hand), "the physical grip did not catch the wall");
+            check(std::count_if(s.events().begin(), s.events().end(), [](const Event& e) {
+                      return e.kind == EventKind::WallGrip;
+                  }) == 1, "contact needs exactly one pulse event");
+            check(!s.webs()[hand].attached, "climbing shot a web");
+            const Vec3 before = body.position;
+            for (int i = 0; i < 15; ++i) {
+                h.gripRelativeToHead.y -= .02f;
+                advance();
+            }
+            near(body.position.y - before.y, .3f, .012f);
+            near(5 - body.position.x, .9f, .012f);
+            const float side = body.position.z;
+            h.gripRelativeToHead.z -= .02f;
+            advance();
+            check(body.position.z > side + .015f, "a sideways pull did not traverse the wall");
+            const float high = body.position.y;
+            h.gripRelativeToHead.y += .02f;
+            advance();
+            check(body.position.y < high - .015f, "pushing the hand up did not lower the body");
+            advance();
+            near(length(body.velocity), 0, .01f);
+            h.wallGrip = h.grip = 0;
+            advance();
+            check(!s.climbingHands(), "released hand stayed attached");
+            const float rested = body.position.y;
+            advance();
+            check(body.position.y >= rested - .01f, "releasing a climb dropped the sticky body");
+        }
+    });
+    test("hand climbing: two hands share movement, handovers and jumps release holds", [] {
+        constexpr float dt = 1.f / 60;
+        Building w;
+        Swing s(walled());
+        s.allowHandClimb(true);
+        Input in;
+        Body body{{4.1f, 10, 0}, {1, 0, 0}, false};
+        auto advance = [&](float sample = 1.f / 60) {
+            const auto motion = s.predictNativeStep(dt, in, w, body, sample);
+            body = {motion.target, motion.velocity, false};
+        };
+        advance();
+        for (auto& h : in.hands) {
+            h.tracked = true;
+            h.wallPosition = {4.95f, 10, 0};
+        }
+        advance();
+        for (auto& h : in.hands)
+            h.wallGrip = h.grip = 1;
+        advance();
+        check(s.climbingHands() == 3, "two grips did not catch the wall");
+        const float start = body.position.y;
+        for (auto& h : in.hands)
+            h.gripRelativeToHead.y -= .03f;
+        advance();
+        near(body.position.y - start, .03f, .01f);
+        advance(0); // the same headset sample must never be counted twice
+        near(length(body.velocity), 0, .01f);
+        in.hands[0].wallGrip = in.hands[0].grip = 0;
+        advance();
+        check(s.climbingHands() == 2, "releasing one hand dropped the other");
+        in.hands[0].wallGrip = in.hands[0].grip = 1;
+        advance();
+        check(s.climbingHands() == 3, "hand-over-hand regrip failed");
+        in.jump = true;
+        advance();
+        check(!s.wall().on && !s.climbingHands(), "jump did not release the wall and hands");
+    });
+    test("hand climbing: no remote or empty-air grips, inside palms work, tracking loss needs a new press", [] {
+        constexpr float dt = 1.f / 60;
+        Building w;
+        Swing s(walled());
+        s.allowHandClimb(true);
+        Input in;
+        Body body{{4.1f, 10, 0}, {1, 0, 0}, false};
+        auto advance = [&] {
+            const auto motion = s.predictNativeStep(dt, in, w, body);
+            body = {motion.target, motion.velocity, false};
+        };
+        advance();
+        auto& h = in.hands[0];
+        h.tracked = true;
+        h.wallGrip = 1;
+        h.wallPosition = {4, 10, 0};
+        check(!s.wallHand(0, in, w), "a distant grip caught the wall");
+        h.wallPosition.x = 5.2f;
+        check(s.wallHand(0, in, w), "a palm inside the facade could not stick");
+        h.wallPosition = {4.95f, 31, 0};
+        check(!s.wallHand(0, in, w), "a grip above the roof held empty air");
+        h.wallPosition = {4.95f, 10, 0};
+        h.wallGrip = 0;
+        advance();
+        h.wallGrip = 1;
+        advance();
+        check(s.climbingHands() == 1, "valid grip refused");
+        h.tracked = false;
+        advance();
+        check(!s.climbingHands(), "tracking loss kept the hand attached");
+        h.tracked = true;
+        h.gripRelativeToHead.y = -10;
+        advance();
+        check(!s.climbingHands(), "tracking recovery grabbed without a new press");
+        h.wallGrip = 0;
+        advance();
+        h.wallGrip = 1;
+        advance();
+        check(s.climbingHands() == 1, "a fresh press after tracking recovery failed");
+        s.allowHandClimb(false);
+        check(!s.climbingHands(), "disabling climbing kept a hand attached");
+    });
+    test("hand climbing camera: close crouch, upright horizon, smooth return and reset", [] {
+        GameTrackingRig rig;
+        rig.handClimb(true);
+        auto f = trackedFrame();
+        const Vec3 feet{4.1f, 10, 0};
+        const SurfaceHold wall{{-1, 0, 0}, {5, 11, 0}, 0, false};
+        holdFor(rig, f, feet, {}, .3f);
+        auto out = holdFor(rig, f, feet, wall, .7f);
+        near(out.viewTilt, 0, .001f);
+        check(!out.standing, "climbing stood the player on the wall");
+        near(out.headPose.position.x, 4.60f, .01f);
+        near(out.headPose.position.y - feet.y, 1.f, .01f);
+        rig.reset();
+        out = holdFor(rig, f, feet, wall, .7f);
+        near(out.headPose.position.x, 4.60f, .01f);
+        rig.handClimb(false);
+        out = holdFor(rig, f, feet, {}, .8f);
+        near(out.headPose.position.x, feet.x, .01f);
+        near(out.headPose.position.y - feet.y, 1.7f, .01f);
+    });
+    test("physical climbing restored: hand pulls ignore gaze steering and looking alone never moves", [] {
+        constexpr float dt = 1.f / 60;
+        for (const Vec3 direction : {Vec3{0, 1, 0}, Vec3{0, -1, 0}, Vec3{0, 0, 1}}) {
+            Building world;
+            Swing s(walled());
+            s.allowHandClimb(true);
+            Input in;
+            Body body{{4.1f, 10, 0}, {1, 0, 0}, false};
+            auto step = [&] {
+                const auto motion = s.predictNativeStep(dt, in, world, body);
+                body = {motion.target, motion.velocity, false};
+            };
+            step();
+            auto& h = in.hands[0];
+            h.tracked = true;
+            h.wallPosition = {4.95f, 10, 0};
+            in.look = direction;
+            step();
+            h.wallGrip = h.grip = 1;
+            step();
+            const Vec3 before = body.position;
+            step();
+            near(length(body.position - before), 0, .005f);
+            for (int i = 0; i < 10; ++i) {
+                h.gripRelativeToHead.y -= .02f;
+                step();
+            }
+            near(body.position.y - before.y, .2f, .012f);
+            near(body.position.x, before.x, .005f);
+        }
+    });
+    test("climbing requires a grip: palm placement and strokes alone never attach or pulse", [] {
+        Building world;
+        Swing s(walled());
+        s.allowHandClimb(true);
+        Input in;
+        Body body{{4.1f, 10, 0}, {1, 0, 0}, false};
+        constexpr float dt = 1.f / 60;
+        const auto step = [&] {
+            const auto motion = s.predictNativeStep(dt, in, world, body);
+            body = {motion.target, motion.velocity, false};
+        };
+        step();
+        auto& hand = in.hands[0];
+        hand.tracked = true;
+        hand.wallPosition = {5.2f, 10, 0};
+        const Vec3 from = body.position;
+        for (int i = 0; i < 30; ++i) {
+            hand.gripRelativeToHead.y -= .01f;
+            step();
+            check(!s.climbingHands() && !s.wallHand(0, in, world), "button-free palm attached");
+            for (const auto& event : s.events())
+                check(event.kind != EventKind::WallGrip, "button-free contact made a vibration");
+        }
+        near(length(body.position - from), 0, .005f);
+        hand.wallGrip = 1;
+        step();
+        check(s.climbingHands() == 1, "grip did not catch the wall");
+        hand.wallGrip = 0;
+        step();
+        check(!s.climbingHands(), "palm stayed attached after releasing its grip");
+    });
+    test("grip climbing follows angled, bevelled and faceted rounded corners in either direction", [] {
+        constexpr float dt = 1.f / 90;
+        for (float degrees : {15.f, 30.f, 45.f, 60.f, 90.f, 120.f, 135.f, 150.f}) {
+            for (float side : {-1.f, 1.f}) {
+                for (int shape : {0, 1, 2}) {
+                    if (shape && degrees != 90) continue;
+                    AngledBuilding world(degrees, side, shape == 1);
+                    if (shape == 2) {
+                        const Vec3 centre{6, 0, -side};
+                        for (float angle : {15.f, 30.f, 45.f, 60.f, 75.f}) {
+                            const float radians = angle * 3.14159265f / 180;
+                            const Vec3 n{-std::cos(radians), 0, side * std::sin(radians)};
+                            world.faces.push_back({centre + n, n});
+                        }
+                    }
+                    Swing s(walled());
+                    s.allowHandClimb(true);
+                    Input in;
+                    Body body{{4.1f, 10, -side * 1.4f}, {1, 0, 0}, false};
+                    auto step = [&] {
+                        const auto next = s.predictNativeStep(dt, in, world, body);
+                        check(next.valid, "angled-corner prediction failed");
+                        body = {next.target, next.velocity, false};
+                    };
+                    step();
+                    auto& hand = in.hands[0];
+                    hand.tracked = true;
+                    hand.wallPosition = {4.95f, 10, body.position.z};
+                    step();
+                    hand.wallGrip = 1;
+                    step();
+                    check(s.climbingHands() == 1, "angled-corner palm failed to attach");
+                    for (int i = 0; i < 540; ++i) {
+                        const Vec3 n = s.wall().normal;
+                        const Vec3 along = normalized(cross(Vec3{0, 1, 0}, n)) * side;
+                        hand.gripRelativeToHead -= along * dt;
+                        hand.wallPosition = body.position - n * (s.wall().distance - .05f);
+                        step();
+                        if (!s.wall().on)
+                            throw std::runtime_error("lost angled wall: " + std::to_string(degrees));
+                    }
+                    if (dot(s.wall().normal, world.nextNormal) < .98f)
+                        throw std::runtime_error("did not reach angled face: " + std::to_string(degrees));
+                    // holdWall intentionally keeps up to 10 cm of outward
+                    // slack after moving across a curved/segmented facade.
+                    check(s.wall().distance >= .85f && s.wall().distance <= 1.01f,
+                          "curved corner exceeded the normal body-clearance range");
+                }
+            }
+        }
+    });
+    test("climbing corner camera stays outside projecting trim with delayed world-ray feedback", [] {
+        struct TrimmedCorner : World {
+            AngledBuilding facade;
+            Building trim;
+            TrimmedCorner(float angle, float side) : facade(angle, side) {
+                trim.low = {4.4f, 10.2f, -.6f};
+                trim.high = {5.6f, 11.1f, .6f};
+            }
+            std::optional<RayHit> raycast(Vec3 from, Vec3 way, float reach) const override {
+                const auto a = facade.raycast(from, way, reach), b = trim.raycast(from, way, reach);
+                if (!a) return b;
+                if (!b) return a;
+                return length(a->point - from) < length(b->point - from) ? a : b;
+            }
+            MoveResult sweep(Vec3, Vec3 to, float) const override { return {to, {}, false}; }
+            bool exists(uint64_t id) const override { return facade.exists(id) || trim.exists(id); }
+            bool inside(Vec3 p) const {
+                bool main = true;
+                for (const auto& face : facade.faces)
+                    main &= dot(p - face.point, face.normal) < -.001f;
+                return main || (p.x > trim.low.x + .001f && p.x < trim.high.x - .001f &&
+                                p.y > trim.low.y + .001f && p.y < trim.high.y - .001f &&
+                                p.z > trim.low.z + .001f && p.z < trim.high.z - .001f);
+            }
+        };
+        constexpr float dt = 1.f / 90;
+        for (float angle : {45.f, 90.f, 120.f}) {
+            for (float side : {-1.f, 1.f}) {
+                TrimmedCorner world(angle, side);
+                Swing s(walled());
+                s.allowHandClimb(true);
+                Input in;
+                Body body{{4.1f, 10, -side * 1.4f}, {1, 0, 0}, false};
+                GameTrackingRig rig;
+                rig.handClimb(true);
+                auto frame = trackedFrame();
+                frame.head.position.y = 2.05f;
+                for (auto& hand : frame.hands) hand.squeeze = 0;
+                std::vector<HeadClearance::Surface> delayed;
+                GameMotionFrame view;
+                auto step = [&] {
+                    const auto next = s.predictNativeStep(dt, in, world, body);
+                    body = {next.target, next.velocity, false};
+                    const auto wall = s.wall();
+                    const Vec3 feet = body.position - Vec3{0, 1, 0};
+                    const SurfaceHold hold{wall.normal, feet - wall.normal * wall.distance, 0, false};
+                    rig.bodyCentre(headCollisionOrigin(feet, {0, 1, 0}, hold, true));
+                    rig.surfaceFound({hold.anchor, hold.normal}, true);
+                    for (const auto& hit : delayed) rig.surfaceFound(hit);
+                    delayed.clear();
+                    ++frame.predictedDisplayTime;
+                    view = rig.update(frame, feet, {1, 0, 0}, true, {0, 1, 0}, true, hold);
+                    const auto q = view.headPose.orientation;
+                    for (const auto& ray : rig.clearanceRays(q.rotate({0, 0, -1}), q.rotate({1, 0, 0}),
+                                                            q.rotate({0, 1, 0}))) {
+                        if (ray.distance < .01f) continue;
+                        const auto hit = world.raycast(ray.origin, ray.direction, ray.distance);
+                        if (hit && dot(hit->normal, ray.direction) < -.2f)
+                            delayed.push_back({hit->point, hit->normal});
+                    }
+                };
+                step();
+                auto& hand = in.hands[0];
+                hand.tracked = true;
+                hand.wallPosition = {4.95f, 10, body.position.z};
+                step();
+                hand.wallGrip = 1;
+                step();
+                for (int i = 0; i < 540; ++i) {
+                    const Vec3 n = s.wall().normal;
+                    hand.gripRelativeToHead -= normalized(cross(Vec3{0, 1, 0}, n)) * (side * dt);
+                    hand.wallPosition = body.position - n * (s.wall().distance - .05f);
+                    step();
+                    check(s.wall().on, "projecting corner trim dropped the wall hold");
+                    if (world.inside(view.headPose.position))
+                        throw std::runtime_error("camera entered corner trim at " + std::to_string(angle) +
+                                                 " degrees, frame " + std::to_string(i));
+                    check(!view.standing, "trimmed corner started the wall-running view");
+                }
+                near(dot(s.wall().normal, world.facade.nextNormal), 1, .01f);
+            }
+        }
+    });
+    test("close climbing clearance resolves both walls of acute inside corners", [] {
+        for (float degrees : {30.f, 60.f, 90.f, 120.f, 135.f, 150.f}) {
+            const float angle = degrees * 3.14159265f / 180;
+            const Vec3 first{1, 0, 0}, second{std::cos(angle), 0, std::sin(angle)};
+            const Vec3 point{0, 1, 0}, body = point + normalized(first + second) * 2.f;
+            HeadClearance clearance;
+            clearance.found({point, first});
+            clearance.found({point, second});
+            const Vec3 safe = point + clearance.update(1.f / 90, body, point, true);
+            check(dot(safe - point, first) >= HeadClearance::margin - .001f &&
+                  dot(safe - point, second) >= HeadClearance::margin - .001f,
+                  "clearing one angled wall put the camera inside the other");
+            check(length(safe - point) < 1.f, "inside corner overcorrected the camera");
+        }
+    });
+    test("climbing camera clears projecting pillars using the native collision centre", [] {
+        for (float turn : {0.f, .6f, 1.5707963f}) {
+            const Quat rotation = Quat::yaw(turn);
+            const Vec3 feet = rotation.rotate({4.1f, 9, 0});
+            const Vec3 n = rotation.rotate({-1, 0, 0});
+            const SurfaceHold wall{n, rotation.rotate({5, 9, 0}), 0, false};
+            const Vec3 pillar = rotation.rotate({4.4f, 10, 0});
+            const Vec3 origin = headCollisionOrigin(feet, {0, 1, 0}, wall, true);
+            near(length(origin - (feet + Vec3{0, 1, 0})), 0, .001f);
+            near(length(headCollisionOrigin(feet, {0, 1, 0}, wall, false) - (wall.anchor + n * .5f)), 0);
+            GameTrackingRig rig;
+            rig.handClimb(true);
+            auto frame = trackedFrame();
+            for (auto& hand : frame.hands) hand.squeeze = 0;
+            GameMotionFrame view;
+            for (int i = 0; i < 90; ++i) {
+                ++frame.predictedDisplayTime;
+                rig.bodyCentre(origin);
+                rig.surfaceFound({wall.anchor, n}, true);
+                rig.surfaceFound({pillar, n});
+                view = rig.update(frame, feet, -n, true, {0, 1, 0}, true, wall);
+            }
+            check(dot(view.headPose.position - pillar, n) >= HeadClearance::margin - .001f,
+                  "pillar front was ignored and the climbing camera entered it");
+            near(view.headPose.position.y, feet.y + 1.f, .01f);
+            check(!view.standing, "pillar forced the wall-running view");
+            near(length(view.headPush), .4f, .01f);
+            const Vec3 left{view.eyes[0][12], view.eyes[0][13], view.eyes[0][14]};
+            const Vec3 right{view.eyes[1][12], view.eyes[1][13], view.eyes[1][14]};
+            near(length(left - right), .064f, .001f);
+        }
+    });
+    test("only the close climbing camera anticipates nearby corner obstacles", [] {
+        GameTrackingRig rig;
+        rig.handClimb(true);
+        auto frame = trackedFrame();
+        for (auto& hand : frame.hands) hand.squeeze = 0;
+        const Vec3 feet{0, 9, -4.1f};
+        const SurfaceHold wall{{0, 0, 1}, {0, 10, -5}, 0, false};
+        holdFor(rig, frame, feet, {}, .3f);
+        auto rays = rig.clearanceRays({0, 0, -1}, {1, 0, 0}, {0, 1, 0});
+        near(rays[1].distance, .3f);
+        holdFor(rig, frame, feet, wall, .7f);
+        rays = rig.clearanceRays({0, 0, -1}, {1, 0, 0}, {0, 1, 0});
+        near(rays[1].distance, 1.05f);
+        near(rays[2].distance, .97f);
+        frame.hands[0].stickY = 1;
+        holdFor(rig, frame, feet, wall, .4f);
+        rays = rig.clearanceRays({0, 0, -1}, {1, 0, 0}, {0, 1, 0});
+        near(rays[1].distance, .3f);
+    });
+    test("outside corners carry the body past first contact with the next face and then stop", [] {
+        for (float direction : {-1.f, 1.f}) {
+            Building world;
+            Swing s(walled());
+            s.allowHandClimb(true);
+            Input in;
+            Body body{{4.1f, 10, direction * 19.5f}, {1, 0, 0}, false};
+            constexpr float dt = 1.f / 90;
+            const auto step = [&] {
+                const auto motion = s.predictNativeStep(dt, in, world, body);
+                body = {motion.target, motion.velocity, false};
+            };
+            step();
+            auto& h = in.hands[0];
+            h.tracked = true;
+            h.wallPosition = {4.95f, 10, body.position.z};
+            step();
+            h.wallGrip = 1;
+            step();
+            float first = 0, afterTurn = 0;
+            GameTrackingRig camera;
+            camera.handClimb(true);
+            auto frame = trackedFrame();
+            for (auto& hand : frame.hands) hand.squeeze = 0;
+            for (int i = 0; i < 270; ++i) {
+                if (s.wall().normal.x < -.5f)
+                    h.gripRelativeToHead.z -= direction * dt;
+                step();
+                check(s.wall().on, "corner advance lost the wall");
+                if (!first && std::abs(s.wall().normal.z) > .9f && world.raycast(body.position, -s.wall().normal, 2))
+                    first = body.position.x;
+                const Vec3 feet = body.position - Vec3{0, 1, 0};
+                frame.predictedDisplayTime += 11'111'111;
+                const auto view = camera.update(frame, feet, {1, 0, 0}, true, {0, 1, 0}, true,
+                    {s.wall().normal, feet - s.wall().normal * s.wall().distance, 0, false});
+                if (!afterTurn && std::abs(s.wall().normal.z) > .9f &&
+                    dot(view.headPose.orientation.rotate({0, 0, -1}), -s.wall().normal) > .999f)
+                    afterTurn = body.position.x;
+            }
+            check(first > 5, "the next facade was never beside the body");
+            near(body.position.x - first, .85f, .09f);
+            check(afterTurn > 0 && body.position.x - afterTurn > .25f,
+                  "corner carry finished before the camera turned onto the next wall");
+            near(length(body.velocity), 0, .005f);
+            const auto seated = body.position;
+            for (int i = 0; i < 45; ++i) step();
+            near(length(body.position - seated), 0, .005f);
+        }
+    });
+    test("grip climbing settings keep old packets and reject invalid versions, sizes and switches", [] {
+        using namespace game_swing;
+        for (uint32_t version = 3; version <= 8; ++version) {
+            Settings s;
+            s.version = version;
+            s.bytes = 16 + 4 * version; // official v3=28 through custom v8=48
+            check(validSettings(s), "compatible settings packet was refused");
+            ++s.bytes;
+            check(!validSettings(s), "wrong settings length was accepted");
+        }
+        Settings s;
+        s.handClimb = 1;
+        check(validSettings(s), "grip-only choice was refused");
+        s.handClimb = 2;
+        check(!validSettings(s), "invalid grip-climbing switch was accepted");
+        s.handClimb = 1;
+        s.maxSpeed = NAN;
+        check(!validSettings(s), "invalid speed was accepted");
+    });
+    test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
+        using namespace game_swing;
+        Settings s;
+        check(s.version == 8 && s.bytes == 48, "updated settings did not append the climbing field");
+        check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
+              offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
+        s.noBlows = 3;
+        s.arcade = s.handClimb = 1;
+        check(validSettings(s), "phone, arcade and climbing could not coexist");
+        s.handClimb = 0;
+        check(validSettings(s) && s.noBlows == 3 && s.arcade == 1, "climbing changed phone or web settings");
+        s.noBlows = 4;
+        check(!validSettings(s), "invalid phone suppression mask accepted");
+        s.noBlows = 3;
+        s.arcade = 2;
+        check(!validSettings(s), "invalid arcade web switch accepted");
+        s.arcade = 1;
+        s.version = 7;
+        s.bytes = settingsBytesV7;
+        check(validSettings(s), "official 0.4.0 settings packet was refused");
+    });
+    test("merged arcade and physical web styles both retain grip climbing across style changes", [] {
+        constexpr float dt = 1.f / 60;
+        for (bool arcade : {false, true}) {
+            Building world;
+            auto config = walled();
+            config.physical = true;
+            config.arcade = arcade;
+            Swing s(config);
+            s.allowHandClimb(true);
+            Input in;
+            Body body{{4.1f, 10, 0}, {1, 0, 0}, false};
+            const auto step = [&] {
+                const auto motion = s.predictNativeStep(dt, in, world, body);
+                body = {motion.target, motion.velocity, false};
+            };
+            step();
+            auto& hand = in.hands[0];
+            hand.tracked = true;
+            hand.wallPosition = {5.1f, 10, 0};
+            step();
+            hand.wallGrip = 1;
+            step();
+            check(s.climbingHands() == 1, "web style prevented the palm catching the wall");
+            const float before = body.position.y;
+            for (int i = 0; i < 10; ++i) {
+                if (i == 5) s.allowArcade(!arcade);
+                hand.gripRelativeToHead.y -= .02f;
+                step();
+                check(s.climbingHands() == 1 && !s.webs()[0].attached, "style change released climbing or fired a web");
+            }
+            near(body.position.y - before, .2f, .012f);
+        }
+    });
+    test("merged head clearance protects a rolled climb and keeps camera distance when clear", [] {
+        for (float distance : {.1f, .3f, .75f}) {
+            GameTrackingRig rig;
+            rig.handClimb(true);
+            rig.wallDistance(distance);
+            auto f = trackedFrame();
+            for (auto& hand : f.hands) hand.squeeze = 0;
+            const Vec3 feet{0, 9, -4.1f};
+            const SurfaceHold wall{{0, 0, 1}, {0, 10, -5}, 0, false};
+            const auto play = [&](int frames) {
+                GameMotionFrame out;
+                for (int i = 0; i < frames; ++i) {
+                    ++f.predictedDisplayTime;
+                    rig.bodyCentre(wall.anchor + wall.normal * .5f);
+                    rig.surfaceFound({wall.anchor, wall.normal}, true);
+                    out = rig.update(f, feet, {0, 0, -1}, true, {0, 1, 0}, true, wall);
+                }
+                return out;
+            };
+            play(70);
+            for (auto& hand : f.hands) hand.squeeze = 1;
+            play(1);
+            for (auto& hand : f.hands) hand.grip.orientation = Quat::around({0, 0, -1}, .78539816f);
+            const auto out = play(90);
+            check(out.active && !out.standing, "head protection replaced the climbing view");
+            near(out.wallRoll, 1.5707963f, .005f);
+            near(dot(out.headPose.position - wall.anchor, wall.normal), std::max(distance, HeadClearance::margin), .006f);
+            near(length(out.bodyTilt().rotate({0, 1, 0}) - Vec3{1, 0, 0}), 0, .005f);
+            const Vec3 eyeL{out.eyes[0][12], out.eyes[0][13], out.eyes[0][14]};
+            const Vec3 eyeR{out.eyes[1][12], out.eyes[1][13], out.eyes[1][14]};
+            near(length(eyeL - eyeR), .064f, .001f);
+        }
+    });
+    test("sticky palms round both outside edges without losing the wall or blocking clearance", [] {
+        constexpr float dt = 1.f / 60;
+        for (float side : {-1.f, 1.f}) {
+            Building world;
+            Swing s(walled());
+            s.allowHandClimb(true);
+            Input in;
+            Body body{{4.1f, 10, side * 19.5f}, {1, 0, 0}, false};
+            auto step = [&] {
+                const auto motion = s.predictNativeStep(dt, in, world, body);
+                body = {motion.target, motion.velocity, false};
+            };
+            step();
+            auto& h = in.hands[0];
+            h.tracked = true;
+            h.wallPosition = {4.95f, 10, body.position.z};
+            step();
+            h.wallGrip = 1;
+            step();
+            check(s.climbingHands() == 1, "test palm did not attach");
+            for (int i = 0; i < 180; ++i) {
+                const Vec3 n = s.wall().normal;
+                const Vec3 along = n.x < -.5f ? Vec3{0, 0, side} : Vec3{1, 0, 0};
+                h.gripRelativeToHead -= along * dt;
+                h.wallPosition = body.position - n * (s.wall().distance - .05f);
+                step();
+                check(s.wall().on, "hand climbing fell off a side edge");
+            }
+            near(s.wall().normal.z, side, .01f);
+            check(body.position.x > 5.5f, "attached palm blocked the move round the edge");
+            near(body.position.z, side * 20.9f, .04f);
+        }
+    });
+    test("grip climb around a building edge using the actual tracked camera and controller placement", [] {
+        constexpr float dt = 1.f / 90;
+        Building world;
+        Swing s(walled());
+        s.allowHandClimb(true);
+        Input in;
+        Body body{{4.1f, 10, 19.4f}, {1, 0, 0}, false};
+        auto motion = s.predictNativeStep(dt, in, world, body);
+        body = {motion.target, motion.velocity, false};
+        GameTrackingRig rig;
+        rig.handClimb(true);
+        auto f = trackedFrame();
+        f.hands[1].valid = false;
+        f.hands[0].squeeze = 0;
+        f.hands[0].grip.position.x = .55f;
+        GameMotionFrame placed;
+        for (int i = 0; i < 450; ++i) {
+            const auto wall = s.wall();
+            f.predictedDisplayTime += 11'111'111;
+            const Vec3 feet = body.position - Vec3{0, 1, 0};
+            if (i > 90) {
+                f.hands[0].squeeze = 1;
+                f.hands[0].grip.position.x -= .8f * dt;
+                if (f.hands[0].grip.position.x < -.4f) {
+                    f.hands[0].grip.position.x = .55f;
+                    f.hands[0].grip.position.z = .1f; // lift away for the next stroke
+                    f.hands[0].squeeze = 0;
+                } else {
+                    f.hands[0].grip.position.z = -.5f;
+                }
+            }
+            f.hands[0].aim.position = f.hands[0].grip.position;
+            placed = rig.update(f, feet, {1, 0, 0}, true, {0, 1, 0}, true,
+                                {wall.normal, feet - wall.normal * wall.distance, 0, false});
+            in = placed.swing;
+            in.hands[0].wallPosition = placed.grips[0].position;
+            in.hands[0].wallGrip = f.hands[0].squeeze;
+            motion = s.predictNativeStep(dt, in, world, body);
+            body = {motion.target, motion.velocity, false};
+            check(s.wall().on, "tracked grip climb lost the wall at the edge");
+        }
+        near(s.wall().normal.z, 1, .01f);
+        check(body.position.x > 5.4f, "tracked grip climbing could not reach the next face");
+        check(!placed.standing, "tracked corner forced the running view");
+    });
+    test("wall roll gesture: neutral capture, left/right turn, release lock and fresh reengagement", [] {
+        constexpr float dt = 1.f / 90;
+        for (const float direction : {-1.f, 1.f}) {
+            WallRollGesture gesture;
+            auto f = trackedFrame();
+            f.seconds = dt;
+            near(gesture.update(true, f), 0);
+            check(gesture.engaged(), "two grips did not engage wall roll");
+            for (auto& h : f.hands)
+                h.grip.orientation = Quat::around({0, 0, -1}, direction * .78539816f);
+            for (int i = 0; i < 90; ++i)
+                gesture.update(true, f);
+            near(gesture.angle(), direction * 1.5707963f, .002f);
+            f.hands[0].squeeze = 0;
+            const float held = gesture.update(true, f);
+            check(!gesture.engaged(), "one released grip kept turning");
+            for (int i = 0; i < 90; ++i)
+                gesture.update(true, f);
+            near(gesture.angle(), held, .001f);
+            f.hands[0].squeeze = 1;
+            for (int i = 0; i < 20; ++i)
+                gesture.update(true, f);
+            near(gesture.angle(), held, .001f);
+            for (auto& h : f.hands)
+                h.grip.orientation = {};
+            for (int i = 0; i < 45; ++i)
+                gesture.update(true, f);
+            near(gesture.angle(), held - direction * .78539816f, .002f);
+        }
+    });
+    test("wall roll gesture: drift, head turns and controller tracking gaps do not rotate the view", [] {
+        WallRollGesture gesture;
+        auto f = trackedFrame();
+        gesture.update(true, f);
+        for (auto& h : f.hands)
+            h.grip.orientation = Quat::around({0, 0, -1}, .1f);
+        for (int i = 0; i < 60; ++i) {
+            f.head.orientation = Quat::yaw(static_cast<float>(i) * .01f);
+            gesture.update(true, f);
+        }
+        near(gesture.angle(), 0, .001f);
+        f.hands[0].valid = false;
+        gesture.update(true, f);
+        check(!gesture.engaged(), "lost controller kept the gesture active");
+        for (auto& h : f.hands)
+            h.grip.orientation = Quat::around({0, 0, -1}, .8f);
+        f.hands[0].valid = true;
+        gesture.update(true, f);
+        near(gesture.angle(), 0, .001f);
+        f.focused = false;
+        gesture.update(true, f);
+        check(!gesture.engaged(), "unfocused headset kept the gesture active");
+        gesture.reset();
+        near(gesture.angle(), 0);
+        f.focused = true;
+        f.head.orientation = {};
+        for (auto& h : f.hands)
+            h.grip.orientation = {};
+        gesture.update(true, f);
+        f.hands[0].grip.orientation = Quat::around({0, 0, -1}, 1.5707963f);
+        f.hands[1].grip.orientation = Quat::around({0, 0, -1}, -1.5707963f);
+        for (int i = 0; i < 60; ++i)
+            gesture.update(true, f);
+        near(gesture.angle(), 0, .001f);
+    });
+    test("wall roll rig: eyes pivot in place, distance stays fixed, release locks and recenter resets", [] {
+        GameTrackingRig rig;
+        rig.handClimb(true);
+        auto f = trackedFrame();
+        for (auto& h : f.hands)
+            h.squeeze = 0;
+        const Vec3 feet{0, 9, -4.1f};
+        const SurfaceHold wall{{0, 0, 1}, {0, 10, -5}, 0, false};
+        holdFor(rig, f, feet, {}, .2f);
+        const auto before = holdFor(rig, f, feet, wall, .7f);
+        for (auto& h : f.hands)
+            h.squeeze = 1;
+        holdFor(rig, f, feet, wall, 1.f / 90);
+        for (auto& h : f.hands)
+            h.grip.orientation = Quat::around({0, 0, -1}, .78539816f);
+        auto out = holdFor(rig, f, feet, wall, 1.f);
+        check(out.wallRotate, "two-grip gesture was not reserved from web actions");
+        near(out.wallRoll, 1.5707963f, .003f);
+        near(length(out.headPose.position - before.headPose.position), 0, .005f);
+        near(dot(out.headPose.position - wall.anchor, wall.normal), .4f, .005f);
+        near(length(out.headPose.orientation.rotate({0, 1, 0}) - Vec3{1, 0, 0}), 0, .005f);
+        const Vec3 left{out.eyes[0][12], out.eyes[0][13], out.eyes[0][14]};
+        const Vec3 right{out.eyes[1][12], out.eyes[1][13], out.eyes[1][14]};
+        near(length(left - right), .064f, .001f);
+        f.hands[0].squeeze = 0;
+        out = holdFor(rig, f, feet, wall, .5f);
+        check(!out.wallRotate, "one grip released but actions stayed reserved");
+        near(out.wallRoll, 1.5707963f, .003f);
+        near(length(trackingTurn(out.swing).rotate({0, 1, 0}) - Vec3{1, 0, 0}), 0, .005f);
+        f.hands[0].stickY = 1;
+        out = holdFor(rig, f, feet, wall, .5f);
+        check(out.standing && !out.wallRotate, "left-stick running did not reset the roll gesture");
+        f.hands[0].stickY = 0;
+        out = holdFor(rig, f, feet, wall, .5f);
+        near(out.wallRoll, 0, .003f);
+        near(dot(out.headPose.position - wall.anchor, wall.normal), .4f, .005f);
+        f.recentered = true;
+        out = holdFor(rig, f, feet, wall, 1.f / 90);
+        near(out.wallRoll, 0);
+        f.recentered = false;
+        out = holdFor(rig, f, feet, {}, .3f);
+        near(out.wallRoll, 0);
+    });
+    test("wall run input follows the rolled view throughout transition and returns to a fresh climb view", [] {
+        for (float angle : {0.f, 1.5707963f, 3.14159265f, -1.5707963f}) {
+            GameTrackingRig rig;
+            rig.handClimb(true);
+            auto f = trackedFrame();
+            for (auto& h : f.hands) h.squeeze = 0;
+            const Vec3 feet{0, 9, -4.1f};
+            const SurfaceHold wall{{0, 0, 1}, {0, 10, -5}, 0, false};
+            holdFor(rig, f, feet, wall, .7f);
+            for (auto& h : f.hands) h.squeeze = 1;
+            holdFor(rig, f, feet, wall, 1.f / 90);
+            for (auto& h : f.hands)
+                h.grip.orientation = Quat::around({0, 0, -1}, std::copysign(.78539816f, angle));
+            auto out = holdFor(rig, f, feet, wall, std::abs(angle) / 1.5707963f);
+            f.hands[0].squeeze = 0;
+            out = holdFor(rig, f, feet, wall, 1.f / 90);
+            const Vec3 ahead = normalized(out.headPose.orientation.rotate({0, 1, 0}));
+            const Vec3 right = normalized(cross(ahead, wall.normal));
+            f.hands[0].stickY = 1;
+            for (int i = 0; i < 60; ++i) {
+                out = holdFor(rig, f, feet, wall, 1.f / 90);
+                near(dot(out.swing.move, ahead), 1, .006f);
+                near(out.wallRoll, 0);
+                near(out.viewTilt, std::min(1.5707963f, wallTurnRate * (i + 1) / 90.f), .005f);
+            }
+            near(dot(out.headPose.orientation.rotate({0, 0, -1}), ahead), 1, .006f);
+            near(dot(out.headPose.orientation.rotate({0, 1, 0}), wall.normal), 1, .006f);
+            f.hands[0].stickY = 0;
+            f.hands[0].stickX = 1;
+            out = holdFor(rig, f, feet, wall, .6f);
+            near(dot(out.swing.move, right), 1, .006f);
+            near(dot(out.headPose.orientation.rotate({0, 0, -1}), ahead), 1, .006f);
+            f.hands[0].stickX = 0;
+            out = holdFor(rig, f, feet, wall, .7f);
+            near(out.wallRoll, 0);
+            near(out.headPose.orientation.rotate({0, 1, 0}).y, 1, .005f);
+            near(dot(out.headPose.position - wall.anchor, wall.normal), .4f, .01f);
+        }
+    });
+    test("ground walking with hand climbing enabled never aligns the camera to the left stick", [] {
+        for (Vec3 normal : {Vec3{}, Vec3{0, 1, 0}, normalized(Vec3{.2f, 1, 0})}) {
+            for (bool crawl : {false, true}) {
+                GameTrackingRig rig;
+                rig.handClimb(true);
+                auto f = trackedFrame();
+                for (auto& h : f.hands) h.squeeze = 0;
+                const Vec3 feet{0, 0, 0};
+                const SurfaceHold floor{normal, feet, 0, crawl};
+                const auto before = holdFor(rig, f, feet, floor, .7f);
+                const Vec3 forward = before.headPose.orientation.rotate({0, 0, -1});
+                const Vec3 up = before.headPose.orientation.rotate({0, 1, 0});
+                for (Vec3 stick : {Vec3{1, 0, 0}, Vec3{}, Vec3{0, 1, 0}, Vec3{}, Vec3{0, -1, 0},
+                                   Vec3{}, Vec3{-1, 0, 0}, Vec3{}, Vec3{.7f, .7f, 0}, Vec3{}}) {
+                    f.hands[0].stickX = stick.x;
+                    f.hands[0].stickY = stick.y;
+                    for (int i = 0; i < 30; ++i) {
+                        const auto out = holdFor(rig, f, feet, floor, 1.f / 90);
+                        near(length(out.headPose.orientation.rotate({0, 0, -1}) - forward), 0, .005f);
+                        near(length(out.headPose.orientation.rotate({0, 1, 0}) - up), 0, .005f);
+                        near(length(out.headPose.position - before.headPose.position), 0, .005f);
+                        near(out.viewTilt, before.viewTilt, .005f);
+                        check(!out.wallRotate, "ground walking enabled a wall roll");
+                    }
+                }
+            }
+        }
+    });
+    test("landing after wall running keeps later ground stick movement from turning the view", [] {
+        GameTrackingRig rig;
+        rig.handClimb(true);
+        auto f = trackedFrame();
+        for (auto& h : f.hands) h.squeeze = 0;
+        Vec3 feet{0, 9, -4.1f};
+        const SurfaceHold wall{{0, 0, 1}, {0, 10, -5}, 0, false};
+        holdFor(rig, f, feet, wall, .7f);
+        f.hands[0].stickY = 1;
+        auto out = holdFor(rig, f, feet, wall, .5f);
+        check(out.standing && out.viewTilt > 1.5f, "actual wall did not enter the running view");
+        f.hands[0].stickY = 0;
+        const SurfaceHold floor{{0, 1, 0}, feet, 0, false};
+        const auto landed = holdFor(rig, f, feet, floor, .8f);
+        near(landed.viewTilt, 0, .005f);
+        for (Vec3 stick : {Vec3{1, 0, 0}, Vec3{}, Vec3{-1, 0, 0}, Vec3{0, -1, 0}, Vec3{}}) {
+            f.hands[0].stickX = stick.x;
+            f.hands[0].stickY = stick.y;
+            feet.x += .1f;
+            out = holdFor(rig, f, feet, floor, .3f);
+            near(length(out.headPose.orientation.rotate({0, 0, -1}) -
+                        landed.headPose.orientation.rotate({0, 0, -1})), 0, .005f);
+            near(out.viewTilt, 0, .005f);
+            near(out.headPose.position.x - landed.headPose.position.x, feet.x, .005f);
+        }
+    });
+    test("wall-run reversal keeps the camera steady through the stick centre in every roll", [] {
+        for (float angle : {0.f, 1.5707963f, 3.14159265f}) {
+            for (int neutralFrames : {0, 1, 6}) {
+                GameTrackingRig rig;
+                rig.handClimb(true);
+                auto f = trackedFrame();
+                for (auto& h : f.hands) h.squeeze = 0;
+                const Vec3 feet{0, 9, -4.1f};
+                const SurfaceHold wall{{0, 0, 1}, {0, 10, -5}, 0, false};
+                holdFor(rig, f, feet, wall, .7f);
+                for (auto& h : f.hands) h.squeeze = 1;
+                holdFor(rig, f, feet, wall, 1.f / 90);
+                for (auto& h : f.hands) h.grip.orientation = Quat::around({0, 0, -1}, .78539816f);
+                holdFor(rig, f, feet, wall, angle / 1.5707963f);
+                f.hands[0].squeeze = 0;
+                f.hands[0].stickY = 1;
+                const auto before = holdFor(rig, f, feet, wall, .5f);
+                const Vec3 ahead = before.headPose.orientation.rotate({0, 0, -1});
+                f.hands[0].stickY = .05f;
+                for (int i = 0; i < neutralFrames; ++i) {
+                    const auto neutral = holdFor(rig, f, feet, wall, 1.f / 90);
+                    check(neutral.standing, "centre crossing restarted the climbing camera");
+                    near(length(neutral.swing.move), 0);
+                    near(length(neutral.headPose.orientation.rotate({0, 0, -1}) - ahead), 0, .005f);
+                }
+                f.hands[0].stickY = -1;
+                const auto back = holdFor(rig, f, feet, wall, .3f);
+                near(dot(back.swing.move, before.swing.move), -1, .005f);
+                near(length(back.headPose.orientation.rotate({0, 0, -1}) - ahead), 0, .005f);
+                near(length(back.headPose.position - before.headPose.position), 0, .005f);
+                f.hands[0].stickY = 0;
+                const auto stopped = holdFor(rig, f, feet, wall, .7f);
+                check(!stopped.standing, "sustained release did not return to climbing");
+                near(stopped.viewTilt, 0, .005f);
+                near(dot(stopped.headPose.position - wall.anchor, wall.normal), .4f, .01f);
+            }
+        }
+    });
+    test("backward wall-run entry faces forward and moves backward even after a full stop", [] {
+        for (bool restart : {false, true}) {
+            for (float side : {-0.6f, 0.f, .6f}) {
+                GameTrackingRig rig;
+                rig.handClimb(true);
+                auto f = trackedFrame();
+                for (auto& h : f.hands) h.squeeze = 0;
+                const Vec3 feet{0, 9, -4.1f};
+                const SurfaceHold wall{{0, 0, 1}, {0, 10, -5}, 0, false};
+                auto climb = holdFor(rig, f, feet, wall, .7f);
+                if (restart) {
+                    f.hands[0].stickY = 1;
+                    holdFor(rig, f, feet, wall, .5f);
+                    f.hands[0].stickY = 0;
+                    climb = holdFor(rig, f, feet, wall, .7f);
+                }
+                const Vec3 ahead = climb.headPose.orientation.rotate({0, 1, 0});
+                const Vec3 right = normalized(cross(ahead, wall.normal));
+                f.hands[0].stickY = -1;
+                f.hands[0].stickX = side;
+                const auto back = holdFor(rig, f, feet, wall, .5f);
+                near(dot(back.headPose.orientation.rotate({0, 0, -1}), ahead), 1, .005f);
+                near(dot(normalized(back.swing.move), normalized(-ahead + right * side)), 1, .005f);
+            }
+        }
+    });
+    test("wall running: head yaw steers while pitch cannot reverse, including sideways and upside down", [] {
+        for (float angle : {0.f, 1.5707963f, 3.14159265f}) {
+            GameTrackingRig rig;
+            rig.handClimb(true);
+            auto f = trackedFrame();
+            for (auto& h : f.hands) h.squeeze = 0;
+            const Vec3 feet{0, 9, -4.1f};
+            const SurfaceHold wall{{0, 0, 1}, {0, 10, -5}, 0, false};
+            holdFor(rig, f, feet, wall, .7f);
+            for (auto& h : f.hands) h.squeeze = 1;
+            holdFor(rig, f, feet, wall, 1.f / 90);
+            for (auto& h : f.hands) h.grip.orientation = Quat::around({0, 0, -1}, .78539816f);
+            holdFor(rig, f, feet, wall, angle / 1.5707963f);
+            f.hands[0].squeeze = 0;
+            const auto climb = holdFor(rig, f, feet, wall, 1.f / 90);
+            const Vec3 ahead = normalized(climb.headPose.orientation.rotate({0, 1, 0}));
+            const Vec3 side = normalized(cross(ahead, wall.normal));
+            f.hands[0].stickY = 1;
+            holdFor(rig, f, feet, wall, 1.f / 90);
+            for (float pitch : {-.2f, -.4f, -.42f, -.7f, -1.4f, 0.f, .42f, 1.4f}) {
+                for (float yaw : {0.f, -.6f, .6f}) {
+                    f.head.orientation = Quat::yaw(yaw) * Quat::around({1, 0, 0}, pitch);
+                    const auto out = holdFor(rig, f, feet, wall, .03f);
+                    const Vec3 expected = Quat::around(wall.normal, yaw).rotate(ahead);
+                    near(dot(out.swing.move, expected), 1, .005f);
+                    near(dot(out.swing.move, wall.normal), 0, .005f);
+                }
+            }
+            f.hands[0].stickY = -1;
+            f.head.orientation = {};
+            auto out = holdFor(rig, f, feet, wall, .1f);
+            near(dot(out.swing.move, ahead), -1, .005f);
+            f.hands[0].stickY = 0;
+            f.hands[0].stickX = 1;
+            out = holdFor(rig, f, feet, wall, .1f);
+            near(dot(out.swing.move, side), 1, .005f);
+        }
+    });
+    test("wall-run yaw steering follows corners and explicit turns while head pitch stays independent", [] {
+        GameTrackingRig rig;
+        rig.handClimb(true);
+        auto f = trackedFrame();
+        for (auto& h : f.hands) h.squeeze = 0;
+        const Vec3 feet{4.1f, 9, -19.1f};
+        SurfaceHold wall{{-1, 0, 0}, {5, 10, -19.1f}, 0, false};
+        holdFor(rig, f, feet, wall, .7f);
+        f.hands[0].stickY = 1;
+        auto out = holdFor(rig, f, feet, wall, .3f);
+        near(dot(out.swing.move, {0, 0, -1}), 1, .005f);
+        f.head.orientation = Quat::yaw(.7f) * Quat::around({1, 0, 0}, -.8f);
+        wall = {{0, 0, -1}, {4.1f, 10, -20}, 0, false};
+        out = holdFor(rig, f, feet, wall, .7f);
+        near(dot(out.swing.move, Quat::around(wall.normal, .7f).rotate({1, 0, 0})), 1, .005f);
+        f.hands[1].stickX = 1;
+        out = holdFor(rig, f, feet, wall, 1.f / 90);
+        const Vec3 turned = Quat::around(wall.normal, .7f - .5235988f).rotate({1, 0, 0});
+        near(dot(out.swing.move, turned), 1, .005f);
+        out = holdFor(rig, f, feet, wall, .1f);
+        near(dot(out.swing.move, turned), 1, .005f);
+    });
+    test("wall-run head yaw stays continuous through full turns and vertical head pitches", [] {
+        GameTrackingRig rig;
+        rig.handClimb(true);
+        auto f = trackedFrame();
+        for (auto& hand : f.hands) hand.squeeze = 0;
+        const Vec3 feet{0, 9, -4.1f};
+        const SurfaceHold wall{{0, 0, 1}, {0, 10, -5}, 0, false};
+        holdFor(rig, f, feet, wall, .7f);
+        f.hands[0].stickY = 1;
+        holdFor(rig, f, feet, wall, .2f);
+        for (int i = 0; i <= 180; ++i) {
+            const float yaw = static_cast<float>(i) * .04f;
+            f.head.orientation = Quat::yaw(yaw) * Quat::around({1, 0, 0}, -.65f);
+            const auto out = holdFor(rig, f, feet, wall, 1.f / 90);
+            near(dot(out.swing.move, Quat::around(wall.normal, yaw).rotate({0, 1, 0})), 1, .005f);
+        }
+        const float yaw = 7.2f;
+        for (float pitch : {-.8f, -1.4f, -1.56f, -1.7f, -2.f, -1.6f, -.42f, 0.f, 1.4f, 1.6f, 2.f, 0.f}) {
+            f.head.orientation = Quat::yaw(yaw) * Quat::around({1, 0, 0}, pitch);
+            const auto out = holdFor(rig, f, feet, wall, .03f);
+            near(dot(out.swing.move, Quat::around(wall.normal, yaw).rotate({0, 1, 0})), 1, .005f);
+        }
+    });
+    test("wall-running camera faces diagonal travel and preserves physical head movement", [] {
+        GameTrackingRig rig;
+        rig.handClimb(true);
+        auto f = trackedFrame();
+        for (auto& h : f.hands) h.squeeze = 0;
+        const Vec3 feet{0, 9, -4.1f};
+        const SurfaceHold wall{{0, 0, 1}, {0, 10, -5}, 0, false};
+        holdFor(rig, f, feet, wall, .7f);
+        f.hands[0].stickX = f.hands[0].stickY = .7f;
+        auto out = holdFor(rig, f, feet, wall, .7f);
+        const Vec3 direction = normalized(Vec3{1, 1, 0});
+        near(dot(normalized(out.swing.move), direction), 1, .005f);
+        near(dot(out.headPose.orientation.rotate({0, 0, -1}), direction), 1, .005f);
+        const Quat view = out.headPose.orientation;
+        const Vec3 head = out.headPose.position;
+        f.head.orientation = Quat::yaw(.2f);
+        out = holdFor(rig, f, feet, wall, 1.f / 90);
+        const Vec3 expected = (view * f.head.orientation).rotate({0, 0, -1});
+        near(length(out.headPose.orientation.rotate({0, 0, -1}) - expected), 0, .005f);
+        near(length(out.headPose.position - head), 0, .005f);
+    });
+    test("climb camera follows the next building face smoothly with roll retained", [] {
+        GameTrackingRig rig;
+        rig.handClimb(true);
+        auto f = trackedFrame();
+        for (auto& h : f.hands) h.squeeze = 0;
+        const Vec3 feet{4.1f, 9, -4.1f};
+        SurfaceHold wall{{0, 0, 1}, {4.1f, 10, -5}, 0, false};
+        holdFor(rig, f, feet, wall, .7f);
+        for (auto& h : f.hands) h.squeeze = 1;
+        holdFor(rig, f, feet, wall, 1.f / 90);
+        for (auto& h : f.hands) h.grip.orientation = Quat::around({0, 0, -1}, .78539816f);
+        auto out = holdFor(rig, f, feet, wall, 1.f);
+        f.hands[0].squeeze = 0;
+        wall = {{-1, 0, 0}, {5, 10, -4.1f}, 0, false};
+        for (int i = 0; i < 90; ++i) {
+            const auto before = out;
+            out = holdFor(rig, f, feet, wall, 1.f / 90);
+            check(!out.standing, "corner switched into the wall-running view");
+            near(out.wallRoll, 1.5707963f, .005f);
+            check(length(out.headPose.orientation.rotate({0, 0, -1}) -
+                         before.headPose.orientation.rotate({0, 0, -1})) < .1f, "corner snapped the view");
+            check(length(out.headPose.position - before.headPose.position) < .25f, "corner jumped the camera");
+        }
+        near(dot(out.headPose.orientation.rotate({0, 0, -1}), -wall.normal), 1, .005f);
+        near(dot(out.headPose.position - wall.anchor, wall.normal), .4f, .01f);
+    });
+    test("rolled climbing: physical pulls move sideways and upside down without gaze steering", [] {
+        constexpr float dt = 1.f / 60;
+        for (const float angle : {0.f, 1.5707963f, 3.14159265f}) {
+            Building world;
+            world.low = {-20, 0, -10};
+            world.high = {20, 30, -5};
+            Swing s(walled());
+            s.allowHandClimb(true);
+            Input in;
+            Body body{{0, 10, -4.1f}, {0, 0, -1}, false};
+            auto step = [&] {
+                const auto result = s.predictNativeStep(dt, in, world, body);
+                body = {result.target, result.velocity, false};
+            };
+            step();
+            check(s.wall().on, "test body did not reach the facade");
+            auto& hand = in.hands[1];
+            hand.tracked = true;
+            hand.wallPosition = {0, 10, -5.1f};
+            step();
+            hand.wallGrip = hand.grip = 1;
+            step();
+            check(s.climbingHands() == 2, "test hand did not stick");
+            const Vec3 beforeRoll = body.position;
+            for (int i = 1; i <= 10; ++i) {
+                in.tilt = Quat::around({0, 0, -1}, angle * static_cast<float>(i) / 10);
+                step();
+            }
+            near(length(body.position - beforeRoll), 0, .005f);
+            const Vec3 from = body.position;
+            for (int i = 0; i < 10; ++i) {
+                hand.gripRelativeToHead.y -= .02f;
+                step();
+            }
+            const Vec3 expected = in.tilt.rotate({0, .2f, 0});
+            near(length(body.position - from - expected), 0, .012f);
+            near(body.position.z, from.z, .005f);
+        }
+    });
+    test("climb view: stick runs on the wall, release returns close and upright even after a fast run", [] {
+        GameTrackingRig rig;
+        rig.handClimb(true);
+        auto f = trackedFrame();
+        const Vec3 feet{4.1f, 10, 0};
+        const SurfaceHold wall{{-1, 0, 0}, {5, 11, 0}, 20, false};
+        holdFor(rig, f, feet, {}, .3f);
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            auto out = holdFor(rig, f, feet, wall, .6f);
+            check(!out.standing, "stick at rest kept the running view");
+            near(out.viewTilt, 0, .001f);
+            near(out.headPose.position.x, 4.6f, .01f);
+            f.hands[0].stickY = 1;
+            out = holdFor(rig, f, feet, wall, .6f);
+            check(out.standing, "pushing the stick did not restore the original wall view");
+            near(out.viewTilt, 1.5707963f, .001f);
+            near(dot(out.headPose.position - wall.anchor, wall.normal), 1.7f, .01f);
+            f.hands[0].stickY = .1f; // noise inside the movement dead zone
+            out = holdFor(rig, f, feet, wall, .6f);
+            check(!out.standing, "stick noise kept the running view");
+            near(out.viewTilt, 0, .001f);
+            near(out.headPose.position.x, 4.6f, .01f);
+            near(out.headPose.position.y - feet.y, 1.f, .01f);
+        }
+    });
+    test("climb contact: stick takes over held palms and returning needs a fresh touch", [] {
+        constexpr float dt = 1.f / 60;
+        Building world;
+        Swing s(walled());
+        s.allowHandClimb(true);
+        Input in;
+        Body body{{4.1f, 10, 0}, {1, 0, 0}, false};
+        auto step = [&] {
+            const auto intent = s.predictNativeStep(dt, in, world, body);
+            body = {intent.target, intent.velocity, false};
+        };
+        step();
+        auto& hand = in.hands[0];
+        hand.tracked = true;
+        hand.wallPosition = {4.95f, 10, 0};
+        step();
+        hand.wallGrip = hand.grip = 1;
+        step();
+        check(s.climbingHands() == 1, "test palm did not stick");
+        in.move = {0, 0, -1};
+        step();
+        check(!s.climbingHands(), "sticky hand blocked stick running");
+        check(body.velocity.z < -.1f, "left stick did not move the body");
+        check(std::none_of(s.events().begin(), s.events().end(), [](const Event& e) {
+                  return e.kind == EventKind::WallGrip;
+              }), "running made a contact pulse");
+        in.move = {};
+        step();
+        check(!s.climbingHands() && !s.webs()[0].attached, "returning grabbed or fired without a fresh press");
+        hand.wallGrip = hand.grip = 0;
+        step();
+        hand.wallGrip = hand.grip = 1;
+        step();
+        check(s.climbingHands() == 1, "fresh wall touch after running failed");
+    });
+    test("climb haptics: one pulse per hand contact, no repeat while holding or on missing samples", [] {
+        game_swing::ClimbData data;
+        game_swing::ClimbPulses pulses;
+        data.status = 1;
+        check(!pulses.update(data, true), "pulse before a contact");
+        data.contacts[0] = 1;
+        check(pulses.update(data, true) == 1, "left palm did not pulse");
+        check(!pulses.update(data, true), "holding repeated the pulse");
+        check(!pulses.update({}, true), "missing data made a pulse");
+        check(!pulses.update(data, true), "data recovery replayed an old pulse");
+        data.contacts[1] = 1;
+        check(pulses.update(data, true) == 2, "right palm pulsed the wrong hand");
+        data.contacts[0] = 2;
+        check(pulses.update(data, true) == 1, "recontact did not pulse");
+        data.contacts[0] = data.contacts[1] = 3;
+        check(!pulses.update(data, false), "inactive view pulsed");
+        check(!pulses.update(data, true), "resuming replayed inactive contacts");
+    });
+    test("climb hand pose: palm stays open during contact and normal fists and webs resume off the wall", [] {
+        HandPoser poser;
+        HandPoseInput in;
+        in.tracked = true;
+        in.squeeze = in.web = 1;
+        in.speed = 5;
+        auto pose = poser.update(.05f, in);
+        check(pose.fist > .9f, "normal fist was removed");
+        in.wallContact = true;
+        pose = poser.update(.05f, in);
+        near(pose.fist, 0);
+        near(pose.shoot, 0);
+        in.wallContact = false;
+        pose = poser.update(.05f, in);
+        check(pose.fist > .9f && pose.shoot > .5f, "normal hand poses did not resume");
+    });
+    test("wall camera distance: every menu choice applies, survives reset and stays in range", [] {
+        using namespace vr_settings;
+        Values values;
+        check(values.wallDistance == 40, "unexpected default wall distance");
+        GameTrackingRig rig;
+        rig.handClimb(true);
+        auto f = trackedFrame();
+        const Vec3 feet{4.1f, 10, 0};
+        const SurfaceHold wall{{-1, 0, 0}, {5, 11, 0}, 0, false};
+        holdFor(rig, f, feet, {}, .3f);
+        for (unsigned i = 0; i < std::size(wallDistances); ++i) {
+            choose(Item::wallDistance, static_cast<int>(i), values);
+            check(choice(Item::wallDistance, values) == static_cast<int>(i), "distance menu did not round-trip");
+            rig.wallDistance(static_cast<float>(values.wallDistance) / 100);
+            auto out = holdFor(rig, f, feet, wall, .7f);
+            near(dot(out.headPose.position - wall.anchor, wall.normal),
+                 static_cast<float>(wallDistances[i]) / 100, .005f);
+            rig.reset();
+            out = holdFor(rig, f, feet, wall, .7f);
+            near(dot(out.headPose.position - wall.anchor, wall.normal),
+                 static_cast<float>(wallDistances[i]) / 100, .005f);
+        }
+        values.wallDistance = -100;
+        check(sanitized(values).wallDistance == 20, "minimum distance not clamped");
+        values.wallDistance = 999;
+        check(sanitized(values).wallDistance == 100, "maximum distance not clamped");
+        check(!choose(Item::wallDistance, 100, values), "invalid distance choice accepted");
+    });
+    test("wall contact: palms inside the facade attach, pull and pulse once without pushing the body through", [] {
+        constexpr float dt = 1.f / 60;
+        for (const float depth : {0.f, .02f, .2f, .7f, 1.2f}) {
+            Building world;
+            Swing s(walled());
+            s.allowHandClimb(true);
+            Input in;
+            Body body{{4.1f, 10, 0}, {1, 0, 0}, false};
+            auto step = [&] {
+                const auto motion = s.predictNativeStep(dt, in, world, body);
+                body = {motion.target, motion.velocity, false};
+            };
+            step();
+            auto& hand = in.hands[0];
+            hand.tracked = true;
+            hand.wallPosition = {5 + depth, 10, 0};
+            step();
+            hand.wallGrip = hand.grip = 1;
+            step();
+            check(s.climbingHands() == 1 && !s.webs()[0].attached, "inside palm failed to stick or fired a web");
+            check(std::count_if(s.events().begin(), s.events().end(), [](const Event& e) {
+                      return e.kind == EventKind::WallGrip;
+                  }) == 1, "inside contact did not give exactly one pulse");
+            const Vec3 before = body.position;
+            hand.gripRelativeToHead.x += .5f;
+            step();
+            near(body.position.x, before.x, .005f);
+            for (int i = 0; i < 5; ++i) {
+                hand.gripRelativeToHead.y -= .02f;
+                step();
+            }
+            near(body.position.y - before.y, .1f, .012f);
+            near(body.position.x, before.x, .005f);
+        }
+    });
+    test("hand climbing protocol: raw grips survive web-button swaps and invalid samples are refused", [] {
+        game_swing::Command c;
+        c.serial = c.focused = 1;
+        c.hands[0].tracked = 1;
+        c.hands[0].grip = 0; // trigger-web mapping, trigger not squeezed
+        c.wallGrips[0] = 1; // physical grip still climbs
+        c.wallPositions[0] = {4.95f, 10, 0};
+        check(game_swing::valid(c), "physical grip packet rejected");
+        auto in = game_swing::input(c);
+        near(in.hands[0].grip, 0);
+        near(in.hands[0].wallGrip, 1);
+        near(in.hands[0].wallPosition.x, 4.95f);
+        auto bad = c;
+        bad.wallPositions[0].x = std::numeric_limits<float>::quiet_NaN();
+        check(!game_swing::valid(bad), "nonfinite palm position accepted");
+        bad = c;
+        bad.wallGrips[1] = 2;
+        check(!game_swing::valid(bad), "invalid physical grip accepted");
+        c.version = 4;
+        c.bytes = game_swing::commandBytesV4;
+        check(game_swing::valid(c), "legacy input no longer accepted");
+        near(game_swing::input(c).hands[0].wallGrip, 0);
     });
     test("a body that flies into a wall at an angle runs along it", [] {
         // The wall: x = 5, facing -x. The body's centre keeps 0.9 m off it.
@@ -8214,6 +9508,56 @@ int main() {
         pose=solved(b,t,s,{},1,&r);
         check(!r.grounded&&b.at(pose,23).y<b.at(b.rest,23).y-.2f,"airborne legs stayed on the ground");
     });
+    test("body: the controller wall-roll gesture turns hips and legs; gaze alone does not", [] {
+        GameTrackingRig rig;
+        rig.handClimb(true);
+        auto f = trackedFrame();
+        for (auto& h : f.hands) h.squeeze = 0;
+        const Vec3 feet{0, 9, -4.1f};
+        const SurfaceHold wall{{0, 0, 1}, {0, 10, -5}, 0, false};
+        const auto level = holdFor(rig, f, feet, wall, .7f);
+        for (auto& h : f.hands) h.squeeze = 1;
+        holdFor(rig, f, feet, wall, 1.f / 90);
+        for (auto& h : f.hands) h.grip.orientation = Quat::around({0, 0, -1}, .78539816f);
+        auto rolled = holdFor(rig, f, feet, wall, 1.f);
+        f.hands[0].squeeze = 0;
+        rolled = holdFor(rig, f, feet, wall, 1.f / 90);
+        const Quat yaw = Quat::yaw(rolled.swing.trackingYaw);
+        const Quat tilt = yaw * rolled.bodyTilt() * yaw.conjugate();
+        near(length(tilt.rotate({0, 1, 0}) - Vec3{1, 0, 0}), 0, .005f);
+        for (bool odd : {false, true}) {
+            auto b = testBody(odd);
+            auto t = lookingAhead(level.headPose.position);
+            t.airborne = true;
+            t.facing = level.headPose.orientation;
+            body::Config c;
+            c.hideHead = false;
+            body::State a, z;
+            const auto before = solved(b, t, a, c);
+            t.eyes = rolled.headPose.position;
+            t.facing = rolled.headPose.orientation;
+            t.tilt = tilt;
+            const auto after = solved(b, t, z, c);
+            for (int joint : b.rig.below[static_cast<size_t>(b.rig.pelvis)])
+                near(length(b.at(after, joint) - (t.eyes + tilt.rotate(b.at(before, joint) - level.headPose.position))),
+                     0, .008f);
+        }
+        f.head.orientation = arc({0, 0, -1}, {0, -1, 0});
+        const auto lookedDown = holdFor(rig, f, feet, wall, .2f);
+        near(length(lookedDown.bodyTilt().rotate({0, 1, 0}) - rolled.bodyTilt().rotate({0, 1, 0})), 0, .005f);
+    });
+    test("body: looking down keeps the earlier upright hips instead of a wall-climb frame", [] {
+        for (bool odd : {false, true}) {
+            auto b = testBody(odd);
+            auto t = lookingAhead({0, 1.7f, .08f});
+            t.airborne = true;
+            t.facing = arc({0, 0, -1}, {0, -1, 0});
+            body::State state;
+            const auto pose = solved(b, t, state);
+            body::Pose view(const_cast<float*>(pose.data()), static_cast<int>(b.rig.parent.size()));
+            near(dot(normalized(view.direction(b.rig.pelvis, b.rig.pelvisUp)), {0, 1, 0}), 1, .01f);
+        }
+    });
     test("body: the body turns with the head only past the dead zone", [] {
         auto b=testBody();
         auto t=lookingAhead({0,1.7f,.08f});
@@ -9707,7 +11051,9 @@ int main() {
     test("VR settings tab: six sections, every setting once, a list's choices one per step", [] {
         using namespace vr_settings;
         const auto& all = rows();
-        unsigned seen = 0, headings = 0;
+        uint64_t seen = 0;
+        unsigned headings = 0;
+        static_assert(static_cast<unsigned>(lastItem) < 63, "more settings than the test's bits");
         for (const auto& row : all) {
             check(row.title && *row.title, "a row without a title");
             for (const char* c = row.title; *c; ++c)
@@ -9717,17 +11063,18 @@ int main() {
                 ++headings;
                 continue;
             }
-            const unsigned bit = 1u << static_cast<unsigned>(row.item);
+            const uint64_t bit = uint64_t{1} << static_cast<unsigned>(row.item);
             check(!(seen & bit), "a setting twice");
             seen |= bit;
             check(row.help && std::strlen(row.help) <= 80, "help missing, or too long for the game's column");
+            check(row.choices.size() <= maxChoices, "more choices than the tab shows");
             for (const char* c : row.choices)
                 check(c && *c, "an empty choice");
         }
         // The sections (the player, October 19: "sort the options in spidy vr
         // settings ingame into nice sections"), each with a setting in the tab.
-        const std::pair<size_t, const char*> sections[] = {{1, "WEBS"},     {6, "SWINGING"}, {9, "COMFORT"},
-                                                           {13, "DISPLAY"}, {18, "BODY"},    {20, "EXPERIMENTAL"}};
+        const std::pair<size_t, const char*> sections[] = {{0, "WEBS"},     {5, "SWINGING"}, {8, "COMFORT"},
+                                                           {12, "DISPLAY"}, {18, "BODY"},    {20, "EXPERIMENTAL"}};
         check(headings == std::size(sections), "the sections: webs, swinging, comfort, display, body, experimental");
         for (const auto& [at, title] : sections) {
             check(all[at].item == Item::none && std::strcmp(all[at].title, title) == 0, "a section out of place");
@@ -9738,8 +11085,11 @@ int main() {
         }
         check(all[21].item == Item::flips && all[21].choices.empty() && std::strcmp(all[20].title, "EXPERIMENTAL") == 0,
               "the flips: a switch under EXPERIMENTAL");
-        check(all.size() == 23 && all[22].item == Item::flipSpeed && all[22].choices.size() == std::size(flipSpeeds),
-              "the flip speed under the flips, the last row");
+        check(all[22].item == Item::flipSpeed && all[22].choices.size() == std::size(flipSpeeds),
+              "the flip speed under the flips");
+        check(all.size() == 25 && all[23].item == Item::handClimb && all[23].choices.empty() &&
+                  all[24].item == Item::wallDistance && all[24].choices.size() == std::size(wallDistances),
+              "hand wall climbing, a switch, and its camera distance last under EXPERIMENTAL");
         // The wall view has no row of its own any more: it turned only while
         // Spidy held the player on a wall, so it was never a choice of its own
         // and the launcher's one "Wall running" now carries both (the player,
@@ -9748,40 +11098,43 @@ int main() {
         // then "also merge the two options").
         for (const auto& row : all)
             check(row.item != Item::standOnWalls, "the wall view still has a row of its own");
-        check(all[15].item == Item::screenSize && all[17].item == Item::hud && all[17].choices.size() == 4 &&
-                  std::strcmp(all[17].choices[0], "OFF") == 0 && std::strcmp(all[17].choices[3], "LARGE") == 0,
+        check(all[14].item == Item::screenSize && all[16].item == Item::hud && all[16].choices.size() == 4 &&
+                  std::strcmp(all[16].choices[0], "OFF") == 0 && std::strcmp(all[16].choices[3], "LARGE") == 0,
               "the HUD after the game screen's rows: OFF, SMALL, MEDIUM, LARGE");
-        check(all[16].item == Item::screenDepth && std::strcmp(all[16].title, "GAME SCREEN 3D") == 0 &&
-                  all[16].choices.size() == 4 && std::strcmp(all[16].choices[0], "OFF") == 0 &&
-                  std::strcmp(all[16].choices[3], "HIGH") == 0,
+        check(all[15].item == Item::screenDepth && std::strcmp(all[15].title, "GAME SCREEN 3D") == 0 &&
+                  all[15].choices.size() == 4 && std::strcmp(all[15].choices[0], "OFF") == 0 &&
+                  std::strcmp(all[15].choices[3], "HIGH") == 0,
               "the game screen's depth under its size: OFF, LOW, MEDIUM, HIGH");
+        check(all[17].item == Item::nearClip && std::strcmp(all[17].title, "NEAR CLIP") == 0 &&
+                  all[17].choices.size() == std::size(nearClips) && std::strcmp(all[17].choices[6], "10 CM") == 0,
+              "the near clip last under DISPLAY: 1 to 10 cm");
         // Webs are always physical (the user, October 15: "remove non physical web, no need for it").
         for (const auto& row : all)
             check(std::strcmp(row.title, "PHYSICAL WEBS") != 0, "webs can still be made non-physical");
-        check(all[14].item == Item::view && std::strcmp(all[14].title, "VR VIEW") == 0 && all[14].choices.size() == 2 &&
-                  std::strcmp(all[14].choices[0], "VR") == 0 && std::strcmp(all[14].choices[1], "GAME SCREEN") == 0,
+        check(all[13].item == Item::view && std::strcmp(all[13].title, "VR VIEW") == 0 && all[13].choices.size() == 2 &&
+                  std::strcmp(all[13].choices[0], "VR") == 0 && std::strcmp(all[13].choices[1], "GAME SCREEN") == 0,
               "the view above the game screen's rows: VR, or GAME SCREEN");
         // VR VIEW is on the pause menu's first page, beside RESUME, and no other row is.
         for (const auto& row : all)
             check(row.page == (row.item == Item::view), "a row on the wrong page");
-        check(all[2].item == Item::webStyle && std::strcmp(all[2].title, "WEB STYLE") == 0 &&
-                  all[2].choices.size() == 2 && std::strcmp(all[2].choices[0], "REALISTIC") == 0 &&
-                  std::strcmp(all[2].choices[1], "ARCADE") == 0,
+        check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
+                  all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
+                  std::strcmp(all[1].choices[1], "ARCADE") == 0,
               "the web style first under WEBS: REALISTIC, or ARCADE");
-        check(all[3].item == Item::webButton && all[3].choices.size() == 2 &&
-                  std::strcmp(all[3].choices[0], "GRIP") == 0 && std::strcmp(all[3].choices[1], "TRIGGER") == 0,
+        check(all[2].item == Item::webButton && all[2].choices.size() == 2 &&
+                  std::strcmp(all[2].choices[0], "GRIP") == 0 && std::strcmp(all[2].choices[1], "TRIGGER") == 0,
               "the web button under the web style: GRIP, or TRIGGER");
-        check(all[4].item == Item::aimMarkers && all[5].item == Item::airWebs, "the aim markers, then the air webs");
-        check(all[7].item == Item::swingSpeed && all[8].item == Item::weight, "SWINGING: the swing speed, the weight");
-        check(all[10].item == Item::snapTurn && all[11].item == Item::smoothTurn && all[12].item == Item::haptics,
+        check(all[3].item == Item::aimMarkers && all[4].item == Item::airWebs, "the aim markers, then the air webs");
+        check(all[6].item == Item::swingSpeed && all[7].item == Item::weight, "SWINGING: the swing speed, the weight");
+        check(all[9].item == Item::snapTurn && all[10].item == Item::smoothTurn && all[11].item == Item::haptics,
               "COMFORT: snap and smooth turning, the vibration");
         check(all[19].item == Item::calibrate && all[19].choices.size() == 2 &&
                   std::strcmp(all[19].choices[1], "ON RESUME") == 0,
               "the body's calibration: NO, or ON RESUME");
         // Every setting has a row but the wall view, which the launcher's one
         // "Wall running" now carries along with who holds you on the wall.
-        constexpr unsigned everySetting = (2u << static_cast<unsigned>(lastItem)) - 2;
-        constexpr unsigned noRowOfItsOwn = 1u << static_cast<unsigned>(Item::standOnWalls);
+        constexpr uint64_t everySetting = (uint64_t{2} << static_cast<unsigned>(lastItem)) - 2;
+        constexpr uint64_t noRowOfItsOwn = uint64_t{1} << static_cast<unsigned>(Item::standOnWalls);
         check(seen == (everySetting & ~noRowOfItsOwn), "a setting missing");
         auto choicesOf = [&](Item item) {
             return std::find_if(all.begin(), all.end(), [&](const Row& r) { return r.item == item; })->choices.size();
@@ -9797,8 +11150,7 @@ int main() {
     test("near clip menu keeps geometry close to the headset", [] {
         using namespace vr_settings;
         Values v;
-        check(v.nearClipMm == 20 && defaultChoice(Item::nearClip) == 2,
-              "near clip defaults to two centimetres");
+        check(v.nearClipMm == 20 && defaultChoice(Item::nearClip) == 2, "near clip defaults to two centimetres");
         constexpr int expected[] = {10, 15, 20, 30, 50, 75, 100};
         for (int index = 0; index < static_cast<int>(std::size(expected)); ++index) {
             choose(Item::nearClip, index, v);
@@ -9812,8 +11164,28 @@ int main() {
         check(sanitized(v).nearClipMm == 10, "near clip lower bound");
         v.nearClipMm = 1000;
         check(sanitized(v).nearClipMm == 100, "near clip upper bound");
-        check(rows()[0].item == Item::nearClip && rows()[0].choices.size() == std::size(expected),
-              "near clip appears first");
+    });
+    test("VR settings only the tab offers: kept as key=value lines, read back sanitized, the rest left", [] {
+        using namespace vr_settings;
+        const Values defaults;
+        check(tabOnlyText(defaults) == "near_clip_mm=20\nhand_climb=0\nwall_distance_cm=40\n", "the defaults' text");
+        Values changed = defaults;
+        changed.handClimb = true;
+        changed.wallDistance = 75;
+        changed.nearClipMm = 50;
+        check(withTabOnly(defaults, tabOnlyText(changed)) == changed, "the settings did not come back");
+        // Windows' line ends, a line of another build, no number, and a
+        // distance out of range: the rest still counts.
+        auto read = withTabOnly(defaults, "hand_climb=1\r\nfuture_row=3\nwall_distance_cm=near\n");
+        check(read.handClimb && read.wallDistance == 40, "a bad line spoiled the good one");
+        read = withTabOnly(defaults, "wall_distance_cm=5\nhand_climb=2");
+        check(read.handClimb && read.wallDistance == wallDistances[0], "a value out of range was kept");
+        // Nothing saved yet, and the launcher's settings untouched.
+        Values launched = defaults;
+        launched.swingSpeed = 40;
+        launched.flips = true;
+        check(withTabOnly(launched, "") == launched && withTabOnly(launched, "swing_speed=10\n") == launched,
+              "the file changed a setting the launcher gives");
     });
     test("VR settings choices: switches and lists round-trip, launcher values show the nearest step", [] {
         using namespace vr_settings;
@@ -10523,7 +11895,20 @@ int main() {
         game_swing::Command c;
         c.focused = 1;
         c.serial = 1;
-        check(c.version == 4 && c.bytes == 200 && game_swing::valid(c), "a level version 4 command was rejected");
+        check(c.version == 5 && c.bytes == 240 && game_swing::valid(c), "a level version 5 command was rejected");
+        c.wallRotate = 1;
+        check(game_swing::valid(c) && game_swing::input(c).wallRotate, "the wall roll's flag was lost");
+        c.wallRotate = 2;
+        check(!game_swing::valid(c), "a wall roll flag of 2 was accepted");
+        c.wallRotate = 1;
+        c.wallGrips[1] = 1.5f;
+        check(!game_swing::valid(c), "a grip squeezed past 1 was accepted");
+        c.wallGrips[1] = 0;
+        c.version = 4;
+        c.bytes = game_swing::commandBytesV4;
+        check(game_swing::valid(c), "the previous release's version 4 command was rejected");
+        check(!game_swing::input(c).wallRotate, "a version 4 command held the grips for the wall roll");
+        c.wallRotate = 0;
         c.version = 3;
         c.bytes = game_swing::commandBytesV3;
         check(game_swing::valid(c), "a level version 3 command was rejected");

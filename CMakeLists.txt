@@ -163,7 +163,7 @@ if(SPIDY_BUILD_XR)
     target_sources(spidy_stereo_probe PRIVATE src/game_xr.cpp src/game_player.cpp src/game_pad.cpp
                    src/game_menu.cpp src/game_time.cpp src/game_prompts.cpp src/game_steam.cpp
                    src/phone_music.cpp)
-    target_link_libraries(spidy_stereo_probe PRIVATE spidy_openxr)
+    target_link_libraries(spidy_stereo_probe PRIVATE spidy_openxr shell32 ole32 uuid)
   endif()
   add_executable(spidy_xr_lab apps/xr_lab.cpp)
   target_link_libraries(spidy_xr_lab PRIVATE spidy_openxr)

@@ -182,6 +182,9 @@ struct HandInput {
     // hand's shoots a web ball). The controller's own grip and trigger unless
     // the player swapped them (trackedSwingInput).
     float trigger{}, grip{};
+    // Physical controller grip and position, independent of the web-button mapping.
+    float wallGrip{};
+    Vec3 wallPosition{};
 };
 struct Input {
     std::array<HandInput, 2> hands{};
@@ -197,6 +200,9 @@ struct Input {
     // Where the head looks (world, unit; zero: unknown): the enemy a punch
     // would go to is the one looked at (game_punch).
     Vec3 look{};
+    // Both grips are held for the wall roll (HAND WALL CLIMBING): they shoot
+    // no web and grab nothing until let go.
+    bool wallRotate{};
 };
 // The tracking space's orientation in the world (Rig::orientation): hand
 // motion relative to the head turns into the world with it.
@@ -275,6 +281,7 @@ enum class EventKind {
     Leap,     // a charged leap left the ground; strength: its charge
     Join,     // a hand took hold of the other hand's web
     Pass,     // an arcade web went through a thin or loose thing: shot past one, or swung past one
+    WallGrip, // a palm stuck to the wall; one contact pulse in that hand
 };
 struct Event {
     EventKind kind;
@@ -404,6 +411,16 @@ class Swing {
     // Off the wall at once, with no jump (the caller lost track of the body).
     // releaseAll() keeps the wall: the body stays on it without input.
     void leaveWall();
+    void allowHandClimb(bool on) {
+        handClimb_ = on;
+        if (!on)
+            climbing_ = {};
+    }
+    // A near-wall squeeze belongs to climbing before other actions.
+    bool wallHand(int hand, const Input&, const WorldQueries&) const;
+    unsigned climbingHands() const {
+        return (climbing_[0].attached ? 1u : 0u) | (climbing_[1].attached ? 2u : 0u);
+    }
     const WallHold& wall() const {
         return wall_;
     }
@@ -530,6 +547,16 @@ class Swing {
     float leapQueued_{};
     bool leapHeld_{};
     WallHold wall_{};
+    struct ClimbingHand {
+        bool attached{}, held = true;
+        Vec3 previous{}, rate{};
+        uint64_t surface{};
+    };
+    std::array<ClimbingHand, 2> climbing_{};
+    bool handClimb_{};
+    float climbSeconds_{};
+    void climbInputs(const Input&, const WorldQueries&);
+    std::optional<RayHit> wallContact(const HandInput&, const WorldQueries&) const;
     // Time the wall's ray has missed, time since a wall jump, and what is
     // left of the push over a wall's top edge, against crestNormal_.
     float wallLost_{}, sinceWallJump_ = 100, crest_{};
@@ -556,6 +583,8 @@ class Swing {
     // and the time left to come in front of it.
     Vec3 wrapWay_{};
     float wrapLeft_{};
+    float wrapEnd_{};
+    bool wrapSeated_{};
     // Mounting from the ground: how long the stick has walked at a wall, the
     // wall that takes the body once it is in the air and for how long yet,
     // and whether the caller offered that wall (now, and the one kept).

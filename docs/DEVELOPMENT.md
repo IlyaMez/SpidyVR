@@ -447,6 +447,37 @@ nearest the hand first), and native_webs lays them as the rope's first points
 in the game's hand-points step (95f9c0, `native_webs::ropePoints`), as it lays
 a web held in both hands.
 
+**Hand wall climbing** (HAND WALL CLIMBING, experimental and off by default;
+Adrian's pull request 24). `Swing::allowHandClimb` (the swing's settings
+version 8, `handClimb`). On the swing's own wall, with the stick at rest, a
+hand squeezed within 18 cm of the wall holds it where a ray from 35 cm out,
+back along the wall's normal, finds fixed geometry (`Swing::wallContact`);
+the body then moves by that hand's motion relative to the head, turned into
+the world and flattened onto the wall, two hands averaged, at most 3 m/s
+(`climbInputs`, `wallMotion`). A held hand shoots no web and grabs nothing
+(`Swing::wallHand`, `game_swing.cpp`'s `wallHands`). The swing command's
+version 5 carries each grip's place and the controller's own squeeze
+(`wallPositions`, `wallGrips`), whichever button WEB BUTTON gave the webs, and
+`wallRotate` while both grips turn the view. `SpidyClimbSample`
+(`game_swing::ClimbData`) counts each hand's new holds, for a buzz, and says
+which hands hold, for open palms (`HandPoseInput::wallContact`). The view:
+`GameTrackingRig::handClimb` keeps it upright beside the wall, the head
+lowered up to 0.7 m and `wallDistance` (WALL CAMERA DISTANCE, at least
+`HeadClearance::margin`) out from it; both grips roll it about the view's
+axis (`WallRollGesture`: 10 degrees of play, full speed, 90 degrees a second,
+from 45); the stick runs along the wall with the heading taken once and then
+steered by the head's yaw only (`wallRunHeadYaw`); round an outside corner
+the view turns onto the next face at 4 radians a second and the swing carries
+the body 0.85 m on along it. Head clearance casts 0.75 m further and takes up
+to 32 passes between opposing walls while climbing close.
+
+The SPIDY VR tab's settings that no launcher option carries (NEAR CLIP, HAND
+WALL CLIMBING, WALL CAMERA DISTANCE) are kept by the stereo module itself:
+`vr_settings::tabOnlyText` lines in `%APPDATA%\Spidy\spidy_vr.ini`, read as VR
+starts and written when the tab changes one (`game_xr.cpp`, `tabOnlyPath`). A
+file beside the module would not do: it runs from a copy staged per build
+(`reports/stereo-modules/<sha256>/`).
+
 Webs are drawn by the game's own web-line system. If they look wrong in the
 eyes, start with `Launch Spidy VR.cmd -OverlayWebs` for Spidy's overlay strands.
 
@@ -1001,6 +1032,13 @@ setup and a camera position available to every shader. Moving the view lines
 that work up with the headset. That view now covers a wider field of view than
 the stock camera, which may cost some frame rate; compare with `-StockMonitorView`.
 
+That view on the head, and the eyes, take NEAR CLIP's near plane (2 cm unless
+the player chose another, 1 to 10 cm; `near_clip.hpp`, set by `game_xr.cpp` as
+the settings apply) instead of the stock camera's 10 cm, which cut off hands
+held up before the face. The engine's depth is reversed, so the nearer plane
+costs no precision far away. Pull request 22 (iplusdvr), tried by its author in
+a headset.
+
 Since October 10's eighth build the game does that work for its view but does
 not render it while you are immersive, both eyes are live and no game screen
 is wanted (`restGameView` in `src/stereo_probe.cpp`: the view's `+1208` is
@@ -1333,6 +1371,7 @@ still requires a running game or headset.
 | `src/game_prompts.cpp`, `tools/probe_prompts.py` | What the game is asking for now: the prompt and QTE interface watched through `game_menu`'s hooks on the UI's call wrapper and text lookup, the live demand the interact button sends, the counters a session report carries; plus the October 11 research exports (for a game with no VR session running) |
 | `src/game_offers.cpp`, `src/game_warp.cpp`, `include/spidy/offer_pointing.hpp`, `tools/research_warp.py` | The game's interactions on Spidy's wall: the hero's offer processor, each offer's check and a vent's own check answered as the game's crawl would where the swing holds the player, and the offers it gathered near him; a hand pointing at one and the interact's use of it - the game's own crawl entry under him (`game_warp`), its pick, then its Y; the in-game check (`research_warp.py --use`) |
 | `src/game_xr.cpp`, `src/game_tracking.cpp` | Native eye presentation and Quest controls |
+| `include/spidy/wall_roll.hpp`, `src/swing.cpp` (`climbInputs`) | Hand wall climbing: palms that hold the wall and pull, the two-grip roll of the view |
 | `src/native_hud.cpp`, `include/spidy/native_hud.hpp`, `tools/probe_hud.py` | The game's HUD in VR: its panel in front of the head, the second movie (markers, subtitles, prompts) on it, and its check in the game |
 | `src/native_rays.cpp`, `src/native_movement.cpp`, `src/game_swing.cpp` | Native world queries and collision-controlled swing requests |
 | `src/lab_world.cpp`, `apps/xr_lab.cpp` | Synthetic collision world and VR lab |

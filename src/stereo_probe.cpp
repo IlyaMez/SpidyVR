@@ -14,55 +14,18 @@
 #include <atomic>
 #include <cstdint>
 #include <initializer_list>
-#include <string>
 #include <intrin.h>
 #include <windows.h>
 using namespace spidy;
 using native_view::Descriptor;
-HINSTANCE nearClipModule{};
-std::atomic<int> nearClipMm{20};
-SRWLOCK nearClipLock = SRWLOCK_INIT;
-uint64_t nearClipPoll{};
-std::wstring nearClipSettingsPath() {
-    wchar_t path[32768]{};
-    if (!GetModuleFileNameW(nearClipModule, path, 32768))
-        return {};
-    std::wstring directory = path;
-    const auto slash = directory.find_last_of(L"\\/");
-    if (slash == std::wstring::npos)
-        return {};
-    directory.resize(slash);
-    return directory + L"\\SpidyNearClip.ini";
-}
-void readNearClip() {
-    AcquireSRWLockExclusive(&nearClipLock);
-    const auto now = GetTickCount64();
-    if (!nearClipPoll || now - nearClipPoll >= 500) {
-        nearClipPoll = now;
-        const auto path = nearClipSettingsPath();
-        if (!path.empty())
-            nearClipMm = std::clamp(static_cast<int>(GetPrivateProfileIntW(
-                L"VR", L"NearClipMm", 20, path.c_str())), 10, 100);
-    }
-    ReleaseSRWLockExclusive(&nearClipLock);
-}
-int spidy::near_clip::getMillimetres() {
-    readNearClip();
-    return nearClipMm.load();
-}
-void spidy::near_clip::setMillimetres(int millimetres) {
-    AcquireSRWLockExclusive(&nearClipLock);
-    nearClipMm = std::clamp(millimetres, 10, 100);
-    const auto path = nearClipSettingsPath();
-    if (!path.empty()) {
-        const auto text = std::to_wstring(nearClipMm.load());
-        WritePrivateProfileStringW(L"VR", L"NearClipMm", text.c_str(), path.c_str());
-    }
-    nearClipPoll = GetTickCount64();
-    ReleaseSRWLockExclusive(&nearClipLock);
+// NEAR CLIP's near plane for the head's and the eyes' lenses in immersive VR
+// (near_clip.hpp), metres: the XR worker sets it, each frame's lenses read it.
+std::atomic<float> nearClip{.02f};
+void spidy::near_clip::set(int millimetres) {
+    nearClip.store(static_cast<float>(std::clamp(millimetres, 10, 100)) / 1000, std::memory_order_relaxed);
 }
 float spidy::near_clip::metres() {
-    return static_cast<float>(nearClipMm.load(std::memory_order_relaxed)) / 1000.f;
+    return nearClip.load(std::memory_order_relaxed);
 }
 struct Config {
     uint32_t magic, version, bytes, pid;
@@ -1233,11 +1196,13 @@ bool activeView(const Descriptor* incoming, Descriptor& out) {
     bool placed = head.viewed;
     if (placed) {
         out = stock;
-        // A head-mounted camera needs a shorter near plane than the stock
-        // third-person camera so nearby body geometry remains visible.
-        reinterpret_cast<Lens>(base + 0x187bb00)(&out, near_clip::metres(), stock.farZ(), lens.left, lens.right,
-                                                 lens.top, lens.bottom, 0, 0, stock.values[0x428 / 4],
-                                                 stock.values[0x42c / 4], false, false);
+        // Keep the stock camera's far plane and temporal jitter. Its near
+        // plane, 10 cm, suits a camera behind the hero; on the head it cut
+        // off hands held up before the face (NEAR CLIP).
+        reinterpret_cast<Lens>(base + 0x187bb00)(&out, near_clip::metres(), stock.farZ(), lens.left,
+                                                 lens.right, lens.top, lens.bottom, 0, 0,
+                                                 stock.values[0x428 / 4], stock.values[0x42c / 4], false,
+                                                 false);
         reinterpret_cast<SetPose>(base + 0x187ca10)(&out, pose.data());
         placed = native_view::valid(out);
     }
@@ -1400,7 +1365,6 @@ void enqueueCommand(void* list, uint32_t command, uint64_t order, void* payload)
 // each eye's previous camera equal to its current one, so motion vectors and
 // temporal anti-aliasing saw no camera motion.
 void placeEyes() {
-    readNearClip();
     Descriptor main{};
     const auto primary = pointer(base + 0x7a34dd0);
     const bool render = read(primary, &main, sizeof(main)) && native_view::valid(main) && !retiring();
@@ -2204,10 +2168,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStop(void*) {
     return result;
 }
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
-    if (reason == DLL_PROCESS_ATTACH) {
-        nearClipModule = instance;
+    if (reason == DLL_PROCESS_ATTACH)
         DisableThreadLibraryCalls(instance);
-    }
     return TRUE;
 }
 // Diagnostic: 1 places the eyes in view maintenance, as before October 5; 0

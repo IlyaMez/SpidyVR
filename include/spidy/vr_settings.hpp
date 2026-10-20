@@ -2,12 +2,15 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <string>
+#include <string_view>
 
 // Spidy's VR settings. The launcher (or the command line) gives a session
 // the values it starts with; during play the game's own Settings change
 // them: pause, Settings, then SPIDY VR after the game's last tab (game_menu).
 // The session reports the last ones, and the launcher starts the next
-// session with them.
+// session with them. The few only the tab offers the game module keeps
+// itself (tabOnlyText).
 namespace spidy::vr_settings {
 struct Values {
     bool aimMarkers = true;
@@ -58,6 +61,13 @@ struct Values {
     // your floor (the tab's STAND ON WALLS; GameTrackingRig::standOnWalls);
     // off, you stay upright beside it.
     bool standOnWalls = true;
+    // Hand wall climbing, experimental (the tab's HAND WALL CLIMBING;
+    // Swing::allowHandClimb, GameTrackingRig::handClimb): on a wall with the
+    // left stick at rest, a grip squeezed near the wall holds it and pulls you
+    // along; both grips held roll the view. And how far the eyes keep from
+    // the wall meanwhile, centimetres (WALL CAMERA DISTANCE, wallDistances).
+    bool handClimb = false;
+    int wallDistance = 40;
     // Scenes the game plays on the game screen (cutscenes, finishers) have
     // depth there (the tab's GAME SCREEN 3D): 0 off, the game's flat frame; 1
     // low, 2 medium, 3 high (screenDepths).
@@ -67,6 +77,9 @@ struct Values {
     // swings stay above the street. Off, REALISTIC: webs are ropes that bend
     // round whatever comes between you and where they stick.
     bool arcadeWebs = false;
+    // How near the eyes the headset still shows things, millimetres (the
+    // tab's NEAR CLIP, nearClips; near_clip.hpp). The game's own camera clips
+    // at 100, which cut off hands held up before the face.
     int nearClipMm = 20;
     bool operator==(const Values&) const = default;
 };
@@ -78,6 +91,10 @@ inline constexpr int smoothTurns[] = {0, 60, 90, 120, 180, 240};
 inline constexpr int hapticLevels[] = {0, 25, 50, 75, 100};
 inline constexpr int weights[] = {40, 60, 80, 100, 125, 150, 200, 250, 300};
 inline constexpr int flipSpeeds[] = {90, 120, 150, 180, 240, 300, 360, 480};
+inline constexpr int nearClips[] = {10, 15, 20, 30, 50, 75, 100};
+// Nearer than 20 cm would do nothing: the eyes keep that far from any surface
+// (HeadClearance::margin).
+inline constexpr int wallDistances[] = {20, 25, 30, 40, 50, 60, 75, 100};
 // Real gravity, m/s^2: a weight of 100% falls at it.
 inline constexpr float realGravity = 9.81f;
 // The swing's gravity for a weight, m/s^2.
@@ -104,7 +121,7 @@ inline float screenDepth(int choice) {
 // The values within the session's ranges: swing speed 1-65 m/s (what
 // run_game_vr.py accepts), snap turn 0-90 degrees, smooth turn 0-360 degrees
 // a second, vibration 0-100%, weight 40-300%, HUD 0-3, flip speed 90-480
-// degrees a second, the game screen's depth 0-3.
+// degrees a second, the game screen's depth 0-3, near clip 10-100 mm.
 Values sanitized(Values);
 
 enum class Item : uint8_t {
@@ -126,6 +143,8 @@ enum class Item : uint8_t {
     screenDepth,
     view,
     webStyle,
+    handClimb,
+    wallDistance,
     nearClip,
 };
 inline constexpr Item lastItem = Item::nearClip;
@@ -145,7 +164,10 @@ struct Row {
     // menu (the one with resume)").
     bool page{};
 };
-const std::array<Row, 23>& rows();
+const std::array<Row, 25>& rows();
+// The most choices a row shows (game_menu's buffers): a row with more would
+// lose its last ones.
+inline constexpr size_t maxChoices = 9;
 // The choice a setting shows for these values: a switch 0 (off) or 1 (on), a
 // list its step nearest to the value (a launcher value between two steps
 // shows the nearer one, the lower on a tie).
@@ -154,4 +176,13 @@ int choice(Item, const Values&);
 bool choose(Item, int choice, Values&);
 // What the game's RESET puts back: the choice for Spidy's defaults (Values{}).
 int defaultChoice(Item);
+// The settings only the tab offers, which no launcher option or XrConfig
+// field carries: NEAR CLIP, HAND WALL CLIMBING and WALL CAMERA DISTANCE. The
+// game module keeps them as these key=value lines in a file of their own, beside
+// the launcher's settings (game_xr.cpp, tabOnlyPath), and reads them back
+// when VR starts.
+std::string tabOnlyText(const Values&);
+// The values with what such text holds, sanitized. A line with an unknown
+// key, or whose value is no whole number, is passed over.
+Values withTabOnly(Values, std::string_view text);
 } // namespace spidy::vr_settings
