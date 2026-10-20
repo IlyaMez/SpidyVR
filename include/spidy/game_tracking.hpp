@@ -4,6 +4,7 @@
 #include "native_view.hpp"
 #include "swing.hpp"
 #include "tracking.hpp"
+#include "realistic_flip.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -188,6 +189,7 @@ class FlipMotion {
     // turn; a tap's flip and the way back level go as much faster or slower.
     // A turn in holdTurnSeconds until set; reset() keeps it.
     void speed(float radiansPerSecond);
+    float steeringRate() const { return 6.2831853f / holdTurnSeconds * scale_; }
     // Level at once (a menu, a recenter, another player). A held A stays held:
     // it flips again only once let go and pressed in the air; a held stick
     // flips again only once let go in the air.
@@ -304,9 +306,16 @@ class GameTrackingRig {
     const HeadClearance& clearance() const {
         return clearance_;
     }
+    void automaticFlips(RealisticFlipSettings settings) { autoSettings_=settings; }
+    void flight(RealisticFlight sample) { flight_=sample; }
     void reset();
 
   private:
+    RealisticFlipSettings autoSettings_{};
+    RealisticFlight flight_{};
+    RealisticFlip automatic_{};
+    AutomaticHandMotion automaticHands_{};
+    bool automaticStickReady_{}, automaticBrakeHeld_{}, automaticBrakeFromAir_{};
     Rig rig_{};
     FlipMotion flip_{};
     Pose lastHead_{};

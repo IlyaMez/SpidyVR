@@ -10,6 +10,7 @@
 #include "spidy/game_bridge_protocol.hpp"
 #include "spidy/game_grab.hpp"
 #include "spidy/game_menu.hpp"
+#include "spidy/realistic_flip_settings.hpp"
 #include "spidy/game_offers.hpp"
 #include "spidy/game_pad.hpp"
 #include "spidy/game_prompts.hpp"
@@ -799,6 +800,22 @@ DWORD WINAPI run(void*) {
         values.hud = static_cast<int>(config.hud);
         values.flipSpeed = static_cast<int>(config.flipSpeed);
         values.screenDepth = static_cast<int>(config.screenDepth);
+        const auto savedAutomatic = realistic_flip_settings::get();
+        values.realisticFlips = savedAutomatic.enabled;
+        values.automaticReleaseFlip = savedAutomatic.releaseFlip;
+        values.automaticStrength = savedAutomatic.strength;
+        values.automaticSpeed = savedAutomatic.speed;
+        values.automaticMinimumSpeed = savedAutomatic.minimumSpeed;
+        values.automaticResponse = savedAutomatic.responseMs;
+        values.automaticHandStrength = savedAutomatic.handStrength;
+        values.automaticFalloff = savedAutomatic.falloffMs;
+        values.automaticHandThreshold = savedAutomatic.handThreshold;
+        values.automaticAirBrake = savedAutomatic.airBrake;
+        auto automaticSettings = [&] {
+            return RealisticFlipSettings{values.realisticFlips,values.automaticReleaseFlip,
+                values.automaticStrength,values.automaticSpeed,values.automaticMinimumSpeed,
+                values.automaticResponse,values.automaticHandStrength,values.automaticFalloff,values.automaticHandThreshold,values.automaticAirBrake};
+        };
         values = vr_settings::sanitized(values);
         game_menu::publish(values);
         uint32_t settingChanges{};
@@ -1079,6 +1096,7 @@ DWORD WINAPI run(void*) {
             rig.snapTurn(static_cast<float>(values.snapTurn) * 3.14159265f / 180);
             rig.smoothTurn(static_cast<float>(values.smoothTurn) * 3.14159265f / 180);
             rig.flips(values.flips);
+            rig.automaticFlips(automaticSettings());
             rig.flipSpeed(static_cast<float>(values.flipSpeed) * 3.14159265f / 180);
             rig.triggerWebs(values.triggerWebs);
             rig.standOnWalls(values.standOnWalls);
@@ -1455,6 +1473,24 @@ DWORD WINAPI run(void*) {
                                     rig.surfaceFound({hit.position, n});
                             }
                     }
+                    RealisticFlight flight;
+                    flight.valid = swingState.qpc && static_cast<int64_t>(swingState.qpc) >
+                        now.QuadPart-frequency.QuadPart/10 && !swingState.error &&
+                        (swingState.status==1 || swingState.status==2);
+                    flight.velocity = swingState.velocity;
+                    float ropeLengths=0; unsigned attachedRopes=0;
+                    if (flight.valid && swingState.owned) {
+                        for (const auto& web : swingState.webs) {
+                            if (!web.attached || !finite(web.anchor) || !std::isfinite(web.tension)) continue;
+                            const Vec3 toward=web.anchor-feet;
+                            if(length(toward)<.1f) continue;
+                            flight.attached=true;
+                            ropeLengths+=length(toward); ++attachedRopes;
+                            flight.pull += normalized(toward)*std::clamp(web.tension,.1f,100.f);
+                        }
+                    }
+                    if(attachedRopes) flight.ropeLength=ropeLengths/attachedRopes;
+                    rig.flight(flight);
                     motion = rig.update(controller, feet, {camera[8], camera[9], camera[10]}, gameplay,
                                         swingState.owned ? Vec3{0, 1, 0} : heroUp,
                                         game_swing::airborne(swingState, now.QuadPart, frequency.QuadPart), hold,
@@ -1537,7 +1573,10 @@ DWORD WINAPI run(void*) {
                     game_prompts::setRewriting(false);
                     (void)promptHelp;
                     // A change in the SPIDY VR tab takes effect at once.
+                    const auto previousAutomatic = automaticSettings();
                     if (game_menu::take(values)) {
+                        if (!(previousAutomatic == automaticSettings()))
+                            realistic_flip_settings::save(automaticSettings());
                         ++settingChanges;
                         applySettings();
                     }

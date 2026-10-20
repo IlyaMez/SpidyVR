@@ -9,14 +9,70 @@
 #include "spidy/native_hud.hpp"
 #include "spidy/native_view.hpp"
 #include "spidy/native_webs.hpp"
+#include "spidy/realistic_flip_settings.hpp"
 #include <MinHook.h>
 #include <atomic>
 #include <cstdint>
 #include <initializer_list>
+#include <string>
 #include <intrin.h>
 #include <windows.h>
 using namespace spidy;
 using native_view::Descriptor;
+HINSTANCE rotationSettingsModule{};
+SRWLOCK rotationSettingsLock = SRWLOCK_INIT;
+std::wstring rotationSettingsPath() {
+    wchar_t path[32768]{};
+    if (!GetModuleFileNameW(rotationSettingsModule, path, 32768))
+        return {};
+    std::wstring directory = path;
+    const auto slash = directory.find_last_of(L"\\/");
+    if (slash == std::wstring::npos)
+        return {};
+    directory.resize(slash);
+    return directory + L"\\SpidyRotation.ini";
+}
+RealisticFlipSettings spidy::realistic_flip_settings::get() {
+    AcquireSRWLockExclusive(&rotationSettingsLock);
+    const auto path = rotationSettingsPath();
+    auto read = [&](const wchar_t* key, int fallback) {
+        return static_cast<int>(GetPrivateProfileIntW(L"RealisticRotation", key, fallback, path.c_str()));
+    };
+    RealisticFlipSettings settings;
+    settings.enabled = read(L"Enabled", 0) == 1;
+    settings.releaseFlip = read(L"ReleaseFlip", 1) == 1;
+    settings.strength = std::clamp(read(L"Strength", 50), 25, 100);
+    settings.speed = std::clamp(read(L"Speed", 240), 90, 360);
+    settings.minimumSpeed = std::clamp(read(L"MinimumSpeed", 3), 3, 16);
+    settings.responseMs = std::clamp(read(L"ResponseMs", 500), 100, 750);
+    settings.handStrength = std::clamp(read(L"HandStrength", 100), 25, 200);
+    settings.handThreshold = std::clamp(read(L"HandThreshold", 100), 50, 300);
+    settings.airBrake = read(L"AirBrake", 1) == 1;
+    settings.falloffMs = std::clamp(read(L"FalloffMs", 3000), 500, 3000);
+    ReleaseSRWLockExclusive(&rotationSettingsLock);
+    return settings;
+}
+void spidy::realistic_flip_settings::save(RealisticFlipSettings settings) {
+    AcquireSRWLockExclusive(&rotationSettingsLock);
+    const auto path = rotationSettingsPath();
+    auto write = [&](const wchar_t* key, int value) {
+        const auto text = std::to_wstring(value);
+        WritePrivateProfileStringW(L"RealisticRotation", key, text.c_str(), path.c_str());
+    };
+    if (!path.empty()) {
+        write(L"Enabled", settings.enabled);
+        write(L"ReleaseFlip", settings.releaseFlip);
+        write(L"Strength", std::clamp(settings.strength, 25, 100));
+        write(L"Speed", std::clamp(settings.speed, 90, 360));
+        write(L"MinimumSpeed", std::clamp(settings.minimumSpeed, 3, 16));
+        write(L"ResponseMs", std::clamp(settings.responseMs, 100, 750));
+        write(L"HandStrength", std::clamp(settings.handStrength, 25, 200));
+        write(L"HandThreshold", std::clamp(settings.handThreshold, 50, 300));
+        write(L"AirBrake", settings.airBrake);
+        write(L"FalloffMs", std::clamp(settings.falloffMs, 500, 3000));
+    }
+    ReleaseSRWLockExclusive(&rotationSettingsLock);
+}
 struct Config {
     uint32_t magic, version, bytes, pid;
     uint64_t base;
@@ -2154,8 +2210,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStop(void*) {
     return result;
 }
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
-    if (reason == DLL_PROCESS_ATTACH)
+    if (reason == DLL_PROCESS_ATTACH) {
+        rotationSettingsModule = instance;
         DisableThreadLibraryCalls(instance);
+    }
     return TRUE;
 }
 // Diagnostic: 1 places the eyes in view maintenance, as before October 5; 0

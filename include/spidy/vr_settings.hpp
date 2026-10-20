@@ -67,6 +67,11 @@ struct Values {
     // swings stay above the street. Off, REALISTIC: webs are ropes that bend
     // round whatever comes between you and where they stick.
     bool arcadeWebs = false;
+    bool realisticFlips = false, automaticReleaseFlip = true;
+    int automaticStrength = 50, automaticSpeed = 240, automaticMinimumSpeed = 3;
+    int automaticResponse = 500, automaticHandStrength = 100, automaticFalloff = 3000;
+    int automaticHandThreshold = 100;
+    bool automaticAirBrake = true;
     bool operator==(const Values&) const = default;
 };
 // The steps the game's Settings offer. The launcher's slider sets any swing
@@ -125,8 +130,18 @@ enum class Item : uint8_t {
     screenDepth,
     view,
     webStyle,
+    realisticFlips,
+    automaticStrength,
+    automaticSpeed,
+    automaticMinimumSpeed,
+    automaticReleaseFlip,
+    automaticResponse,
+    automaticHandStrength,
+    automaticFalloff,
+    automaticHandThreshold,
+    automaticAirBrake,
 };
-inline constexpr Item lastItem = Item::webStyle;
+inline constexpr Item lastItem = Item::automaticAirBrake;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. The sections: WEBS, SWINGING, COMFORT, DISPLAY, BODY and
 // EXPERIMENTAL (the player, October 19: "sort the options in spidy vr
@@ -143,7 +158,7 @@ struct Row {
     // menu (the one with resume)").
     bool page{};
 };
-const std::array<Row, 22>& rows();
+const std::array<Row, 32>& rows();
 // The choice a setting shows for these values: a switch 0 (off) or 1 (on), a
 // list its step nearest to the value (a launcher value between two steps
 // shows the nearer one, the lower on a tie).
