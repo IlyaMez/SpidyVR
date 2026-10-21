@@ -81,6 +81,10 @@ struct Values {
     // tab's NEAR CLIP, nearClips; near_clip.hpp). The game's own camera clips
     // at 100, which cut off hands held up before the face.
     int nearClipMm = 20;
+    // OFF mirrors the left eye. A selected recording FOV renders the active
+    // view again, costs frame time, and omits Spidy's eye-only overlays.
+    // The requested angle is widened if needed to contain both eye frusta.
+    int spectatorFov = 0;
     // Realistic flips, experimental (the tab's REALISTIC FLIPS and the nine
     // rows under it; RealisticFlipSettings, which holds what each means): the
     // swing's flight and the arms turn the player in the air, and A there
@@ -178,8 +182,9 @@ enum class Item : uint8_t {
     hapticWind,
     hapticCombat,
     hapticMovement,
+    spectatorFov,
 };
-inline constexpr Item lastItem = Item::hapticMovement;
+inline constexpr Item lastItem = Item::spectatorFov;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. The sections: WEBS, SWINGING, COMFORT, HAPTICS, DISPLAY, BODY and
 // EXPERIMENTAL (the player, October 19: "sort the options in spidy vr
@@ -197,7 +202,7 @@ struct Row {
     // menu (the one with resume)").
     bool page{};
 };
-const std::array<Row, 41>& rows();
+const std::array<Row, 42>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

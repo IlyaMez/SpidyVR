@@ -133,7 +133,7 @@ AddItemFn originalAddItem{};
 uintptr_t imageBase{};
 SRWLOCK lock = SRWLOCK_INIT;
 vr_settings::Values shown;
-uint32_t pending{}; // bits 1 << Item changed in the tab and not taken yet
+uint64_t pending{}; // one bit per Item, including tab settings beyond index 31
 std::atomic<uint64_t> tabsBuilt{}, changesMade{};
 std::atomic<uint32_t> failure{};
 std::atomic<bool> hooked{}, created{};
@@ -390,7 +390,7 @@ void change(Item item, int index) {
     AcquireSRWLockExclusive(&lock);
     const bool changed = vr_settings::choose(item, index, shown);
     if (changed)
-        pending |= 1u << static_cast<unsigned>(item);
+        pending |= uint64_t{1} << static_cast<unsigned>(item);
     ReleaseSRWLockExclusive(&lock);
     if (changed)
         ++changesMade;
@@ -562,9 +562,9 @@ bool matches(uintptr_t at, const unsigned char* bytes, size_t count) {
         return false;
     }
 }
-vr_settings::Values copyItems(const vr_settings::Values& from, vr_settings::Values to, uint32_t which) {
+vr_settings::Values copyItems(const vr_settings::Values& from, vr_settings::Values to, uint64_t which) {
     for (unsigned i = 1; i <= static_cast<unsigned>(vr_settings::lastItem); ++i)
-        if (which & (1u << i))
+        if (which & (uint64_t{1} << i))
             vr_settings::choose(static_cast<Item>(i), vr_settings::choice(static_cast<Item>(i), from), to);
     return to;
 }
@@ -617,7 +617,7 @@ void game_menu::publish(const vr_settings::Values& values) {
 }
 bool game_menu::take(vr_settings::Values& values) {
     AcquireSRWLockExclusive(&lock);
-    const uint32_t which = pending;
+    const uint64_t which = pending;
     if (which)
         values = copyItems(shown, values, which);
     pending = 0;

@@ -1,4 +1,5 @@
 #include "spidy/lab_world.hpp"
+#include "spidy/spectator_fov.hpp"
 #include "spidy/native_view.hpp"
 #include "spidy/game_tracking.hpp"
 #include "spidy/native_eye_frame.hpp"
@@ -11279,8 +11280,11 @@ int main() {
     });
     test("VR settings tab: seven sections, every setting once, a list's choices one per step", [] {
         using namespace vr_settings;
-        const auto& all = rows();
-        uint64_t seen = 0;
+        std::array<Row, 41> all;
+        std::copy_if(rows().begin(), rows().end(), all.begin(), [](const Row& row) {
+            return row.item != Item::spectatorFov;
+        });
+        uint64_t seen = uint64_t{1} << static_cast<unsigned>(Item::spectatorFov);
         unsigned headings = 0;
         static_assert(static_cast<unsigned>(lastItem) < 63, "more settings than the test's bits");
         for (const auto& row : all) {
@@ -11411,10 +11415,34 @@ int main() {
         v.nearClipMm = 1000;
         check(sanitized(v).nearClipMm == 100, "near clip upper bound");
     });
+    test("recording FOV defaults off, fits DISPLAY, persists and covers both eyes", [] {
+        using namespace vr_settings;
+        Values v;
+        check(v.spectatorFov == 0 && defaultChoice(Item::spectatorFov) == 0, "recording must be opt-in");
+        check(rows()[24].item == Item::spectatorFov && rows()[25].item == Item::none &&
+                  rows()[24].choices.size() == 9, "recording FOV belongs last under DISPLAY, with nine choices");
+        for (int i = 0; i < 9; ++i) {
+            choose(Item::spectatorFov, i, v);
+            check(v.spectatorFov == spectator_fov::choices[i] && choice(Item::spectatorFov, v) == i,
+                  "every recording choice must round-trip");
+            check(withTabOnly(Values{}, tabOnlyText(v)).spectatorFov == v.spectatorFov,
+                  "recording FOV must persist in the existing tab-only settings");
+        }
+        check(withTabOnly(Values{}, "spectator_fov=-20\n").spectatorFov == 0, "invalid negative FOV is off");
+        const native_eyes::Bounds eyes{-1.2f, 1.4f, -1.35f, 1.6f};
+        for (float aspect : {.3f, 1.f, 16.f/9, 32.f/9})
+            for (int fov : {80, 100, 130, 150}) {
+                const auto lens = spectator_fov::covering(eyes, fov, aspect);
+                check(lens.left <= eyes.left && lens.right >= eyes.right && lens.top <= eyes.top &&
+                          lens.bottom >= eyes.bottom, "the recording lens must contain both asymmetric eye frusta");
+                near((lens.right-lens.left)/(lens.bottom-lens.top), aspect, .0001f);
+                check(lens.right >= std::tan(fov*.00872664626f)-.0001f, "requested FOV must be a lower bound");
+            }
+    });
     test("VR settings only the tab offers: kept as key=value lines, read back sanitized, the rest left", [] {
         using namespace vr_settings;
         const Values defaults;
-        check(tabOnlyText(defaults) == "near_clip_mm=20\nhand_climb=0\nwall_distance_cm=40\nrealistic_flips=0\n"
+        check(tabOnlyText(defaults) == "spectator_fov=0\nnear_clip_mm=20\nhand_climb=0\nwall_distance_cm=40\nrealistic_flips=0\n"
                                        "rotation_strength=50\nrotation_speed=240\nflight_speed_min=3\n"
                                        "swing_momentum=1\nrotation_response_ms=500\nhand_momentum=100\n"
                                        "angular_drag_ms=3000\nhand_speed_min_cm=100\nair_rotation_brake=1\n"
@@ -11422,6 +11450,7 @@ int main() {
                                        "body_haptics_movement=1\n",
               "the defaults' text");
         Values changed = defaults;
+        changed.spectatorFov = 130;
         changed.handClimb = true;
         changed.wallDistance = 75;
         changed.nearClipMm = 50;

@@ -10,6 +10,7 @@
 #include "spidy/native_view.hpp"
 #include "spidy/native_webs.hpp"
 #include "spidy/near_clip.hpp"
+#include "spidy/spectator_fov.hpp"
 #include <MinHook.h>
 #include <atomic>
 #include <cstdint>
@@ -21,6 +22,10 @@ using native_view::Descriptor;
 // NEAR CLIP's near plane for the head's and the eyes' lenses in immersive VR
 // (near_clip.hpp), metres: the XR worker sets it, each frame's lenses read it.
 std::atomic<float> nearClip{.02f};
+std::atomic<int> recordingFov{};
+void spidy::spectator_fov::set(int degrees) {
+    recordingFov.store(degrees <= 0 ? 0 : std::clamp(degrees, 80, 150), std::memory_order_relaxed);
+}
 void spidy::near_clip::set(int millimetres) {
     nearClip.store(static_cast<float>(std::clamp(millimetres, 10, 100)) / 1000, std::memory_order_relaxed);
 }
@@ -1423,9 +1428,10 @@ void placeEyes() {
         ReleaseSRWLockShared(&commandLock);
     }
     latchedImmersive = render && enabled && controlled && desired.enabled == 1;
+    const int recording = recordingFov.load(std::memory_order_relaxed);
     // The game's view is on the head and both eyes render: it need not.
     restGameView(primary, latchedImmersive && (config.createViews & 32) && live.load() == 2 &&
-                              !native_gpu::screenRequested());
+                              !native_gpu::screenRequested() && !recording);
     // The eyes' jobs of this frame mark into the resting view's list (see rested).
     if (const auto resting = rested.load(); resting && clearDrawn(resting))
         InterlockedIncrement64(&SpidyDrawnFrames);
@@ -1490,6 +1496,11 @@ void placeEyes() {
         Mat4 pose{};
         native_eyes::Bounds lens{};
         if (native_eyes::headView(desired, pose, lens)) {
+            // Only the optional window view changes. Containment is guaranteed
+            // in tangent space, including asymmetric/canted eye projections.
+            // Keep the requested desktop aspect, widening rather than cropping.
+            if (recording && live.load() == 2 && !native_gpu::screenRequested())
+                lens = spectator_fov::covering(lens, recording, flatAspect.load());
             pose[12] += placed.offset.x;
             pose[13] += placed.offset.y;
             pose[14] += placed.offset.z;
