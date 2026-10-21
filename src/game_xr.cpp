@@ -35,9 +35,9 @@
 #include "spidy/native_hud.hpp"
 #include "spidy/native_webs.hpp"
 #include "spidy/near_clip.hpp"
-#include "spidy/spectator_fov.hpp"
 #include "spidy/offer_pointing.hpp"
 #include "spidy/presentation_gate.hpp"
+#include "spidy/recording_fov.hpp"
 #include "spidy/slow_motion.hpp"
 #include "spidy/vr_settings.hpp"
 #include "spidy/web_pull.hpp"
@@ -1249,7 +1249,7 @@ DWORD WINAPI run(void*) {
             rig.automaticFlips(realisticFlips(values));
             native_hud::setSize(values.hud);
             near_clip::set(values.nearClipMm);
-            spectator_fov::set(values.spectatorFov);
+            recording_fov::set(values.recordingFov);
             sendSwingSettings();
             if (swingStarted && startPunch && samplePunch) {
                 if (values.punch && !punchStarted) {

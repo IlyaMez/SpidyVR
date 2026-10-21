@@ -3,7 +3,48 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 20, seventh): after a realistic flip the stick walks
+**Latest build (October 21): RECORDING FOV, optional - pull request 21
+(iplusdvr).** You: "review and fix whats needed if needed", then "it should
+be an optional feature".
+
+- **RECORDING FOV, the last row under DISPLAY, OFF unless you pick 130, 140
+  or 150 degrees.** Off, the game window mirrors your left eye as it has
+  since 0.3.5, Spidy's marks and all. With an angle, the game renders its own
+  view again for the window, at least that wide across and of the window's
+  shape: a wider picture to record, without Spidy's marks (they stay in the
+  headset), every frame whatever the monitor frame rate, at a cost in frame
+  rate. That view is the engine's active view, which the eyes rely on for
+  culling, occlusion and the far buildings' full models, so its lens never
+  covers less than the head's lens covering both eyes: a Quest 3 in a 16:9
+  window needs 128.5 degrees. While it is on, far buildings draw their full
+  models within the game's own 145 m, not the half as far again they get
+  while the game's view rests.
+- **Measured by the author** in a Quest 3 (3032 x 3248 an eye), standing in
+  one place 30 s each: 117.1 newly rendered frames a second off, 84.5 at 130
+  degrees, 112.3 off again, so about 3 ms a frame while it is on. They saw
+  nothing missing at the headset's edges or in the far buildings.
+- **What the review changed.** The eyes' shared shadows stay fitted to the
+  head's lens: the pull request fitted them to the recording lens, which
+  would have coarsened the headset's shadows while recording (the game's view
+  fits cascades of its own when it renders). The view's first submit of the
+  frame, which sets up its culling, takes the recording lens too; only its
+  last one had it. The choices are 130, 140 and 150 degrees: the pull
+  request's 80 to 120 all showed the same 128.5 on a Quest 3. The code and
+  `spidy_vr.ini` call it what the tab does (`recording_fov.hpp`,
+  `recording_fov=`; it was spectator), the help is in the tab's words, and
+  the angles carry their degree signs. The tab's layout test checks the row
+  where it is instead of leaving it out, and the docs are here, in
+  PLAYERS.md and DEVELOPMENT.md rather than a file of their own. Kept from
+  the pull request: the menu's record of changed settings has 64 bits, since
+  the body haptics' switches took the settings past 31, where a 32-bit shift
+  is undefined.
+- **Checked:** core tests (new: the recording FOV's choices, range and line
+  in the tab's file, its lens holding lopsided eyes at four window shapes and
+  a Quest 3's at 16:9), the launcher's, all the protocol suites. The author's
+  headset check ran their version; the review's lens changes have not run in
+  the game.
+
+**Earlier build (October 20, seventh): after a realistic flip the stick walks
 where you look.** You: "i tried the new experimental locomotion and crawling
 settings - they somehow caused offset where moving forward would cause me to
 walk left (see last session)".

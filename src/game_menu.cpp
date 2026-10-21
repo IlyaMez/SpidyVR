@@ -133,7 +133,11 @@ AddItemFn originalAddItem{};
 uintptr_t imageBase{};
 SRWLOCK lock = SRWLOCK_INIT;
 vr_settings::Values shown;
-uint64_t pending{}; // one bit per Item, including tab settings beyond index 31
+// Bits 1 << Item changed in the tab and not taken yet. 64 of them: the haptics'
+// groups took Item past 31, where a 32-bit shift is undefined (x86 wraps it
+// onto another setting's bit).
+uint64_t pending{};
+static_assert(static_cast<unsigned>(vr_settings::lastItem) < 64, "more settings than pending's bits");
 std::atomic<uint64_t> tabsBuilt{}, changesMade{};
 std::atomic<uint32_t> failure{};
 std::atomic<bool> hooked{}, created{};

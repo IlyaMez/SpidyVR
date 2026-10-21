@@ -104,7 +104,11 @@ aim markers, the focus meter), 30 pictures a second: every picture sent to
 the monitor costs the graphics card time the headset could have. "Monitor
 frame rate" in the launcher's options chooses Every frame, 60, 30, 15 or 5 a
 second; 60 makes a smoother recording of the window. On menus, cutscenes
-and the flat screen the window shows the game as usual.
+and the flat screen the window shows the game as usual. For a wider view
+to record, pick an angle for RECORDING FOV (the SPIDY VR tab, DISPLAY): the
+window then shows the game's own view, at least that wide across, with none
+of Spidy's marks, every frame whatever the monitor frame rate, and it costs
+frame rate in the headset.
 
 The picture in each eye is anti-aliased and upscaled by the game itself:
 the scene is rendered smaller and built up to the eye's full size from the
@@ -604,7 +608,13 @@ VR settings
                    (OFF hides it in VR). NEAR CLIP: how near your eyes things
                    still show, 2 cm unless you change it (1 to 10 cm; the
                    game's own camera keeps 10 cm, which hid hands held up
-                   before your face).
+                   before your face). RECORDING FOV (OFF unless you pick
+                   130, 140 or 150 degrees): the game window on your monitor
+                   shows a wider view to record, at least that wide across,
+                   instead of your left eye. It costs frame rate (about 3 ms
+                   a frame on its author's PC), and what Spidy draws itself
+                   (its gloves and webs, the aim markers, the combat marks)
+                   is only in the headset then.
   BODY ........... CALIBRATE BODY: set it to ON RESUME and resume, and the
                    T-pose panel asks for your measurements again.
   EXPERIMENTAL ... FLIPS (off until you switch it on) lets the left stick
@@ -613,9 +623,9 @@ VR settings
                    and its WALL CAMERA DISTANCE. REALISTIC FLIPS (off until
                    you switch it on, above) and the nine rows that tune it.
   Changes apply at once. The launcher starts your next session with them;
-  its options show them too. NEAR CLIP, the four body haptics switches and
-  the EXPERIMENTAL rows below FLIP SPEED are only in the tab: Spidy keeps
-  them in
+  its options show them too. NEAR CLIP, RECORDING FOV, the four body haptics
+  switches and the EXPERIMENTAL rows below FLIP SPEED are only in the tab:
+  Spidy keeps them in
   %APPDATA%\Spidy\spidy_vr.ini, beside the launcher's own settings. Playing
   the game on its screen instead of VR is on the pause menu itself: SWITCH
   TO GAME SCREEN, under RESUME (each session starts in VR).

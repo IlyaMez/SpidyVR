@@ -81,10 +81,11 @@ struct Values {
     // tab's NEAR CLIP, nearClips; near_clip.hpp). The game's own camera clips
     // at 100, which cut off hands held up before the face.
     int nearClipMm = 20;
-    // OFF mirrors the left eye. A selected recording FOV renders the active
-    // view again, costs frame time, and omits Spidy's eye-only overlays.
-    // The requested angle is widened if needed to contain both eye frusta.
-    int spectatorFov = 0;
+    // The monitor's view in immersive VR, degrees across (the tab's RECORDING
+    // FOV; recording_fov.hpp), 0 for off: the window then mirrors the left
+    // eye. An angle renders the game's own view again for the window, which
+    // costs frame time and leaves Spidy's drawings out of the window.
+    int recordingFov = 0;
     // Realistic flips, experimental (the tab's REALISTIC FLIPS and the nine
     // rows under it; RealisticFlipSettings, which holds what each means): the
     // swing's flight and the arms turn the player in the air, and A there
@@ -142,7 +143,7 @@ inline float screenDepth(int choice) {
 // run_game_vr.py accepts), snap turn 0-90 degrees, smooth turn 0-360 degrees
 // a second, vibration and body haptics 0-100%, weight 40-300%, HUD 0-3, flip
 // speed 90-480 degrees a second, the game screen's depth 0-3, near clip
-// 10-100 mm.
+// 10-100 mm, recording FOV 0 (off) or 130-150 degrees.
 Values sanitized(Values);
 
 enum class Item : uint8_t {
@@ -182,9 +183,9 @@ enum class Item : uint8_t {
     hapticWind,
     hapticCombat,
     hapticMovement,
-    spectatorFov,
+    recordingFov,
 };
-inline constexpr Item lastItem = Item::spectatorFov;
+inline constexpr Item lastItem = Item::recordingFov;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. The sections: WEBS, SWINGING, COMFORT, HAPTICS, DISPLAY, BODY and
 // EXPERIMENTAL (the player, October 19: "sort the options in spidy vr
@@ -215,10 +216,11 @@ bool choose(Item, int choice, Values&);
 // What the game's RESET puts back: the choice for Spidy's defaults (Values{}).
 int defaultChoice(Item);
 // The settings only the tab offers, which no launcher option or XrConfig
-// field carries: NEAR CLIP, HAND WALL CLIMBING, WALL CAMERA DISTANCE and the
-// realistic flips' ten rows. The game module keeps them as these key=value
-// lines in a file of their own, beside the launcher's settings (game_xr.cpp,
-// tabOnlyPath), and reads them back when VR starts.
+// field carries: NEAR CLIP, RECORDING FOV, HAND WALL CLIMBING, WALL CAMERA
+// DISTANCE, the realistic flips' ten rows and the body haptics' four groups.
+// The game module keeps them as these key=value lines in a file of their
+// own, beside the launcher's settings (game_xr.cpp, tabOnlyPath), and reads
+// them back when VR starts.
 std::string tabOnlyText(const Values&);
 // The values with what such text holds, sanitized. A line with an unknown
 // key, or whose value is no whole number, is passed over.

@@ -1,5 +1,5 @@
 #include "spidy/vr_settings.hpp"
-#include "spidy/spectator_fov.hpp"
+#include "spidy/recording_fov.hpp"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -29,14 +29,14 @@ constexpr const char* hudChoices[] = {"OFF", "SMALL", "MEDIUM", "LARGE"};
 constexpr const char* flipSpeedChoices[] = {"90\xC2\xB0/S",  "120\xC2\xB0/S", "150\xC2\xB0/S", "180\xC2\xB0/S",
                                             "240\xC2\xB0/S", "300\xC2\xB0/S", "360\xC2\xB0/S", "480\xC2\xB0/S"};
 constexpr const char* depthChoices[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
-constexpr const char* spectatorChoices[] = {"OFF", "80", "90", "100", "110", "120", "130", "140", "150"};
-static_assert(std::size(spectatorChoices) == std::size(spectator_fov::choices) &&
-              std::size(spectatorChoices) <= maxChoices);
 constexpr const char* wallDistanceChoices[] = {"20 CM", "25 CM", "30 CM", "40 CM",
                                                "50 CM", "60 CM", "75 CM", "100 CM"};
 static_assert(std::size(wallDistanceChoices) == std::size(wallDistances));
 constexpr const char* nearClipChoices[] = {"1 CM", "1.5 CM", "2 CM", "3 CM", "5 CM", "7.5 CM", "10 CM"};
 static_assert(std::size(nearClipChoices) == std::size(nearClips));
+// RECORDING FOV: the least the monitor's view shows across (recording_fov.hpp).
+constexpr const char* recordingFovChoices[] = {"OFF", "130\xC2\xB0", "140\xC2\xB0", "150\xC2\xB0"};
+static_assert(std::size(recordingFovChoices) == std::size(recording_fov::choices));
 // The realistic flips' rows (RealisticFlipSettings).
 constexpr int automaticStrengths[] = {25, 50, 75, 100};
 constexpr const char* automaticStrengthChoices[] = {"25%", "50%", "75%", "100%"};
@@ -72,8 +72,6 @@ static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(sna
 // A list setting's steps, or none for a switch.
 std::span<const int> steps(Item item) {
     switch (item) {
-    case Item::spectatorFov:
-        return spectator_fov::choices;
     case Item::swingSpeed:
         return swingSpeeds;
     case Item::snapTurn:
@@ -97,6 +95,8 @@ std::span<const int> steps(Item item) {
         return wallDistances;
     case Item::nearClip:
         return nearClips;
+    case Item::recordingFov:
+        return recording_fov::choices;
     case Item::automaticStrength:
         return automaticStrengths;
     case Item::automaticSpeed:
@@ -117,8 +117,6 @@ std::span<const int> steps(Item item) {
 }
 float numberOf(Item item, const Values& v) {
     switch (item) {
-    case Item::spectatorFov:
-        return static_cast<float>(v.spectatorFov);
     case Item::swingSpeed:
         return v.swingSpeed;
     case Item::snapTurn:
@@ -143,6 +141,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.wallDistance);
     case Item::nearClip:
         return static_cast<float>(v.nearClipMm);
+    case Item::recordingFov:
+        return static_cast<float>(v.recordingFov);
     case Item::automaticStrength:
         return static_cast<float>(v.automaticStrength);
     case Item::automaticSpeed:
@@ -203,7 +203,6 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
 } // namespace
 
 Values sanitized(Values v) {
-    v.spectatorFov = v.spectatorFov <= 0 ? 0 : std::clamp(v.spectatorFov, 80, 150);
     v.swingSpeed = std::isfinite(v.swingSpeed) ? std::clamp(v.swingSpeed, 1.f, 65.f) : 32.f;
     v.snapTurn = std::clamp(v.snapTurn, 0, 90);
     v.smoothTurn = std::clamp(v.smoothTurn, 0, 360);
@@ -216,6 +215,7 @@ Values sanitized(Values v) {
     v.screenDepth = std::clamp(v.screenDepth, 0, 3);
     v.wallDistance = std::clamp(v.wallDistance, wallDistances[0], std::end(wallDistances)[-1]);
     v.nearClipMm = std::clamp(v.nearClipMm, nearClips[0], std::end(nearClips)[-1]);
+    v.recordingFov = recording_fov::sanitized(v.recordingFov);
     // The realistic flips' ranges, as RealisticFlip takes them.
     v.automaticStrength = std::clamp(v.automaticStrength, 25, 100);
     v.automaticSpeed = std::clamp(v.automaticSpeed, 90, 360);
@@ -270,8 +270,9 @@ const std::array<Row, 42>& rows() {
         {Item::hud, "HUD", "How large the game's HUD shows in front of you. Off: no HUD in VR.", hudChoices},
         {Item::nearClip, "NEAR CLIP",
          "How near your eyes things still show. Nearer keeps your hands in view.", nearClipChoices},
-        {Item::spectatorFov, "RECORDING FOV",
-         "Costs FPS; no Spidy overlays. Widens to fit eyes. OFF: normal left-eye mirror.", spectatorChoices},
+        {Item::recordingFov, "RECORDING FOV",
+         "A wider view on the monitor, to record. Costs frame rate; no Spidy marks there.",
+         recordingFovChoices},
         {Item::none, "BODY", nullptr, {}},
         {Item::calibrate, "CALIBRATE BODY", "Fit Spider-Man to you: pick ON RESUME, then hold both triggers in a T-pose.",
          calibrateChoices},
@@ -333,9 +334,6 @@ bool choose(Item item, int index, Values& v) {
         return false;
     const Values before = v;
     switch (item) {
-    case Item::spectatorFov:
-        v.spectatorFov = s[index];
-        break;
     case Item::swingSpeed:
         v.swingSpeed = static_cast<float>(s[index]);
         break;
@@ -371,6 +369,9 @@ bool choose(Item item, int index, Values& v) {
         break;
     case Item::nearClip:
         v.nearClipMm = s[index];
+        break;
+    case Item::recordingFov:
+        v.recordingFov = s[index];
         break;
     case Item::automaticStrength:
         v.automaticStrength = s[index];
@@ -409,7 +410,6 @@ struct TabOnly {
     int Values::*number;
 };
 constexpr TabOnly tabOnly[] = {
-    {"spectator_fov", nullptr, &Values::spectatorFov},
     {"near_clip_mm", nullptr, &Values::nearClipMm},
     {"hand_climb", &Values::handClimb, nullptr},
     {"wall_distance_cm", nullptr, &Values::wallDistance},
@@ -427,6 +427,7 @@ constexpr TabOnly tabOnly[] = {
     {"body_haptics_wind", &Values::hapticWind, nullptr},
     {"body_haptics_combat", &Values::hapticCombat, nullptr},
     {"body_haptics_movement", &Values::hapticMovement, nullptr},
+    {"recording_fov", nullptr, &Values::recordingFov},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

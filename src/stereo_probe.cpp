@@ -10,7 +10,7 @@
 #include "spidy/native_view.hpp"
 #include "spidy/native_webs.hpp"
 #include "spidy/near_clip.hpp"
-#include "spidy/spectator_fov.hpp"
+#include "spidy/recording_fov.hpp"
 #include <MinHook.h>
 #include <atomic>
 #include <cstdint>
@@ -22,15 +22,17 @@ using native_view::Descriptor;
 // NEAR CLIP's near plane for the head's and the eyes' lenses in immersive VR
 // (near_clip.hpp), metres: the XR worker sets it, each frame's lenses read it.
 std::atomic<float> nearClip{.02f};
-std::atomic<int> recordingFov{};
-void spidy::spectator_fov::set(int degrees) {
-    recordingFov.store(degrees <= 0 ? 0 : std::clamp(degrees, 80, 150), std::memory_order_relaxed);
-}
 void spidy::near_clip::set(int millimetres) {
     nearClip.store(static_cast<float>(std::clamp(millimetres, 10, 100)) / 1000, std::memory_order_relaxed);
 }
 float spidy::near_clip::metres() {
     return nearClip.load(std::memory_order_relaxed);
+}
+// RECORDING FOV's angle (recording_fov.hpp), degrees, 0 for off: the XR
+// worker sets it, each frame's rest and the game's view's lens read it.
+std::atomic<int> recordingFov{};
+void spidy::recording_fov::set(int degrees) {
+    recordingFov.store(recording_fov::sanitized(degrees), std::memory_order_relaxed);
 }
 struct Config {
     uint32_t magic, version, bytes, pid;
@@ -1192,6 +1194,17 @@ bool heroPosition(Vec3& position) {
     position = {m[12], m[13], m[14]};
     return true;
 }
+// The lens of the game's own view on the head: the head's lens covering both
+// eyes, or, while RECORDING FOV has that view render for the window
+// (restGameView), the wider one of the window's shape that holds it. The
+// frame's first submit (activeView) and its last (placeEyes) both take it, so
+// what the view culls for and what it renders agree.
+native_eyes::Bounds viewLens(const native_eyes::Bounds& head) {
+    const int degrees = recordingFov.load(std::memory_order_relaxed);
+    return degrees && live.load() == 2 && !native_gpu::screenRequested()
+               ? recording_fov::covering(head, degrees, flatAspect.load())
+               : head;
+}
 // The engine's active view (ViewContextManager +f8) is its first pool view: the
 // stock camera. Offscreen eyes are never active, and the "drawn in any view"
 // (18a1890) and "sphere in any view" (18a12a0) queries visit pool views only.
@@ -1219,7 +1232,7 @@ bool activeView(const Descriptor* incoming, Descriptor& out) {
     if (!head.controlled || head.command.enabled != 1)
         return false;
     const auto& pose = head.pose;
-    const auto& lens = head.lens;
+    const auto lens = viewLens(head.lens);
     bool placed = head.viewed;
     if (placed) {
         out = stock;
@@ -1428,10 +1441,11 @@ void placeEyes() {
         ReleaseSRWLockShared(&commandLock);
     }
     latchedImmersive = render && enabled && controlled && desired.enabled == 1;
-    const int recording = recordingFov.load(std::memory_order_relaxed);
-    // The game's view is on the head and both eyes render: it need not.
+    // The game's view is on the head and both eyes render: it need not, unless
+    // RECORDING FOV wants it in the window.
     restGameView(primary, latchedImmersive && (config.createViews & 32) && live.load() == 2 &&
-                              !native_gpu::screenRequested() && !recording);
+                              !native_gpu::screenRequested() &&
+                              !recordingFov.load(std::memory_order_relaxed));
     // The eyes' jobs of this frame mark into the resting view's list (see rested).
     if (const auto resting = rested.load(); resting && clearDrawn(resting))
         InterlockedIncrement64(&SpidyDrawnFrames);
@@ -1496,25 +1510,29 @@ void placeEyes() {
         Mat4 pose{};
         native_eyes::Bounds lens{};
         if (native_eyes::headView(desired, pose, lens)) {
-            // Only the optional window view changes. Containment is guaranteed
-            // in tangent space, including asymmetric/canted eye projections.
-            // Keep the requested desktop aspect, widening rather than cropping.
-            if (recording && live.load() == 2 && !native_gpu::screenRequested())
-                lens = spectator_fov::covering(lens, recording, flatAspect.load());
             pose[12] += placed.offset.x;
             pose[13] += placed.offset.y;
             pose[14] += placed.offset.z;
-            auto aligned = main;
-            reinterpret_cast<Lens>(base + 0x187bb00)(
-                &aligned, near_clip::metres(), main.farZ(), lens.left, lens.right, lens.top, lens.bottom,
-                0, 0, main.values[0x428 / 4], main.values[0x42c / 4], false, false);
-            reinterpret_cast<SetPose>(base + 0x187ca10)(&aligned, pose.data());
+            const auto onHead = [&](const native_eyes::Bounds& b) {
+                auto view = main;
+                reinterpret_cast<Lens>(base + 0x187bb00)(
+                    &view, near_clip::metres(), main.farZ(), b.left, b.right, b.top, b.bottom, 0, 0,
+                    main.values[0x428 / 4], main.values[0x42c / 4], false, false);
+                reinterpret_cast<SetPose>(base + 0x187ca10)(&view, pose.data());
+                return view;
+            };
+            const auto aligned = onHead(lens);
             if (native_view::valid(aligned)) {
                 // Covers both eyes: what the first eye fits its shadow cascades to.
                 shadowLens = aligned;
                 shadowLensPass = offscreenPass;
-                if (config.createViews & 8) {
-                    originalSubmit(reinterpret_cast<void*>(primary), &aligned);
+                // The game's view takes RECORDING FOV's wider lens (viewLens), as
+                // at the frame's first submit. The eyes' shadows keep this one:
+                // rendering, the view fits cascades of its own to its own lens.
+                const auto viewed =
+                    recordingFov.load(std::memory_order_relaxed) ? onHead(viewLens(lens)) : aligned;
+                if ((config.createViews & 8) && native_view::valid(viewed)) {
+                    originalSubmit(reinterpret_cast<void*>(primary), &viewed);
                     activeAligned = true;
                 }
             }

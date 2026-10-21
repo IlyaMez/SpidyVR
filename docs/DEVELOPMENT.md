@@ -503,9 +503,9 @@ let go in the air, steers it. `GameTrackingRig::automaticFlips` switches between
 `tests/realistic_flip_tests.cpp` is its own test program (ctest
 `realistic_flips`).
 
-The SPIDY VR tab's settings that no launcher option carries (NEAR CLIP, HAND
-WALL CLIMBING, WALL CAMERA DISTANCE, the realistic flips' rows) are kept by
-the stereo module itself:
+The SPIDY VR tab's settings that no launcher option carries (NEAR CLIP,
+RECORDING FOV, HAND WALL CLIMBING, WALL CAMERA DISTANCE, the realistic flips'
+rows) are kept by the stereo module itself:
 `vr_settings::tabOnlyText` lines in `%APPDATA%\Spidy\spidy_vr.ini`, read as VR
 starts and written when the tab changes one (`game_xr.cpp`, `tabOnlyPath`). A
 file beside the module would not do: it runs from a copy staged per build
@@ -1083,6 +1083,28 @@ cut to the window's shape about its middle (`mirrorEye` in
 `src/native_eye_gpu.cpp`, drawn over the back buffer in the Present hook).
 The view renders again the moment a game screen is wanted, in flat mode, and
 when the session stops; `-GameMonitorView` keeps it rendering throughout.
+
+RECORDING FOV (the tab's, last under DISPLAY, off by default; pull request 21,
+iplusdvr) keeps it rendering too, for recording: with an angle picked
+(`recording_fov::set`, from `game_xr.cpp` as the settings apply) `placeEyes`
+leaves the view awake, so the window shows it instead of the left eye, with
+none of Spidy's drawings, and every present reaches DXGI (`holdPresent` holds
+them only while the window mirrors). Its lens is then not the head's lens but
+`recording_fov::covering`'s: centred, of the window's shape (`flatAspect`, the
+stock camera's), at least the angle across, and never covering less than the
+head's lens, since the eyes rely on this view's culling, occlusion and far
+buildings' full models. Unlike `-GameMonitorView`'s head lens it is not
+stretched in the window. A Quest 3 (54 degrees out, 44 in, 48 up and down,
+with `headView`'s 5%) in a 16:9 window needs 128.5 degrees, so the choices are
+130, 140 and 150. Both of the frame's submits of the view take that lens
+(`viewLens`: `activeView`, which sets up the frame's culling, and
+`placeEyes`), and the eyes' shared shadow cascades stay fitted to the head's
+lens (`shadowLens`): rendering, the view fits cascades of its own. The left eye
+stands in for nothing then (`isActiveView` and `impostorQueries` act only
+while the view rests), so far buildings draw their full models within the
+game's own 145 m. The author measured it in a Quest 3 at 3032 x 3248 an eye,
+standing in one place 30 s each: 117.1 newly rendered frames a second off,
+84.5 at 130 degrees, 112.3 off again, about 3 ms a frame more.
 
 Some of what a resting view no longer does was done for everyone. Far
 buildings are impostors, cards standing in for the model, and which of them
