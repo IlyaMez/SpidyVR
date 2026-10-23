@@ -727,6 +727,7 @@ void Swing::release(int i, EventKind reason) {
             std::max(std::min(config_.minRope, webs_[o].length), length(hold(o) - body_.position));
     webs_[i] = {};
     hands_[i].zipUsed = false;
+    hands_[i].ropeClimbing = false;
     hands_[i].reeling = false;
     hands_[i].pullDistance = hands_[i].pullTime = hands_[i].obstructed = hands_[i].winch = 0;
     hands_[i].slack = 0;
@@ -931,6 +932,8 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
             s.zipUsed = hands_[o].zipUsed;
             s.pullDistance = s.pullTime = s.obstructed = s.slack = 0;
             events_.push_back({EventKind::Join, i, .5f});
+            if (betterClimbing_)
+                s.ropeClimbing = hands_[o].ropeClimbing = true;
         } else if (!w.attached && shoot) {
             // From the body, stood off a surface the game holds it on.
             const Vec3 from = length(support_) > .5f ? body_.position + support_ * config_.wallClearance
@@ -963,9 +966,20 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
                                                        length(hold(i) - body_.position)));
             }
             s.reeling = reel;
+            // Once both hands have taken this strand, a bearing hand takes
+            // rope in instead of adding a yank impulse. Reaching up again
+            // does not pay that length out; the other hand keeps the height.
+            const bool climbingRope = betterClimbing_ && s.ropeClimbing && !w.airAnchor;
+            if (climbingRope && s.sample && bears(i) && dt > 0 && dt <= .1f) {
+                const Vec3 travel = trackingTurn(in).rotate(h.gripRelativeToHead - s.previous);
+                const float pull = -dot(travel, normalized(w.anchor - body_.position));
+                if (pull > 0 && pull <= config_.maxHandSpeed * dt)
+                    w.length = std::max(std::min(config_.minRope, w.length),
+                                        w.length - std::min(pull, 3.f * dt));
+            }
             // Motion must be both fast and deliberate within a short window.
             // Head-relative samples remove virtual movement and room-scale translation.
-            if (s.sample && !s.zipUsed && bears(i)) {
+            if (s.sample && !s.zipUsed && bears(i) && !climbingRope) {
                 const Vec3 delta = trackingTurn(in).rotate(h.gripRelativeToHead - s.previous);
                 const float pull = -dot(delta, normalized(w.anchor - body_.position));
                 if (pull > 0) {

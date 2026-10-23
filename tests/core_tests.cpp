@@ -902,6 +902,77 @@ int main() {
         }
     };
     const auto physical=[]{auto c=inert();c.physical=true;return c;};
+
+    test("better climbing retains hand-over-hand progress without a yank impulse", [physical] {
+        TestWorld world;
+        Swing swing(physical());
+        swing.allowBetterClimbing(true);
+        auto in = aimed(); in.hands[0].trigger = 0;
+        in.hands[1] = {in.hands[0].aim, {0, .3f, 0}, true, 0, 0};
+        Body body{{}, {}, false};
+        auto intent = swing.predictNativeStep(1.f / 90, in, world, body);
+        auto step = [&] {
+            body = {intent.target, intent.velocity, false};
+            intent = swing.predictNativeStep(1.f / 90, in, world, body);
+            check(intent.valid, "climbing prediction failed");
+            for (const auto& e : swing.events())
+                check(e.kind != EventKind::Zip, "climbing became a yank impulse");
+        };
+        step(); in.hands[1].grip = 1; step();
+        check(swing.shared(), "two hands did not share the web");
+        for (int i = 0; i < 30; ++i) { in.hands[1].gripRelativeToHead.y -= .01f; step(); }
+        check(intent.target.y > .5f, "hand pull did not take in the rope");
+        const float before = intent.target.y;
+        in.hands[1].grip = 0; step();
+        for (int i = 0; i < 25; ++i) { intent.velocity = {}; step(); }
+        check(intent.target.y > before - .05f, "the remaining hand lost the gained height");
+        const float retained = swing.webs()[0].length;
+        // Reach forward with the free hand, grip the same strand and pull again.
+        in.hands[1].gripRelativeToHead.y += .4f; step();
+        in.hands[1].grip = 1; step();
+        check(swing.shared(), "free hand could not regrip the strand");
+        for (int i = 0; i < 25; ++i) { in.hands[1].gripRelativeToHead.y -= .01f; step(); }
+        check(std::min(swing.webs()[0].length, swing.webs()[1].length) < retained - .15f,
+              "another hand-over-hand stroke made no progress");
+    });
+    test("better climbing ignores repeated poses and tracking gaps, and can be switched off", [physical] {
+        TestWorld world;
+        Swing swing(physical()); swing.allowBetterClimbing(true);
+        auto in = aimed(); in.hands[0].trigger = 0;
+        in.hands[1] = {in.hands[0].aim, {0, .3f, 0}, true, 0, 0};
+        Body body{{}, {}, false};
+        swing.predictNativeStep(.01f, in, world, body);
+        in.hands[1].grip = 1;
+        swing.predictNativeStep(.01f, in, world, body);
+        check(swing.shared(), "not a shared strand");
+        const auto before = swing.webs()[1].length;
+        in.hands[1].gripRelativeToHead.y -= .3f;
+        for (int i = 0; i < 100; ++i) swing.predictNativeStep(.01f, in, world, body, 0);
+        near(swing.webs()[1].length, before);
+        swing.predictNativeStep(.01f, in, world, body, .2f);
+        near(swing.webs()[1].length, before);
+        swing.allowBetterClimbing(false);
+        const auto lengthOff = swing.webs()[1].length;
+        for (int i = 0; i < 10; ++i) {
+            in.hands[1].gripRelativeToHead.y -= .005f;
+            swing.predictNativeStep(.01f, in, world, body);
+        }
+        near(swing.webs()[1].length, lengthOff);
+        swing.releaseAll();
+        check(!swing.webs()[0].attached && !swing.webs()[1].attached, "release kept a climbing web");
+    });
+    test("better climbing switch saves and extends settings without moving old fields", [] {
+        vr_settings::Values v;
+        check(!v.betterClimbing, "better climbing must default off");
+        check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
+        check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
+        game_swing::Settings s;
+        check(s.version == 9 && s.bytes == 52 && offsetof(game_swing::Settings, betterClimbing) == 48,
+              "settings moved old fields");
+        s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
+        s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
+    });
+
     test("a physical web bends round a building's corner and comes off it again", [physical] {
         Corner w;Swing s(physical());const auto in=w.held();
         Body body{{14,20,2},{-10,0,0},false};
@@ -1789,7 +1860,7 @@ int main() {
     });
     test("grip climbing settings keep old packets and reject invalid versions, sizes and switches", [] {
         using namespace game_swing;
-        for (uint32_t version = 3; version <= 8; ++version) {
+        for (uint32_t version = 3; version <= 9; ++version) {
             Settings s;
             s.version = version;
             s.bytes = 16 + 4 * version; // official v3=28 through custom v8=48
@@ -1809,7 +1880,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 8 && s.bytes == 48, "updated settings did not append the climbing field");
+        check(s.version == 9 && s.bytes == 52, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -11705,6 +11776,7 @@ int main() {
     test("VR settings tab: seven sections, every setting once, a list's choices one per step", [] {
         using namespace vr_settings;
         const auto& all = rows();
+        check(all[8].item == Item::betterClimbing, "better climbing missing under SWINGING");
         uint64_t seen = 0;
         unsigned headings = 0;
         static_assert(static_cast<unsigned>(lastItem) < 63, "more settings than the test's bits");
@@ -11727,9 +11799,9 @@ int main() {
         }
         // The sections (the player, October 19: "sort the options in spidy vr
         // settings ingame into nice sections"), each with a setting in the tab.
-        const std::pair<size_t, const char*> sections[] = {{0, "WEBS"},     {5, "SWINGING"}, {8, "COMFORT"},
-                                                           {11, "HAPTICS"}, {18, "DISPLAY"}, {26, "BODY"},
-                                                           {28, "EXPERIMENTAL"}};
+        const std::pair<size_t, const char*> sections[] = {{0, "WEBS"},     {5, "SWINGING"}, {9, "COMFORT"},
+                                                           {12, "HAPTICS"}, {19, "DISPLAY"}, {27, "BODY"},
+                                                           {29, "EXPERIMENTAL"}};
         check(headings == std::size(sections),
               "the sections: webs, swinging, comfort, haptics, display, body, experimental");
         for (const auto& [at, title] : sections) {
@@ -11739,21 +11811,21 @@ int main() {
                 ++next;
             check(next < all.size() && all[next].item != Item::none, "a section with no setting in the tab");
         }
-        check(all[29].item == Item::flips && all[29].choices.empty() && std::strcmp(all[28].title, "EXPERIMENTAL") == 0,
+        check(all[30].item == Item::flips && all[30].choices.empty() && std::strcmp(all[29].title, "EXPERIMENTAL") == 0,
               "the flips: a switch under EXPERIMENTAL");
-        check(all[30].item == Item::flipSpeed && all[30].choices.size() == std::size(flipSpeeds),
+        check(all[31].item == Item::flipSpeed && all[31].choices.size() == std::size(flipSpeeds),
               "the flip speed under the flips");
-        check(all[31].item == Item::handClimb && all[31].choices.empty() && all[32].item == Item::wallDistance &&
-                  all[32].choices.size() == std::size(wallDistances),
+        check(all[32].item == Item::handClimb && all[32].choices.empty() && all[33].item == Item::wallDistance &&
+                  all[33].choices.size() == std::size(wallDistances),
               "hand wall climbing, a switch, and its camera distance under the flips");
         const Item realistic[] = {Item::realisticFlips,        Item::automaticStrength,    Item::automaticSpeed,
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake};
-        check(all.size() == 33 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 34 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[33 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[33].title, "REALISTIC FLIPS") == 0 && all[33].choices.empty(),
+            check(all[34 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[34].title, "REALISTIC FLIPS") == 0 && all[34].choices.empty(),
               "realistic flips: a switch, first of its rows");
         // The wall view has no row of its own any more: it turned only while
         // Spidy held the player on a wall, so it was never a choice of its own
@@ -11763,31 +11835,31 @@ int main() {
         // then "also merge the two options").
         for (const auto& row : all)
             check(row.item != Item::standOnWalls, "the wall view still has a row of its own");
-        check(all[20].item == Item::screenSize && all[22].item == Item::hud && all[22].choices.size() == 4 &&
-                  std::strcmp(all[22].choices[0], "OFF") == 0 && std::strcmp(all[22].choices[3], "LARGE") == 0,
+        check(all[21].item == Item::screenSize && all[23].item == Item::hud && all[23].choices.size() == 4 &&
+                  std::strcmp(all[23].choices[0], "OFF") == 0 && std::strcmp(all[23].choices[3], "LARGE") == 0,
               "the HUD after the game screen's rows: OFF, SMALL, MEDIUM, LARGE");
-        check(all[21].item == Item::screenDepth && std::strcmp(all[21].title, "GAME SCREEN 3D") == 0 &&
-                  all[21].choices.size() == 4 && std::strcmp(all[21].choices[0], "OFF") == 0 &&
-                  std::strcmp(all[21].choices[3], "HIGH") == 0,
+        check(all[22].item == Item::screenDepth && std::strcmp(all[22].title, "GAME SCREEN 3D") == 0 &&
+                  all[22].choices.size() == 4 && std::strcmp(all[22].choices[0], "OFF") == 0 &&
+                  std::strcmp(all[22].choices[3], "HIGH") == 0,
               "the game screen's depth under its size: OFF, LOW, MEDIUM, HIGH");
         // The marks' look after the HUD (the player, October 21: "an optional alternative set of our custom
         // ingame vr ui in more scifi techy style like the base game ui"): the printed ones first.
-        check(all[23].item == Item::uiStyle && std::strcmp(all[23].title, "UI STYLE") == 0 &&
-                  all[23].choices.size() == 2 && std::strcmp(all[23].choices[0], "COMIC") == 0 &&
-                  std::strcmp(all[23].choices[1], "TECH") == 0,
+        check(all[24].item == Item::uiStyle && std::strcmp(all[24].title, "UI STYLE") == 0 &&
+                  all[24].choices.size() == 2 && std::strcmp(all[24].choices[0], "COMIC") == 0 &&
+                  std::strcmp(all[24].choices[1], "TECH") == 0,
               "the UI style after the HUD: COMIC, or TECH");
-        check(all[24].item == Item::nearClip && std::strcmp(all[24].title, "NEAR CLIP") == 0 &&
-                  all[24].choices.size() == std::size(nearClips) && std::strcmp(all[24].choices[6], "10 CM") == 0,
+        check(all[25].item == Item::nearClip && std::strcmp(all[25].title, "NEAR CLIP") == 0 &&
+                  all[25].choices.size() == std::size(nearClips) && std::strcmp(all[25].choices[6], "10 CM") == 0,
               "the near clip under the UI style: 1 to 10 cm");
-        check(all[25].item == Item::recordingFov && std::strcmp(all[25].title, "RECORDING FOV") == 0 &&
-                  all[25].choices.size() == std::size(recording_fov::choices) &&
-                  std::strcmp(all[25].choices[0], "OFF") == 0 && std::strcmp(all[25].choices[3], "150\xC2\xB0") == 0,
+        check(all[26].item == Item::recordingFov && std::strcmp(all[26].title, "RECORDING FOV") == 0 &&
+                  all[26].choices.size() == std::size(recording_fov::choices) &&
+                  std::strcmp(all[26].choices[0], "OFF") == 0 && std::strcmp(all[26].choices[3], "150\xC2\xB0") == 0,
               "the recording FOV last under DISPLAY: OFF, then 130 to 150 degrees");
         // Webs are always physical (the user, October 15: "remove non physical web, no need for it").
         for (const auto& row : all)
             check(std::strcmp(row.title, "PHYSICAL WEBS") != 0, "webs can still be made non-physical");
-        check(all[19].item == Item::view && std::strcmp(all[19].title, "VR VIEW") == 0 && all[19].choices.size() == 2 &&
-                  std::strcmp(all[19].choices[0], "VR") == 0 && std::strcmp(all[19].choices[1], "GAME SCREEN") == 0,
+        check(all[20].item == Item::view && std::strcmp(all[20].title, "VR VIEW") == 0 && all[20].choices.size() == 2 &&
+                  std::strcmp(all[20].choices[0], "VR") == 0 && std::strcmp(all[20].choices[1], "GAME SCREEN") == 0,
               "the view above the game screen's rows: VR, or GAME SCREEN");
         // VR VIEW is on the pause menu's first page, beside RESUME, and no other row is.
         for (const auto& row : all)
@@ -11801,15 +11873,15 @@ int main() {
               "the web button under the web style: GRIP, or TRIGGER");
         check(all[3].item == Item::aimMarkers && all[4].item == Item::airWebs, "the aim markers, then the air webs");
         check(all[6].item == Item::swingSpeed && all[7].item == Item::weight, "SWINGING: the swing speed, the weight");
-        check(all[9].item == Item::snapTurn && all[10].item == Item::smoothTurn, "COMFORT: snap and smooth turning");
+        check(all[10].item == Item::snapTurn && all[11].item == Item::smoothTurn, "COMFORT: snap and smooth turning");
         // HAPTICS (October 20): the controllers' vibration, the bHaptics level and its four groups' switches.
-        check(all[12].item == Item::haptics && all[13].item == Item::bodyHaptics &&
-                  std::strcmp(all[13].title, "BODY HAPTICS") == 0 && all[14].item == Item::hapticWebs &&
-                  all[15].item == Item::hapticWind && all[16].item == Item::hapticCombat &&
-                  all[17].item == Item::hapticMovement && all[14].choices.empty() && all[17].choices.empty(),
+        check(all[13].item == Item::haptics && all[14].item == Item::bodyHaptics &&
+                  std::strcmp(all[14].title, "BODY HAPTICS") == 0 && all[15].item == Item::hapticWebs &&
+                  all[16].item == Item::hapticWind && all[17].item == Item::hapticCombat &&
+                  all[18].item == Item::hapticMovement && all[15].choices.empty() && all[18].choices.empty(),
               "HAPTICS: the vibration, body haptics, then the web, wind, combat and movement switches");
-        check(all[27].item == Item::calibrate && all[27].choices.size() == 2 &&
-                  std::strcmp(all[27].choices[1], "ON RESUME") == 0,
+        check(all[28].item == Item::calibrate && all[28].choices.size() == 2 &&
+                  std::strcmp(all[28].choices[1], "ON RESUME") == 0,
               "the body's calibration: NO, or ON RESUME");
         // Every setting has a row but the wall view, which the launcher's one
         // "Wall running" now carries along with who holds you on the wall.
@@ -11894,10 +11966,11 @@ int main() {
                                        "swing_momentum=1\nrotation_response_ms=500\nhand_momentum=100\n"
                                        "angular_drag_ms=3000\nhand_speed_min_cm=100\nair_rotation_brake=1\n"
                                        "body_haptics_webs=1\nbody_haptics_wind=1\nbody_haptics_combat=1\n"
-                                       "body_haptics_movement=1\nrecording_fov=0\nui_style=0\n",
+                                       "body_haptics_movement=1\nrecording_fov=0\nui_style=0\nbetter_climbing=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;
+        changed.betterClimbing = true;
         changed.handClimb = true;
         changed.wallDistance = 75;
         changed.nearClipMm = 50;

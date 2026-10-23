@@ -935,7 +935,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
     if (!copy(header, input, sizeof(header)) ||
         (header[2] != settingsBytesV3 && header[2] != settingsBytesV4 &&
          header[2] != settingsBytesV5 && header[2] != settingsBytesV6 &&
-         header[2] != settingsBytesV7 && header[2] != sizeof(s)) ||
+         header[2] != settingsBytesV7 && header[2] != settingsBytesV8 && header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || !validSettings(s))
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
@@ -972,6 +972,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
             solver.allowArcade(s.arcade != 0);
         if (s.version >= 8)
             solver.allowHandClimb(s.handClimb != 0);
+        if (s.version >= 9)
+            solver.allowBetterClimbing(s.betterClimbing != 0);
         // A swing started without the grab (-NoWebGrab) offers it from now on.
         if (s.grab && !game_grab::offering() && driveMotion && sampleDriven) {
             config.grabKinds = game_grab::movableKinds;

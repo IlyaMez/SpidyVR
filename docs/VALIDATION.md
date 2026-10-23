@@ -1,5 +1,14 @@
 # Validation — 2026-10-21
 
+## Better Climbing — 2026-10-23
+
+Complete Windows Release build with OpenXR, observer/game modules and launcher.
+Core: 430 checks passed, including retained climbing progress, another grip
+and pull, no zip impulse while climbing, repeated input, tracking gaps,
+switching off, persistence and legacy settings packets. All three CTest
+targets and the 138 Python protocol checks passed. Not tested in the live
+game or a headset; repeated strokes and the feel of the handover need that check.
+
 ## Every SPIDY VR setting in the launcher (latest build)
 
 The user: "why doesnt the new launcher include all the realstic flips stuff?",

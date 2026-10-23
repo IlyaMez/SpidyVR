@@ -610,6 +610,7 @@ int main() {
         t.automaticReleaseFlip = t.automaticAirBrake = false;
         t.handClimb = t.realisticFlips = true;
         t.uiStyle = 1;
+        t.betterClimbing = true;
         t.nearClipMm = 10;
         t.wallDistance = 60;
         t.automaticStrength = 75;
@@ -624,7 +625,7 @@ int main() {
         check(profileText(profileOf(PlaySettings{}, "Spidy's own"), "0.4.1") ==
                   "# Spidy settings profile. To use it, in the Spidy launcher: Profile > Paste a profile, "
                   "or Import a file.\nname=Spidy's own\nspidy=0.4.1\narcade_webs=0\ntrigger_webs=0\n"
-                  "aim_markers=1\nair_webs=1\nswing_speed=32\nweight=100\nwall_run=1\nsnap_turn=30\n"
+                  "aim_markers=1\nair_webs=1\nswing_speed=32\nweight=100\nbetter_climbing=0\nwall_run=1\nsnap_turn=30\n"
                   "smooth_turn=0\nhaptics=100\nbody_haptics=100\nbody_haptics_webs=1\nbody_haptics_wind=1\n"
                   "body_haptics_combat=1\nbody_haptics_movement=1\nscreen_size=1\nscreen_depth=2\nhud=2\n"
                   "ui_style=0\nnear_clip_mm=20\nflips=0\nflip_speed=180\nhand_climb=0\nwall_distance_cm=40\n"
