@@ -31,6 +31,7 @@ from probe_native_rays import snapshot as ray_snapshot, command as ray_command
 from probe_game_swing import (snapshot as swing_snapshot, command as swing_command, assess as assess_swing,
                               flight_summary, climb_snapshot)
 from probe_game_grab import grab_snapshot, hand_command as grab_hand_command
+from probe_game_body import command as body_command
 
 
 class Reader:
@@ -53,10 +54,197 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             swing_command(1, (0, 0, 0), wall_rotate=2)
 
+    def test_body_commands_use_the_earlier_pose_protocol(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 0, 0)] * 2
+        args = (1, 1, (0, 1.7, 0), (0, 0, 0, 1), hands)
+        self.assertEqual(len(body_command(*args)), 144)
+        packet = body_command(*args, shoots=(0, 0))
+        self.assertEqual(len(packet), 168)
+        self.assertEqual(struct.unpack_from('<4I', packet), (0x53424443, 3, 168, 1))
+
+    def test_outdoor_crawl_body_packet_preserves_prefix_and_places_version_5_fields(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 0, 0)] * 2
+        args = (7, 1, (0, 1, .4), (0, 0, 0, 1), hands)
+        packet = body_command(*args, crawl=((0, 0, 1), (0, 1, 0), (1, 0, 0), 1.5), floor=(0, 0, -.9))
+        self.assertEqual(len(packet), 232)
+        self.assertEqual(struct.unpack_from('<4I', packet), (0x53424443, 5, 232, 129))
+        self.assertEqual(packet[16:144], body_command(*args)[16:144])
+        self.assertEqual(struct.unpack_from('<9f', packet, 192), (0, 0, 1, 0, 1, 0, 1, 0, 0))
+        self.assertEqual(struct.unpack_from('<f', packet, 228), (1.5,))
+        self.assertAlmostEqual(struct.unpack_from('<f', packet, 188)[0], -.9)
+
+    def test_outdoor_crawl_body_rejects_invalid_surface_stride_or_legacy_flag(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 0, 0)] * 2
+        args = (1, 1, (0, 1, .4), (0, 0, 0, 1), hands)
+        for crawl in (((0, 0, 0), (0, 1, 0), (0, 1, 0), 0),
+                      ((0, 0, 1), (0, 0, 1), (0, 1, 0), 0),
+                      ((0, 0, 1), (0, 1, 0), (0, math.nan, 0), 0),
+                      ((0, 0, 1), (0, 1, 0), (0, 1, 0), math.inf)):
+            with self.assertRaises(ValueError):
+                body_command(*args, crawl=crawl)
+        with self.assertRaises(ValueError):
+            body_command(1, 129, *args[2:])
+
+    def test_moving_crawl_body_appends_motion_without_changing_legacy_pose_fields(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 0, 0)] * 2
+        args = (7, 1, (0, 1, .4), (0, 0, 0, 1), hands)
+        crawl = ((0, 0, 1), (0, 1, 0), (1, 0, 0), 1.5)
+        legacy = body_command(*args, crawl=crawl)
+        for motion in (0, .5, 1):
+            packet = body_command(*args, crawl=crawl, crawl_motion=motion)
+            self.assertEqual(len(packet), 240)
+            self.assertEqual(struct.unpack_from('<4I', packet), (0x53424443, 6, 240, 129))
+            self.assertEqual(packet[16:232], legacy[16:232])
+            self.assertEqual(struct.unpack_from('<f', packet, 232), (motion,))
+            self.assertEqual(packet[236:], bytes(4))
+
+    def test_moving_crawl_body_rejects_invalid_motion_or_missing_crawl_frame(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 0, 0)] * 2
+        args = (7, 1, (0, 1, .4), (0, 0, 0, 1), hands)
+        crawl = ((0, 0, 1), (0, 1, 0), (0, 1, 0), 0)
+        for motion in (-.01, 1.01, math.nan, math.inf):
+            with self.assertRaises(ValueError):
+                body_command(*args, crawl=crawl, crawl_motion=motion)
+        with self.assertRaises(ValueError):
+            body_command(*args, crawl_motion=1)
+
+    def test_planted_crawl_body_appends_world_origin_and_keeps_version_6_fields(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 0, 0)] * 2
+        args = (7, 1, (0, 1, .4), (0, 0, 0, 1), hands)
+        crawl = ((0, 0, 1), (0, 1, 0), (0, 1, 0), 0)
+        old = body_command(*args, crawl=crawl, crawl_motion=1)
+        packet = body_command(*args, crawl=crawl, crawl_motion=1, crawl_origin=(30, 40, 50))
+        self.assertEqual(len(packet), 256)
+        self.assertEqual(struct.unpack_from('<4I', packet), (0x53424443, 7, 256, 385))
+        self.assertEqual(packet[16:240], old[16:240])
+        self.assertEqual(struct.unpack_from('<3f', packet, 240), (30, 40, 50))
+        self.assertEqual(packet[252:], bytes(4))
+
+    def test_planted_crawl_body_rejects_missing_frame_or_nonfinite_world_origin(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 0, 0)] * 2
+        args = (7, 1, (0, 1, .4), (0, 0, 0, 1), hands)
+        crawl = ((0, 0, 1), (0, 1, 0), (0, 1, 0), 0)
+        with self.assertRaises(ValueError):
+            body_command(*args, crawl_origin=(0, 0, 0))
+        with self.assertRaises(ValueError):
+            body_command(*args, crawl=crawl, crawl_origin=(0, math.nan, 0))
+        with self.assertRaises(ValueError):
+            body_command(7, 257, *args[2:])
+
+    def test_hand_synced_crawl_packet_appends_strokes_and_preserves_planted_prefix(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 0, 0)] * 2
+        args = (7, 1, (0, 1, .4), (0, 0, 0, 1), hands)
+        kwargs = dict(crawl=((0, 0, 1), (0, 1, 0), (0, 1, 0), 0), crawl_origin=(30, 40, 50))
+        old = body_command(*args, **kwargs)
+        packet = body_command(*args, **kwargs, crawl_strokes=(7, 9))
+        self.assertEqual(len(packet), 264)
+        self.assertEqual(struct.unpack_from('<4I', packet), (0x53424443, 8, 264, 897))
+        self.assertEqual(packet[16:256], old[16:256])
+        self.assertEqual(struct.unpack_from('<2I', packet, 256), (7, 9))
+
+    def test_hand_synced_crawl_packet_rejects_bad_counters_and_missing_origin(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 0, 0)] * 2
+        args = (7, 1, (0, 1, .4), (0, 0, 0, 1), hands)
+        kwargs = dict(crawl=((0, 0, 1), (0, 1, 0), (0, 1, 0), 0), crawl_origin=(0, 0, 0))
+        for strokes in ((-1, 0), (0, 0x100000000), (math.nan, 0), (1,), (1.5, 2)):
+            with self.assertRaises(ValueError):
+                body_command(*args, **kwargs, crawl_strokes=strokes)
+        with self.assertRaises(ValueError):
+            body_command(*args, crawl_strokes=(1, 2))
+        with self.assertRaises(ValueError):
+            body_command(7, 513, *args[2:])
+
+    def test_shared_camera_pelvis_distance_packet_and_invalid_values(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 0, 0)] * 2
+        args = (7, 1, (0, 1, .4), (0, 0, 0, 1), hands)
+        kwargs = dict(crawl=((0, 0, 1), (0, 1, 0), (0, 1, 0), 0),
+                      crawl_origin=(30, 40, 50), crawl_strokes=(7, 9))
+        old = body_command(*args, **kwargs)
+        for cm in (10, 15, 20, 25, 30, 40, 50, 60, 75, 100):
+            packet = body_command(*args, **kwargs, crawl_distance=cm / 100)
+            self.assertEqual(len(packet), 272)
+            self.assertEqual(struct.unpack_from('<4I', packet), (0x53424443, 9, 272, 897))
+            self.assertEqual(packet[16:264], old[16:264])
+            self.assertAlmostEqual(struct.unpack_from('<f', packet, 264)[0], cm / 100)
+            self.assertEqual(packet[268:], bytes(4))
+        for distance in (0, .09, 1.01, math.nan, math.inf):
+            with self.assertRaises(ValueError):
+                body_command(*args, **kwargs, crawl_distance=distance)
+        with self.assertRaises(ValueError):
+            body_command(*args, crawl_distance=.4)
+
+    def test_confirmed_wall_hands_use_flags_without_changing_version_9_payload(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 1, 0)] * 2
+        args = (7, 1, (0, 1, .4), (0, 0, 0, 1), hands)
+        kwargs = dict(crawl=((0, 0, 1), (0, 1, 0), (0, 1, 0), 0), crawl_origin=(0, 0, 0),
+                      crawl_strokes=(7, 9), crawl_distance=.4)
+        old = body_command(*args, **kwargs)
+        for mask in range(4):
+            packet = body_command(*args, **kwargs, crawl_hands=mask)
+            self.assertEqual(struct.unpack_from('<4I', packet), (0x53424443, 9, 272, 897 | (mask << 10)))
+            self.assertEqual(packet[16:], old[16:])
+        for mask in (-1, 4, math.nan, .5):
+            with self.assertRaises(ValueError):
+                body_command(*args, **kwargs, crawl_hands=mask)
+        with self.assertRaises(ValueError):
+            body_command(*args, crawl_hands=1)
+        with self.assertRaises(ValueError):
+            body_command(7, 1025, *args[2:], **kwargs)
+
+    def test_collision_pose_flags_keep_grip_support_separate_and_preserve_payload(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 1, 0)] * 2
+        args = (7, 1, (0, 1, .4), (0, 0, 0, 1), hands)
+        kwargs = dict(crawl=((0, 0, 1), (0, 1, 0), (0, 1, 0), 0), crawl_origin=(0, 0, 0),
+                      crawl_strokes=(7, 9), crawl_distance=.4)
+        old = body_command(*args, **kwargs)
+        for mask in range(4):
+            packet = body_command(*args, **kwargs, crawl_touches=mask, crawl_turn_away=True)
+            self.assertEqual(struct.unpack_from('<4I', packet),
+                             (0x53424443, 9, 272, 897 | mask << 12 | 16384))
+            self.assertEqual(packet[16:], old[16:])
+            self.assertEqual(struct.unpack_from('<I', packet, 12)[0] & 3072, 0)
+        for mask in (-1, 4, math.nan, .5):
+            with self.assertRaises(ValueError):
+                body_command(*args, **kwargs, crawl_touches=mask)
+        with self.assertRaises(ValueError):
+            body_command(*args, crawl_touches=1)
+        with self.assertRaises(ValueError):
+            body_command(*args, crawl_turn_away=True)
+
+    def test_vent_contact_packet_uses_version_10_without_outdoor_pose_flags(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 1, 0)] * 2
+        packet = body_command(7, 1, (0, .4, 0), (0, 0, 0, 1), hands,
+                              vent_surface=((0, 1, 0), (0, 0, 1)), crawl_hands=1, crawl_touches=2)
+        self.assertEqual(struct.unpack_from('<4I', packet),
+                         (0x53424443, 10, 272, 1 | 32768 | 1024 | 8192))
+        self.assertEqual(len(packet), 272)
+        self.assertEqual(struct.unpack_from('<3f', packet, 192), (0, 1, 0))
+
+    def test_vent_contact_packet_rejects_back_rotation_and_missing_surface(self):
+        hands = [((0, 0, 0), (0, 0, 0, 1), 1, 0)] * 2
+        with self.assertRaises(ValueError):
+            body_command(7, 32769, (0, .4, 0), (0, 0, 0, 1), hands)
+        with self.assertRaises(ValueError):
+            body_command(7, 1, (0, .4, 0), (0, 0, 0, 1), hands,
+                         vent_surface=((0, 1, 0), (0, 0, 1)), crawl_turn_away=True)
+
     def test_wall_contact_snapshot_reads_both_palms_and_counters(self):
         raw = struct.pack('<4IQ2Q2I', 0x53434c44, 1, 48, 1, 2, 7, 9, 3, 0)
         result = climb_snapshot(Reader(raw, struct.pack('<Q', 2)), 0)
         self.assertEqual(result, dict(status=1, contacts=[7, 9], hands=3))
+
+    def test_native_vent_crawl_snapshot_reads_intent_and_rejects_invalid_vectors(self):
+        head = struct.pack('<4IQ2Q2I', 0x53434c44, 2, 72, 1, 2, 7, 9, 1, 0)
+        tail = struct.pack('<3fIQ', 0, 0, -.5, 1, 1_000_000_000)
+        data = climb_snapshot(Reader(head, tail, struct.pack('<Q', 2)), 0)
+        self.assertEqual(data['crawl'], 1)
+        self.assertEqual(data['crawl_move'], (0, 0, -.5))
+        self.assertEqual(data['sample_time_ns'], 1_000_000_000)
+        for vector, flag in (((math.nan, 0, 0), 1), ((2, 0, 0), 1), ((0, 0, 0), 2)):
+            bad = struct.pack('<3fIQ', *vector, flag, 1_000_000_000)
+            with self.assertRaisesRegex(RuntimeError, 'Invalid vent crawl'):
+                climb_snapshot(Reader(head, bad, struct.pack('<Q', 2)), 0)
+        self.assertIsNone(climb_snapshot(Reader(head, tail[:8]), 0))
 
     def test_wall_contact_snapshot_rejects_incompatible_and_torn_data(self):
         raw = struct.pack('<4IQ2Q2I', 0x53434c44, 2, 48, 1, 2, 7, 9, 3, 0)

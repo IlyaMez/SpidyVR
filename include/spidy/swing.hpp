@@ -176,7 +176,9 @@ struct SwingConfig {
 constexpr int maxBends = 6;
 struct HandInput {
     Pose aim{};                // world space, -Z forward
-    Vec3 gripRelativeToHead{}; // tracking meters, excludes artificial travel
+    // Tracking metres, excluding artificial travel. Outdoor grip climbing
+    // references the head at hold entry; ordinary actions use its live pose.
+    Vec3 gripRelativeToHead{};
     bool tracked{};
     // grip shoots and holds this hand's web; trigger reels it in (a free
     // hand's shoots a web ball). The controller's own grip and trigger unless
@@ -416,6 +418,7 @@ class Swing {
         if (!on)
             climbing_ = {};
     }
+    bool handClimbEnabled() const { return handClimb_; }
     // A near-wall squeeze belongs to climbing before other actions.
     bool wallHand(int hand, const Input&, const WorldQueries&) const;
     unsigned climbingHands() const {

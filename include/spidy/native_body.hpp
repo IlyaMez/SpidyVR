@@ -50,9 +50,20 @@ enum Flags : uint32_t {
     // Standing so, the view holds the head below the player's own under a
     // roof (a vent, a duct): the legs kneel (body::Targets::kneel).
     kneel = 64,
+    crawl = 128, // version 5: visual outdoor crawl; locomotion remains unchanged
+    crawlPlanted = 256, // version 7: persistent alternating foot contacts
+    crawlHandSync = 512, // version 8: contralateral hand strokes and a stable pelvis
+    crawlLeftHeld = 1024, crawlRightHeld = 2048, // version 9: confirmed wall support, for upper-spine twist
+    crawlLeftTouch = 4096, crawlRightTouch = 8192, // version 9: collision contact without a grip press
+    crawlTurnAway = 16384, // version 9: feet-supported outward pose
+    ventHands = 32768, // version 10: upper-body contact response; native vent legs stay in control
 };
+inline uint32_t crawlHandFlags(unsigned hands) { return (hands & 3u) << 10; }
+inline unsigned crawlHandMask(uint32_t flags) { return (flags >> 10) & 3u; }
+inline uint32_t crawlTouchFlags(unsigned hands) { return (hands & 3u) << 12; }
+inline unsigned crawlTouchMask(uint32_t flags) { return (flags >> 12) & 3u; }
 struct Command {
-    uint32_t magic = 0x53424443, version = 4, bytes = sizeof(Command), flags{};
+    uint32_t magic = 0x53424443, version = 10, bytes = sizeof(Command), flags{};
     uint64_t serial{};
     uint32_t leaseMs = 250, reserved{};
     Vec3 eyes{};   // between the eyes, relative to the feet
@@ -81,10 +92,61 @@ struct Command {
     // (commandBytesV3) ends before them: the world's floor.
     Vec3 standUp{};
     Vec3 floor{};
+    // Version 5 visual crawl frame, world axes: outward normal, the chosen
+    // body direction along the wall, travel direction and stride phase 0..2pi.
+    Vec3 crawlNormal{}, crawlAhead{}, crawlStep{};
+    float crawlPhase{};
+    // Version 6: 0 the compact resting crouch, 1 the wider, lower moving stance.
+    float crawlMotion{};
+    uint32_t motionReserved{}; // preserve version 6's trailing alignment bytes
+    Vec3 crawlOrigin{}; // version 7: world anchor for persistent planted feet
+    uint32_t originReserved{}; // preserve version 7's trailing alignment bytes
+    uint32_t crawlStrokes[2]{}; // version 8: left/right attached-hand stroke counters
+    float crawlDistance = .25f; // version 9: camera/pelvis wall clearance, metres
+    uint32_t distanceReserved{};
 };
-constexpr uint32_t commandBytesV1 = 144, commandBytesV2 = 160, commandBytesV3 = 168;
-static_assert(sizeof(Hand) == 36 && sizeof(Command) == 192 && offsetof(Command, tilt) == commandBytesV1 &&
+constexpr uint32_t commandBytesV1 = 144, commandBytesV2 = 160, commandBytesV3 = 168, commandBytesV4 = 192,
+                   commandBytesV5 = 232, commandBytesV6 = 240, commandBytesV7 = 256, commandBytesV8 = 264;
+static_assert(sizeof(Hand) == 36 && sizeof(Command) == 272 && offsetof(Command, tilt) == commandBytesV1 &&
               offsetof(Command, shoot) == commandBytesV2 && offsetof(Command, standUp) == commandBytesV3);
+static_assert(offsetof(Command, crawlNormal) == commandBytesV4 && offsetof(Command, crawlPhase) == 228);
+static_assert(offsetof(Command, crawlMotion) == commandBytesV5);
+static_assert(offsetof(Command, crawlOrigin) == commandBytesV6);
+static_assert(offsetof(Command, crawlStrokes) == commandBytesV7);
+static_assert(offsetof(Command, crawlDistance) == commandBytesV8);
+inline bool commandFormat(uint32_t version, uint32_t bytes) {
+    return (version == 1 && bytes == commandBytesV1) || (version == 2 && bytes == commandBytesV2) ||
+           (version == 3 && bytes == commandBytesV3) || (version == 4 && bytes == commandBytesV4) ||
+           (version == 5 && bytes == commandBytesV5) || (version == 6 && bytes == commandBytesV6) ||
+           (version == 7 && bytes == commandBytesV7) || (version == 8 && bytes == commandBytesV8) ||
+           ((version == 9 || version == 10) && bytes == sizeof(Command));
+}
+inline bool validCrawl(const Command& c) {
+    if (c.flags & ventHands)
+        return c.version == 10 && !(c.flags & (crawl | crawlPlanted | crawlHandSync | crawlTurnAway)) &&
+            finite(c.crawlNormal) && std::abs(length(c.crawlNormal) - 1) < .01f && finite(c.floor);
+    if ((crawlTouchMask(c.flags) || (c.flags & crawlTurnAway)) &&
+        (!(c.flags & crawlHandSync) || c.version < 9 || c.version > 10))
+        return false;
+    if (crawlHandMask(c.flags) && (!(c.flags & crawlHandSync) || c.version < 9 || c.version > 10))
+        return false;
+    if ((c.flags & crawlHandSync) && (!(c.flags & crawlPlanted) || c.version < 8 || c.version > 10))
+        return false;
+    if ((c.flags & crawlHandSync) && c.version >= 9 &&
+        (!std::isfinite(c.crawlDistance) || c.crawlDistance < .1f || c.crawlDistance > 1.f))
+        return false;
+    if ((c.flags & crawlPlanted) && (!(c.flags & crawl) || c.version < 7 || c.version > 10 ||
+                                   !finite(c.crawlOrigin)))
+        return false;
+    return !(c.flags & crawl) || ((c.version >= 5 && c.version <= 10) &&
+        (c.version < 6 || (std::isfinite(c.crawlMotion) && c.crawlMotion >= 0 && c.crawlMotion <= 1)) &&
+        finite(c.crawlNormal) && finite(c.crawlAhead) &&
+        finite(c.crawlStep) && std::abs(length(c.crawlNormal) - 1) < .01f &&
+        std::abs(length(c.crawlAhead) - 1) < .01f && std::abs(length(c.crawlStep) - 1) < .01f &&
+        std::abs(dot(c.crawlNormal, c.crawlAhead)) < .01f &&
+        std::abs(dot(c.crawlNormal, c.crawlStep)) < .01f && finite(c.floor) &&
+        std::isfinite(c.crawlPhase) && c.crawlPhase >= 0 && c.crawlPhase <= 6.283186f);
+}
 
 enum State : uint32_t { off = 0, waiting = 1, active = 2, failed = 3 };
 // Why the body is not on the hero (Status::problem).
@@ -135,6 +197,8 @@ void renderFrame();
 // the eyes may draw the hero. Otherwise they hide it, as before the body.
 bool drawn();
 Status status();
+// Internal VR-worker feedback; no exported packet or protocol layout changes.
+float crawlOutwardWeight();
 // Where the hero's shoulders and wrists are at his own size, from the rig of
 // his latest pose job; false (and `out` untouched) before one was read.
 bool proportions(body_calibration::Proportions& out);

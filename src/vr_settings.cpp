@@ -29,9 +29,6 @@ constexpr const char* hudChoices[] = {"OFF", "SMALL", "MEDIUM", "LARGE"};
 constexpr const char* flipSpeedChoices[] = {"90\xC2\xB0/S",  "120\xC2\xB0/S", "150\xC2\xB0/S", "180\xC2\xB0/S",
                                             "240\xC2\xB0/S", "300\xC2\xB0/S", "360\xC2\xB0/S", "480\xC2\xB0/S"};
 constexpr const char* depthChoices[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
-constexpr const char* wallDistanceChoices[] = {"20 CM", "25 CM", "30 CM", "40 CM",
-                                               "50 CM", "60 CM", "75 CM", "100 CM"};
-static_assert(std::size(wallDistanceChoices) == std::size(wallDistances));
 constexpr const char* nearClipChoices[] = {"1 CM", "1.5 CM", "2 CM", "3 CM", "5 CM", "7.5 CM", "10 CM"};
 static_assert(std::size(nearClipChoices) == std::size(nearClips));
 // RECORDING FOV: the least the monitor's view shows across (recording_fov.hpp).
@@ -224,7 +221,7 @@ Values sanitized(Values v) {
     v.hud = std::clamp(v.hud, 0, 3);
     v.flipSpeed = std::clamp(v.flipSpeed, 90, 480);
     v.screenDepth = std::clamp(v.screenDepth, 0, 3);
-    v.wallDistance = std::clamp(v.wallDistance, wallDistances[0], std::end(wallDistances)[-1]);
+    v.wallDistance = fixedWallDistance;
     v.nearClipMm = std::clamp(v.nearClipMm, nearClips[0], std::end(nearClips)[-1]);
     v.recordingFov = recording_fov::sanitized(v.recordingFov);
     v.uiStyle = std::clamp(v.uiStyle, uiStyles[0], std::end(uiStyles)[-1]);
@@ -238,9 +235,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 43>& rows() {
+const std::array<Row, 42>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 43> all{{
+    static const std::array<Row, 42> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -295,9 +292,7 @@ const std::array<Row, 43>& rows() {
         {Item::flipSpeed, "FLIP SPEED", "How fast a flip turns you over, at full tilt of the left stick.",
          flipSpeedChoices},
         {Item::handClimb, "HAND WALL CLIMBING",
-         "On a wall, squeeze a grip near it and pull to climb; both grips roll the view.", {}},
-        {Item::wallDistance, "WALL CAMERA DISTANCE",
-         "How far your eyes keep from the wall while you hand climb.", wallDistanceChoices},
+         "Grip and pull. Reach back near the wall to turn. Left stick: run. A: jump.", {}},
         {Item::realisticFlips, "REALISTIC FLIPS",
          "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.", {}},
         {Item::automaticStrength, "ROTATION STRENGTH",
@@ -379,8 +374,7 @@ bool choose(Item item, int index, Values& v) {
         v.screenDepth = s[index];
         break;
     case Item::wallDistance:
-        v.wallDistance = s[index];
-        break;
+        return false;
     case Item::nearClip:
         v.nearClipMm = s[index];
         break;

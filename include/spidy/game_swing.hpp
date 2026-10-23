@@ -262,12 +262,39 @@ struct Ropes {
 static_assert(sizeof(Ropes) == 96);
 // Separate telemetry keeps existing swing/probe packets compatible.
 struct ClimbData {
-    uint32_t magic = 0x53434c44, version = 1, bytes = sizeof(ClimbData), status{};
+    uint32_t magic = 0x53434c44, version = 2, bytes = sizeof(ClimbData), status{};
     int64_t sequence{};
     uint64_t contacts[2]{};
     uint32_t hands{}, reserved{};
+    Vec3 crawlMove{}; // world-space stick intent for the game's supported crawl
+    uint32_t crawl{};
+    uint64_t sampleTimeNs{};
 };
-static_assert(sizeof(ClimbData) == 48);
+static_assert(sizeof(ClimbData) == 72 && offsetof(ClimbData, crawlMove) == 48);
+// Only a current outdoor attachment can interrupt the visual momentum run.
+// A squeezed grip without contact, a vent hold or stale feedback cannot.
+inline bool outdoorClimbGrip(const ClimbData& d, uint64_t nowNs) {
+    return d.magic == 0x53434c44 && d.version == 2 && d.bytes == sizeof(ClimbData) && d.status &&
+        d.crawl == 0 && d.hands > 0 && d.hands <= 3 && d.sampleTimeNs &&
+        nowNs >= d.sampleTimeNs && nowNs - d.sampleTimeNs <= 100'000'000;
+}
+// Expired feedback, leaving the crawl or a stick press never repeats a pull.
+inline Vec3 crawlPull(const ClimbData& d, bool allowed, uint64_t nowNs) {
+    if (!allowed || d.version != 2 || d.bytes != sizeof(ClimbData) || !d.status || d.crawl != 1 ||
+        !d.hands || d.hands > 3 || !d.sampleTimeNs || nowNs < d.sampleTimeNs ||
+        nowNs - d.sampleTimeNs > 100'000'000 || !finite(d.crawlMove)) return {};
+    return limited(d.crawlMove, 1.f);
+}
+// Only measured hand pulls bypass the game's Xbox stick dead zone. Otherwise
+// a slow physical pull becomes a stick too small to move the player at all.
+// x/z are native right/forward, not tracking-space axes.
+inline Vec3 crawlStick(Vec3 pull, Vec3 ahead, Vec3 side) {
+    if (!finite(pull) || !finite(ahead) || !finite(side)) return {};
+    Vec3 stick{dot(pull, side), 0, dot(pull, ahead)};
+    const float amount = length(stick);
+    if (amount < .012f) return {}; // under 3 cm/s: stationary controller noise
+    return stick * ((.25f + .75f * std::min(amount, 1.f)) / amount);
+}
 // Contact counters survive an attachment released between headset samples.
 class ClimbPulses {
   public:

@@ -22,14 +22,26 @@ def climb_snapshot(game, address):
         raw = game.read(address, 48)
         if len(raw) != 48:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53434c44, 1, 48):
+        magic, version, size = struct.unpack_from('<3I', raw)
+        if magic != 0x53434c44 or (version, size) not in ((1, 48), (2, 72)):
             raise RuntimeError('Wall contact protocol mismatch')
+        if version == 2:
+            raw += game.read(address + 48, 24)
+        if len(raw) != size:
+            return None
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address + 16, 8):
             continue
         left, right, hands, reserved = struct.unpack_from('<2Q2I', raw, 24)
         if hands > 3 or reserved:
             raise RuntimeError('Invalid wall contact state')
-        return dict(status=struct.unpack_from('<I', raw, 12)[0], contacts=[left, right], hands=hands)
+        result = dict(status=struct.unpack_from('<I', raw, 12)[0], contacts=[left, right], hands=hands)
+        if version == 2:
+            move = struct.unpack_from('<3f', raw, 48)
+            crawl, sample_time_ns = struct.unpack_from('<IQ', raw, 60)
+            if crawl > 1 or not all(math.isfinite(v) for v in move) or math.sqrt(sum(v*v for v in move)) > 1.001:
+                raise RuntimeError('Invalid vent crawl state')
+            result.update(crawl=crawl, crawl_move=move, sample_time_ns=sample_time_ns)
+        return result
     return None
 
 

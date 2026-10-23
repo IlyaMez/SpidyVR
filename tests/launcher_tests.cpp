@@ -589,7 +589,25 @@ int main() {
                 check(spidy::vr_settings::sanitized(v).*s.number == s.high, std::string(s.key).c_str());
             }
     });
-    // Every setting a profile holds away from its default.
+    test("old distance profiles keep the crawl clearance fixed without dropping new 0.4.1 settings", [&] {
+        const auto read = readProfile("wall_distance_cm=100\nhand_climb=1\nnear_clip_mm=50\n"
+                                      "body_haptics=75\n");
+        check(read.has_value(), "old profile was rejected");
+        PlaySettings settings;
+        settings.tab.wallDistance = 60;
+        applyProfile(*read, settings);
+        check(settings.tab.wallDistance == spidy::vr_settings::fixedWallDistance && settings.tab.handClimb,
+              "profile changed the fixed climb clearance or lost hand climbing");
+        check(settings.tab.nearClipMm == 50 && settings.options.bodyHaptics == 75,
+              "new 0.4.1 settings were lost");
+        check(profileMatches(*read, settings),
+              "an imported old profile could never match its fixed clearance");
+        settings.tab.wallDistance = 100;
+        const auto saved = profileOf(settings);
+        check(saved.values[at("wall_distance_cm")] == spidy::vr_settings::fixedWallDistance,
+              "a stale distance was exported into a new profile");
+    });
+    // Every adjustable setting a profile holds away from its default.
     PlaySettings mine;
     {
         auto& o = mine.options;
@@ -627,7 +645,7 @@ int main() {
                   "aim_markers=1\nair_webs=1\nswing_speed=32\nweight=100\nwall_run=1\nsnap_turn=30\n"
                   "smooth_turn=0\nhaptics=100\nbody_haptics=100\nbody_haptics_webs=1\nbody_haptics_wind=1\n"
                   "body_haptics_combat=1\nbody_haptics_movement=1\nscreen_size=1\nscreen_depth=2\nhud=2\n"
-                  "ui_style=0\nnear_clip_mm=20\nflips=0\nflip_speed=180\nhand_climb=0\nwall_distance_cm=40\n"
+                  "ui_style=0\nnear_clip_mm=20\nflips=0\nflip_speed=180\nhand_climb=0\nwall_distance_cm=25\n"
                   "realistic_flips=0\nrotation_strength=50\nrotation_speed=240\nflight_speed_min=3\n"
                   "swing_momentum=1\nrotation_response_ms=500\nhand_momentum=100\nangular_drag_ms=3000\n"
                   "hand_speed_min_cm=100\nair_rotation_brake=1\n",
@@ -640,7 +658,8 @@ int main() {
     test("a profile's text gives its settings back and leaves graphics and the body as they are", [&] {
         const PlaySettings defaults;
         for (const auto& s : profileSettings)
-            check(profileValue(s, mine) != profileValue(s, defaults), std::string(s.key).c_str());
+            if (s.low != s.high)
+                check(profileValue(s, mine) != profileValue(s, defaults), std::string(s.key).c_str());
         const auto read = readProfile(profileText(profileOf(mine, "Arcade swing"), "0.4.1"));
         check(read && read->name == "Arcade swing" && read->madeWith == "0.4.1" && read->complete(),
               "read back");
@@ -729,8 +748,10 @@ int main() {
             {"NEAR CLIP", "2 CM", "1 CM"},                 {"ANGULAR DRAG", "VERY SLOW", "QUICK"}};
         check(profileChanges(profileOf(change), PlaySettings{}) == expected,
               "the changes, in the tab's order");
-        check(profileChanges(profileOf(mine), PlaySettings{}).size() == std::size(profileSettings),
-              "all of them");
+        const auto adjustable =
+            std::count_if(begin, end, [](const ProfileSetting& s) { return s.low != s.high; });
+        check(profileChanges(profileOf(mine), PlaySettings{}).size() == static_cast<size_t>(adjustable),
+              "all adjustable settings, excluding the fixed wall clearance");
     });
     test("a profile's file is its name without what Windows refuses in a file name", [] {
         check(profileFileName("Arcade swing") == "Arcade swing", "a plain name");

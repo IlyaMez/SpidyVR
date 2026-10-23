@@ -1,4 +1,6 @@
 #pragma once
+#include "crawl_feet.hpp"
+#include "crawl_turn.hpp"
 #include "math.hpp"
 #include <array>
 #include <cstdint>
@@ -100,6 +102,13 @@ struct Rig {
     // and up. In each hand's frame: the fingers' direction and the palm's normal
     // (out of the palm).
     Vec3 pelvisForward{}, pelvisUp{}, headForward{}, headUp{};
+    Vec3 upperChestForward{};
+    std::vector<Vec3> spineForward, neckForward;
+    // The legs' shared parent can be below the body root: the hero has
+    // a_body -> pelvis -> both legs, with the spine beside pelvis.
+    // Correcting a_body alone leaves the animated pelvis tilted beneath it.
+    int hipRoot = -1;
+    Vec3 hipForward{}, hipUp{};
     std::array<Vec3, 2> handFingers{}, handPalm{};
     // In each hand's frame too: across the palm, from the little finger's
     // side to the thumb's (zero when the rest pose does not say).
@@ -134,6 +143,9 @@ struct Rig {
     // What a planted foot (Targets::plant) is turned back to.
     std::array<Vec3, 2> footForward{}, footUp{};
     std::array<float, 2> ankleHeight{};
+    // Sole contact ahead of the ankle, measured from the foot's descendants.
+    // Outdoor crawling pitches about this forefoot, with the heel off the wall.
+    std::array<float, 2> forefootLength{};
     bool ready{};
 };
 // Builds the per-joint subtrees and the rest-pose references from a rest pose
@@ -196,6 +208,28 @@ struct Targets {
     // along the floor behind him, where a squat folded them up in front of
     // his eyes. Standing tall enough, kneeling is standing.
     bool kneel{};
+    // Contact-driven upper-spine motion without replacing native vent legs
+    // or enabling outdoor foot placement / back-facing stance changes.
+    bool surfaceHands{};
+    Vec3 surfaceNormal{}, surfacePoint{};
+    // Outdoor hand climbing: chest toward the surface and alternating feet.
+    // The selected tracking frame supplies ahead; gaze never chooses it.
+    bool crawl{};
+    Vec3 crawlNormal{}, crawlAhead{}, crawlStep{};
+    float crawlPhase{};
+    float crawlMotion{}; // 0 compact at rest, 1 wider and farther below the hips while moving
+    bool crawlPlanted{};
+    Vec3 crawlOrigin{}; // world-space player feet, before body/eye offsets
+    Quat crawlModelToWorld{};
+    bool crawlHandSync{};
+    unsigned crawlHands{}; // confirmed left/right wall attachments, not squeezed buttons
+    unsigned crawlTouches{}; // solid palm contact; does not enable movement
+    bool crawlTurnAway{};
+    // Native play requires a free palm to leave and recontact the wall
+    // after turning. Explicit pose probes retain head-led requests.
+    bool crawlReachTurn{};
+    std::array<uint32_t, 2> crawlStrokes{};
+    float crawlDistance{}; // saved camera metres; pelvis adds 5 cm; zero keeps legacy scaled clearance
 };
 struct Config {
     // Where the wrist joint sits from the grip point of a right hand, in its
@@ -252,6 +286,17 @@ struct Config {
     // Kneeling (Targets::kneel), the knee's height over the floor at the
     // body's own size: where the kneecap rests on it.
     float kneeHeight = .07f;
+    // Outdoor hand climbing: eyes above the avatar's usual eye anchor, metres
+    // along the selected crawl-up frame. Hands and tracking space stay put.
+    float crawlEyeLift = .08f;
+    // Remaining relative eye lift while outward. Zero restores the body's
+    // usual height by raising it through the turn, never moving the camera.
+    float crawlOutwardEyeLift{};
+    // Extra room in front of the chest when looking down while facing away
+    // from an outdoor wall. Move the avatar anchor wallward, not the camera.
+    float crawlOutwardEyeClearance = .12f;
+    // Maximum upper-spine twist with one attached hand, radians (70 degrees).
+    float crawlTorsoTwist = 1.2217305f;
     // Shrinks the head to a millimetre, so the eyes are not inside it.
     bool hideHead = true;
     // The hands take the controllers' orientation; false keeps the game's.
@@ -261,7 +306,31 @@ struct Config {
     float blendSpeed = 4;
 };
 struct State {
+    CrawlFeet crawlFeet;
+    CrawlFeet outwardFeet;
+    CrawlTurn crawlTurn;
     float weight{}, yaw{};
+    float crawlWeight{};
+    float crawlTwist{};
+    float crawlOutwardMotion{};
+    struct OutwardAnchor {
+        bool set{};
+        Vec3 pelvis{}, head{}, origin{}, normal{}, up{};
+        // Let the new outward pose settle beneath the eyes once after a
+        // handoff, before its height becomes a fixed look-around anchor.
+        float settle{};
+        bool waistSet{};
+        Vec3 waistForward{}, waistUp{};
+        bool shouldersSet{};
+        std::array<Vec3, 2> shoulderOffsets{};
+    } outwardAnchor;
+    struct ReachTurn {
+        float direction{}, age{};
+        unsigned previousTouches{}, previousTracked{}, armed{}, cue{};
+        std::array<float, 2> approach{};
+        std::array<float, 2> contactDepth{.035f, .035f};
+        bool pending{}, outward{};
+    } crawlReach;
     bool yawSet{};
     // Each hand as last tracked: from the eyes in the body's frame (its
     // forward, up and left), and its orientation in that frame.

@@ -87,7 +87,8 @@ inline constexpr ProfileSetting profileSettings[] = {
     launcherOption("flips", Item::flips, &SessionOptions::flips),
     launcherOption("flip_speed", Item::flipSpeed, 90, 480, &SessionOptions::flipSpeed),
     tabOnly("hand_climb", Item::handClimb, &Values::handClimb),
-    tabOnly("wall_distance_cm", Item::wallDistance, 20, 100, &Values::wallDistance),
+    tabOnly("wall_distance_cm", Item::wallDistance, vr_settings::fixedWallDistance,
+            vr_settings::fixedWallDistance, &Values::wallDistance),
     tabOnly("realistic_flips", Item::realisticFlips, &Values::realisticFlips),
     tabOnly("rotation_strength", Item::automaticStrength, 25, 100, &Values::automaticStrength),
     tabOnly("rotation_speed", Item::automaticSpeed, 90, 360, &Values::automaticSpeed),
@@ -103,6 +104,8 @@ inline constexpr ProfileSetting profileSettings[] = {
 using detail::profileSettings;
 
 inline int profileValue(const ProfileSetting& s, const PlaySettings& settings) {
+    if (s.low == s.high)
+        return s.low;
     if (s.option)
         return settings.options.*s.option ? 1 : 0;
     if (s.optionNumber)

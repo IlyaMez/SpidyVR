@@ -47,6 +47,7 @@ class WallRollGesture {
     }
     float angle() const { return angle_; }
     bool engaged() const { return engaged_; }
+    Vec3 axis() const { return axis_; }
     void suspend() {
         engaged_ = false;
         held_[0] = held_[1] = false;

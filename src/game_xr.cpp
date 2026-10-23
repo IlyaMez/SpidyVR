@@ -1,6 +1,7 @@
 // Bounded first-person OpenXR integration using the game's two native views.
 #include "spidy/native_appearance.hpp"
 #include "spidy/native_body.hpp"
+#include "spidy/wall_crawl_body.hpp"
 // The input bridge remains a separately verified, separately stoppable module.
 #include "spidy/bhaptics_output.hpp"
 #include "spidy/body_calibration.hpp"
@@ -831,6 +832,7 @@ DWORD WINAPI run(void*) {
         uint32_t trackingGapFrames{}, trackingGapReasons{}, floorCrawlFrames{}, crawlCapFrames{};
         uint32_t kneelFrames{};
         float floorCrawlSeconds{};
+        CrawlCameraGate crawlCameraGate;
         game_warp::Data warp{};
         // The game's interactions on Spidy's wall (version 35): what the game
         // gathered near the player, what each hand points at, and the
@@ -943,6 +945,9 @@ DWORD WINAPI run(void*) {
         game_swing::Bends swingBends;
         game_swing::ClimbData climbState;
         game_swing::ClimbPulses climbPulses;
+        unsigned collisionRayPhase{};
+        WallCrawlBody wallCrawlBody;
+        bool ventCrawlBefore{};
         // What each hand's web holds, when it caught a thug instead of a wall.
         game_grab::Data grabState;
         uint32_t grabPhases[2]{};
@@ -1245,7 +1250,7 @@ DWORD WINAPI run(void*) {
             rig.triggerWebs(values.triggerWebs);
             rig.standOnWalls(values.standOnWalls);
             rig.handClimb(values.handClimb);
-            rig.wallDistance(static_cast<float>(values.wallDistance) / 100.f);
+            rig.wallDistance(static_cast<float>(vr_settings::fixedWallDistance) / 100.f);
             rig.automaticFlips(realisticFlips(values));
             native_hud::setSize(values.hud);
             near_clip::set(values.nearClipMm);
@@ -1589,6 +1594,14 @@ DWORD WINAPI run(void*) {
                         hold.crawl = true;
                         ++floorCrawlFrames;
                     }
+                    hold.vent = hold.crawl &&
+                        (climbState.status && climbState.crawl == 1 && climbState.sampleTimeNs &&
+                         frame.predictedDisplayTime > 0 &&
+                         static_cast<uint64_t>(frame.predictedDisplayTime) >= climbState.sampleTimeNs &&
+                         static_cast<uint64_t>(frame.predictedDisplayTime) - climbState.sampleTimeNs <=
+                             100'000'000);
+                    hold = crawlCameraGate.update(frame.seconds, gameplay && values.handClimb,
+                        (origins.play() & buttonB) != 0, swingFresh && swingState.grounded, hold);
                     const bool crawlsFloor = hold.crawl && hold.normal.y > .99f;
                     floorCrawlSeconds =
                         crawlsFloor ? floorCrawlSeconds + (std::isfinite(frame.seconds)
@@ -1613,9 +1626,10 @@ DWORD WINAPI run(void*) {
                         holdGapSeconds = held ? 0.f : holdGapSeconds + seconds;
                         if (held) {
                             lastHold = hold;
-                        } else if (motion.standing && length(n) > .5f && holdGapSeconds < holdGrace &&
+                        } else if ((motion.standing || motion.ventCrawl) && length(n) > .5f &&
+                                   holdGapSeconds < holdGrace &&
                                    std::abs(dot(feet - lastHold.anchor, n)) < 1.5f &&
-                                   length(v - n * dot(v, n)) < holdGraceSpeed) {
+                                   length(v - n * dot(v, n)) < (motion.ventCrawl ? 3.f : holdGraceSpeed)) {
                             // On the plane it stood on, with the feet: kept
                             // where it was while the game took a player over
                             // a shaft's lip at 1.3 m/s, the view stayed on
@@ -1662,6 +1676,18 @@ DWORD WINAPI run(void*) {
                             headCollisionOrigin(feet, bodyUp, hold, values.handClimb && swingState.owned));
                         if (holds)
                             rig.surfaceFound({hold.anchor, held}, true);
+                        if (rayResults) {
+                            // The bridge publishes on another thread. Hand
+                            // contacts consume each complete, fresh batch once.
+                            const auto sequence = rayResults->sequence;
+                            if (!(sequence & 1)) {
+                                MemoryBarrier();
+                                const native_rays::Data sample = *rayResults;
+                                MemoryBarrier();
+                                if (rayResults->sequence == sequence)
+                                    rig.handFeedback(sample, now.QuadPart, frequency.QuadPart);
+                            }
+                        }
                         if (rayResults)
                             for (unsigned i = 0; i < native_rays::capacity && i < rayResults->count; ++i) {
                                 const auto& hit = rayResults->hits[i];
@@ -1699,6 +1725,7 @@ DWORD WINAPI run(void*) {
                             flight.ropeLength = ropes / static_cast<float>(attached);
                     }
                     rig.flight(flight);
+                    rig.outwardCrawl(values.body && !flatScreen ? native_body::crawlOutwardWeight() : 0.f);
                     motion = rig.update(controller, feet, {camera[8], camera[9], camera[10]}, gameplay,
                                         swingState.owned ? Vec3{0, 1, 0} : heroUp,
                                         game_swing::airborne(swingState, now.QuadPart, frequency.QuadPart), hold,
@@ -1955,12 +1982,7 @@ DWORD WINAPI run(void*) {
                             const Vec3 ahead = turn.rotate({0, 0, -1}), aside = turn.rotate({1, 0, 0}),
                                        overhead = turn.rotate({0, 1, 0});
                             const auto head = rig.clearanceRays(ahead, aside, overhead);
-                            for (unsigned i = 0; i < head.size() && aim.count < native_rays::capacity; ++i)
-                                if (head[i].distance >= .01f && finite(head[i].origin) &&
-                                    std::abs(length(head[i].direction) - 1) < .001f)
-                                    aim.rays[aim.count++] = {head[i].origin,
-                                                             std::min(head[i].distance, 150.f),
-                                                             head[i].direction, 2u + i};
+                            const auto hands = rig.handCollisionRays(motion.headPose.position);
                             // And the room over his feet, along the surface he
                             // stands on: how far the head can go before it is
                             // through the roof of a vent or a duct. From the
@@ -1980,9 +2002,8 @@ DWORD WINAPI run(void*) {
                             const Vec3 up = motion.standing && finite(hold.normal) && length(hold.normal) > .5f
                                                 ? normalized(hold.normal)
                                                 : Vec3{0, 1, 0};
-                            if (finite(up) && length(up) > .5f && aim.count < native_rays::capacity)
-                                aim.rays[aim.count++] = {feet + up * .1f, headroomReach, up, 7u};
-                            aim.leaseMs = 100;
+                            const native_rays::Ray roof{feet + up * .1f, headroomReach, up, 7u};
+                            appendTrackingRays(aim, head, hands, roof, collisionRayPhase++);
                         }
                         check(submitRays(&aim), "Controller world rays");
                         // What the roof's ray found, from the batch the bridge
@@ -2043,8 +2064,9 @@ DWORD WINAPI run(void*) {
                         if (const Vec3 look = motion.headPose.orientation.rotate({0, 0, -1});
                             input.focused && finite(look) && length(look) > .5f)
                             input.look = normalized(look);
+                        const Input climbInput = wallClimbInput(motion);
                         for (unsigned i = 0; i < 2; ++i) {
-                            const auto& hand = motion.swing.hands[i];
+                            const auto& hand = climbInput.hands[i];
                             input.hands[i] = {hand.aim, hand.gripRelativeToHead, hand.tracked, hand.trigger,
                                               hand.grip};
                             input.wallPositions[i] = motion.grips[i].position;
@@ -2053,7 +2075,7 @@ DWORD WINAPI run(void*) {
                         check(submitSwing(&input), "Tracked swing input");
                         check(sampleSwing(&swingState), "Native swing feedback");
                         if (!sampleClimb || sampleClimb(&climbState) || climbState.magic != 0x53434c44 ||
-                            climbState.version != 1 || climbState.bytes != sizeof(climbState))
+                            climbState.version != 2 || climbState.bytes != sizeof(climbState))
                             climbState = {};
                         const unsigned wallPulses =
                             climbPulses.update(climbState, input.focused && values.handClimb);
@@ -2592,6 +2614,26 @@ DWORD WINAPI run(void*) {
                         if (playing) {
                             walk.right = mounting ? 0 : motion.walkRight;
                             walk.forward = mounting ? 0 : motion.walkForward;
+                            // Hand pulls become ordinary native crawl input. The
+                            // game keeps vent collision and its supported state.
+                            const bool handCrawl = motion.ventCrawl && values.handClimb && motion.active &&
+                                !flatScreen && !calibrationInput && !layerOn && !mounting &&
+                                std::hypot(motion.walkRight, motion.walkForward) <= .2f;
+                            const Vec3 pull =
+                                game_swing::crawlPull(climbState, handCrawl, frame.predictedDisplayTime);
+                            if (handCrawl && climbState.crawl && climbState.hands) {
+                                const Vec3 stick =
+                                    game_swing::crawlStick(pull, motion.walkForwardAxis,
+                                                          motion.walkRightAxis);
+                                walk.right = stick.x;
+                                walk.forward = stick.z;
+                            }
+                            if (motion.ventCrawl != ventCrawlBefore) {
+                                ventCrawlBefore = motion.ventCrawl;
+                                message(1, 0, ventCrawlBefore ?
+                                                  "Vent hand crawling active (native crawl, close view)" :
+                                                  "Vent hand crawling ended");
+                            }
                             // On the game's own crawl, with the view turned
                             // onto the wall, what the game makes of that stick
                             // is the one thing no session has measured.
@@ -2742,7 +2784,8 @@ DWORD WINAPI run(void*) {
                         for (unsigned i = 0; i < 2; ++i) {
                             const auto& hand = motion.swing.hands[i];
                             const auto& aim = aimed.hands[i];
-                            free = free && !swingState.webs[i].attached && !grabPhases[i];
+                            free = free && !swingState.webs[i].attached && !grabPhases[i] &&
+                                   !(motion.ventCrawl && climbState.status && (climbState.hands & (1u << i)));
                             pulling[i] = {hand.tracked && hand.grip > .5f,
                                           aim.kind == static_cast<uint32_t>(game_swing::AimKind::blocked), aim.point,
                                           hand.aim.position, hand.gripRelativeToHead};
@@ -2833,7 +2876,7 @@ DWORD WINAPI run(void*) {
                             const bool onCrawl = swingState.status &&
                                                  swingState.wall == static_cast<uint32_t>(game_swing::Surface::game);
                             const bool webbed = swingState.webs[0].attached || swingState.webs[1].attached;
-                            walk.parkour = onCrawl && (walk.jump || webbed);
+                            walk.parkour = onCrawl && (walk.jump || (!motion.ventCrawl && webbed));
                         }
                         walk.scan = templePress.held() && steering;
                         // A perfect dodge: the game slows its own time within a
@@ -3385,6 +3428,38 @@ DWORD WINAPI run(void*) {
                                      (kneels ? native_body::kneel : 0u);
                         pose.standUp = motion.standUp;
                         pose.floor = motion.floor;
+                        const bool wallGrip = game_swing::outdoorClimbGrip(
+                            climbState, frame.predictedDisplayTime > 0 ? frame.predictedDisplayTime : 0);
+                        if (motion.ventCrawl && values.handClimb && values.body && !flatScreen) {
+                            pose.flags |= native_body::ventHands |
+                                          native_body::crawlTouchFlags(motion.wallTouches);
+                            const auto sampleTime = frame.predictedDisplayTime > 0 ?
+                                static_cast<uint64_t>(frame.predictedDisplayTime) : 0;
+                            const bool fresh = climbState.status && climbState.crawl == 1 && sampleTime &&
+                                climbState.sampleTimeNs && sampleTime >= climbState.sampleTimeNs &&
+                                sampleTime - climbState.sampleTimeNs <= 100'000'000;
+                            pose.flags |= native_body::crawlHandFlags(fresh ? climbState.hands : 0);
+                            pose.crawlNormal = hold.normal;
+                            pose.floor = hold.anchor - motion.anchor;
+                        }
+                        if (wallCrawlBody.update(motion, hold, values.handClimb && values.body && !flatScreen,
+                                                 frame.seconds, wallGrip ? climbState.hands : 0)) {
+                            pose.flags |= native_body::crawl | native_body::crawlPlanted |
+                                          native_body::crawlHandSync;
+                            pose.flags |= native_body::crawlHandFlags(wallGrip ? climbState.hands : 0);
+                            pose.flags |= native_body::crawlTouchFlags(motion.wallTouches) |
+                                          native_body::crawlTurnAway;
+                            pose.floor = wallCrawlBody.floor();
+                            pose.crawlNormal = wallCrawlBody.normal();
+                            pose.crawlAhead = wallCrawlBody.ahead();
+                            pose.crawlStep = wallCrawlBody.step();
+                            pose.crawlPhase = wallCrawlBody.phase();
+                            pose.crawlMotion = wallCrawlBody.motion();
+                            pose.crawlOrigin = motion.anchor;
+                            pose.crawlStrokes[0] = wallCrawlBody.handSteps()[0];
+                            pose.crawlStrokes[1] = wallCrawlBody.handSteps()[1];
+                            pose.crawlDistance = static_cast<float>(vr_settings::fixedWallDistance) / 100.f;
+                        }
                         pose.eyes = Vec3{(motion.eyes[0][12] + motion.eyes[1][12]) / 2,
                                          (motion.eyes[0][13] + motion.eyes[1][13]) / 2,
                                          (motion.eyes[0][14] + motion.eyes[1][14]) / 2} -
@@ -3403,7 +3478,8 @@ DWORD WINAPI run(void*) {
                             HandPoseInput doing;
                             doing.tracked = tracked;
                             doing.wallContact = motion.active && !flatScreen && values.handClimb &&
-                                                climbState.status && (climbState.hands & (1u << i));
+                                ((motion.wallTouches & (1u << i)) ||
+                                 (climbState.status && (climbState.hands & (1u << i))));
                             doing.web = motion.swing.hands[i].grip;
                             doing.squeeze = hand.squeeze;
                             doing.speed = speed;

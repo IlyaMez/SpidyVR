@@ -411,6 +411,32 @@ void solveHero(float* out, uintptr_t job, uintptr_t instance) {
             t.plant = standing;
             t.floor = standing ? toModel.rotate(wanted.floor) : Vec3{};
             t.kneel = standing && (wanted.flags & native_body::kneel);
+            t.surfaceHands = wanted.version >= 10 && (wanted.flags & native_body::ventHands);
+            if (t.surfaceHands) {
+                t.surfaceNormal = toModel.rotate(wanted.crawlNormal);
+                t.surfacePoint = toModel.rotate(wanted.floor);
+                t.crawlHands = native_body::crawlHandMask(wanted.flags);
+                t.crawlTouches = native_body::crawlTouchMask(wanted.flags);
+            }
+            t.crawl = (wanted.flags & native_body::crawl) && native_body::validCrawl(wanted);
+            if (t.crawl) {
+                t.floor = toModel.rotate(wanted.floor);
+                t.crawlNormal = toModel.rotate(wanted.crawlNormal);
+                t.crawlAhead = toModel.rotate(wanted.crawlAhead);
+                t.crawlStep = toModel.rotate(wanted.crawlStep);
+                t.crawlPhase = wanted.crawlPhase;
+                t.crawlMotion = wanted.version >= 6 ? wanted.crawlMotion : 0.f;
+                t.crawlPlanted = wanted.flags & native_body::crawlPlanted;
+                t.crawlOrigin = wanted.crawlOrigin;
+                t.crawlModelToWorld = toWorld;
+                t.crawlHandSync = wanted.flags & native_body::crawlHandSync;
+                t.crawlHands = native_body::crawlHandMask(wanted.flags);
+                t.crawlTouches = native_body::crawlTouchMask(wanted.flags);
+                t.crawlTurnAway = wanted.flags & native_body::crawlTurnAway;
+                t.crawlReachTurn = t.crawlTurnAway;
+                t.crawlStrokes = {wanted.crawlStrokes[0], wanted.crawlStrokes[1]};
+                t.crawlDistance = wanted.version >= 9 ? wanted.crawlDistance : 0.f;
+            }
             t.eyes = toModel.rotate(wanted.eyes);
             t.facing = toModel * wanted.facing;
             if (const Quat tilt = wanted.tilt; tilt.x != 0 || tilt.y != 0 || tilt.z != 0)
@@ -609,6 +635,14 @@ native_body::Status native_body::status() {
     ReleaseSRWLockShared(&statusLock);
     return out;
 }
+float native_body::crawlOutwardWeight() {
+    if (!drawn()) return 0;
+    AcquireSRWLockShared(&solveLock);
+    const float weight = lastTargets.crawl && lastTargets.crawlTurnAway && state.crawlTurn.ready() ?
+        state.crawlTurn.outwardWeight(state.crawlTurn.angle()) : 0.f;
+    ReleaseSRWLockShared(&solveLock);
+    return weight;
+}
 bool native_body::proportions(body_calibration::Proportions& out) {
     AcquireSRWLockShared(&solveLock);
     const bool set = heroProportionsSet;
@@ -648,17 +682,14 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyBodyStart(void* input) {
     return native_body::start(c.base);
 }
 extern "C" __declspec(dllexport) DWORD WINAPI SpidyBodySubmit(void* input) {
-    // A version 1, 2 or 3 command (the probe's) is shorter: read as many bytes as it says.
+    // Older probe commands retain their original sizes and meanings.
     Command c{};
     uint32_t header[3]{};
     const auto at = reinterpret_cast<uintptr_t>(input);
     if (!read(at, header, sizeof(header)) || header[0] != 0x53424443 ||
-        !((header[1] == 1 && header[2] == native_body::commandBytesV1) ||
-          (header[1] == 2 && header[2] == native_body::commandBytesV2) ||
-          (header[1] == 3 && header[2] == native_body::commandBytesV3) ||
-          (header[1] == 4 && header[2] == sizeof(c))) ||
+        !native_body::commandFormat(header[1], header[2]) ||
         !read(at, &c, header[2]) || c.leaseMs > 500 || !finite(c.eyes) || !std::isfinite(c.height) ||
-        !(c.armLength >= 0 && c.armLength <= 2))
+        !(c.armLength >= 0 && c.armLength <= 2) || !native_body::validCrawl(c))
         return 7502;
     const float tilt = c.tilt.x * c.tilt.x + c.tilt.y * c.tilt.y + c.tilt.z * c.tilt.z + c.tilt.w * c.tilt.w;
     if (!std::isfinite(tilt) || std::abs(tilt - 1) > .01f)

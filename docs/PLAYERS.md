@@ -554,8 +554,8 @@ flips above)
 Hand wall climbing (experimental, off until you switch HAND WALL CLIMBING on
 in Settings > SPIDY VR or "Hand wall climbing" in the launcher's options)
   On a wall ............ with the left stick at rest you stay upright beside
-                         the wall, a little crouched, your eyes 40 cm from
-                         it (WALL CAMERA DISTANCE: 20 to 100 cm)
+                         the wall, a little crouched, your eyes 25 cm from
+                         it. The camera distance is fixed
   Squeeze a grip ....... with that hand within about 18 cm of the wall: the
                          palm holds on, open, with a short buzz. Pull it down
                          to climb, sideways to go along, up to go down; two
@@ -569,6 +569,15 @@ in Settings > SPIDY VR or "Hand wall climbing" in the launcher's options)
                          left or right; let go to climb again
   A .................... jumps off the wall
   Round a corner ....... your view turns onto the building's next side
+  Turn away ............ withdraw one hand, turn your head toward the other
+                         side, then touch that hand to the wall again. Your
+                         body turns with its feet still attached; looking
+                         around alone does not request a turn. Use the same
+                         gesture to turn back. Back-facing camera clearance
+                         is 40 cm; the two-grip roll gesture is suspended
+  In a vent ............ grip and pull along its floor, walls or ceiling.
+                         The native crawl animation and corner transitions
+                         remain; wall running and back-facing turns are off
 
 Menus and cutscenes show on a screen in the headset. There the controllers act
 as an Xbox controller: left stick moves, A selects, B goes back, grips switch

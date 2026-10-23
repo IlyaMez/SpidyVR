@@ -13,6 +13,7 @@
 // keeps in a file of its own (tabOnlyText), which the launcher's options
 // change too.
 namespace spidy::vr_settings {
+inline constexpr int fixedWallDistance = 25;
 struct Values {
     bool aimMarkers = true;
     // Webs catching props and thugs, punching and your own body, like the web
@@ -62,13 +63,9 @@ struct Values {
     // your floor (the tab's STAND ON WALLS; GameTrackingRig::standOnWalls);
     // off, you stay upright beside it.
     bool standOnWalls = true;
-    // Hand wall climbing, experimental (the tab's HAND WALL CLIMBING;
-    // Swing::allowHandClimb, GameTrackingRig::handClimb): on a wall with the
-    // left stick at rest, a grip squeezed near the wall holds it and pulls you
-    // along; both grips held roll the view. And how far the eyes keep from
-    // the wall meanwhile, centimetres (WALL CAMERA DISTANCE, wallDistances).
+    // Experimental physical hand pulls, solid palms and crawling body poses.
     bool handClimb = false;
-    int wallDistance = 40;
+    int wallDistance = fixedWallDistance; // retained for stored-profile compatibility
     // Scenes the game plays on the game screen (cutscenes, finishers) have
     // depth there (the tab's GAME SCREEN 3D): 0 off, the game's flat frame; 1
     // low, 2 medium, 3 high (screenDepths).
@@ -209,7 +206,7 @@ struct Row {
     // menu (the one with resume)").
     bool page{};
 };
-const std::array<Row, 43>& rows();
+const std::array<Row, 42>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

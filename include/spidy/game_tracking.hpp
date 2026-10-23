@@ -1,5 +1,6 @@
 #pragma once
 #include "head_clearance.hpp"
+#include "hand_collision.hpp"
 #include "native_rays.hpp"
 #include "native_view.hpp"
 #include "realistic_flip.hpp"
@@ -15,6 +16,11 @@ namespace spidy {
 // grip) and their grips the reels (Input's trigger), swapped from the default.
 Input trackedSwingInput(const XrFrame& frame, const Rig& rig, bool triggerWebs = false);
 native_rays::Command controllerAimRays(const Input&, uint64_t serial);
+// Keeps both aiming rays and the roof probe. During hand contact, body-to-eye
+// and forward head probes run every frame; side/up probes share one slot.
+void appendTrackingRays(native_rays::Command&, const std::array<HeadClearance::Ray, 5>& head,
+                        const std::array<native_rays::Ray, 2>& hands, native_rays::Ray roof,
+                        unsigned phase);
 struct GameMotionFrame {
     bool active{}, releaseWebs = true;
     // Why the frame could not be placed (GameTrackingRig::Inactive bits;
@@ -55,6 +61,7 @@ struct GameMotionFrame {
     bool standing{};
     float wallRoll{};
     bool wallRotate{};
+    bool ventCrawl{};
     float viewTilt{};
     // For the player's body: the up the view stands him along (the world's
     // until it turns onto a surface), the point of that surface under his
@@ -66,10 +73,27 @@ struct GameMotionFrame {
     // How far the eyes, and the hands and the body placed with them, moved
     // out of what the world is built of (HeadClearance), metres in the world.
     Vec3 headPush{};
+    Vec3 handPush{}; // Camera placement from pressing solid building surfaces.
+    unsigned wallTouches{}; // Ray-confirmed palm contact/pressure, independent of grip buttons.
+    bool climbTracking{};
+    std::array<Vec3, 2> climbGrips{}; // tracking metres relative to the head at hold entry
+    std::array<float, 2> climbHold{};
     Quat bodyTilt() const {
         return standing ? flipTilt : swing.tilt;
     }
 };
+// Only wall-climb locomotion/stride cues use the fixed tracking reference.
+// Web, punch and other head-relative gestures keep frame.swing unchanged.
+inline Input wallClimbInput(const GameMotionFrame& frame) {
+    Input result = frame.swing;
+    if (frame.climbTracking)
+        for (unsigned i = 0; i < 2; ++i) {
+            result.hands[i].gripRelativeToHead = frame.climbGrips[i];
+            result.hands[i].wallGrip = frame.climbHold[i];
+            result.hands[i].wallPosition = frame.grips[i].position;
+        }
+    return result;
+}
 // The wall or ceiling that holds the player, as the swing module reports it
 // (game_swing::Data's wall): the swing's own wall, or the game's wall crawl.
 //
@@ -85,6 +109,35 @@ struct SurfaceHold {
     Vec3 anchor{}; // the point of it under the player's body, in the world
     float speed{}; // the player's speed, m/s
     bool crawl{};  // the game's wall crawl: its actor's feet are on the surface
+    bool vent{};   // enclosed native crawl: never switch into wall running
+};
+// A grounded dodge can briefly report the same native pose flags as a duct
+// crawl. Do not let that animation acquire a prone camera or a crawl cap.
+class CrawlCameraGate {
+  public:
+    SurfaceHold update(float seconds, bool enabled, bool dodge, bool grounded, SurfaceHold candidate) {
+        if (!enabled) {
+            *this = {};
+            return candidate;
+        }
+        const float dt = std::isfinite(seconds) ? std::clamp(seconds, 0.f, .1f) : 0.f;
+        if (dodge && !vent_ && (grounded || groundedBefore_))
+            dodgeSeconds_ = .9f;
+        else
+            dodgeSeconds_ = std::max(0.f, dodgeSeconds_ - dt);
+        groundedBefore_ = grounded && !vent_;
+        if (dodgeSeconds_ > 0 && candidate.crawl)
+            candidate = {};
+        // Unconfirmed native floor flags also occur while turning/running.
+        // They must not start the vent camera or its separate head-height cap.
+        if (candidate.crawl && !candidate.vent && normalized(candidate.normal).y > .866f)
+            candidate = {};
+        vent_ = candidate.vent;
+        return candidate;
+    }
+  private:
+    float dodgeSeconds_{};
+    bool groundedBefore_{}, vent_{};
 };
 // The native collision capsule's centre is clear even when a projecting
 // pillar covers the point half a metre off the facade used by the crawl.
@@ -320,11 +373,18 @@ class GameTrackingRig {
     // After an update: the rays for the next batch, along the head's own
     // look, side and up.
     std::array<HeadClearance::Ray, HeadClearance::rays> clearanceRays(Vec3 look, Vec3 side, Vec3 up) const {
-        const bool closeClimb = handClimb_ && !standing_ && length(climbNormal_) > .5f;
+        const bool closeClimb = handClimb_ && !standing_ &&
+                                (length(climbNormal_) > .5f || ventViewActive_);
         return clearance_.next(look, side, up, closeClimb ? .75f : 0.f);
     }
     const HeadClearance& clearance() const {
         return clearance_;
+    }
+    void handFeedback(const native_rays::Data& data, int64_t now, int64_t frequency) {
+        handCollision_.feedback(data, now, frequency);
+    }
+    std::array<native_rays::Ray, 2> handCollisionRays(Vec3 head) const {
+        return handCollision_.next(head);
     }
     void handClimb(bool on) {
         handClimb_ = on;
@@ -332,7 +392,7 @@ class GameTrackingRig {
             wallRoll_.reset();
     }
     void wallDistance(float metres) {
-        wallDistance_ = std::isfinite(metres) ? std::clamp(metres, HeadClearance::margin, 1.f) : .4f;
+        wallDistance_ = std::isfinite(metres) ? std::clamp(metres, .1f, 1.f) : .4f;
     }
     // REALISTIC FLIPS (RealisticFlip), from the VR settings; off, the flips
     // are FlipMotion's. reset() keeps them.
@@ -342,6 +402,10 @@ class GameTrackingRig {
     // The swing's flight for the next update: its velocity and its webs' pull.
     void flight(RealisticFlight sample) {
         flight_ = sample;
+    }
+    // Actual solved body stance, not the player's momentary look direction.
+    void outwardCrawl(float weight) {
+        outwardCrawl_ = std::isfinite(weight) ? std::clamp(weight, 0.f, 1.f) : 0.f;
     }
     void reset();
 
@@ -370,15 +434,25 @@ class GameTrackingRig {
     bool standing_{}, standOnWalls_ = true;
     bool handClimb_{};
     float wallDistance_ = .4f;
+    float outwardCrawl_{};
+    float outwardOffset_{};
     WallRollGesture wallRoll_;
     Vec3 climbNormal_{}, runNormal_{}, runAhead_{};
     Quat climbView_{};
+    // Prone vent frame: neutral headset looks into native support. Its
+    // orientation follows floor/wall/ceiling changes, about the placed eyes.
+    Quat ventTurn_{};
+    Vec3 ventForward_{0, 0, -1};
+    bool ventViewActive_{};
     float runYaw_{}, runHeadYaw_{};
     bool wallRunning_{};
+    bool climbTrackingSet_{};
+    Vec3 climbTrackingHead_{};
     float runIdleSeconds_{};
     float headroom_{};
     Vec3 headDrop_{};
     HeadClearance clearance_{};
+    HandCollision handCollision_{};
     Vec3 bodyCentre_{std::numeric_limits<float>::quiet_NaN(), 0, 0};
 };
 } // namespace spidy
