@@ -3,6 +3,15 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
+**Unreleased: optional WEB SLINGSHOT (iplusdvr).** Off by default, under
+SWINGING. When on, attaching a web on the ground no longer jumps automatically.
+Stand still, shoot a separate web from each hand at two solid surfaces, draw
+both hands back at least 16 cm and hold. Both controllers vibrate as the launch
+charges. Release both web buttons together to launch toward the anchors'
+midpoint, within the chosen swing speed limit. Pushing the hands forward,
+walking, jumping, losing tracking or switching it off cancels the charge.
+This adds no web bridges, enemy tethers or rope climbing.
+
 **Latest build (October 21, fourth): RECORDING FOV, optional - pull request
 21 (iplusdvr).** You: "review and fix whats needed if needed", then "it should
 be an optional feature".

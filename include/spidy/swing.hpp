@@ -282,6 +282,7 @@ enum class EventKind {
     Join,     // a hand took hold of the other hand's web
     Pass,     // an arcade web went through a thin or loose thing: shot past one, or swung past one
     WallGrip, // a palm stuck to the wall; one contact pulse in that hand
+    Slingshot, // both drawn webs released: strength is the stored charge
 };
 struct Event {
     EventKind kind;
@@ -308,6 +309,19 @@ class Swing {
     void settleStep(float predictedSeconds, float actualSeconds);
     void reset(Body body = {});
     void releaseAll();
+    // Grounded web shots stay grounded; draw two fixed webs, then release to launch.
+    void allowSlingshot(bool on) {
+        if (slingshotEnabled_ != on) {
+            slingshotEnabled_ = on;
+            clearSlingshot();
+        }
+    }
+    bool slingshotEnabled() const {
+        return slingshotEnabled_;
+    }
+    float slingshotCharge() const {
+        return slingshotCharge_;
+    }
     // A new speed limit during play (the VR settings). A body
     // faster than it slows to it in the next step.
     void limitSpeed(float maxSpeed);
@@ -473,6 +487,12 @@ class Swing {
     }
 
   private:
+    void clearSlingshot();
+    void slingshot(float dt, const Input&, const WorldQueries&);
+    bool slingshotEnabled_{}, slingshotPair_{}, slingshotReleasing_{};
+    Vec3 slingshotHands_[2]{}, slingshotEnds_[2]{};
+    uint64_t slingshotSurfaces_[2]{};
+    float slingshotCharge_{}, slingshotHold_{}, slingshotRelease_{}, slingshotYaw_{};
     struct HandState {
         // held: grip squeezed, with release hysteresis. A web shoots only on the
         // press that sets it, so a lost web never re-fires while the grip stays held.

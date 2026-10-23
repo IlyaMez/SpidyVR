@@ -1773,6 +1773,8 @@ void App::options(ImVec2 origin, ImVec2 size) {
         option("Weight", "How heavy you are while swinging and after letting go. 100% is real gravity.", S(150), [&] {
             stepCombo("##weight", kWeights, kWeightValues, static_cast<int>(std::size(kWeightValues)), &o.weight);
         });
+        option("Web slingshot", "No auto jump. Draw two fixed webs, hold for vibration, release both to launch.",
+               S(42), [&] { tabToggle("##webslingshot", Item::webSlingshot); });
         option("Snap turn", "How far a flick of the right stick turns you.", S(150), [&] {
             stepCombo("##snap", kSnapTurns, kSnapValues, static_cast<int>(std::size(kSnapValues)), &o.snapTurn);
         });

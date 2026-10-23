@@ -696,6 +696,7 @@ void Swing::holdWall(float dt, float before, const World* collision) {
 void Swing::reset(Body b) {
     if (!finite(b.position) || !finite(b.velocity))
         throw std::invalid_argument("Invalid body");
+    clearSlingshot();
     body_ = b;
     webs_ = {};
     hands_ = {};
@@ -842,6 +843,7 @@ WebShot Swing::shot(Pose aim, Vec3 from, const WorldQueries& world) const {
     return out;
 }
 void Swing::releaseAll() {
+    clearSlingshot();
     climbing_ = {};
     for (int i = 0; i < 2; ++i) {
         release(i);
@@ -965,7 +967,7 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
             s.reeling = reel;
             // Motion must be both fast and deliberate within a short window.
             // Head-relative samples remove virtual movement and room-scale translation.
-            if (s.sample && !s.zipUsed && bears(i)) {
+            if (s.sample && !s.zipUsed && bears(i) && !(slingshotEnabled_ && body_.grounded)) {
                 const Vec3 delta = trackingTurn(in).rotate(h.gripRelativeToHead - s.previous);
                 const float pull = -dot(delta, normalized(w.anchor - body_.position));
                 if (pull > 0) {
@@ -996,6 +998,85 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
         }
         s.previous = h.gripRelativeToHead;
         s.sample = true;
+    }
+    slingshot(dt, in, world);
+}
+void Swing::clearSlingshot() {
+    slingshotPair_ = slingshotReleasing_ = false;
+    slingshotCharge_ = slingshotHold_ = slingshotRelease_ = 0;
+}
+void Swing::slingshot(float dt, const Input& in, const WorldQueries& world) {
+    // Only real arm travel charges it; walking, a snap turn, loss of tracking,
+    // or a missing anchor cancels the gesture rather than launching later.
+    if (!slingshotEnabled_ || !in.focused || !body_.grounded || wall_.on || in.jump || in.leap > 0 ||
+        !in.hands[0].tracked || !in.hands[1].tracked || !finite(in.move) || length(in.move) > .2f ||
+        length(body_.velocity) > 2 || !std::isfinite(dt) || dt <= 0 || dt > .1f) {
+        clearSlingshot();
+        return;
+    }
+    const bool both = hands_[0].held && hands_[1].held;
+    if (slingshotPair_) {
+        if (std::abs(std::remainder(in.trackingYaw - slingshotYaw_, 6.2831853f)) > .2f ||
+            !world.exists(slingshotSurfaces_[0]) || !world.exists(slingshotSurfaces_[1])) {
+            clearSlingshot();
+            return;
+        }
+        // Releasing one hand opens a short window for the other. A broken web
+        // whose button is still held is not a deliberate release.
+        for (unsigned i = 0; i < 2; ++i)
+            if (hands_[i].held &&
+                (!webs_[i].attached || webs_[i].airAnchor || webs_[i].surface != slingshotSurfaces_[i] ||
+                 length(webs_[i].end() - slingshotEnds_[i]) > .1f)) {
+                clearSlingshot();
+                return;
+            }
+        if (!both || slingshotReleasing_) {
+            slingshotReleasing_ = true;
+            slingshotRelease_ += dt;
+            if (slingshotRelease_ > .2f || both) {
+                clearSlingshot();
+                return;
+            }
+            if (!hands_[0].held && !hands_[1].held) {
+                const float charge = slingshotCharge_;
+                Vec3 direction = normalized((slingshotEnds_[0] + slingshotEnds_[1]) * .5f - body_.position);
+                clearSlingshot();
+                if (charge >= .15f && length(direction) > .9f) {
+                    direction.y = std::max(.25f, direction.y + .25f);
+                    direction = normalized(direction);
+                    body_.velocity = limited(direction * (12 + 28 * charge), config_.maxSpeed);
+                    body_.grounded = false;
+                    events_.push_back({EventKind::Slingshot, -1, charge});
+                }
+            }
+            return;
+        }
+    }
+    if (!both || !webs_[0].attached || !webs_[1].attached || webs_[0].airAnchor || webs_[1].airAnchor ||
+        shared() || length(webs_[0].end() - webs_[1].end()) < 1.5f) {
+        clearSlingshot();
+        return;
+    }
+    if (!slingshotPair_) {
+        slingshotPair_ = true;
+        slingshotYaw_ = in.trackingYaw;
+        for (unsigned i = 0; i < 2; ++i) {
+            slingshotHands_[i] = in.hands[i].gripRelativeToHead;
+            slingshotEnds_[i] = webs_[i].end();
+            slingshotSurfaces_[i] = webs_[i].surface;
+        }
+    }
+    float pull = 1;
+    for (unsigned i = 0; i < 2; ++i) {
+        const Vec3 travel = trackingTurn(in).rotate(in.hands[i].gripRelativeToHead - slingshotHands_[i]);
+        pull = std::min(pull, -dot(travel, normalized(slingshotEnds_[i] - body_.position)));
+    }
+    if (pull > .16f) {
+        slingshotHold_ += dt;
+        if (slingshotHold_ > .25f)
+            slingshotCharge_ = std::min(std::clamp(pull / .4f, 0.f, 1.f), slingshotCharge_ + dt * .8f);
+    } else {
+        slingshotCharge_ = slingshotHold_ = 0;
     }
 }
 void Swing::move(Vec3 target, const World* collision) {

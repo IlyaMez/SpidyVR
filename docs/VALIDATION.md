@@ -1,5 +1,18 @@
 # Validation — 2026-10-21
 
+## Optional web slingshot — 2026-10-23
+
+Built the complete Windows Release configuration, including the game modules,
+OpenXR and launcher, from `ff3fc89` with this feature applied. All three CTest
+targets passed: core (434 checks), launcher (30 checks), and realistic flips.
+All 138 Python protocol checks passed. No headset or live-game testing yet.
+
+The new tests exercise charging and one-shot release, the swing speed cap,
+OFF, two-hand release timing, duplicate input samples, relaxing the draw,
+walking, jumping, turning, tracking/focus loss, missing surfaces, air anchors,
+settings persistence and old settings packets. Native takeoff timing and the
+feel of the controller vibration still need a headset test.
+
 ## Every SPIDY VR setting in the launcher (latest build)
 
 The user: "why doesnt the new launcher include all the realstic flips stuff?",

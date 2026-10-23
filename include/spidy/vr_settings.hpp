@@ -107,6 +107,7 @@ struct Values {
     // ui_style.hpp's UiStyle): 0 comic, printed as Spidy's videos are; 1
     // tech, as the game's own HUD and menus are.
     int uiStyle = 0;
+    bool webSlingshot = false; // two fixed webs drawn from a standstill, then released
     bool operator==(const Values&) const = default;
 };
 // The steps the game's Settings offer. The launcher's slider sets any swing
@@ -190,8 +191,9 @@ enum class Item : uint8_t {
     hapticMovement,
     recordingFov,
     uiStyle,
+    webSlingshot,
 };
-inline constexpr Item lastItem = Item::uiStyle;
+inline constexpr Item lastItem = Item::webSlingshot;
 // The SPIDY VR tab, top to bottom: a section's heading (item none) or a
 // setting. The sections: WEBS, SWINGING, COMFORT, HAPTICS, DISPLAY, BODY and
 // EXPERIMENTAL (the player, October 19: "sort the options in spidy vr
@@ -209,7 +211,7 @@ struct Row {
     // menu (the one with resume)").
     bool page{};
 };
-const std::array<Row, 43>& rows();
+const std::array<Row, 44>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;
