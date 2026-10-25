@@ -4295,7 +4295,7 @@ DWORD WINAPI run(void*) {
                                               phoneScreen.size(), phonePicture.halfWidth, phonePicture.halfHeight,
                                               phonePicture.corners[0].x, phonePicture.corners[0].y,
                                               phonePicture.corners[0].z);
-                                message(5, 0, text);
+                                message(3, 0, text);
                             }
                         }
                         std::array<D3D12Renderer::ViewTarget, 2> overlayViews;
@@ -4332,7 +4332,7 @@ DWORD WINAPI run(void*) {
                         static bool loggedPaintIssue;
                         if (!loggedPaintIssue && !overlay.paintIssue().empty()) {
                             loggedPaintIssue = true;
-                            message(5, 0, ("Phone screen picture failed: " + overlay.paintIssue()).c_str());
+                            message(3, 0, ("Phone screen picture failed: " + overlay.paintIssue()).c_str());
                         }
                         overlayMs = std::chrono::duration<double, std::milli>(
                                         std::chrono::steady_clock::now() - overlayStart)
