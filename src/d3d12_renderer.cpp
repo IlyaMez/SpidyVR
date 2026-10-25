@@ -1017,17 +1017,18 @@ cbuffer Quad : register(b0) { row_major float4x4 vp; float4 corners[4]; };
 Texture2D picture : register(t0);
 SamplerState sharp : register(s0);
 struct Out { float4 position : SV_POSITION; float2 uv : TEXCOORD; };
+// Temporary (Linux black-screen report): ignores vp/corners entirely and
+// covers most of the eye's clip space directly, to isolate the draw/pipeline
+// itself from the corners' positioning math.
 Out vs(uint id : SV_VertexID) {
     const uint at[6] = {0, 1, 2, 0, 2, 3};
+    const float2 fixed_corners[4] = {float2(-.9f, -.9f), float2(.9f, -.9f), float2(.9f, .9f), float2(-.9f, .9f)};
     const float2 uvs[4] = {float2(0, 1), float2(1, 1), float2(1, 0), float2(0, 0)};
     Out o;
-    o.position = mul(vp, float4(corners[at[id]].xyz, 1));
+    o.position = float4(fixed_corners[at[id]], .5f, 1);
     o.uv = uvs[at[id]];
     return o;
 }
-// Temporary (Linux black-screen report): a flat, unmistakable colour instead
-// of sampling the texture at all, to isolate the quad's geometry/draw from
-// the picture's content.
 float4 ps(Out i) : SV_TARGET { return float4(1, 0, 1, 1); }
 )";
         const auto vs = compile(quad, "vs", "vs_5_0", "Compile picture quad vertex shader");
