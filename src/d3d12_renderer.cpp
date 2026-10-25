@@ -1036,7 +1036,9 @@ float4 ps(Out i) : SV_TARGET { return float4(picture.SampleLevel(sharp, i.uv, 0)
         p.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         p.DepthStencilState.DepthEnable = TRUE;
         p.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-        p.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+        // Temporary (Linux black-screen report): ALWAYS instead of LESS, to check
+        // whether the quad is failing its depth test against the body behind it.
+        p.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
         quadPipeline_.Reset();
         hr(device_->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&quadPipeline_)), "Create picture quad pipeline");
         quadFormat_ = targetFormat;
