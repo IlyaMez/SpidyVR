@@ -1026,16 +1026,21 @@ cbuffer Corners : register(b1) { float4 corners[4]; };
 Texture2D picture : register(t0);
 SamplerState sharp : register(s0);
 struct Out { float4 position : SV_POSITION; float2 uv : TEXCOORD; };
+// Temporary (Linux black-screen report): a small FIXED-SIZE marker centred
+// on wherever corners[0] actually projects to, instead of the real quad
+// shape. Separates "is the vp*corner transform sane" from "is the real
+// quad's shape/size being clipped away".
 Out vs(uint id : SV_VertexID) {
     const uint at[6] = {0, 1, 2, 0, 2, 3};
+    const float2 marker[4] = {float2(-.05f, -.05f), float2(.05f, -.05f), float2(.05f, .05f), float2(-.05f, .05f)};
     const float2 uvs[4] = {float2(0, 1), float2(1, 1), float2(1, 0), float2(0, 0)};
+    float4 clip = mul(vp, float4(corners[0].xyz, 1));
+    float2 center = clip.xy / clip.w;
     Out o;
-    o.position = mul(vp, float4(corners[at[id]].xyz, 1));
+    o.position = float4(center + marker[at[id]], .5f, 1);
     o.uv = uvs[at[id]];
     return o;
 }
-// Temporary (Linux black-screen report): still a flat colour, so this test
-// is only about whether the quad now lands in the right place.
 float4 ps(Out i) : SV_TARGET { return float4(1, 0, 1, 1); }
 )";
         const auto vs = compile(quad, "vs", "vs_5_0", "Compile picture quad vertex shader");
