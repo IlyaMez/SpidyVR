@@ -4284,6 +4284,19 @@ DWORD WINAPI run(void*) {
                             appendPhoneScreen(phoneScreen, view);
                             phonePicture = {phoneScreen, phoneScreenHalfWidth, phoneScreenHalfHeight,
                                             phoneScreenCorners(view), phoneScreenGlass()};
+                            // Temporary (remove once the Linux phone-screen report is in): the
+                            // picture's CPU-side numbers, once, the first time the phone opens.
+                            static bool loggedPhonePicture;
+                            if (!loggedPhonePicture) {
+                                loggedPhonePicture = true;
+                                char text[200];
+                                std::snprintf(text, sizeof text,
+                                              "Phone screen: %zu vertices, half %.4f x %.4f, corner0 %.3f %.3f %.3f",
+                                              phoneScreen.size(), phonePicture.halfWidth, phonePicture.halfHeight,
+                                              phonePicture.corners[0].x, phonePicture.corners[0].y,
+                                              phonePicture.corners[0].z);
+                                message(5, 0, text);
+                            }
                         }
                         std::array<D3D12Renderer::ViewTarget, 2> overlayViews;
                         // Slow motion recolours the image under the overlay, about each eye's lens.
@@ -4313,6 +4326,14 @@ DWORD WINAPI run(void*) {
                         if (!saved->flatScreen)
                             overlay.renderViews(overlayViews, vertices, true, false, translucent, &grade,
                                                 &phonePicture);
+                        // Temporary (remove once the Linux phone-screen report is in): report once
+                        // if building the phone's screen picture ever throws, instead of only
+                        // finding out from a session-ending exception.
+                        static bool loggedPaintIssue;
+                        if (!loggedPaintIssue && !overlay.paintIssue().empty()) {
+                            loggedPaintIssue = true;
+                            message(5, 0, ("Phone screen picture failed: " + overlay.paintIssue()).c_str());
+                        }
                         overlayMs = std::chrono::duration<double, std::milli>(
                                         std::chrono::steady_clock::now() - overlayStart)
                                         .count();
