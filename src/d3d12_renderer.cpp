@@ -1026,18 +1026,18 @@ cbuffer Corners : register(b1) { float4 corners[4]; };
 Texture2D picture : register(t0);
 SamplerState sharp : register(s0);
 struct Out { float4 position : SV_POSITION; float2 uv : TEXCOORD; };
-// Temporary (Linux black-screen report): a small FIXED-SIZE marker centred
-// on wherever corners[0] actually projects to, instead of the real quad
-// shape. Separates "is the vp*corner transform sane" from "is the real
-// quad's shape/size being clipped away".
+// Temporary (Linux black-screen report): the real per-vertex dynamic index
+// into corners[], like the original shader, but the clip position is
+// manually perspective-divided (w forced to 1) instead of output raw. Tests
+// whether per-vertex array indexing itself is the problem, independent of
+// raw homogeneous/w-based rasterization.
 Out vs(uint id : SV_VertexID) {
     const uint at[6] = {0, 1, 2, 0, 2, 3};
-    const float2 marker[4] = {float2(-.05f, -.05f), float2(.05f, -.05f), float2(.05f, .05f), float2(-.05f, .05f)};
     const float2 uvs[4] = {float2(0, 1), float2(1, 1), float2(1, 0), float2(0, 0)};
-    float4 clip = mul(vp, float4(corners[0].xyz, 1));
-    float2 center = clip.xy / clip.w;
+    float4 clip = mul(vp, float4(corners[at[id]].xyz, 1));
+    float2 ndc = clip.xy / clip.w;
     Out o;
-    o.position = float4(center + marker[at[id]], .5f, 1);
+    o.position = float4(ndc, .5f, 1);
     o.uv = uvs[at[id]];
     return o;
 }
@@ -1123,18 +1123,14 @@ void D3D12Renderer::recordPictureQuad(const Picture& picture, const Mat4& viewPr
     auto all = pictureSrv_->GetGPUDescriptorHandleForHeapStart();
     all.ptr += pictureMips * srvStep;
     list_->SetGraphicsRootDescriptorTable(2, all);
-    // Temporary (Linux black-screen report): the shader's marker always reads
-    // corners[0], so draw it four times, loading a different real corner into
-    // that slot each time, to check whether corners 1-3 land as sanely as 0
-    // did on its own.
+    float cornerConstants[16]{};
     for (unsigned c = 0; c < 4; ++c) {
-        float cornerConstants[16]{};
-        cornerConstants[0] = picture.corners[c].x;
-        cornerConstants[1] = picture.corners[c].y;
-        cornerConstants[2] = picture.corners[c].z;
-        list_->SetGraphicsRoot32BitConstants(1, 16, cornerConstants, 0);
-        list_->DrawInstanced(6, 1, 0, 0);
+        cornerConstants[4 * c] = picture.corners[c].x;
+        cornerConstants[4 * c + 1] = picture.corners[c].y;
+        cornerConstants[4 * c + 2] = picture.corners[c].z;
     }
+    list_->SetGraphicsRoot32BitConstants(1, 16, cornerConstants, 0);
+    list_->DrawInstanced(6, 1, 0, 0);
 }
 void addBox(std::vector<Vertex>& out, Vec3 lo, Vec3 hi, Vec3 color) {
     Vec3 p[] = {{lo.x, lo.y, lo.z}, {hi.x, lo.y, lo.z}, {hi.x, hi.y, lo.z}, {lo.x, hi.y, lo.z},
