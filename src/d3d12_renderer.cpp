@@ -1025,7 +1025,10 @@ Out vs(uint id : SV_VertexID) {
     o.uv = uvs[at[id]];
     return o;
 }
-float4 ps(Out i) : SV_TARGET { return float4(picture.Sample(sharp, i.uv).rgb, 1); }
+// Temporary (Linux black-screen report): forced to mip 0, bypassing the mip
+// chain and automatic LOD selection, to isolate whether the base draw into
+// the picture's texture is itself visible under vkd3d-proton.
+float4 ps(Out i) : SV_TARGET { return float4(picture.SampleLevel(sharp, i.uv, 0).rgb, 1); }
 )";
         const auto vs = compile(quad, "vs", "vs_5_0", "Compile picture quad vertex shader");
         const auto ps = compile(quad, "ps", "ps_5_0", "Compile picture quad pixel shader");
