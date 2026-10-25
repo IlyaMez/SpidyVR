@@ -451,9 +451,14 @@ void D3D12Renderer::renderViews(std::span<const ViewTarget> views, std::span<con
         }
         if (painting) {
             recordPictureQuad(*picture, views[eye].viewProjection);
-            // The overlay's own signature again, for what follows.
+            // The overlay's own signature, vertex buffer and constants again, for what follows.
             list_->SetGraphicsRootSignature(root_.Get());
             list_->SetGraphicsRoot32BitConstants(0, 16, views[eye].viewProjection.data(), 0);
+            if (bytes) {
+                D3D12_VERTEX_BUFFER_VIEW buffer{vertices_->GetGPUVirtualAddress(), static_cast<UINT>(bytes),
+                                                sizeof(Vertex)};
+                list_->IASetVertexBuffers(0, 1, &buffer);
+            }
         }
         if (!translucent.empty()) {
             list_->SetPipelineState(translucent_.Get());
@@ -868,6 +873,12 @@ D3D12_GRAPHICS_PIPELINE_STATE_DESC opaquePipeline(ID3D12RootSignature* root, ID3
     return p;
 }
 constexpr DXGI_FORMAT pictureFormat = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+// The picture quad's own corners, as an actual vertex buffer: vkd3d-proton
+// does not correctly read a root-constants array indexed per vertex (the
+// Linux black-screen report), so the corners travel this way instead.
+struct QuadVertex {
+    float x, y, z, u, v;
+};
 } // namespace
 void D3D12Renderer::preparePicture(DXGI_FORMAT targetFormat) {
     if (!pictureTexture_) {
@@ -996,62 +1007,63 @@ float4 ps(float4 position : SV_POSITION) : SV_TARGET {
         const auto mps = compile(shrink, "ps", "ps_5_0", "Compile mip pixel shader");
         const auto m = opaquePipeline(mipRoot_.Get(), mvs.Get(), mps.Get(), pictureFormat);
         hr(device_->CreateGraphicsPipelineState(&m, IID_PPV_ARGS(&mipPipeline_)), "Create mip pipeline");
-        // The quad: its corners and the view's projection as constants, the
-        // picture sampled with its mips and at a slant as sharp as it lets.
-        // Temporary (Linux black-screen report): the matrix and the corners
-        // split into two root constant blocks instead of one 32-value block,
-        // to test whether a single block mixing a matrix with trailing data
-        // is what vkd3d-proton gets wrong.
-        D3D12_ROOT_PARAMETER quad[3]{};
+        // The quad: the view's projection as a constant, its four corners as
+        // an actual vertex buffer (vkd3d-proton under Proton/Linux does not
+        // correctly read a root-constants array indexed per vertex - see the
+        // Linux black-screen report), the picture sampled with its mips and
+        // at a slant as sharp as it lets.
+        D3D12_ROOT_PARAMETER quad[2]{};
         quad[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
         quad[0].Constants.Num32BitValues = 16;
         quad[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
-        quad[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-        quad[1].Constants.ShaderRegister = 1;
-        quad[1].Constants.Num32BitValues = 16;
-        quad[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
-        quad[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        quad[2].DescriptorTable = {1, &range};
-        quad[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        quad[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        quad[1].DescriptorTable = {1, &range};
+        quad[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
         D3D12_STATIC_SAMPLER_DESC sharp = linear;
         sharp.Filter = D3D12_FILTER_ANISOTROPIC;
         sharp.MaxAnisotropy = 8;
-        const D3D12_ROOT_SIGNATURE_DESC quadSig{3, quad, 1, &sharp, D3D12_ROOT_SIGNATURE_FLAG_NONE};
+        const D3D12_ROOT_SIGNATURE_DESC quadSig{2, quad, 1, &sharp,
+                                                D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT};
         quadRoot_ = signature(device_.Get(), quadSig, "Create picture quad root signature");
+        D3D12_RESOURCE_DESC quadVertexDesc{};
+        quadVertexDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        quadVertexDesc.Width = 6 * sizeof(QuadVertex);
+        quadVertexDesc.Height = 1;
+        quadVertexDesc.DepthOrArraySize = 1;
+        quadVertexDesc.MipLevels = 1;
+        quadVertexDesc.SampleDesc.Count = 1;
+        quadVertexDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        auto uploadHeap = heap(D3D12_HEAP_TYPE_UPLOAD);
+        hr(device_->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE, &quadVertexDesc,
+                                            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&quadVertices_)),
+           "Create picture quad vertex buffer");
     }
     if (!quadPipeline_ || quadFormat_ != targetFormat) {
         const char* quad = R"(
 cbuffer Vp : register(b0) { row_major float4x4 vp; };
-cbuffer Corners : register(b1) { float4 corners[4]; };
 Texture2D picture : register(t0);
 SamplerState sharp : register(s0);
+struct In { float3 position : POSITION; float2 uv : TEXCOORD; };
 struct Out { float4 position : SV_POSITION; float2 uv : TEXCOORD; };
-// Temporary (Linux black-screen report): the real per-vertex dynamic index
-// into corners[], like the original shader, but the clip position is
-// manually perspective-divided (w forced to 1) instead of output raw. Tests
-// whether per-vertex array indexing itself is the problem, independent of
-// raw homogeneous/w-based rasterization.
-Out vs(uint id : SV_VertexID) {
-    const uint at[6] = {0, 1, 2, 0, 2, 3};
-    const float2 uvs[4] = {float2(0, 1), float2(1, 1), float2(1, 0), float2(0, 0)};
-    float4 clip = mul(vp, float4(corners[at[id]].xyz, 1));
-    float2 ndc = clip.xy / clip.w;
+Out vs(In i) {
     Out o;
-    o.position = float4(ndc, .5f, 1);
-    o.uv = uvs[at[id]];
+    o.position = mul(vp, float4(i.position, 1));
+    o.uv = i.uv;
     return o;
 }
-float4 ps(Out i) : SV_TARGET { return float4(1, 0, 1, 1); }
+float4 ps(Out i) : SV_TARGET { return float4(picture.Sample(sharp, i.uv).rgb, 1); }
 )";
         const auto vs = compile(quad, "vs", "vs_5_0", "Compile picture quad vertex shader");
         const auto ps = compile(quad, "ps", "ps_5_0", "Compile picture quad pixel shader");
         auto p = opaquePipeline(quadRoot_.Get(), vs.Get(), ps.Get(), targetFormat);
+        D3D12_INPUT_ELEMENT_DESC quadLayout[] = {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
+        p.InputLayout = {quadLayout, 2};
         p.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         p.DepthStencilState.DepthEnable = TRUE;
         p.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-        // Temporary (Linux black-screen report): ALWAYS instead of LESS, to check
-        // whether the quad is failing its depth test against the body behind it.
-        p.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        p.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
         quadPipeline_.Reset();
         hr(device_->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&quadPipeline_)), "Create picture quad pipeline");
         quadFormat_ = targetFormat;
@@ -1115,6 +1127,18 @@ void D3D12Renderer::recordPicture(const Picture& picture, unsigned first) {
 }
 void D3D12Renderer::recordPictureQuad(const Picture& picture, const Mat4& viewProjection) {
     const UINT srvStep = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    const unsigned at[6] = {0, 1, 2, 0, 2, 3};
+    const float uvs[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+    QuadVertex quadVertices[6];
+    for (unsigned i = 0; i < 6; ++i) {
+        const unsigned c = at[i];
+        quadVertices[i] = {picture.corners[c].x, picture.corners[c].y, picture.corners[c].z, uvs[c][0], uvs[c][1]};
+    }
+    void* mapped{};
+    D3D12_RANGE noRead{0, 0};
+    hr(quadVertices_->Map(0, &noRead, &mapped), "Map picture quad vertices");
+    std::memcpy(mapped, quadVertices, sizeof(quadVertices));
+    quadVertices_->Unmap(0, nullptr);
     list_->SetPipelineState(quadPipeline_.Get());
     list_->SetGraphicsRootSignature(quadRoot_.Get());
     ID3D12DescriptorHeap* heaps[] = {pictureSrv_.Get()};
@@ -1122,14 +1146,10 @@ void D3D12Renderer::recordPictureQuad(const Picture& picture, const Mat4& viewPr
     list_->SetGraphicsRoot32BitConstants(0, 16, viewProjection.data(), 0);
     auto all = pictureSrv_->GetGPUDescriptorHandleForHeapStart();
     all.ptr += pictureMips * srvStep;
-    list_->SetGraphicsRootDescriptorTable(2, all);
-    float cornerConstants[16]{};
-    for (unsigned c = 0; c < 4; ++c) {
-        cornerConstants[4 * c] = picture.corners[c].x;
-        cornerConstants[4 * c + 1] = picture.corners[c].y;
-        cornerConstants[4 * c + 2] = picture.corners[c].z;
-    }
-    list_->SetGraphicsRoot32BitConstants(1, 16, cornerConstants, 0);
+    list_->SetGraphicsRootDescriptorTable(1, all);
+    D3D12_VERTEX_BUFFER_VIEW quadBuffer{quadVertices_->GetGPUVirtualAddress(), sizeof(quadVertices),
+                                        sizeof(QuadVertex)};
+    list_->IASetVertexBuffers(0, 1, &quadBuffer);
     list_->DrawInstanced(6, 1, 0, 0);
 }
 void addBox(std::vector<Vertex>& out, Vec3 lo, Vec3 hi, Vec3 color) {

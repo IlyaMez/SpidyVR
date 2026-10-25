@@ -172,6 +172,9 @@ class D3D12Renderer {
     ComPtr<ID3D12RootSignature> pictureRoot_, mipRoot_, quadRoot_;
     ComPtr<ID3D12PipelineState> picturePipeline_, mipPipeline_, quadPipeline_;
     DXGI_FORMAT quadFormat_ = DXGI_FORMAT_UNKNOWN;
+    // The quad's own four corners, written fresh each frame (see QuadVertex
+    // in d3d12_renderer.cpp).
+    ComPtr<ID3D12Resource> quadVertices_;
 };
 void addBox(std::vector<Vertex>& out, Vec3 min, Vec3 max, Vec3 color);
 void addBeam(std::vector<Vertex>& out, Vec3 a, Vec3 b, float radius, Vec3 color);
