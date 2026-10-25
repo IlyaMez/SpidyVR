@@ -1115,22 +1115,26 @@ void D3D12Renderer::recordPicture(const Picture& picture, unsigned first) {
 }
 void D3D12Renderer::recordPictureQuad(const Picture& picture, const Mat4& viewProjection) {
     const UINT srvStep = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    float cornerConstants[16]{};
-    for (unsigned c = 0; c < 4; ++c) {
-        cornerConstants[4 * c] = picture.corners[c].x;
-        cornerConstants[4 * c + 1] = picture.corners[c].y;
-        cornerConstants[4 * c + 2] = picture.corners[c].z;
-    }
     list_->SetPipelineState(quadPipeline_.Get());
     list_->SetGraphicsRootSignature(quadRoot_.Get());
     ID3D12DescriptorHeap* heaps[] = {pictureSrv_.Get()};
     list_->SetDescriptorHeaps(1, heaps);
     list_->SetGraphicsRoot32BitConstants(0, 16, viewProjection.data(), 0);
-    list_->SetGraphicsRoot32BitConstants(1, 16, cornerConstants, 0);
     auto all = pictureSrv_->GetGPUDescriptorHandleForHeapStart();
     all.ptr += pictureMips * srvStep;
     list_->SetGraphicsRootDescriptorTable(2, all);
-    list_->DrawInstanced(6, 1, 0, 0);
+    // Temporary (Linux black-screen report): the shader's marker always reads
+    // corners[0], so draw it four times, loading a different real corner into
+    // that slot each time, to check whether corners 1-3 land as sanely as 0
+    // did on its own.
+    for (unsigned c = 0; c < 4; ++c) {
+        float cornerConstants[16]{};
+        cornerConstants[0] = picture.corners[c].x;
+        cornerConstants[1] = picture.corners[c].y;
+        cornerConstants[2] = picture.corners[c].z;
+        list_->SetGraphicsRoot32BitConstants(1, 16, cornerConstants, 0);
+        list_->DrawInstanced(6, 1, 0, 0);
+    }
 }
 void addBox(std::vector<Vertex>& out, Vec3 lo, Vec3 hi, Vec3 color) {
     Vec3 p[] = {{lo.x, lo.y, lo.z}, {hi.x, lo.y, lo.z}, {hi.x, hi.y, lo.z}, {lo.x, hi.y, lo.z},
