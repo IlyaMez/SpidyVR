@@ -998,37 +998,44 @@ float4 ps(float4 position : SV_POSITION) : SV_TARGET {
         hr(device_->CreateGraphicsPipelineState(&m, IID_PPV_ARGS(&mipPipeline_)), "Create mip pipeline");
         // The quad: its corners and the view's projection as constants, the
         // picture sampled with its mips and at a slant as sharp as it lets.
-        D3D12_ROOT_PARAMETER quad[2]{};
+        // Temporary (Linux black-screen report): the matrix and the corners
+        // split into two root constant blocks instead of one 32-value block,
+        // to test whether a single block mixing a matrix with trailing data
+        // is what vkd3d-proton gets wrong.
+        D3D12_ROOT_PARAMETER quad[3]{};
         quad[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-        quad[0].Constants.Num32BitValues = 32;
+        quad[0].Constants.Num32BitValues = 16;
         quad[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
-        quad[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        quad[1].DescriptorTable = {1, &range};
-        quad[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        quad[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        quad[1].Constants.ShaderRegister = 1;
+        quad[1].Constants.Num32BitValues = 16;
+        quad[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+        quad[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        quad[2].DescriptorTable = {1, &range};
+        quad[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
         D3D12_STATIC_SAMPLER_DESC sharp = linear;
         sharp.Filter = D3D12_FILTER_ANISOTROPIC;
         sharp.MaxAnisotropy = 8;
-        const D3D12_ROOT_SIGNATURE_DESC quadSig{2, quad, 1, &sharp, D3D12_ROOT_SIGNATURE_FLAG_NONE};
+        const D3D12_ROOT_SIGNATURE_DESC quadSig{3, quad, 1, &sharp, D3D12_ROOT_SIGNATURE_FLAG_NONE};
         quadRoot_ = signature(device_.Get(), quadSig, "Create picture quad root signature");
     }
     if (!quadPipeline_ || quadFormat_ != targetFormat) {
         const char* quad = R"(
-cbuffer Quad : register(b0) { row_major float4x4 vp; float4 corners[4]; };
+cbuffer Vp : register(b0) { row_major float4x4 vp; };
+cbuffer Corners : register(b1) { float4 corners[4]; };
 Texture2D picture : register(t0);
 SamplerState sharp : register(s0);
 struct Out { float4 position : SV_POSITION; float2 uv : TEXCOORD; };
-// Temporary (Linux black-screen report): ignores vp/corners entirely and
-// covers most of the eye's clip space directly, to isolate the draw/pipeline
-// itself from the corners' positioning math.
 Out vs(uint id : SV_VertexID) {
     const uint at[6] = {0, 1, 2, 0, 2, 3};
-    const float2 fixed_corners[4] = {float2(-.9f, -.9f), float2(.9f, -.9f), float2(.9f, .9f), float2(-.9f, .9f)};
     const float2 uvs[4] = {float2(0, 1), float2(1, 1), float2(1, 0), float2(0, 0)};
     Out o;
-    o.position = float4(fixed_corners[at[id]], .5f, 1);
+    o.position = mul(vp, float4(corners[at[id]].xyz, 1));
     o.uv = uvs[at[id]];
     return o;
 }
+// Temporary (Linux black-screen report): still a flat colour, so this test
+// is only about whether the quad now lands in the right place.
 float4 ps(Out i) : SV_TARGET { return float4(1, 0, 1, 1); }
 )";
         const auto vs = compile(quad, "vs", "vs_5_0", "Compile picture quad vertex shader");
@@ -1103,21 +1110,21 @@ void D3D12Renderer::recordPicture(const Picture& picture, unsigned first) {
 }
 void D3D12Renderer::recordPictureQuad(const Picture& picture, const Mat4& viewProjection) {
     const UINT srvStep = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    float constants[32]{};
-    std::memcpy(constants, viewProjection.data(), sizeof(float) * 16);
+    float cornerConstants[16]{};
     for (unsigned c = 0; c < 4; ++c) {
-        constants[16 + 4 * c] = picture.corners[c].x;
-        constants[17 + 4 * c] = picture.corners[c].y;
-        constants[18 + 4 * c] = picture.corners[c].z;
+        cornerConstants[4 * c] = picture.corners[c].x;
+        cornerConstants[4 * c + 1] = picture.corners[c].y;
+        cornerConstants[4 * c + 2] = picture.corners[c].z;
     }
     list_->SetPipelineState(quadPipeline_.Get());
     list_->SetGraphicsRootSignature(quadRoot_.Get());
     ID3D12DescriptorHeap* heaps[] = {pictureSrv_.Get()};
     list_->SetDescriptorHeaps(1, heaps);
-    list_->SetGraphicsRoot32BitConstants(0, 32, constants, 0);
+    list_->SetGraphicsRoot32BitConstants(0, 16, viewProjection.data(), 0);
+    list_->SetGraphicsRoot32BitConstants(1, 16, cornerConstants, 0);
     auto all = pictureSrv_->GetGPUDescriptorHandleForHeapStart();
     all.ptr += pictureMips * srvStep;
-    list_->SetGraphicsRootDescriptorTable(1, all);
+    list_->SetGraphicsRootDescriptorTable(2, all);
     list_->DrawInstanced(6, 1, 0, 0);
 }
 void addBox(std::vector<Vertex>& out, Vec3 lo, Vec3 hi, Vec3 color) {
