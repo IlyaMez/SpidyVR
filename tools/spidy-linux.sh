@@ -130,6 +130,31 @@ fi
 
 echo "Starting Spidy VR. Click the game window once, then load your save (mouse or keyboard)."
 cd "$SPIDY_DIR"
-exec "$CLIENT" --bus-name="$BUS" --directory="$SPIDY_DIR" --unset-env=XR_RUNTIME_JSON \
-    -- wine python/python.exe -u tools/run_game_vr.py --xr-runtime auto "$@" \
-    2> >(grep --line-buffered -v -E 'Fontconfig|fixme:' >&2)
+
+# run_game_vr.py takes the SPIDY VR tab settings (webs, flips, haptics, ...) only as CLI flags and
+# has no memory of its own; Spidy Launcher.exe supplies that memory on Windows. Here, a persisted
+# settings file plays the same part: PERSISTED_ARGS carries last session's settings in, and the
+# session's own 'VR settings from the headset: ...' line (printed when they changed) is saved back
+# out once it exits. Without a Python 3 on PATH, settings just reset to defaults each session.
+PERSISTED_ARGS=()
+if command -v python3 >/dev/null; then
+    mapfile -t PERSISTED_ARGS < <(python3 "$SPIDY_DIR/tools/vr_settings_persist.py" load 2>/dev/null || true)
+fi
+
+SESSION_LOG=$(mktemp)
+trap 'rm -f "$SESSION_LOG"' EXIT
+
+set +e
+"$CLIENT" --bus-name="$BUS" --directory="$SPIDY_DIR" --unset-env=XR_RUNTIME_JSON \
+    -- wine python/python.exe -u tools/run_game_vr.py --xr-runtime auto "${PERSISTED_ARGS[@]}" "$@" \
+    2> >(grep --line-buffered -v -E 'Fontconfig|fixme:' >&2) \
+    | tee "$SESSION_LOG"
+status=${PIPESTATUS[0]}
+set -e
+
+if command -v python3 >/dev/null; then
+    settings_line=$(grep -F 'VR settings from the headset: ' "$SESSION_LOG" | tail -n1 || true)
+    [[ -n "$settings_line" ]] && python3 "$SPIDY_DIR/tools/vr_settings_persist.py" save "$settings_line"
+fi
+
+exit "$status"
