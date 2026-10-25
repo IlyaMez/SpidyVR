@@ -10,3 +10,4 @@ __pycache__/
 /bhaptics-app.local
 # The phone's songs, in a checkout the launcher's folder (phone_music.hpp).
 /Music/
+.idea/
