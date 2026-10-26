@@ -6,6 +6,7 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <span>
+#include <string>
 #include <vector>
 #include <windows.h>
 #include <wrl/client.h>
@@ -99,6 +100,13 @@ class D3D12Renderer {
     ID3D12CommandQueue* queue() const {
         return queue_.Get();
     }
+    // Set once a frame by renderViews when preparing the picture's texture
+    // and pipelines throws: what it caught, so a picture that fails to build
+    // is skipped for that frame instead of ending the session. Empty when
+    // nothing went wrong.
+    const std::string& paintIssue() const {
+        return paintIssue_;
+    }
 
   private:
     void pipeline(DXGI_FORMAT format);
@@ -141,6 +149,7 @@ class D3D12Renderer {
     DXGI_FORMAT format_ = DXGI_FORMAT_UNKNOWN;
     unsigned width_{}, height_{};
     std::size_t capacity_{};
+    std::string paintIssue_;
     // blit(): a full-screen triangle sampling one shader-visible descriptor.
     ComPtr<ID3D12DescriptorHeap> srv_;
     ComPtr<ID3D12RootSignature> blitRoot_;
@@ -163,6 +172,9 @@ class D3D12Renderer {
     ComPtr<ID3D12RootSignature> pictureRoot_, mipRoot_, quadRoot_;
     ComPtr<ID3D12PipelineState> picturePipeline_, mipPipeline_, quadPipeline_;
     DXGI_FORMAT quadFormat_ = DXGI_FORMAT_UNKNOWN;
+    // The quad's own four corners, written fresh each frame (see QuadVertex
+    // in d3d12_renderer.cpp).
+    ComPtr<ID3D12Resource> quadVertices_;
 };
 void addBox(std::vector<Vertex>& out, Vec3 min, Vec3 max, Vec3 color);
 void addBeam(std::vector<Vertex>& out, Vec3 a, Vec3 b, float radius, Vec3 color);
