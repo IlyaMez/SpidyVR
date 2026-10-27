@@ -2034,10 +2034,14 @@ DWORD WINAPI run(void*) {
                         presented = false;
                     } else if (vrPlay && !wasGameplay) {
                         // Gameplay counts its own images: the screen before it
-                        // may have had none for a while (loading).
+                        // may have had none for a while (loading). Coming back
+                        // from a menu or cutscene, the native renderer is
+                        // switching out of the screen's single stereo pair and
+                        // back to a synced pair for both eyes, which a menu's
+                        // own close hitch can delay past the usual 3 s budget.
                         lastNewImageMs = 0;
                         presented = false;
-                        firstImageDeadline = nativeStarted ? GetTickCount64() + 3000 : 0;
+                        firstImageDeadline = nativeStarted ? GetTickCount64() + 6000 : 0;
                     }
                     wasGameplay = vrPlay;
                     const bool controlsVisible = recentPresentation(lastNewImageMs, GetTickCount64());
