@@ -338,17 +338,10 @@ void D3D12Renderer::renderViews(std::span<const ViewTarget> views, std::span<con
     const bool grading = grade && preserveColor && grade->visible();
     if (grading)
         prepareGrade(format);
-    bool painting = picture && !picture->vertices.empty() && picture->halfWidth > 0 &&
-                    picture->halfHeight > 0;
-    paintIssue_.clear();
-    if (painting) {
-        try {
-            preparePicture(format);
-        } catch (const std::exception& e) {
-            paintIssue_ = e.what();
-            painting = false;
-        }
-    }
+    const bool painting = picture && !picture->vertices.empty() && picture->halfWidth > 0 &&
+                          picture->halfHeight > 0;
+    if (painting)
+        preparePicture(format);
     if (!depth_ || width != width_ || height != height_) {
         depth_.Reset();
         width_ = width;

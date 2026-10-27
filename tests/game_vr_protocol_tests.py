@@ -2057,6 +2057,39 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(settings_line(start, dict(vr_settings=dict(start, calibration_prompt=False)))
                         .endswith(' calibration_prompt=0'))
 
+    def test_a_linux_session_starts_with_the_settings_the_last_one_left(self):
+        # tools/spidy-linux.sh has no launcher: vr_settings_persist.py keeps the line and gives the arguments back.
+        import vr_settings_persist as persist
+        start = dict(aim_markers=True, web_grab=True, air_webs=True, web_shooter=True, punch=True, body=True,
+                     swing_speed=32.0, weight=100, snap_turn=30, smooth_turn=0, haptics=100, screen_size=1,
+                     flips=False, flip_speed=180, trigger_webs=False, hud=2, stand_on_walls=True, screen_depth=2,
+                     arcade_webs=False, body_haptics=100, eye_height_mm=0, arm_length_mm=0, calibration_prompt=True)
+        with tempfile.TemporaryDirectory() as folder:
+            saved = pathlib.Path(folder)/'spidy'/'vr_settings.txt'
+            # Nothing saved yet: no arguments, not even an empty one.
+            with patch.object(persist, 'settings_file', return_value=saved), patch('builtins.print') as out:
+                self.assertEqual(persist.main(['', 'load']), 0)
+            out.assert_not_called()
+            line = settings_line(start, dict(vr_settings=dict(start, air_webs=False, flips=True, weight=150,
+                                                              snap_turn=0, eye_height_mm=1630, arm_length_mm=590)))
+            persist.save(line, saved)
+            args = persist.arguments(persist.parse(saved.read_text()))
+            self.assertEqual(args, ['--no-air-webs', '--flips', '--eye-height', '1630', '--arm-length', '590',
+                                    '--snap-turn', '0', '--weight', '150'])
+            # A later session that changed only the HUD keeps the rest; a half-made calibration keeps the old one.
+            persist.save(settings_line(start, dict(vr_settings=dict(start, air_webs=False, flips=True, weight=150,
+                                                                    snap_turn=0, hud=0, eye_height_mm=1700,
+                                                                    arm_length_mm=0))), saved)
+            args = persist.arguments(persist.parse(saved.read_text()))
+            self.assertIn('--hud', args)
+            self.assertEqual(args[args.index('--eye-height') + 1], '1630')
+        # Every argument it gives is one run_game_vr.py takes.
+        script = (pathlib.Path(__file__).resolve().parents[1]/'tools'/'run_game_vr.py').read_text(encoding='utf-8')
+        flags = [flag for *_, flag in persist.SWITCHES + persist.NUMBERS] + ['--eye-height', '--arm-length',
+                                                                           '--no-calibration-prompt']
+        for flag in flags:
+            self.assertIn(f"add_argument('{flag}'", script)
+
 
 if __name__ == '__main__':
     unittest.main()

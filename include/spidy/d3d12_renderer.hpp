@@ -6,7 +6,6 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <span>
-#include <string>
 #include <vector>
 #include <windows.h>
 #include <wrl/client.h>
@@ -100,13 +99,6 @@ class D3D12Renderer {
     ID3D12CommandQueue* queue() const {
         return queue_.Get();
     }
-    // Set once a frame by renderViews when preparing the picture's texture
-    // and pipelines throws: what it caught, so a picture that fails to build
-    // is skipped for that frame instead of ending the session. Empty when
-    // nothing went wrong.
-    const std::string& paintIssue() const {
-        return paintIssue_;
-    }
 
   private:
     void pipeline(DXGI_FORMAT format);
@@ -149,7 +141,6 @@ class D3D12Renderer {
     DXGI_FORMAT format_ = DXGI_FORMAT_UNKNOWN;
     unsigned width_{}, height_{};
     std::size_t capacity_{};
-    std::string paintIssue_;
     // blit(): a full-screen triangle sampling one shader-visible descriptor.
     ComPtr<ID3D12DescriptorHeap> srv_;
     ComPtr<ID3D12RootSignature> blitRoot_;

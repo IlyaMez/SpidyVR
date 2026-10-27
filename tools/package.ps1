@@ -20,7 +20,7 @@ foreach ($name in $modules + 'spidy_launcher.exe') {
 $tools = @('run_game_vr', 'vr_launcher', 'vr_display', 'xr_runtime', 'inspect_game', 'bridge_game', 'capture_game_state',
            'capture_movement', 'capture_stereo', 'observe_game', 'probe_game_grab', 'probe_game_screen',
            'probe_game_swing', 'probe_menu_pad', 'probe_native_motion', 'probe_native_rays', 'probe_render',
-           'probe_stereo', 'probe_stereo_gpu', 'game_freeze')
+           'probe_stereo', 'probe_stereo_gpu', 'game_freeze', 'vr_settings_persist')
 
 # Python 3.12.10 is the newest 3.12 with Windows binaries; its MD5 matches python.org's release page.
 $pythonVersion = '3.12.10'
