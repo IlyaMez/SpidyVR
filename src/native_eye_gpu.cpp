@@ -96,6 +96,10 @@ std::array<CopyCommands, 3> captureCommands, presentCommands, screenCommands, mi
 std::array<ComPtr<ID3D12Resource>, 2> stagedEyes;
 EyePairState::Stamp capturedStamp;
 uint64_t capturedPairs{}, reusedPairs{}, capturedMs{};
+// Diagnostic only: stagePair() returning early with no fault set, because the
+// capture command pool had nothing finished on the GPU yet (readyCommands()
+// found every slot's fence still ahead of the completed value).
+uint64_t stageBusyStalls_{};
 // The game's presented frame (submission lock). A texture replaced by a new
 // size stays alive for a few seconds, for draws still reading it.
 std::atomic<bool> screenWanted{};
@@ -368,8 +372,10 @@ void stagePair(EyePairState::Stamp stamp) {
             }
         }
     auto* slot = readyCommands(captureCommands);
-    if (!slot)
+    if (!slot) {
+        stageBusyStalls_ += !fault;
         return;
+    }
     for (unsigned i = 0; i < 2; ++i)
         copyEyeTexture(slot->list.Get(), resources[i].Get(), states[i], stagedEyes[i].Get(), originalBarrier,
                        D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -1041,6 +1047,10 @@ uint32_t error() {
 Data snapshot() {
     std::lock_guard lock(telemetry);
     return SpidyGpuData;
+}
+uint64_t stageBusyStalls() {
+    std::lock_guard lock(recording);
+    return stageBusyStalls_;
 }
 void registerEye(unsigned eye, ID3D12Resource* resource) {
     if (!enabled || eye >= 2 || !resource)

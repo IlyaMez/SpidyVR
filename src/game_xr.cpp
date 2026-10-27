@@ -1476,12 +1476,14 @@ DWORD WINAPI run(void*) {
                                      std::to_string(gpu.pairs) + ", begins " + std::to_string(gpu.begins[0]) + "/" +
                                      std::to_string(gpu.begins[1]) + ", ends " + std::to_string(gpu.ends[0]) + "/" +
                                      std::to_string(gpu.ends[1]) + ", captured " + std::to_string(gpu.captured) +
+                                     " @" + std::to_string(gpu.capturedSerial) +
                                      ", last copy serial " + std::to_string(lastCopySerial) + " gen " +
                                      std::to_string(lastCopyGeneration) + (lastCopyFound ? " found" : " NOT FOUND") +
                                      ", last xr gate shouldRender=" + std::to_string(gate.shouldRender) +
                                      " valid=" + std::to_string(gate.trackedValid) +
                                      " ready=" + std::to_string(gate.ready) +
-                                     " drawn=" + std::to_string(gate.drawn) + ")";
+                                     " drawn=" + std::to_string(gate.drawn) + ", capture pool busy " +
+                                     std::to_string(native_gpu::stageBusyStalls()) + ")";
                 throw std::runtime_error((lastNewImageMs ? "Native eye presentation stalled for 3 seconds"
                                                           : "No native eye images reached OpenXR within 3 seconds") +
                                           detail);

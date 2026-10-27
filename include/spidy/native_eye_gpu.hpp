@@ -39,6 +39,11 @@ uint32_t error();
 // begin/end markers have stopped advancing, if either, when a pair never
 // becomes ready.
 Data snapshot();
+// Diagnostic only, not part of Data's stable layout: how many times
+// stagePair() found the capture command pool still busy on the GPU (every
+// slot's fence ahead of the completed value) and silently gave up for that
+// attempt, with no fault set.
+uint64_t stageBusyStalls();
 // Capture mode only: copies the newest captured pair into the pixel buffers
 // that Data publishes, without stopping. Returns 0, or why nothing was copied.
 DWORD freeze();
