@@ -1460,10 +1460,20 @@ DWORD WINAPI run(void*) {
             // VR play has eye images; the game played on its screen has the
             // screen's, which these do not count.
             const bool eyesWanted = motion.active && !flatScreen;
-            if (eyesWanted && firstImageDeadline && !lastNewImageMs && GetTickCount64() >= firstImageDeadline)
-                throw std::runtime_error("No native eye images reached OpenXR within 3 seconds");
-            if (eyesWanted && lastNewImageMs && GetTickCount64() - lastNewImageMs >= 3000)
-                throw std::runtime_error("Native eye presentation stalled for 3 seconds");
+            if ((eyesWanted && firstImageDeadline && !lastNewImageMs && GetTickCount64() >= firstImageDeadline) ||
+                (eyesWanted && lastNewImageMs && GetTickCount64() - lastNewImageMs >= 3000)) {
+                // Diagnostic only: which eye's GPU begin/end markers stopped
+                // advancing, if either, when the pair that ready() wants
+                // never completes.
+                const auto gpu = native_gpu::snapshot();
+                const auto detail = " (fault " + std::to_string(gpu.error) + ", pairs " +
+                                     std::to_string(gpu.pairs) + ", begins " + std::to_string(gpu.begins[0]) + "/" +
+                                     std::to_string(gpu.begins[1]) + ", ends " + std::to_string(gpu.ends[0]) + "/" +
+                                     std::to_string(gpu.ends[1]) + ")";
+                throw std::runtime_error((lastNewImageMs ? "Native eye presentation stalled for 3 seconds"
+                                                          : "No native eye images reached OpenXR within 3 seconds") +
+                                          detail);
+            }
             const bool active = runtime.frameStereo(
                 [&](const XrFrame& trackedFrame) {
                     XrFrame frame = trackedFrame;

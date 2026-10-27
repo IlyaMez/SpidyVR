@@ -1038,6 +1038,10 @@ void leaveMarker() {
 uint32_t error() {
     return fault.load();
 }
+Data snapshot() {
+    std::lock_guard lock(telemetry);
+    return SpidyGpuData;
+}
 void registerEye(unsigned eye, ID3D12Resource* resource) {
     if (!enabled || eye >= 2 || !resource)
         return;

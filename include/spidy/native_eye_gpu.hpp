@@ -35,6 +35,10 @@ bool waitCopy(uint64_t serial, uint32_t timeoutMs);
 // exact poses required for projection-layer submission, including on reuse.
 bool copyLatest(ID3D12Resource* left, ID3D12Resource* right, uint64_t& serial, uint64_t& generation);
 uint32_t error();
+// A thread-safe copy of the published counters (diagnostic): which eye's
+// begin/end markers have stopped advancing, if either, when a pair never
+// becomes ready.
+Data snapshot();
 // Capture mode only: copies the newest captured pair into the pixel buffers
 // that Data publishes, without stopping. Returns 0, or why nothing was copied.
 DWORD freeze();
