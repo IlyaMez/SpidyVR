@@ -706,6 +706,11 @@ DWORD WINAPI run(void*) {
     // lastPresentedMs: an image was on show. lastNewImageMs: the game delivered a newer one.
     uint64_t firstImageDeadline{}, lastPresentedMs{}, lastNewImageMs{};
     bool presented{}, wasGameplay{};
+    // Diagnostic only: the newest pair copyLatest actually returned, and
+    // whether history still had a matching command for it (vs. the native
+    // pipeline itself not producing anything new).
+    uint64_t lastCopySerial{}, lastCopyGeneration{};
+    bool lastCopyFound{};
     // The last frame's predicted display time; held images age against it.
     int64_t displayTime{};
     Presentation shownKind{};
@@ -1469,7 +1474,10 @@ DWORD WINAPI run(void*) {
                 const auto detail = " (fault " + std::to_string(gpu.error) + ", pairs " +
                                      std::to_string(gpu.pairs) + ", begins " + std::to_string(gpu.begins[0]) + "/" +
                                      std::to_string(gpu.begins[1]) + ", ends " + std::to_string(gpu.ends[0]) + "/" +
-                                     std::to_string(gpu.ends[1]) + ")";
+                                     std::to_string(gpu.ends[1]) + ", captured " + std::to_string(gpu.captured) +
+                                     ", last copy serial " + std::to_string(lastCopySerial) + " gen " +
+                                     std::to_string(lastCopyGeneration) + (lastCopyFound ? " found" : " NOT FOUND") +
+                                     ")";
                 throw std::runtime_error((lastNewImageMs ? "Native eye presentation stalled for 3 seconds"
                                                           : "No native eye images reached OpenXR within 3 seconds") +
                                           detail);
@@ -4147,6 +4155,11 @@ DWORD WINAPI run(void*) {
                                                          imageGeneration);
                     check(native_gpu::error(), "GPU eye bridge");
                     const auto* saved = copied ? history.find(imageSerial, displayTime) : nullptr;
+                    if (copied) {
+                        lastCopySerial = imageSerial;
+                        lastCopyGeneration = imageGeneration;
+                        lastCopyFound = saved != nullptr;
+                    }
                     copied = copied && saved;
                     copyMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
                                                                        copyStart)
