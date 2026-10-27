@@ -1471,13 +1471,17 @@ DWORD WINAPI run(void*) {
                 // advancing, if either, when the pair that ready() wants
                 // never completes.
                 const auto gpu = native_gpu::snapshot();
+                const auto gate = runtime.lastGate();
                 const auto detail = " (fault " + std::to_string(gpu.error) + ", pairs " +
                                      std::to_string(gpu.pairs) + ", begins " + std::to_string(gpu.begins[0]) + "/" +
                                      std::to_string(gpu.begins[1]) + ", ends " + std::to_string(gpu.ends[0]) + "/" +
                                      std::to_string(gpu.ends[1]) + ", captured " + std::to_string(gpu.captured) +
                                      ", last copy serial " + std::to_string(lastCopySerial) + " gen " +
                                      std::to_string(lastCopyGeneration) + (lastCopyFound ? " found" : " NOT FOUND") +
-                                     ")";
+                                     ", last xr gate shouldRender=" + std::to_string(gate.shouldRender) +
+                                     " valid=" + std::to_string(gate.trackedValid) +
+                                     " ready=" + std::to_string(gate.ready) +
+                                     " drawn=" + std::to_string(gate.drawn) + ")";
                 throw std::runtime_error((lastNewImageMs ? "Native eye presentation stalled for 3 seconds"
                                                           : "No native eye images reached OpenXR within 3 seconds") +
                                           detail);

@@ -800,6 +800,7 @@ bool XrRuntime::frameStereo(const std::function<bool(const XrFrame&)>& prepare,
             end.layerCount = flatScreen_ && stereoScreen_ ? 2 : 1;
             end.layers = layers;
         }
+        lastGate_ = {state.shouldRender != XR_FALSE, tracked.valid, ready, drawn};
         endCalled = true;
         phase = Clock::now();
         xr(xrEndFrame(session_, &end), "Submit stereo frame");

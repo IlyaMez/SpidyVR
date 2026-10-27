@@ -39,6 +39,15 @@ class XrRuntime {
     bool lastFrameSubmitted() const {
         return lastFrameSubmitted_;
     }
+    // Diagnostic only: why the last frameStereo call did or didn't submit a
+    // projection layer, so a healthy native pipeline (a valid, drawn pair)
+    // can be told apart from OpenXR itself declining to render the frame.
+    struct LastGate {
+        bool shouldRender{}, trackedValid{}, ready{}, drawn{};
+    };
+    LastGate lastGate() const {
+        return lastGate_;
+    }
     const XrFrameTiming& lastFrameTiming() const {
         return frameTiming_;
     }
@@ -151,6 +160,7 @@ class XrRuntime {
     XrTime previousTime_{};
     bool running_{}, exit_{};
     bool lastFrameSubmitted_{};
+    LastGate lastGate_{};
     bool flatScreen_{}, stereoScreen_{};
     Pose screenPose_{};
     float screenAspect_ = 16.f / 9, screenWidth_ = 3.2f;
