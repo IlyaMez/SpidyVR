@@ -1465,8 +1465,14 @@ DWORD WINAPI run(void*) {
             // VR play has eye images; the game played on its screen has the
             // screen's, which these do not count.
             const bool eyesWanted = motion.active && !flatScreen;
-            if ((eyesWanted && firstImageDeadline && !lastNewImageMs && GetTickCount64() >= firstImageDeadline) ||
-                (eyesWanted && lastNewImageMs && GetTickCount64() - lastNewImageMs >= 3000)) {
+            // A frame that reuses the last good eye pair still counts: the
+            // headset keeps showing something. Only a stretch with nothing
+            // presented at all - new or reused - means eye images truly
+            // stopped reaching OpenXR. The game can pause producing a fresh
+            // stereo pair for a couple of seconds around a menu closing
+            // without that being a failure worth tearing the session down for.
+            if ((eyesWanted && firstImageDeadline && !lastPresentedMs && GetTickCount64() >= firstImageDeadline) ||
+                (eyesWanted && lastPresentedMs && GetTickCount64() - lastPresentedMs >= 3000)) {
                 // Diagnostic only: which eye's GPU begin/end markers stopped
                 // advancing, if either, when the pair that ready() wants
                 // never completes.
@@ -1484,8 +1490,8 @@ DWORD WINAPI run(void*) {
                                      " ready=" + std::to_string(gate.ready) +
                                      " drawn=" + std::to_string(gate.drawn) + ", capture pool busy " +
                                      std::to_string(native_gpu::stageBusyStalls()) + ")";
-                throw std::runtime_error((lastNewImageMs ? "Native eye presentation stalled for 3 seconds"
-                                                          : "No native eye images reached OpenXR within 3 seconds") +
+                throw std::runtime_error((lastPresentedMs ? "Native eye presentation stalled for 3 seconds"
+                                                           : "No native eye images reached OpenXR within 3 seconds") +
                                           detail);
             }
             const bool active = runtime.frameStereo(
