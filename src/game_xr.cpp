@@ -706,11 +706,6 @@ DWORD WINAPI run(void*) {
     // lastPresentedMs: an image was on show. lastNewImageMs: the game delivered a newer one.
     uint64_t firstImageDeadline{}, lastPresentedMs{}, lastNewImageMs{};
     bool presented{}, wasGameplay{};
-    // Diagnostic only: the newest pair copyLatest actually returned, and
-    // whether history still had a matching command for it (vs. the native
-    // pipeline itself not producing anything new).
-    uint64_t lastCopySerial{}, lastCopyGeneration{};
-    bool lastCopyFound{};
     // The last frame's predicted display time; held images age against it.
     int64_t displayTime{};
     Presentation shownKind{};
@@ -1472,28 +1467,9 @@ DWORD WINAPI run(void*) {
             // stereo pair for a couple of seconds around a menu closing
             // without that being a failure worth tearing the session down for.
             if ((eyesWanted && firstImageDeadline && !lastPresentedMs && GetTickCount64() >= firstImageDeadline) ||
-                (eyesWanted && lastPresentedMs && GetTickCount64() - lastPresentedMs >= 3000)) {
-                // Diagnostic only: which eye's GPU begin/end markers stopped
-                // advancing, if either, when the pair that ready() wants
-                // never completes.
-                const auto gpu = native_gpu::snapshot();
-                const auto gate = runtime.lastGate();
-                const auto detail = " (fault " + std::to_string(gpu.error) + ", pairs " +
-                                     std::to_string(gpu.pairs) + ", begins " + std::to_string(gpu.begins[0]) + "/" +
-                                     std::to_string(gpu.begins[1]) + ", ends " + std::to_string(gpu.ends[0]) + "/" +
-                                     std::to_string(gpu.ends[1]) + ", captured " + std::to_string(gpu.captured) +
-                                     " @" + std::to_string(gpu.capturedSerial) +
-                                     ", last copy serial " + std::to_string(lastCopySerial) + " gen " +
-                                     std::to_string(lastCopyGeneration) + (lastCopyFound ? " found" : " NOT FOUND") +
-                                     ", last xr gate shouldRender=" + std::to_string(gate.shouldRender) +
-                                     " valid=" + std::to_string(gate.trackedValid) +
-                                     " ready=" + std::to_string(gate.ready) +
-                                     " drawn=" + std::to_string(gate.drawn) + ", capture pool busy " +
-                                     std::to_string(native_gpu::stageBusyStalls()) + ")";
-                throw std::runtime_error((lastPresentedMs ? "Native eye presentation stalled for 3 seconds"
-                                                           : "No native eye images reached OpenXR within 3 seconds") +
-                                          detail);
-            }
+                (eyesWanted && lastPresentedMs && GetTickCount64() - lastPresentedMs >= 3000))
+                throw std::runtime_error(lastPresentedMs ? "Native eye presentation stalled for 3 seconds"
+                                                          : "No native eye images reached OpenXR within 3 seconds");
             const bool active = runtime.frameStereo(
                 [&](const XrFrame& trackedFrame) {
                     XrFrame frame = trackedFrame;
@@ -4167,11 +4143,6 @@ DWORD WINAPI run(void*) {
                                                          imageGeneration);
                     check(native_gpu::error(), "GPU eye bridge");
                     const auto* saved = copied ? history.find(imageSerial, displayTime) : nullptr;
-                    if (copied) {
-                        lastCopySerial = imageSerial;
-                        lastCopyGeneration = imageGeneration;
-                        lastCopyFound = saved != nullptr;
-                    }
                     copied = copied && saved;
                     copyMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
                                                                        copyStart)
