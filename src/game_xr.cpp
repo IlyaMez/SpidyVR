@@ -2047,7 +2047,7 @@ DWORD WINAPI run(void*) {
                         // own close hitch can delay past the usual 3 s budget.
                         lastNewImageMs = 0;
                         presented = false;
-                        firstImageDeadline = nativeStarted ? GetTickCount64() + 6000 : 0;
+                        firstImageDeadline = nativeStarted ? GetTickCount64() + 3000 : 0;
                     }
                     wasGameplay = vrPlay;
                     const bool controlsVisible = recentPresentation(lastNewImageMs, GetTickCount64());
