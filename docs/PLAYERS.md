@@ -800,8 +800,24 @@ VR settings
                    arrows, target circle, impact/combo effects, KO text and
                    automatic combat slow-motion screen effects. Spider-Sense
                    attack warnings and offscreen direction markers remain
-                   visible. Combat controls, sound and vibration still work. Web aim markers and the
+                   visible. Off also removes directional combo requirements:
+                   uppercuts launch freely, downward blows knock standing enemies
+                   down or slam airborne enemies into the ground, even on a
+                   finisher count. Punch speed, contact and free-hand rules
+                   still apply. Sound and vibration still work. Web aim markers and the
                    game's own HUD have their existing separate controls.
+  JOYSTICK WALL RUN CAMERA ... off by default: the left stick supplies wall
+                   velocity while the game sees a neutral movement stick,
+                   so the existing momentum wall-running gait and camera
+                   placement take over. The normal momentum wall clearance
+                   is retained; no new body lean or close-view pose is added.
+                   On restores the old wall-floor camera transition.
+                   WALL RUN CAMERA TILT controls the momentum camera bank.
+  HALF PUNCH DAMAGE ... off by default. On halves VR punch and web-strike
+                   health damage, including uppercuts, smashes, counters and
+                   finishers. Launch and smash velocity, knockback, combo
+                   rules and punch recognition do not change. Off restores
+                   normal damage. This is not a global game damage setting.
   EXPERIMENTAL ... FLIPS (off until you switch it on) uses the right stick
                    in the air; release holds the angle and A returns upright.
                    CONTROLLED FLIPS is a separate A-toggle mode, above.

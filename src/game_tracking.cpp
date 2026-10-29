@@ -236,6 +236,7 @@ void GameTrackingRig::reset() {
     const bool flips = flips_, controlledFlips = controlledFlips_;
     const bool triggerWebs = triggerWebs_, standOnWalls = standOnWalls_;
     const bool handClimb = handClimb_, runViewEnabled = runViewEnabled_, cameraTilt = runCameraTilt_;
+    const bool joystickCamera = joystickRunCamera_;
     const FlipMotion flip = flip_;
     const auto autoSettings = autoSettings_;
     *this = {};
@@ -247,6 +248,7 @@ void GameTrackingRig::reset() {
     triggerWebs_ = triggerWebs;
     standOnWalls_ = standOnWalls;
     handClimb_ = handClimb;
+    joystickRunCamera_ = joystickCamera;
     runViewEnabled_ = runViewEnabled;
     runCameraTilt_ = cameraTilt;
     wallDistance_ = wallDistance;
@@ -528,7 +530,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         const Quat floor = arc(surfaceTurn_.rotate({0, 1, 0}), held) * surfaceTurn_;
         const Vec3 level = horizontal(floor.conjugate().rotate(travel));
         const Vec3 tracked = horizontal(f.head.orientation.rotate({0, 0, -1}));
-        if (length(level) > .5f && length(tracked) > .5f) {
+        if (joystickRunCamera_ && length(level) > .5f && length(tracked) > .5f) {
             const float yaw = std::atan2(-level.x, -level.z) - std::atan2(-tracked.x, -tracked.z);
             rig_.turn(std::remainder(yaw - rig_.yaw, 2 * pi), f.head.position);
         }
@@ -544,12 +546,12 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         runHeadYaw_ = headYaw;
         runNormal_ = held;
         runYaw_ = rig_.yaw;
-        wallRoll_.reset();
+        if (joystickRunCamera_) wallRoll_.reset();
     }
     wallRunning_ = wallRun;
     if (handClimb_ && !ventCrawl && holds && std::abs(held.y) < .5f) {
         const Vec3 face = normalized(Vec3{held.x, 0, held.z});
-        if (!wallRun && length(climbNormal_) > .5f) {
+        if ((!wallRun || !joystickRunCamera_) && length(climbNormal_) > .5f) {
             // Carry the climbing view around a building's side without an
             // instantaneous quarter-turn or the wall-floor standing view.
             const float remaining = std::atan2(cross(climbNormal_, face).y, dot(climbNormal_, face));
@@ -562,7 +564,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     } else {
         climbNormal_ = {};
     }
-    if (!holds || !standOnWalls_ || (handClimb_ && !wallRun))
+    if (!holds || !standOnWalls_ || (handClimb_ && (!wallRun || !joystickRunCamera_)))
         standing_ = false;
     else if (handClimb_ || surface.crawl ||
              (std::isfinite(surface.speed) && surface.speed < (walks ? wallStrideSpeed : wallStandSpeed)))
@@ -714,14 +716,14 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     const float runSpeed = finite(runVelocity) ? length(runVelocity) : 0.f;
     const bool runView = runViewEnabled_ && handClimb_ && holds && std::abs(held.y) < .5f &&
         !ventCrawl && !f.jump && !runViewSupports_ && runSpeed > .25f &&
-        (wallRun || runSpeed > (runViewActive_ ? wallStandSpeed : 3.f));
+        ((wallRun && joystickRunCamera_) || runSpeed > (runViewActive_ ? wallStandSpeed : 3.f));
     Vec3 runOffset{};
     if (runView) {
         const float vertical = std::abs(dot(runVelocity / runSpeed,
             normalized(Vec3{0, 1, 0} - held * held.y)));
         // The wall-standing view brings the aligned pelvis closer to the facade.
         // Give joystick runs extra room without changing their viewing angle.
-        const float room = wallRun ? runCameraDistance_ :
+        const float room = wallRun && joystickRunCamera_ ? runCameraDistance_ :
             .75f + (momentumView_.distance - .75f) * (1 - vertical);
         runOffset = held * (room - dot(placed.toWorld(f.head).position - surface.anchor, held));
     }
@@ -732,7 +734,8 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     // A cosmetic bank around the tracked eyes, only during momentum runs.
     // Keep it out of the stored climb heading and the joystick body-view turn.
     const Pose unbankedHead = placed.toWorld(f.head);
-    const bool bankSurface = runView && !wallRun && !walks && !standing_;
+    const bool bankSurface = runView && !(wallRun && joystickRunCamera_) &&
+        (!walks || (wallRun && !joystickRunCamera_)) && !standing_;
     float wantedBank = 0;
     if (bankSurface && runCameraTilt_) {
         const Vec3 travel = runVelocity / runSpeed;
@@ -784,6 +787,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         placed.origin += out.headPush;
     }
     out.standing = standing_;
+    out.joystickWallRun = wallRun;
     out.viewTilt = std::acos(std::clamp(surfaceTurn_.rotate({0, 1, 0}).y, -1.f, 1.f));
     out.standUp = surfaceTurn_.rotate({0, 1, 0});
     out.floor = surfaceShift_;
@@ -845,7 +849,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     out.gazeValid = f.gazeValid && validTrackedPose(f.gaze);
     if (out.gazeValid)
         out.gazePose = placed.toWorld(f.gaze);
-    if (handClimb_ && holds && !wallRun)
+    if (handClimb_ && holds && (!wallRun || !joystickRunCamera_))
         climbView_ = unbankedHead.orientation;
     for (unsigned i = 0; i < 2; ++i) {
         out.eyes[i] = worldPose(placed.toWorld(f.eyes[i].pose));

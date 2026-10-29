@@ -284,7 +284,7 @@ void breakAttack(const SpiderSense::Counter& c, Vec3 head) {
     way.y = 0;
     request.direction = length(way) > 1e-3f ? normalized(way) : Vec3{0, 0, -1};
     request.normal = request.direction * -1.f;
-    request.amount = 1;
+    request.amount = fighter.halfPunchDamage ? .5f : 1.f;
     request.type = 1; // kMelee
     request.knockback = static_cast<int32_t>(Knockback::Knockback);
     request.knockbackAmount = 3;
@@ -401,20 +401,28 @@ void land(PunchEvent e, bool byStrike) {
     // and he then goes the way that fist went.
     const Cue before = cues.cue();
     const Vec3 went = byStrike ? strike.direction() : e.direction;
-    const bool called = cues.answers(went, e.point - headAt);
+    const bool called = fighter.combatVisuals && cues.answers(went, e.point - headAt);
+    if (!fighter.combatVisuals && byStrike) {
+        // Keep the player's upward/downward swing when the strike arrives.
+        const auto swung = punches.blow(went, e.speed);
+        e.direction = swung.direction;
+        e.knockback = swung.knockback;
+    }
     if (called && byStrike)
         e.direction = normalized(went);
     tally.called += called;
     tally.strikeCalled += called && byStrike;
-    tally.missedCalls += !byStrike && !called && before.way != CueWay::None;
+    tally.missedCalls += fighter.combatVisuals && !byStrike && !called && before.way != CueWay::None;
     // The flow's finisher must be called: a blow that would be it and
     // answers no such call is a plain one that leaves him standing, to be
     // called on, and the count stays.
-    const bool uncalled = flow.finisher(flow.count() + 1) && !(called && before.finisher);
+    const bool uncalled = fighter.combatVisuals && flow.finisher(flow.count() + 1) && !(called && before.finisher);
     if (uncalled)
         flow.keep();
     const int count = uncalled ? flow.count() : flow.hit();
-    auto d = deliver(e, airborne, count, flow, {}, called ? before.way : CueWay::None, cues.config().damage);
+    auto d = deliver(e, airborne, count, flow, DeliveryConfig{.halfDamage = fighter.halfPunchDamage},
+                     called ? before.way : CueWay::None, cues.config().damage,
+                     !fighter.combatVisuals);
     if (uncalled && (d.fly || d.knockback >= Knockback::Knockdown)) {
         d.kind = BlowKind::Hit;
         d.kinetic = d.fly = false;
@@ -429,7 +437,8 @@ void land(PunchEvent e, bool byStrike) {
         if (made)
             noteCounter(*made, false);
         ++senseTally.counterBlows;
-        if (d.kind == BlowKind::Hit) {
+        if (d.kind == BlowKind::Hit &&
+            (fighter.combatVisuals || verticalBlow(e, airborne) != CueWay::Down)) {
             Vec3 along = e.direction;
             along.y = 0;
             along = length(along) > 1e-3f ? normalized(along) : Vec3{0, 0, -1};
@@ -441,8 +450,9 @@ void land(PunchEvent e, bool byStrike) {
         d.damage *= counterDamage;
     }
     // The flow's next call: the one that stands, or after an answer another way.
-    tally.calls += cues.call(flow.count(), flow.finisher(flow.count() + 1), called,
-                             static_cast<uint32_t>((tally.blows + 1) * 2654435761u >> 13));
+    if (fighter.combatVisuals)
+        tally.calls += cues.call(flow.count(), flow.finisher(flow.count() + 1), called,
+                                static_cast<uint32_t>((tally.blows + 1) * 2654435761u >> 13));
     native_bodies::Damage request;
     request.victim = e.target;
     request.damager = fighter.record;
@@ -651,7 +661,7 @@ Opened game_punch::update(float seconds, const Input& in, const Player& player, 
     events.clear();
     punches.update(seconds, hands, inReach, events);
     flow.update(seconds);
-    if (!flow.count())
+    if (!fighter.combatVisuals || !flow.count())
         cues.clear();
     steerFlights(seconds);
     for (const auto& e : events) {
@@ -690,9 +700,11 @@ Opened game_punch::update(float seconds, const Input& in, const Player& player, 
     if (counterWishLeft > 0 && std::any_of(enemies.begin(), enemies.end(),
                                            [&](const FightTarget& e) { return e.id == counterWish; }))
         wish.target = counterWish;
-    for (const auto& e : enemies)
-        if (e.id == wish.target)
-            wish.called = Cues::direction(cues.cue().way, e.middle() - head);
+    wish.freeDirections = !fighter.combatVisuals;
+    if (fighter.combatVisuals)
+        for (const auto& e : enemies)
+            if (e.id == wish.target)
+                wish.called = Cues::direction(cues.cue().way, e.middle() - head);
     // With a look to mark by, a strike needs its mark: nobody marked, nobody
     // to fly to. (Without one, from an older headset module, the fist picks.)
     const bool looking = finite(in.look) && length(in.look) > .5f;

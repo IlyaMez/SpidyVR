@@ -107,6 +107,8 @@ std::atomic<uint64_t> aimDeadline{};
 uint64_t aimSerial{}, aimMadeMs{};
 // The hands whose motion lands no blow (Settings::noBlows).
 std::atomic<uint32_t> noBlows{};
+std::atomic<bool> combatVisuals{true};
+std::atomic<bool> halfPunchDamage{};
 bool copy(void* destination, const void* source, size_t bytes) {
     __try {
         if (reinterpret_cast<uintptr_t>(source) < 0x10000 ||
@@ -443,6 +445,8 @@ void visit(const native_rays::QueryContext& world) {
             // the strikes' speeds are.
             fighter.velocity = player.velocity * game_punch::worldScale();
             fighter.busy = noBlows.load(std::memory_order_relaxed);
+            fighter.combatVisuals = combatVisuals.load(std::memory_order_relaxed);
+            fighter.halfPunchDamage = halfPunchDamage.load(std::memory_order_relaxed);
             for (unsigned i = 0; i < 2; ++i) {
                 const bool carried = solver.webs()[i].attached && (owned || !motion.grounded);
                 fighter.swinging |= carried;
@@ -994,6 +998,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStart(void* input) {
         motion.syncAirVelocity = 1;
         if ((result = startMotion(&motion)))
             break;
+        combatVisuals = true;
+        halfPunchDamage = false;
         started = true;
         solver = Swing(physicsConfig(config));
         QueryPerformanceFrequency(&frequency);
@@ -1093,7 +1099,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
     if (!copy(header, input, sizeof(header)) ||
         (header[2] != settingsBytesV3 && header[2] != settingsBytesV4 &&
          header[2] != settingsBytesV5 && header[2] != settingsBytesV6 &&
-         header[2] != settingsBytesV7 && header[2] != settingsBytesV8 && header[2] != settingsBytesV9 &&
+         header[2] != settingsBytesV7 && header[2] != settingsBytesV8 && header[2] != settingsBytesV9 && header[2] != settingsBytesV10 && header[2] != settingsBytesV11 &&
          header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || !validSettings(s))
         return 2001;
@@ -1127,6 +1133,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         if (s.version >= 5)
             solver.allowPhysical(s.physical != 0);
         noBlows = s.version >= 6 ? s.noBlows : 0u;
+        combatVisuals = s.version < 11 || s.combatVisuals != 0;
+        halfPunchDamage = s.version >= 12 && s.halfPunchDamage != 0;
         if (s.version >= 7)
             solver.allowArcade(s.arcade != 0);
         if (s.version >= 8)

@@ -154,7 +154,10 @@ std::optional<WebStrike::Opening> WebStrike::open(float seconds, const std::arra
         // Thrown out from the player; or, with an enemy marked, swung the way
         // the flow calls: a hook, an uppercut and a blow down go across.
         const bool outward = dot(way, normalized(f.position - neck)) >= config_.outward;
-        const bool swung = wished && length(calledWay) > .5f && dot(way, calledWay) >= config_.calledAim;
+        const bool vertical = wish.freeDirections &&
+            verticalBlow(Punches{}.blow(way, speed), false) != CueWay::None;
+        const bool swung = wished && (vertical ||
+            (length(calledWay) > .5f && dot(way, calledWay) >= config_.calledAim));
         const bool thrown = finiteBody && speed >= config_.minSpeed && (outward || swung);
         thrownFor = thrown ? thrownFor + dt : 0.f;
         if (!thrown || thrownFor < config_.sustain || phase_ == Phase::Flying || sinceEnd_ < config_.pause || !armed)
@@ -393,8 +396,17 @@ void Lock::clear() {
     since_ = away_ = 0;
 }
 
+CueWay verticalBlow(const PunchEvent& blow, bool targetAirborne, const DeliveryConfig& c) {
+    if (blow.knockback == Knockback::PopUp)
+        return CueWay::Up;
+    if (blow.direction.y < -c.slamPitch && (targetAirborne || blow.strength >= .35f))
+        return CueWay::Down;
+    return CueWay::None;
+}
 Delivery deliver(const PunchEvent& blow, bool targetAirborne, int count, const Flow& flow, const DeliveryConfig& c,
-                 CueWay called, float calledDamage) {
+                 CueWay called, float calledDamage, bool freeDirections) {
+    if (freeDirections)
+        called = CueWay::None;
     Delivery d;
     d.damage = blow.damage * flow.damage(count) * (called == CueWay::None ? 1.f : calledDamage);
     d.knockback = blow.knockback;
@@ -406,7 +418,17 @@ Delivery deliver(const PunchEvent& blow, bool targetAirborne, int count, const F
         d.knockback = Knockback::FlyBack;
         d.velocity = level * carry + Vec3{0, lift, 0};
     };
-    if (flow.finisher(count)) {
+    const CueWay vertical = freeDirections ? verticalBlow(blow, targetAirborne, c) : CueWay::None;
+    if (vertical == CueWay::Up) {
+        fly(targetAirborne ? BlowKind::Juggle : BlowKind::Launch, c.launchCarry, c.launchLift);
+    } else if (vertical == CueWay::Down) {
+        if (targetAirborne) {
+            fly(BlowKind::Slam, c.slamCarry, -c.slamSpeed);
+            d.damage *= c.slamDamage;
+        } else {
+            d.knockback = Knockback::Knockdown;
+        }
+    } else if (flow.finisher(count)) {
         fly(BlowKind::Finisher, c.finisherSpeed, c.finisherLift);
         d.damage *= c.finisherDamage;
     } else if (called == CueWay::Down && targetAirborne) {
@@ -436,6 +458,7 @@ Delivery deliver(const PunchEvent& blow, bool targetAirborne, int count, const F
         // knocks down (kMelee kKnockdown: a hit reaction, then BotStateStunned).
         d.knockback = Knockback::Knockdown;
     }
+    if (c.halfDamage) d.damage *= .5f;
     return d;
 }
 

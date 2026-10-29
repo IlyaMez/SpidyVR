@@ -110,6 +110,9 @@ struct Player {
     // On the ground; and on a web that carries him (then a blow landed in
     // the air does not stop him there).
     bool grounded{}, swinging{};
+    // Off: no hidden directional calls may override a launcher or ground smash.
+    bool combatVisuals = true;
+    bool halfPunchDamage{};
     // A bit per hand whose web holds something or carries the player: it
     // neither punches nor opens a strike. And the bot each hand's web holds
     // (an actor record, 0 for none): a punch at him with that hand strikes.

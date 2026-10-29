@@ -726,7 +726,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 10 && s.bytes == 56 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 12 && s.bytes == 64 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -1239,7 +1239,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 10 && s.bytes == 56 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 12 && s.bytes == 64 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -2575,10 +2575,10 @@ int main() {
     });
     test("grip climbing settings keep old packets and reject invalid versions, sizes and switches", [] {
         using namespace game_swing;
-        for (uint32_t version = 3; version <= 10; ++version) {
+        for (uint32_t version = 3; version <= 12; ++version) {
             Settings s;
             s.version = version;
-            s.bytes = 16 + 4 * version; // official v3=28 through custom v10=56
+            s.bytes = 16 + 4 * version; // official v3=28 through custom v12=64
             check(validSettings(s), "compatible settings packet was refused");
             ++s.bytes;
             check(!validSettings(s), "wrong settings length was accepted");
@@ -2595,7 +2595,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 10 && s.bytes == 56, "updated settings did not append the climbing field");
+        check(s.version == 12 && s.bytes == 64, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -18564,7 +18564,8 @@ int main() {
         check(withTabOnly(Values{}, tabOnlyText(values)) == values, "controlled mode did not persist");
         for (const auto& row : rows())
             check(std::string(row.title).find("MOMENTUM ") == std::string::npos &&
-                  std::string(row.title).find("JOYSTICK ") == std::string::npos,
+                  (row.item == Item::joystickRunCamera ||
+                  std::string(row.title).find("JOYSTICK ") == std::string::npos),
                   "retired tuning still has a menu row");
     });
     test("body protocol separates official dive kicks from new and legacy wall runs", [] {
@@ -18724,6 +18725,106 @@ int main() {
             const auto normalGround = holdFor(originalAngle, control, feet, {}, 2);
             near(length(ground.headPose.position - normalGround.headPose.position), 0, .005f);
         }
+    });
+    test("joystick momentum mode uses the unchanged momentum camera and gait from actual velocity", [] {
+        for (Vec3 travel : {Vec3{6,0,0},Vec3{0,6,0},normalized(Vec3{1,1,0})*6.f}) {
+            GameTrackingRig joystick,momentum;
+            joystick.handClimb(true); momentum.handClimb(true);
+            joystick.joystickWallRunCamera(false);
+            joystick.wallRunCameraTilt(true); momentum.wallRunCameraTilt(true);
+            joystick.wallRunBody(true,0,travel); momentum.wallRunBody(true,0,travel);
+            auto f=trackedFrame(), neutral=f; f.seconds=neutral.seconds=1.f/90;
+            for (auto& h:f.hands) h.squeeze=0;
+            for (auto& h:neutral.hands) h.squeeze=0;
+            f.hands[0].stickY=1;
+            const Vec3 feet{0,10,-.1f};
+            const SurfaceHold wall{{0,0,1},{0,10,-1},6,false};
+            const auto driven=holdFor(joystick,f,feet,wall,2);
+            const auto coast=holdFor(momentum,neutral,feet,wall,2);
+            check(driven.joystickWallRun && !driven.standing,"stick selected the old wall-floor view");
+            near(length(driven.headPose.position-coast.headPose.position),0,.003f);
+            for (Vec3 axis : {Vec3{0,1,0},Vec3{0,0,-1}})
+                near(length(driven.headPose.orientation.rotate(axis)-coast.headPose.orientation.rotate(axis)),0,.003f);
+            near(dot(driven.headPose.position-wall.anchor,wall.normal),
+                 .95f-.20f*std::abs(normalized(travel).y),.015f);
+            check(length(driven.swing.move)>.9f,"neutral-view routing discarded the movement input");
+            WallRunBody a,b;
+            for(int i=0;i<90;++i) {
+                check(a.update(driven,wall,travel,true,false,0,1.f/90) &&
+                      b.update(coast,wall,travel,true,false,0,1.f/90),"actual momentum did not start the existing gait");
+                near(a.phase(),b.phase()); near(length(a.ahead()-b.ahead()),0);
+            }
+            joystick.reset(); joystick.wallRunBody(true,0,travel);
+            const auto recentered=holdFor(joystick,f,feet,wall,2);
+            check(!recentered.standing,"recenter lost momentum mode");
+            joystick.joystickWallRunCamera(true);
+            const auto legacy=holdFor(joystick,f,feet,wall,2);
+            check(legacy.standing && legacy.viewTilt>1.5f,"legacy camera option stopped working");
+            joystick.joystickWallRunCamera(false);
+            const auto restored=holdFor(joystick,f,feet,wall,2);
+            check(!restored.standing && restored.viewTilt<.005f,"legacy floor turn remained in momentum mode");
+        }
+    });
+    test("joystick camera choice leaves ground vents and momentum view unchanged", [] {
+        for (const SurfaceHold hold : {SurfaceHold{},SurfaceHold{{0,1,0},{0,0,0},0,true,true},
+                                      SurfaceHold{{0,0,1},{0,10,-1},8,false}}) {
+            GameTrackingRig on,off;
+            on.handClimb(true); off.handClimb(true); off.joystickWallRunCamera(false);
+            on.wallRunBody(true,0,{8,0,0}); off.wallRunBody(true,0,{8,0,0});
+            auto f=trackedFrame(); f.seconds=1.f/90;
+            if (length(hold.normal)<.5f || hold.vent) f.hands[0].stickY=1;
+            const Vec3 feet=hold.vent ? Vec3{} : Vec3{0,10,-.1f};
+            const auto a=holdFor(on,f,feet,hold,2), b=holdFor(off,f,feet,hold,2);
+            check(!b.joystickWallRun,"non-wall movement became a joystick wall run");
+            near(length(a.headPose.position-b.headPose.position),0,.003f);
+            near(length(a.headPose.orientation.rotate({0,1,0})-b.headPose.orientation.rotate({0,1,0})),0,.003f);
+        }
+    });
+    test("joystick and momentum running use the same body gait regardless of camera tilt", [] {
+        const auto b=splitPelvisBody();
+        for (Vec3 direction : {Vec3{1,0,0},Vec3{0,1,0},normalized(Vec3{1,1,0})}) {
+            for (int phase=0;phase<12;++phase) {
+                auto t=lookingAhead({0,0,.95f-.20f*std::abs(direction.y)}); t.wallRun=true;
+                t.runNormal={0,0,1}; t.runAhead=direction; t.runSpeed=6;
+                t.runPhase=phase*6.2831853f/12;
+                t.facing=body::between({0,0,-1},{0,1,0},direction,t.runNormal);
+                body::State baselineState; body::Result baseResult;
+                body::Config config; config.hideHead=false;
+                const auto expected=solved(b,t,baselineState,config,1,&baseResult);
+                for (float angle : {0.f,.7f,1.5707963f}) {
+                    GameMotionFrame frame; frame.standing=angle>0;
+                    frame.swing.tilt=Quat::around({1,0,0},angle);
+                    frame.flipTilt=Quat::around({0,0,1},.2f);
+                    t.tilt=frame.bodyTilt(true);
+                    body::State state; body::Result result;
+                    const auto actual=solved(b,t,state,config,1,&result);
+                    check(actual==expected,"camera transition selected a different running body pose");
+                    check(result.headError<.005f,"shared run pose lost the tracked head");
+                    body::Pose pose(const_cast<float*>(actual.data()),static_cast<int>(b.rig.parent.size()));
+                    for (int joint : {b.rig.pelvis,b.rig.hipRoot,2,3,4,21,22,23,25,26,27})
+                        check(pose.position(joint).z>-.015f,"original momentum camera put the body through the wall");
+                }
+            }
+        }
+        GameMotionFrame run; run.active=true; run.joystickWallRun=true;
+        const SurfaceHold slow{{0,0,1},{0,0,0},.5f,false};
+        WallRunBody gait;
+        check(!gait.update(run,slow,{0,.5f,0},true,false,0,.01f),
+              "joystick flag fabricated momentum before the player moved fast enough");
+        const SurfaceHold moving{{0,0,1},{0,0,0},6,false};
+        check(gait.update(run,moving,{0,6,0},true,false,0,.01f),"real joystick-generated velocity did not trigger momentum");
+    });
+    test("joystick wall-run camera switch persists and defaults to momentum view", [] {
+        using namespace vr_settings;
+        Values v;
+        check(!v.joystickRunCamera && defaultChoice(Item::joystickRunCamera)==0,"default camera changed");
+        check(choose(Item::joystickRunCamera,1,v) && v.joystickRunCamera,"legacy choice failed");
+        check(choose(Item::joystickRunCamera,0,v) && !v.joystickRunCamera,"OFF choice failed");
+        check(!withTabOnly(Values{},tabOnlyText(v)).joystickRunCamera,"camera choice was not saved");
+        check(!withTabOnly(Values{},"hand_climb=1\n").joystickRunCamera,"old settings disabled the transition");
+        choose(Item::joystickRunCamera,1,v);
+        check(choose(Item::joystickRunCamera,defaultChoice(Item::joystickRunCamera),v) && !v.joystickRunCamera,
+              "reset did not restore the camera transition");
     });
     test("joystick camera distance changes live across directions and survives recentering", [] {
         for (Vec3 travel : {Vec3{6, 0, 0}, Vec3{0, 6, 0}, normalized(Vec3{1, 1, 0}) * 6.f}) {
@@ -20158,6 +20259,119 @@ int main() {
         check(deliver(blow({0,-.9f,-.44f},5),true,5,flow).kind==BlowKind::Finisher,"a finisher in the air was something else");
         near(speedOf(punches.config(),.5f),4.85f);
     });
+    test("free combat: vertical punches override hidden calls and every finisher count", [] {
+        const Punches punches;
+        const Flow flow;
+        const auto upper = punches.blow({0,.9f,-.44f},5);
+        const auto down = punches.blow({0,-.9f,-.44f},5);
+        for (int count=1; count<=10; ++count) {
+            for (auto cue : {CueWay::None, CueWay::Up, CueWay::Down, CueWay::Left, CueWay::Right}) {
+                const auto up=deliver(upper,false,count,flow,{},cue,1.5f,true);
+                check(up.kind==BlowKind::Launch && up.fly && up.velocity.y>8,
+                      "a hidden call or finisher replaced the uppercut");
+                near(up.damage,upper.damage*flow.damage(count),.01f);
+                const auto airUp=deliver(upper,true,count,flow,{},cue,1.5f,true);
+                check(airUp.kind==BlowKind::Juggle && airUp.velocity.y>8,"uppercut did not relaunch an airborne enemy");
+                const auto slam=deliver(down,true,count,flow,{},cue,1.5f,true);
+                check(slam.kind==BlowKind::Slam && slam.fly && slam.velocity.y<-20,
+                      "a hidden call or finisher replaced the ground slam");
+                near(slam.damage,down.damage*flow.damage(count)*1.6f,.01f);
+                const auto floor=deliver(down,false,count,flow,{},cue,1.5f,true);
+                check(floor.knockback==Knockback::Knockdown && !floor.fly,
+                      "a hidden call or finisher prevented the grounded knockdown");
+            }
+        }
+        check(deliver(upper,false,5,flow).kind==BlowKind::Finisher,
+              "visuals-on finisher behavior changed");
+        const auto weak=deliver(punches.blow({0,1,-.1f},3),false,1,flow,{},CueWay::Up,1.5f,true);
+        check(weak.kind==BlowKind::Hit && !weak.fly,"a hidden call bypassed uppercut strength");
+        const auto jab=deliver(punches.blow({0,0,-1},3),false,1,flow,{},CueWay::Down,1.5f,true);
+        check(jab.kind==BlowKind::Hit && jab.knockback!=Knockback::Knockdown,
+              "a hidden call turned a straight jab into a smash");
+    });
+    test("free combat: vertical web strikes need no call but retain aim, speed and free-hand gates", [] {
+        for (Vec3 way : {Vec3{0,1,-.45f},Vec3{0,-1,-.45f}}) {
+            Fight f; f.wish.target=7; f.wish.freeDirections=true; f.rest();
+            const auto opened=f.punch(way,5);
+            check(opened && opened->target==7,"an intentional vertical swing needed a hidden call");
+            check(dot(f.strike.direction(),normalized(way))>.99f,"vertical strike lost the hand direction");
+            Fight on; on.wish.target=7; on.rest();
+            check(!on.punch(way,5),"visuals-on opened an uncalled vertical strike");
+            Fight slow; slow.wish.target=7; slow.wish.freeDirections=true; slow.rest();
+            check(!slow.punch(way,1),"a slow motion opened a strike");
+            Fight busy; busy.wish.target=7; busy.wish.freeDirections=true; busy.rest(.5f,false);
+            check(!busy.punch(way,5,nullptr,false),"an occupied hand opened a vertical strike");
+            Fight away; away.wish.target=7; away.wish.freeDirections=true; away.rest();
+            check(!away.punch({way.x,way.y,.5f},5),"a vertical swing away from the enemy opened a strike");
+            const Walled wall;
+            Fight blocked; blocked.wish.target=7; blocked.wish.freeDirections=true; blocked.rest();
+            check(!blocked.punch(way,5,&wall),"a vertical strike passed through a wall");
+        }
+    });
+    test("free combat: settings default to called combat and preserve older packet layouts", [] {
+        using namespace game_swing;
+        Settings s;
+        check(s.version==12 && s.bytes==64 && s.combatVisuals==1 &&
+              offsetof(Settings,combatVisuals)==56,"free combat broke the settings defaults or layout");
+        s.combatVisuals=0;
+        check(validSettings(s),"free combat setting refused");
+        s.combatVisuals=2;
+        check(!validSettings(s),"invalid combat mode accepted");
+        Settings old;
+        old.version=10; old.bytes=settingsBytesV10;
+        check(validSettings(old) && old.combatVisuals==1,"old settings changed combat semantics");
+    });
+    test("half punch damage scales every move after combo bonuses without changing its reaction", [] {
+        const Punches fists;
+        const Flow flow;
+        const DeliveryConfig half{.halfDamage=true};
+        for (bool free : {false,true}) for (bool air : {false,true})
+            for (int count=1;count<=10;++count) for (auto cue : {CueWay::None,CueWay::Up,CueWay::Down,CueWay::Left})
+                for (Vec3 way : {Vec3{0,0,-1},Vec3{0,.9f,-.44f},Vec3{0,-.9f,-.44f}})
+                    for (float speed : {3.f,5.f,8.f}) {
+                        const auto blow=fists.blow(way,speed);
+                        const auto full=deliver(blow,air,count,flow,{},cue,1.5f,free);
+                        const auto reduced=deliver(blow,air,count,flow,half,cue,1.5f,free);
+                        near(reduced.damage,full.damage*.5f,.0001f);
+                        check(reduced.kind==full.kind && reduced.kinetic==full.kinetic && reduced.fly==full.fly &&
+                              reduced.knockback==full.knockback,"reduced damage changed the move or hit reaction");
+                        near(length(reduced.velocity-full.velocity),0);
+                        // The counter multiplier applied after delivery still halves exactly once.
+                        near(reduced.damage*1.25f,full.damage*1.25f*.5f,.0001f);
+                    }
+    });
+    test("half punch damage persists and older settings keep full damage", [] {
+        using namespace vr_settings;
+        Values v;
+        check(!v.halfPunchDamage && defaultChoice(Item::halfPunchDamage)==0,"damage changed by default");
+        check(choose(Item::halfPunchDamage,1,v) && v.halfPunchDamage,"damage switch did not enable");
+        check(withTabOnly(Values{},tabOnlyText(v)).halfPunchDamage,"damage switch did not persist");
+        check(!withTabOnly(Values{},"combat_visuals=0\n").halfPunchDamage,"old settings reduced damage");
+        check(choose(Item::halfPunchDamage,0,v) && !v.halfPunchDamage,"full damage did not restore");
+        game_swing::Settings packet;
+        check(packet.version==12 && packet.bytes==64 && !packet.halfPunchDamage &&
+              offsetof(game_swing::Settings,halfPunchDamage)==60,"damage protocol shifted older fields");
+        packet.halfPunchDamage=1;
+        check(game_swing::validSettings(packet),"half-damage packet refused");
+        packet.halfPunchDamage=2;
+        check(!game_swing::validSettings(packet),"invalid damage switch accepted");
+        packet={}; packet.version=11; packet.bytes=game_swing::settingsBytesV11;
+        check(game_swing::validSettings(packet) && !packet.halfPunchDamage,"old packet lost full damage");
+    });
+    test("joystick momentum only suppresses the stock stick while custom outdoor wall motion owns the player", [] {
+        using namespace game_swing;
+        Data d; d.status=1; d.owned=1; d.wall=static_cast<uint32_t>(Surface::wall);
+        check(momentumWallDrive(true,true,d),"custom momentum wall motion still forwards the stock stick");
+        check(!momentumWallDrive(false,true,d) && !momentumWallDrive(true,false,d),"legacy or stale motion lost input");
+        d.owned=0; check(!momentumWallDrive(true,true,d),"native crawl lost its stick");
+        d.owned=1;
+        for (Surface surface : {Surface::none,Surface::floor,Surface::game}) {
+            d.wall=static_cast<uint32_t>(surface);
+            check(!momentumWallDrive(true,true,d),"ground, vent or ceiling controls were suppressed");
+        }
+        d.wall=static_cast<uint32_t>(Surface::wall); d.status=0;
+        check(!momentumWallDrive(true,true,d),"an inactive module consumed movement");
+    });
     test("hit stop: the game's time stops for a blow and eases back, longer for a finisher", [] {
         HitStop stop;
         near(stop.timeScale(),1);
@@ -20690,18 +20904,19 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 41 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 43 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[41 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[41].title, "REALISTIC FLIPS") == 0 && all[41].choices.empty(),
+            check(all[43 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[43].title, "REALISTIC FLIPS") == 0 && all[43].choices.empty(),
               "realistic flips: a switch, first of its rows");
-        check(all[36].item == Item::controlledFlips && all[39].item == Item::wallRunCameraTilt, "custom switches misplaced");
+        check(all[36].item == Item::controlledFlips && all[39].item == Item::joystickRunCamera &&
+              all[40].item == Item::wallRunCameraTilt, "custom switches misplaced");
         // EYE AIM, before the realistic flips: what the eyes aim, off by default (only a headset that tracks
         // the eyes can).
-        check(all[40].item == Item::eyeAim && std::strcmp(all[40].title, "EYE AIM") == 0 &&
-                  all[40].choices.size() == 4 && std::strcmp(all[40].choices[0], "OFF") == 0 &&
-                  std::strcmp(all[40].choices[1], "WEB BALLS") == 0 && std::strcmp(all[40].choices[2], "ZIPS") == 0 &&
-                  std::strcmp(all[40].choices[3], "BOTH") == 0 && all[40].place == Place::tab,
+        check(all[42].item == Item::eyeAim && std::strcmp(all[42].title, "EYE AIM") == 0 &&
+                  all[42].choices.size() == 4 && std::strcmp(all[42].choices[0], "OFF") == 0 &&
+                  std::strcmp(all[42].choices[1], "WEB BALLS") == 0 && std::strcmp(all[42].choices[2], "ZIPS") == 0 &&
+                  std::strcmp(all[42].choices[3], "BOTH") == 0 && all[42].place == Place::tab,
               "EYE AIM: OFF, WEB BALLS, ZIPS, BOTH, in the tab before the realistic flips");
         {
             Values v;
@@ -20763,7 +20978,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 47,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 49,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -20804,7 +21019,7 @@ int main() {
               "lists: one choice per step; switches: the game's own ON and OFF");
         check(choicesOf(Item::calibrate) == 2, "the calibration's switch names its two choices");
     });
-    test("combat visuals can be hidden independently and persist without changing combat or web aiming", [] {
+    test("combat visuals choice persists without disabling punching or web aiming", [] {
         using namespace vr_settings;
         Values v;
         check(v.combatVisuals && defaultChoice(Item::combatVisuals) == 1, "combat artwork hidden by default");
@@ -20877,7 +21092,7 @@ int main() {
         using namespace vr_settings;
         const Values defaults;
         check(tabOnlyText(defaults) == "controlled_flips=0\nnear_clip_mm=20\nhand_climb=0\n"
-                                       "wall_run_camera_tilt=1\n"
+                                       "joystick_wall_run_camera=0\nwall_run_camera_tilt=1\nhalf_punch_damage=0\n"
                                        "realistic_flips=0\n"
                                        "rotation_strength=50\nrotation_speed=240\nflight_speed_min=3\n"
                                        "swing_momentum=1\nrotation_response_ms=500\nhand_momentum=100\n"

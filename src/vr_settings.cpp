@@ -217,6 +217,10 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.handClimb;
     case Item::wallRunCameraTilt:
         return &v.wallRunCameraTilt;
+    case Item::joystickRunCamera:
+        return &v.joystickRunCamera;
+    case Item::halfPunchDamage:
+        return &v.halfPunchDamage;
     case Item::view:
         return &v.flatScreen;
     case Item::realisticFlips:
@@ -270,9 +274,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 52>& rows() {
+const std::array<Row, 54>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 52> all{{
+    static const std::array<Row, 54> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -321,7 +325,7 @@ const std::array<Row, 52>& rows() {
         {Item::uiStyle, "UI STYLE",
          "Spidy's own marks, gadget wheel and meters: comic print, or tech like the HUD.", uiStyleChoices},
         {Item::combatVisuals, "COMBAT VISUALS",
-         "Show punch arrows, target rings, hit effects and KO text. Spider-Sense stays on.", {}},
+         "Off: no combat effects; free uppercuts/smashes. Spider-Sense stays on.", {}},
         {Item::nearClip, "NEAR CLIP",
          "How near your eyes things still show. Nearer keeps your hands in view.", nearClipChoices},
         {Item::recordingFov, "RECORDING FOV",
@@ -343,8 +347,12 @@ const std::array<Row, 52>& rows() {
          flipSpeedChoices},
         {Item::handClimb, "HAND WALL CLIMBING",
          "Grip and pull. Reach back near the wall to turn. Left stick: run. A: jump.", {}},
+        {Item::joystickRunCamera, "JOYSTICK WALL RUN CAMERA",
+         "On: old wall-floor view. Off: joystick drives the existing momentum wall run.", {}},
         {Item::wallRunCameraTilt, "WALL RUN CAMERA TILT",
          "Gently bank the view with the body on horizontal momentum wall runs.", {}},
+        {Item::halfPunchDamage, "HALF PUNCH DAMAGE",
+         "Punches and web strikes deal 50% damage. Launches and smash force stay the same.", {}},
         {Item::eyeAim, "EYE AIM", "Web balls and zips go where your eyes look. Needs a headset with eye tracking.",
          eyeAimChoices},
         {Item::realisticFlips, "REALISTIC FLIPS",
@@ -489,7 +497,9 @@ constexpr TabOnly tabOnly[] = {
     {"controlled_flips", &Values::controlledFlips, nullptr},
     {"near_clip_mm", nullptr, &Values::nearClipMm},
     {"hand_climb", &Values::handClimb, nullptr},
+    {"joystick_wall_run_camera", &Values::joystickRunCamera, nullptr},
     {"wall_run_camera_tilt", &Values::wallRunCameraTilt, nullptr},
+    {"half_punch_damage", &Values::halfPunchDamage, nullptr},
     {"realistic_flips", &Values::realisticFlips, nullptr},
     {"rotation_strength", nullptr, &Values::automaticStrength},
     {"rotation_speed", nullptr, &Values::automaticSpeed},

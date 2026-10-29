@@ -64,6 +64,7 @@ struct GameMotionFrame {
     // tracking space turns onto it; and how far it leans from the world's up
     // now, radians (0 level, a quarter turn on a wall).
     bool standing{};
+    bool joystickWallRun{}; // locomotion, independent of the optional camera transition
     float wallRoll{};
     bool wallRotate{};
     bool ventCrawl{};
@@ -83,8 +84,10 @@ struct GameMotionFrame {
     bool climbTracking{};
     std::array<Vec3, 2> climbGrips{}; // tracking metres relative to the head at hold entry
     std::array<float, 2> climbHold{};
-    Quat bodyTilt() const {
-        return standing ? flipTilt : swing.tilt;
+    Quat bodyTilt(bool runningPose = false) const {
+        // The travel-driven wall-run gait stays in the wall frame. The camera
+        // may stand on that wall, but it must not select a different body pose.
+        return runningPose ? Quat{} : standing ? flipTilt : swing.tilt;
     }
 };
 // Only wall-climb locomotion/stride cues use the fixed tracking reference.
@@ -417,6 +420,7 @@ class GameTrackingRig {
     void wallRunCameraDistance(float metres) {
         runCameraDistance_ = std::isfinite(metres) ? std::clamp(metres, .4f, 1.6f) : .9f;
     }
+    void joystickWallRunCamera(bool enabled) { joystickRunCamera_ = enabled; }
     void wallRunCameraTilt(bool enabled) { runCameraTilt_ = enabled; }
     // Actual solved body stance, not the player's momentary look direction.
     void outwardCrawl(float weight) {
@@ -470,6 +474,7 @@ class GameTrackingRig {
     bool ventViewActive_{};
     float runYaw_{}, runHeadYaw_{};
     bool wallRunning_{};
+    bool joystickRunCamera_ = true;
     bool runViewEnabled_{}, runViewActive_{}, runCameraTilt_{};
     float runCameraBank_{};
     unsigned runViewSupports_{};

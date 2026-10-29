@@ -73,6 +73,8 @@ struct StrikeWish {
     // enemy opens the strike too: a hook, an uppercut or a blow down, which
     // go across and not out at him.
     Vec3 called{};
+    // With combat visuals off, an upward/downward swing needs no cue.
+    bool freeDirections{};
 };
 struct WebStrikeConfig {
     // A strike opens with a fist at least this fast relative to the player
@@ -430,6 +432,7 @@ struct DeliveryConfig {
     // One that goes down this steeply (the sine of its pitch) slams him.
     float slamPitch = .5f, slamSpeed = 24, slamCarry = 2, slamDamage = 1.6f;
     float finisherDamage = 2.5f, finisherSpeed = 18, finisherLift = 5;
+    bool halfDamage{}; // health damage only, after every move multiplier
 };
 struct Delivery {
     BlowKind kind{};
@@ -442,12 +445,18 @@ struct Delivery {
     bool fly{};
     Vec3 velocity{};
 };
+// The freely chosen vertical move, using the same strength and pitch gates
+// as ordinary uppercuts and downward punches.
+CueWay verticalBlow(const PunchEvent& blow, bool targetAirborne, const DeliveryConfig& config = {});
+
 // How the blow `blow` goes to the game: the `count`th of its flow, at a
 // target on his feet or in the air. called: the way it was called and went
 // (Cues::answers), None for an ordinary blow; calledDamage: such a blow's
-// damage, times.
+// damage, times. freeDirections ignores calls and lets vertical moves take
+// priority over an automatic finisher.
 Delivery deliver(const PunchEvent& blow, bool targetAirborne, int count, const Flow& flow,
-                 const DeliveryConfig& config = {}, CueWay called = CueWay::None, float calledDamage = 1.5f);
+                 const DeliveryConfig& config = {}, CueWay called = CueWay::None, float calledDamage = 1.5f,
+                 bool freeDirections = false);
 
 // The game's time around a landed blow: it all but stops for a moment, then
 // eases back, as fighting games freeze on a hit. The head and the hands keep
