@@ -652,6 +652,147 @@ int main() {
             tick();
         }
     };
+    test("fixed shot basis keeps flutter continuous when the wrist crosses the old basis threshold", [] {
+        const Vec3 axis=normalized(Vec3{0,.9f,-.435f});
+        const Vec3 a=flyingWebPoint({},axis*40,.4f,.6f,.3f,axis);
+        const Vec3 moved{0,.01f,0};
+        const Vec3 b=flyingWebPoint(moved,axis*40,.4f,.6f,.3f,axis);
+        check(length(b-a)<.02f,"flutter changed sides as wrist moved");
+    });
+    test("flight visuals advance smoothly between slower physics samples", [] {
+        WebFlightVisual visual;const Vec3 start{},end{0,0,-300};float before=0;
+        for(int frame=0;frame<360;++frame) {
+            const float physicalAge=(frame/3)/30.f;
+            const float progress=physicalAge/5.f;
+            visual.update(1.f/90,1,5,progress,start+(end-start)*progress,end);
+            const float advance=visual.progress()*300-before;
+            check(advance>=0 && advance<.85f,"visual tip jumped between physics frames");
+            if(frame>0)check(advance>.3f,"visual tip froze between samples");
+            before=visual.progress()*300;
+            near(length(visual.direction()-Vec3{0,0,-1}),0,.0001f);
+        }
+        visual.update(.01f,0,0,0,{},{});check(!visual.flying(),"released web kept animating");
+    });
+    test("web speed OFF preserves the existing physics frame for frame", [] {
+        TestWorld world;spidy::Swing legacy(inert()),off(inert());off.webTravel(100,0);
+        auto in=aimed();in.hands[0].trigger=0;Body a{{0,0,0},{3,-4,0},false},b=a;
+        for(int i=0;i<180;++i) {
+            if(i==120)in.hands[0].grip=0;
+            const auto x=legacy.predictNativeStep(.01f,in,world,a),y=off.predictNativeStep(.01f,in,world,b);
+            check(x.valid && y.valid,"legacy prediction failed");
+            near(length(x.target-y.target),0,1e-6f);near(length(x.velocity-y.velocity),0,1e-6f);
+            if(i==0)check(off.webs()[0].ready() && off.webs()[0].coupling()==1,"OFF delayed the old attachment");
+            a={x.target,x.velocity,false};b={y.target,y.velocity,false};
+        }
+    });
+    test("a web with zero coupling cannot add angular momentum", [] {
+        spidy::RealisticFlip free,contact;
+        RealisticFlipSettings settings;settings.enabled=true;
+        RealisticFlight flight;flight.valid=true;flight.velocity={0,0,-15};flight.handMomentum={1,0,0};
+        for(int i=0;i<50;++i) {free.update(flight,true,false,0,.01f,settings);contact.update(flight,true,false,0,.01f,settings);}
+        flight.handMomentum={};
+        for(int i=0;i<20;++i) {
+            const auto a=free.update(flight,true,false,0,.01f,settings);
+            auto incoming=flight;incoming.attached=true;incoming.pull={1,1,0};incoming.coupling=0;
+            const auto b=contact.update(incoming,true,false,0,.01f,settings);
+            near(a.x,b.x,1e-6f);near(a.y,b.y,1e-6f);near(a.z,b.z,1e-6f);near(a.w,b.w,1e-6f);
+        }
+    });
+    test("simultaneous web arrivals share the soft catch without a two-rope position snap", [] {
+        TwoAnchors world;world.anchors[0]={-10,100,-30};world.anchors[1]={10,100,-30};
+        spidy::Swing solver(inert());solver.webTravel(500,2);
+        Input in;
+        for(int i=0;i<2;++i) {
+            in.hands[i].tracked=true;in.hands[i].grip=1;
+            in.hands[i].gripRelativeToHead={i?.4f:-.4f,0,0};
+            in.hands[i].aim.position=in.hands[i].gripRelativeToHead;
+            in.hands[i].aim.orientation=arc({0,0,-1},normalized(world.anchors[i]-in.hands[i].aim.position));
+        }
+        Body body{{0,0,0},{0,-35,0},false};bool arrived=false;
+        for(int i=0;i<220;++i) {
+            const auto next=solver.predictNativeStep(.01f,in,world,body);
+            check(next.valid && solver.webs()[0].attached && solver.webs()[1].attached,"dual shot failed");
+            check(length(next.velocity-body.velocity)<3.202f,"dual arrival exceeded the force budget");
+            check(length(next.target-(body.position+body.velocity*.01f))<.025f,"dual catch teleported the body");
+            arrived|=solver.webs()[0].ready()&&solver.webs()[1].ready();
+            body={next.target,next.velocity,false};
+        }
+        check(arrived,"dual shot never arrived");
+    });
+    test("the soft web catch limits acceleration and never snaps to the firing position", [] {
+        TestWorld world;world.anchor={0,100,0};spidy::Swing solver(inert());solver.webTravel(500,1);
+        auto in=aimed();in.hands[0].trigger=0;Body body{{0,0,0},{0,-35,0},false};
+        bool arrived=false,finished=false;float lastGain=0;
+        for(int i=0;i<300;++i) {
+            const auto next=solver.predictNativeStep(.01f,in,world,body);
+            check(next.valid,"soft catch invalidated prediction");const auto& web=solver.webs()[0];
+            check(web.attached,"soft catch lost its anchor");
+            const float delta=length(next.velocity-body.velocity);
+            check(delta<=1.601f,"single-frame catch exceeded the acceleration budget");
+            check(length(next.target-(body.position+body.velocity*.01f))<.021f,"catch teleported the player");
+            if(web.ready()) {
+                arrived=true;check(web.coupling()+1e-5f>=lastGain,"catch gain went backwards");lastGain=web.coupling();
+                finished|=!web.catching;
+            } else near(delta,0,.001f);
+            body={next.target,next.velocity,false};
+        }
+        check(arrived && finished,"soft catch never converged to ordinary rope physics");
+    });
+    test("a flying web exerts no force and releasing it cannot attach later", [] {
+        TestWorld world;world.anchor={0,100,0};spidy::Swing solver(inert());solver.webTravel(500,1);
+        auto in=aimed();in.hands[0].trigger=0;Body body{{0,0,0},{3,-8,0},false};
+        for(int i=0;i<50;++i) {
+            const auto next=solver.predictNativeStep(.01f,in,world,body);
+            check(next.valid && !solver.webs()[0].ready(),"flight ended early");
+            near(length(next.velocity-body.velocity),0,.001f);
+            near(length(next.target-(body.position+body.velocity*.01f)),0,.001f);
+            near(solver.webs()[0].tension,0);body={next.target,next.velocity,false};
+        }
+        in.hands[0].grip=0;
+        for(int i=0;i<200;++i) {
+            const auto next=solver.predictNativeStep(.01f,in,world,body);body={next.target,next.velocity,false};
+            check(!solver.webs()[0].attached,"released shot reappeared");
+            for(const auto& event:solver.events())check(event.kind!=EventKind::Attach,"late ghost attachment");
+        }
+    });
+    test("web travel has distance-dependent duration and one shared visible/physical arrival", [] {
+        const float speeds[]{0,60,150,350};
+        for(int mode=1;mode<=3;++mode)for(float distance : {10.f,100.f,500.f}) {
+            TestWorld world;world.anchor={0,distance,0};
+            spidy::Swing solver(inert());solver.allowAirAnchors(false);solver.webTravel(1000,mode);
+            auto in=aimed();in.hands[0].trigger=0;const Body body{{0,0,0},{},false};
+            float elapsed=0;unsigned attached=0;
+            for(int frame=0;frame<1000;++frame) {
+                solver.predictNativeStep(.01f,in,world,body);elapsed+=.01f;
+                for(const auto& event:solver.events())attached+=event.kind==EventKind::Attach;
+                const auto& web=solver.webs()[0];
+                check(web.attached,"shot missed its test surface");
+                near(web.flightTotal,distance/speeds[mode],.001f);
+                near(web.tip().y,std::min(distance,elapsed*speeds[mode]),.02f);
+                if(web.ready()) {
+                    check(attached==1,"arrival event missing or duplicated");
+                    check(elapsed>=web.flightTotal-.011f && elapsed<=web.flightTotal+.011f,"incorrect arrival time");
+                    check(web.coupling()<.011f,"arrival applied full rope force");break;
+                }
+                check(attached==0,"attached before the visible tip arrived");near(web.tension,0);
+                check(frame<999,"web never arrived");
+            }
+        }
+    });
+    test("new optional controls persist and keep their default", [] {
+        using namespace vr_settings;
+        for(int index=0;index<12;++index) {
+            Values value;choose(Item::webRange,index,value);
+            check(choice(Item::webRange,withTabOnly({},tabOnlyText(value)))==index,"saved setting changed");
+        }
+        check(Values{}.webRange==100,"default changed");
+        for(int index=0;index<4;++index) {
+            Values value;choose(Item::webSpeed,index,value);
+            check(choice(Item::webSpeed,withTabOnly({},tabOnlyText(value)))==index,"saved setting changed");
+        }
+        check(Values{}.webSpeed==0,"default changed");
+    });
+
     test("slingshot draws two fixed webs and launches once, capped, toward their midpoint", [] {
         Sling s;
         s.solver.limitSpeed(25);
@@ -726,7 +867,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 10 && s.bytes == 56 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 11 && s.bytes == 64 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -1239,7 +1380,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 10 && s.bytes == 56 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 11 && s.bytes == 64 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -2595,7 +2736,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 10 && s.bytes == 56, "updated settings did not append the climbing field");
+        check(s.version == 11 && s.bytes == 64, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -7681,7 +7822,8 @@ int main() {
         bad=c; bad.rays[0].direction={0,-2,0}; check(!native_rays::valid(bad),"scaled ray accepted");
         bad=c; bad.rays[0].origin.x=std::numeric_limits<float>::infinity();
         check(!native_rays::valid(bad),"infinite origin accepted");
-        bad=c; bad.rays[0].distance=151; check(!native_rays::valid(bad),"excessive range accepted");
+        bad=c; bad.rays[0].distance=8193; check(!native_rays::valid(bad),"excessive range accepted");
+        bad=c; bad.rays[0].distance=1000; check(native_rays::valid(bad),"maximum selectable web range rejected");
         c.count=0; c.leaseMs=0; check(native_rays::valid(c),"cancel command rejected");
     });
     test("controller rays retain hand identity and disappear on tracking loss", [] {
@@ -20690,7 +20832,7 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 41 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 41 + std::size(realistic) + 2, "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
             check(all[41 + i].item == realistic[i], "the realistic flips' rows out of order");
         check(std::strcmp(all[41].title, "REALISTIC FLIPS") == 0 && all[41].choices.empty(),
@@ -20763,7 +20905,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 47,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 49,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -20884,7 +21026,7 @@ int main() {
                                        "angular_drag_ms=3000\nhand_speed_min_cm=100\nair_rotation_brake=1\n"
                                        "flips_in_combat=1\nbody_haptics_webs=1\nbody_haptics_wind=1\nbody_haptics_combat=1\n"
                                        "body_haptics_movement=1\nrecording_fov=0\nui_style=0\ncombat_visuals=1\nblow_sounds=0\n"
-                                       "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\n",
+                                       "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\nweb_range_m=100\nweb_speed=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

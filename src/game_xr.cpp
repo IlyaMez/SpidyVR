@@ -510,7 +510,7 @@ DWORD(WINAPI* soundMode)(void*){};
 BridgeCall startSwing{}, submitSwing{}, sampleSwing{}, stopSwing{}, retargetSwing{}, sampleGrab{}, sampleAim{};
 // Each web's edges (game_swing::Bends): optional, without it a web round an
 // edge is drawn to that edge.
-BridgeCall sampleBends{};
+BridgeCall sampleBends{},sampleWebFlight{};
 BridgeCall sampleClimb{};
 BridgeCall startPunch{}, samplePunch{}, stopPunch{}, swingSettings{}, sampleStrike{}, sampleSlingshot{};
 // Spider-Sense (game_sense, in the same module as the punches): optional, an
@@ -1027,6 +1027,7 @@ DWORD WINAPI run(void*) {
         }
         game_swing::Data swingState;
         game_swing::Bends swingBends;
+        game_swing::WebFlightData webFlight;WebFlightVisual flightVisual[2];bool webArrivedBefore[2]{};
         game_swing::ClimbData climbState;
         game_swing::ClimbPulses climbPulses;
         unsigned collisionRayPhase{};
@@ -1314,6 +1315,7 @@ DWORD WINAPI run(void*) {
             s.handClimb = values.handClimb;
             s.webSlingshot = values.webSlingshot;
             s.betterClimbing = values.betterClimbing;
+            s.webRange=static_cast<float>(values.webRange);s.webSpeed=values.webSpeed;
             sentSwingSettings = s;
             swingSettingsSent = true;
             // A hand-over owns the walls while it lasts; the player's own
@@ -1884,9 +1886,10 @@ DWORD WINAPI run(void*) {
                                        (swingState.status == 1 || swingState.status == 2);
                         flight.velocity = swingState.velocity;
                         float ropes{};
-                        unsigned attached{};
+                        unsigned attached{};float coupling{};
                         if (flight.valid && swingState.owned)
-                            for (const auto& web : swingState.webs) {
+                            for(unsigned i=0;i<2;++i){
+                                const auto& web=swingState.webs[i];if(webFlight.phases[i]==1)continue;
                                 const Vec3 toward = web.anchor - feet;
                                 if (!web.attached || !finite(web.anchor) || !std::isfinite(web.tension) ||
                                     length(toward) < .1f)
@@ -1894,10 +1897,10 @@ DWORD WINAPI run(void*) {
                                 flight.attached = true;
                                 ropes += length(toward);
                                 ++attached;
-                                flight.pull += normalized(toward) * std::clamp(web.tension, .1f, 100.f);
+                                const float gain=webFlight.phases[i]==0?1.f:webFlight.coupling[i];
+                                flight.pull+=normalized(toward)*std::clamp(web.tension,.1f,100.f)*gain;coupling=std::max(coupling,gain);
                             }
-                        if (attached)
-                            flight.ropeLength = ropes / static_cast<float>(attached);
+                        if(attached){flight.coupling=coupling;flight.ropeLength=ropes/static_cast<float>(attached);}
                     }
                     rig.flight(flight);
                     rig.wallHands(climbState.status ? climbState.hands : 0u);
@@ -2321,6 +2324,7 @@ DWORD WINAPI run(void*) {
                                 runtime.haptic(i, .45f, .045f);
                                 feel(body_haptics::Kind::wallGrip, static_cast<int>(i));
                             }
+                        if(!sampleWebFlight || sampleWebFlight(&webFlight)){webFlight={};for(unsigned i=0;i<2;++i){webFlight.phases[i]=swingState.webs[i].attached?3:0;webFlight.coupling[i]=1;}}
                         if (!sampleBends || sampleBends(&swingBends))
                             swingBends = {};
                         // Nothing here changes who holds the player on a wall
@@ -2360,6 +2364,7 @@ DWORD WINAPI run(void*) {
                             }
                             onStrandBefore[i] = on;
                         }
+                        for(unsigned i=0;i<2;++i)flightVisual[i].update(frame.seconds,webFlight.phases[i],webFlight.durations[i],webFlight.progress[i],webFlight.tips[i],swingState.webs[i].anchor);
                         bool trails[2]{};
                         Vec3 trailEnds[2]{};
                         // The hands whose webs a zip pulled: one zip on the body, in the arm of
@@ -2403,8 +2408,15 @@ DWORD WINAPI run(void*) {
                             // A web taken hold of, not shot: the hand closes on it,
                             // a softer pulse than a shot's.
                             const bool taken = attached && !grabbing && (swingState.webs[i].attached & 4);
+                            const bool arrived=attached && !grabbing && webFlight.phases[i]>=2;
+                            if(arrived && !webArrivedBefore[i] && attachedBefore[i] && !taken) {
+                                runtime.haptic(i,.8f);
+                                pulseUntil[i]=displayAt+60'000'000;
+                                feel(body_haptics::Kind::webAttach,static_cast<int>(i));
+                            }
+                            webArrivedBefore[i]=arrived;
                             if (attached != attachedBefore[i] && !grabbing && !wasGrabbing) {
-                                runtime.haptic(i, !attached ? .2f : taken ? .4f : .65f);
+                                runtime.haptic(i,!attached?.2f:taken?.4f:webFlight.phases[i]==1?.15f:.8f);
                                 feel(!attached ? body_haptics::Kind::webRelease
                                      : taken   ? body_haptics::Kind::webTaken
                                                : body_haptics::Kind::webAttach,
@@ -2773,6 +2785,14 @@ DWORD WINAPI run(void*) {
                                 hand.attachedAt = rope.key;
                                 hand.anchor = trail ? trailEnds[from] : swingState.webs[from].anchor;
                                 hand.wrist = webShooter(motion.grips[from], from).position;
+                                if(hand.attached==1&&flightVisual[from].flying())hand.anchor=flightVisual[from].tip();
+                                if(hand.attached==1 && flightVisual[from].flying() && native_webs::drawsHeld()) {
+                                    bent[i].count=native_webs::maxRopeBends;
+                                    const float progress=flightVisual[from].progress();
+                                    const float age=flightVisual[from].age();
+                                    for(uint32_t k=0;k<bent[i].count;++k)
+                                        bent[i].points[k]=flyingWebPoint(hand.wrist,hand.anchor,float(k+1)/float(bent[i].count+1),age,progress,flightVisual[from].direction());
+                                }
                                 // A web round edges: to where it sticks, round each of them. The
                                 // swing's anchor is the nearest edge, and drawn to it the web's end
                                 // jumped to each new one. Where Spidy cannot lay the rope's points
@@ -4038,6 +4058,7 @@ DWORD WINAPI run(void*) {
                     }
                     saved.webSlots = {webRopes.slot(0), webRopes.slot(1)};
                     saved.strandUpper = webRopes.upper();
+                    saved.webFlight=webFlight;for(unsigned i=0;i<2;++i)saved.flightVisual[i]=flightVisual[i];
                     if (calibration.phase() != body_calibration::Phase::idle) {
                         // The panel stays where it appeared in the room; the tracking
                         // space is where this frame's head puts it in the world.
@@ -4235,7 +4256,10 @@ DWORD WINAPI run(void*) {
                                 line.end = web.anchor;
                                 line.slack = web.tension > 0 ? 0.f
                                                              : std::max(web.length - length(line.end - line.start), 0.f);
-                                line.extended = WebAnimation::extended((shown - timing.attachedAt) * 1e-9f);
+                                if(saved->webFlight.durations[hand]>0) {
+                                    line.extended=1;
+                                    if(saved->flightVisual[hand].flying()) {line.end=saved->flightVisual[hand].tip();line.splat=false;line.slack=0;line.flightProgress=saved->flightVisual[hand].progress();line.flightAge=saved->flightVisual[hand].age();line.flightDirection=saved->flightVisual[hand].direction();}
+                                } else line.extended = WebAnimation::extended((shown - timing.attachedAt) * 1e-9f);
                                 appendWeb(vertices, line, viewer, pixelAngle);
                             } else if (WebAnimation::released((shown - timing.releasedAt) * 1e-9f, shooter,
                                                               timing.anchor, line)) {
@@ -4710,6 +4734,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     sampleSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingSample"));
     sampleSlingshot = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySlingshotSample"));
     sampleBends = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingBends"));
+    sampleWebFlight=reinterpret_cast<BridgeCall>(GetProcAddress(rays,"SpidyWebFlightSample"));
     sampleClimb = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyClimbSample"));
     rayResults = reinterpret_cast<const native_rays::Data*>(GetProcAddress(rays, "SpidyRayData"));
     stopSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingStop"));

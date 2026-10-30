@@ -90,7 +90,7 @@ inline bool valid(const Command& c) {
         const float magnitude = length(ray.direction);
         if (!finite(ray.origin) || length(ray.origin) > 100000 || !finite(ray.direction) ||
             magnitude < .999f || magnitude > 1.001f || !std::isfinite(ray.distance) || ray.distance < .01f ||
-            ray.distance > 150)
+            ray.distance > 8192)
             return false;
     }
     return true;

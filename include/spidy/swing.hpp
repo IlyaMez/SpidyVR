@@ -268,6 +268,14 @@ struct Web {
     // `taken` and not shot by it.
     std::uint32_t strand{};
     bool taken{};
+    Vec3 shotOrigin{};
+    float flightLeft{},flightTotal{},engageAge{};
+    bool catching{};
+    bool ready() const {return attached && flightLeft<=0;}
+    float progress() const {return flightTotal>0?std::clamp(1-flightLeft/flightTotal,0.f,1.f):1;}
+    float coupling() const {const float t=flightTotal>0?std::clamp(engageAge/.18f,0.f,1.f):1;return t*t*(3-2*t);}
+    Vec3 tip() const {return shotOrigin+(end()-shotOrigin)*progress();}
+
     // Where the web sticks.
     Vec3 end() const {
         return bent ? bends[0].from : anchor;
@@ -307,6 +315,7 @@ enum class EventKind {
     Join,     // a hand took hold of the other hand's web
     Pass,     // an arcade web went through a thin or loose thing: shot past one, or swung past one
     WallGrip, // a palm stuck to the wall; one contact pulse in that hand
+    Shoot, // a visible web in flight, not a physical attachment yet
     Slingshot, // both drawn webs released: strength is the stored charge
 };
 struct Event {
@@ -518,6 +527,8 @@ class Swing {
     // Hand `hand`'s web holds the body when taut: any web but the longer
     // rope of two hands on one web.
     bool bears(int hand) const;
+    void webTravel(float range,int mode);
+    bool webTravelEnabled()const{return webSpeedMode_!=0;}
     const SwingConfig& config() const {
         return config_;
     }
@@ -533,6 +544,7 @@ class Swing {
     uint64_t slingshotSurfaces_[2]{};
     float slingshotCharge_{}, slingshotHold_{}, slingshotRelease_{}, slingshotYaw_{};
     bool betterClimbing_{};
+    int webSpeedMode_{};
     struct HandState {
         // held: grip squeezed, with release hysteresis. A web shoots only on the
         // press that sets it, so a lost web never re-fires while the grip stays held.

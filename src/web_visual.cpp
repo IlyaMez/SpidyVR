@@ -255,7 +255,7 @@ void appendWeb(std::vector<Vertex>& out, const WebLine& web, Vec3 viewer, float 
     const float slack = std::isfinite(web.slack) ? std::max(web.slack, 0.f) : 0.f;
     const float sag = std::min(std::sqrt(3 * distance * slack / 8), distance * .5f);
     const Vec3 down{0, -1, 0};
-    auto point = [&](float u) { return web.start + chord * u + down * (sag * 4 * u * (1 - u)); };
+    auto point = [&](float u) { return flyingWebPoint(web.start,web.end,u,web.flightAge,web.flightProgress,web.flightDirection) + down * (sag * 4 * u * (1 - u)); };
     auto tangent = [&](float u) { return normalized(chord + down * (sag * 4 * (1 - 2 * u))); };
     // Short segments near the viewer resolve the braid; distant ones only need
     // to follow the curve.

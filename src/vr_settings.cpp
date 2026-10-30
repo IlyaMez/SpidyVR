@@ -75,6 +75,10 @@ static_assert(std::size(automaticStrengthChoices) == std::size(automaticStrength
               std::size(automaticHandStrengthChoices) == std::size(automaticHandStrengths) &&
               std::size(automaticFalloffChoices) == std::size(automaticFalloffs) &&
               std::size(automaticHandThresholdChoices) == std::size(automaticHandThresholds));
+constexpr int webRangeSteps[]={10,25,50,75,100,150,200,300,400,500,750,1000};
+constexpr const char* webRangeLabels[]={"10 M","25 M","50 M","75 M","100 M","150 M","200 M","300 M","400 M","500 M","750 M","1000 M"};
+constexpr int webSpeedSteps[]={0,1,2,3};
+constexpr const char* webSpeedLabels[]={"OFF","SLOW","MEDIUM","FAST"};
 constexpr int screenSizes[] = {0, 1, 2};
 constexpr int hudSizes[] = {0, 1, 2, 3};
 constexpr int depthSteps[] = {0, 1, 2, 3};
@@ -88,6 +92,9 @@ static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(sna
 
 std::span<const int> steps(Item item) {
     switch (item) {
+    case Item::webRange:return webRangeSteps;
+    case Item::webSpeed:return webSpeedSteps;
+
     case Item::swingSpeed:
         return swingSpeeds;
     case Item::snapTurn:
@@ -140,6 +147,9 @@ std::span<const int> steps(Item item) {
 namespace {
 float numberOf(Item item, const Values& v) {
     switch (item) {
+    case Item::webRange:return static_cast<float>(v.webRange);
+    case Item::webSpeed:return static_cast<float>(v.webSpeed);
+
     case Item::swingSpeed:
         return v.swingSpeed;
     case Item::snapTurn:
@@ -244,6 +254,9 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
 } // namespace
 
 Values sanitized(Values v) {
+    v.webRange=std::clamp(v.webRange,10,1000);
+    v.webSpeed=std::clamp(v.webSpeed,0,3);
+
     v.swingSpeed = std::isfinite(v.swingSpeed) ? std::clamp(v.swingSpeed, 1.f, 65.f) : 32.f;
     v.snapTurn = std::clamp(v.snapTurn, 0, 90);
     v.smoothTurn = std::clamp(v.smoothTurn, 0, 360);
@@ -270,9 +283,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 52>& rows() {
+const std::array<Row, 54>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 52> all{{
+    static const std::array<Row, 54> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -280,7 +293,7 @@ const std::array<Row, 52>& rows() {
          "Which button shoots and holds a web; the other reels in and shoots web balls.", webButtonChoices},
         {Item::aimMarkers, "AIM MARKERS", "Show where each web would land.", {}},
         {Item::airWebs, "WEBS HOLD IN OPEN AIR",
-         "With nothing in reach, a web still holds in open air, 100 m out.", {}},
+         "With nothing in reach, a web holds in open air at the selected WEB RANGE.", {}},
         {Item::none, "SWINGING", nullptr, {}},
         {Item::swingSpeed, "SWING SPEED LIMIT", "How fast a swing can carry you.", swingChoices},
         {Item::weight, "WEIGHT", "How heavy you are while swinging and after letting go. 100% is real gravity.",
@@ -372,6 +385,8 @@ const std::array<Row, 52>& rows() {
          "Press A in the air to stop momentum and smoothly return upright.", {}},
         {Item::automaticCombat, "FLIPS IN COMBAT",
          "Off: with enemies near, arms and webs stop turning you and you come upright.", {}},
+        {Item::webRange,"WEB RANGE","Maximum distance for new webs, including open-air anchors.",webRangeLabels},
+        {Item::webSpeed,"WEB SPEED","Distance-based visible flight and soft catch. Off keeps instant attachment.",webSpeedLabels},
     }};
     return all;
 }
@@ -401,6 +416,9 @@ bool choose(Item item, int index, Values& v) {
         return false;
     const Values before = v;
     switch (item) {
+    case Item::webRange:v.webRange=s[index];break;
+    case Item::webSpeed:v.webSpeed=s[index];break;
+
     case Item::swingSpeed:
         v.swingSpeed = static_cast<float>(s[index]);
         break;
@@ -514,6 +532,8 @@ constexpr TabOnly tabOnly[] = {
     {"height_cm", nullptr, &Values::heightCm},
     {"seated", &Values::seated, nullptr},
     {"eye_aim", nullptr, &Values::eyeAim},
+    {"web_range_m",nullptr,&Values::webRange},
+    {"web_speed",nullptr,&Values::webSpeed},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

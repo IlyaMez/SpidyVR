@@ -14,7 +14,52 @@ struct WebLine {
     float slack{};       // rope length beyond the straight distance; 0 when taut
     float extended = 1;  // 0..1 of the way from the wrist while the web is shot
     bool splat = true;   // impact web at the anchor once the shot arrives
+    float flightAge{}, flightProgress=1;Vec3 flightDirection{};
     float seed{};        // varies splat strands between webs
+};
+// A travelling strand flutters; its wrist and flying tip stay on their real path.
+inline Vec3 flyingWebPoint(Vec3 start, Vec3 end, float u, float age, float progress, Vec3 shotDirection={}) {
+    const Vec3 chord=end-start; const float distance=length(chord);
+    const Vec3 forward=normalized(length(shotDirection)>.5f?shotDirection:chord);
+    const Vec3 side=normalized(cross(forward,std::abs(forward.y)<.9f?Vec3{0,1,0}:Vec3{1,0,0}));
+    const Vec3 up=cross(side,forward);
+    const float envelope=std::sin(3.14159265f*u)*std::min(.28f,distance*.012f)*(1-progress);
+    return start+chord*u+(side*std::sin(7.5f*u-4.5f*age)+up*(.55f*std::sin(10.f*u-6.f*age)))*envelope;
+}
+// Render-time flight clock: physics can update slower than the headset.
+// It follows the shot's fixed direction, not a basis rebuilt from moving wrists.
+class WebFlightVisual {
+    Vec3 origin_{},anchor_{},direction_{};
+    float age_{},duration_{},lastProgress_{};bool active_{};
+  public:
+    void update(float dt,unsigned phase,float duration,float progress,Vec3 tip,Vec3 anchor) {
+        if(!phase || !(duration>0) || !finite(tip) || !finite(anchor)) {active_=false;return;}
+        dt=std::isfinite(dt)?std::clamp(dt,0.f,.05f):0;
+        progress=std::clamp(progress,0.f,1.f);
+        const bool newShot=phase==1 && (!active_ || progress<lastProgress_-.001f ||
+                            std::abs(duration-duration_)>.001f || length(anchor-anchor_)>.05f);
+        if(newShot) {
+            active_=true;duration_=duration;age_=progress*duration;
+            anchor_=anchor;
+            origin_=progress<.999f?(tip-anchor*progress)/(1-progress):tip;
+            direction_=normalized(anchor_-origin_);
+        } else if(active_) {
+            age_+=dt;
+            // Correct the clock gently only when a fresh physics sample arrives.
+            if(progress>lastProgress_+.000001f) {
+                const float correction=std::clamp(progress*duration-age_,-dt*.5f,dt*.5f);
+                age_+=correction*(1-std::exp(-dt/.08f));
+            }
+            age_=std::min(age_,progress*duration+.05f);
+        }
+        lastProgress_=progress;
+        age_=std::clamp(age_,0.f,phase==1?std::max(0.f,duration-.00001f):duration);
+    }
+    bool flying() const {return active_ && age_<duration_-.000001f;}
+    float progress() const {return active_ && duration_>0?std::clamp(age_/duration_,0.f,1.f):1.f;}
+    float age() const {return age_;}
+    Vec3 tip() const {return origin_+(anchor_-origin_)*progress();}
+    Vec3 direction() const {return direction_;}
 };
 struct WebLook {
     float radius = .005f;   // half width of the strand
