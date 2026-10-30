@@ -140,6 +140,19 @@ bool Swing::onStrand(int i) const {
     const float along = span > 1e-6f ? std::clamp(dot(to, line) / span, 0.f, 1.f) : 0.f;
     return length(to - line * along) <= config_.strandReach;
 }
+bool Swing::onStrand(int i, const Input& in) const {
+    if(i<0 || i>1 || !in.focused || !in.hands[i].tracked || !in.hands[1-i].tracked ||
+       webs_[i].attached || !webs_[1-i].attached) return false;
+    const auto turn=trackingTurn(in);
+    const Vec3 start=body_.position+turn.rotate(in.hands[1-i].gripRelativeToHead)+Vec3{0,config_.handHeight,0};
+    const Vec3 end=webs_[1-i].anchor;
+    const Vec3 point=body_.position+turn.rotate(in.hands[i].gripRelativeToHead)+Vec3{0,config_.handHeight,0};
+    if(!finite(start)||!finite(end)||!finite(point)) return false;
+    const Vec3 line=end-start; const float span=dot(line,line);
+    const float along=span>1e-6f?std::clamp(dot(point-start,line)/span,0.f,1.f):0;
+    const float reach=betterClimbing_?std::max(config_.strandReach,.24f):config_.strandReach;
+    return reach>0 && length(point-start-line*along)<=reach;
+}
 bool Swing::bears(int i) const {
     if (i < 0 || i > 1 || !webs_[i].attached)
         return false;
@@ -740,7 +753,7 @@ void Swing::reset(Body b) {
     sinceWallJump_ = 100;
     mount_ = mountLeft_ = 0;
     mounting_ = offered_ = mountOffered_ = false;
-    strands_ = 0;
+    strands_ = 0;climbTakeoff_=false;
 }
 void Swing::release(int i, EventKind reason) {
     if (webs_[i].attached)
@@ -875,6 +888,7 @@ WebShot Swing::shot(Pose aim, Vec3 from, const WorldQueries& world) const {
     return out;
 }
 void Swing::releaseAll() {
+    climbTakeoff_=false;
     clearSlingshot();
     climbing_ = {};
     for (int i = 0; i < 2; ++i) {
@@ -897,6 +911,7 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
         leapQueued_ = std::min(in.leap, 1.f);
     leapHeld_ = leap;
     jumpHeld_ = in.jump;
+    const bool onExisting[2]{onStrand(0,in),onStrand(1,in)};
     for (int i = 0; i < 2; ++i) {
         const auto& h = in.hands[i];
         auto& s = hands_[i];
@@ -918,7 +933,7 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
         const Vec3 offset = turn.rotate(h.gripRelativeToHead) + Vec3{0, config_.handHeight, 0};
         // On the other hand's web, as the samples before this one had both
         // hands: a press takes hold of that web.
-        const bool onOther = onStrand(i);
+        const bool onOther = onExisting[i];
         s.reach = offset;
         if (config_.physical) {
             const float over = std::max({dt, stepSeconds_, 1e-3f});
@@ -1014,10 +1029,11 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
             // Once both hands have taken this strand, a bearing hand takes
             // rope in instead of adding a yank impulse. Reaching up again
             // does not pay that length out; the other hand keeps the height.
-            const bool climbingRope = betterClimbing_ && s.ropeClimbing && !w.airAnchor;
+            const bool climbingRope = betterClimbing_ && s.ropeClimbing;
             if (climbingRope && s.sample && bears(i) && dt > 0 && dt <= .1f) {
                 const Vec3 travel = trackingTurn(in).rotate(h.gripRelativeToHead - s.previous);
                 const float pull = -dot(travel, normalized(w.anchor - body_.position));
+                if(body_.grounded && pull>.002f && normalized(w.anchor-body_.position).y>.15f)climbTakeoff_=true;
                 if (pull > 0 && pull <= config_.maxHandSpeed * dt)
                     w.length = std::max(std::min(config_.minRope, w.length),
                                         w.length - std::min(pull, 3.f * dt));
@@ -1394,6 +1410,7 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     seconds = std::min(seconds, longestNativeStep);
     if (actual.grounded && !body_.grounded)
         sinceLanding_ = 0;
+    if(!actual.grounded)climbTakeoff_=false;
     body_ = actual;
     body_.velocity = limited(body_.velocity, config_.maxSpeed);
     stepSeconds_ = seconds;

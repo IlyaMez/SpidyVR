@@ -652,6 +652,79 @@ int main() {
             tick();
         }
     };
+    test("better climbing pulls an open-air web after every travel mode", [] {
+        for(int mode=0;mode<=0;++mode) {
+        TestWorld world; world.enabled=false;
+        Swing swing([] {auto c=inert();c.physical=true;return c;}());
+        swing.allowBetterClimbing(true);
+        swing.allowAirAnchors(true);
+        auto in = aimed(); in.hands[0].trigger = 0;
+        in.hands[1] = {in.hands[0].aim, {0, .3f, 0}, true, 0, 0};
+        Body body{{}, {}, false};
+        auto intent = swing.predictNativeStep(1.f / 90, in, world, body);
+        auto step = [&] {
+            body = {intent.target, intent.velocity, false};
+            intent = swing.predictNativeStep(1.f / 90, in, world, body);
+            check(intent.valid, "climbing prediction failed");
+            for (const auto& e : swing.events())
+                check(e.kind != EventKind::Zip, "climbing became a yank impulse");
+        };
+        for(int frame=0;frame<100;++frame) step();
+        check(swing.webs()[0].airAnchor && swing.webs()[0].attached, "air web never arrived");
+        step(); in.hands[1].grip = 1; step();
+        check(swing.shared(), "two hands did not share the web");
+        for (int i = 0; i < 30; ++i) { in.hands[1].gripRelativeToHead.y -= .01f; step(); }
+        check(intent.target.y > .5f, "hand pull did not take in the rope");
+        const float before = intent.target.y;
+        in.hands[1].grip = 0; step();
+        for (int i = 0; i < 25; ++i) { intent.velocity = {}; step(); }
+        check(intent.target.y > before - .05f, "the remaining hand lost the gained height");
+        const float retained = swing.webs()[0].length;
+        // Reach forward with the free hand, grip the same strand and pull again.
+        in.hands[1].gripRelativeToHead.y += .4f; step();
+        in.hands[1].grip = 1; step();
+        check(swing.shared(), "free hand could not regrip the strand");
+        for (int i = 0; i < 25; ++i) { in.hands[1].gripRelativeToHead.y -= .01f; step(); }
+        check(std::min(swing.webs()[0].length, swing.webs()[1].length) < retained - .15f,
+              "another hand-over-hand stroke made no progress");
+        }
+    });
+    test("better climbing consumes a grip moved onto the strand in the same input sample", [] {
+        TestWorld world;spidy::Swing solver([] {auto c=inert();c.physical=true;return c;}());solver.allowBetterClimbing(true);
+        auto in=aimed();in.hands[0].trigger=0;
+        in.hands[1]={in.hands[0].aim,{1,.3f,0},true,0,0};
+        const Body body{{0,0,0},{},false};
+        solver.predictNativeStep(1.f/90,in,world,body);
+        solver.predictNativeStep(1.f/90,in,world,body);
+        check(!solver.onStrand(1),"old sample was not outside the rope");
+        in.hands[1].gripRelativeToHead.x=0;in.hands[1].grip=1;
+        check(solver.onStrand(1,in),"current hand pose missed the rope");
+        solver.predictNativeStep(1.f/90,in,world,body);
+        bool joined=false,shot=false;
+        for(const auto& event:solver.events()) {
+            joined|=event.kind==EventKind::Join && event.hand==1;
+            shot|=event.kind==EventKind::Attach && event.hand==1;
+        }
+        check(joined && !shot && solver.shared(),"climbing grip fired another web");
+    });
+    test("an upward rope pull asks the native jump to start climbing from the ground", [] {
+        TestWorld world;spidy::Swing solver([] {auto c=inert();c.physical=true;return c;}());solver.allowBetterClimbing(true);
+        solver.allowSlingshot(true);
+        auto in=aimed();in.hands[0].trigger=0;
+        in.hands[1]={in.hands[0].aim,{0,.3f,0},true,0,0};
+        const Body actual{{0,1,0},{},true};
+        auto step=[&] {return solver.predictNativeStep(.01f,in,world,actual);};
+        step();step();in.hands[1].grip=1;step();
+        check(solver.shared(),"two-hand hold failed on the ground");
+        check(!solver.climbTakeoff(),"just gripping caused a jump");
+        in.hands[1].gripRelativeToHead.y-=.03f;step();
+        check(solver.climbTakeoff() && !in.jump,"rope pull still required the jump button");
+        SwingTakeoff native;
+        native.update(1000,true,true,true,solver.climbTakeoff(),true,actual.position,{},{});
+        const auto takeoff=native.update(1080,true,true,true,solver.climbTakeoff(),false,actual.position,{},{});
+        check(takeoff.jump,"native takeoff was not requested");
+        solver.releaseAll();check(!solver.climbTakeoff(),"released rope kept a takeoff request");
+    });
     test("slingshot draws two fixed webs and launches once, capped, toward their midpoint", [] {
         Sling s;
         s.solver.limitSpeed(25);

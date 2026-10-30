@@ -515,9 +515,12 @@ class Swing {
     // Hand `hand` is free and on the other hand's web, as of the latest
     // input: its grip press would take hold of that web, and shoot none.
     bool onStrand(int hand) const;
+    bool onStrand(int hand,const Input&) const;
     // Hand `hand`'s web holds the body when taut: any web but the longer
     // rope of two hands on one web.
     bool bears(int hand) const;
+    bool betterClimbingEnabled() const {return betterClimbing_;}
+    bool climbTakeoff() const {return climbTakeoff_ && betterClimbing_ && ((webs_[0].attached&&hands_[0].ropeClimbing)||(webs_[1].attached&&hands_[1].ropeClimbing));}
     const SwingConfig& config() const {
         return config_;
     }
@@ -533,6 +536,7 @@ class Swing {
     uint64_t slingshotSurfaces_[2]{};
     float slingshotCharge_{}, slingshotHold_{}, slingshotRelease_{}, slingshotYaw_{};
     bool betterClimbing_{};
+    bool climbTakeoff_{};
     struct HandState {
         // held: grip squeezed, with release hysteresis. A web shoots only on the
         // press that sets it, so a lost web never re-fires while the grip stays held.
