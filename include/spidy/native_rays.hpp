@@ -90,7 +90,7 @@ inline bool valid(const Command& c) {
         const float magnitude = length(ray.direction);
         if (!finite(ray.origin) || length(ray.origin) > 100000 || !finite(ray.direction) ||
             magnitude < .999f || magnitude > 1.001f || !std::isfinite(ray.distance) || ray.distance < .01f ||
-            ray.distance > 8192)
+            ray.distance > 1000) // as far as WEB RANGE reaches (150 m before it)
             return false;
     }
     return true;

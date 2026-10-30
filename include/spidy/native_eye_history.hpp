@@ -15,7 +15,8 @@ struct NativeEyeFrame {
     std::array<TrackedEye, 2> trackingEyes;
     std::array<game_swing::WebState, 2> webs;
     std::array<WebTimeline::Hand, 2> webTimes{};
-    game_swing::WebFlightData webFlight;WebFlightVisual flightVisual[2];
+    game_swing::WebFlightData webFlight;
+    WebFlightVisual flightVisual[2];
     // The game rope that draws each hand's web (WebRopes; -1: none). One web
     // in both hands: the hand its strand comes to first, the other hand's
     // part running from wrist to wrist; -1 otherwise.

@@ -551,7 +551,7 @@ int main() {
                 continue;
             const bool leftOut = row.item == Item::view || row.item == Item::calibrate ||
                                  row.item == Item::height || row.item == Item::recordingFov ||
-                                 row.item == Item::eyeAim;
+                                 row.item == Item::eyeAim || row.item == Item::recordingSmoothing;
             check(std::count_if(begin, end, [&](const ProfileSetting& s) { return s.item == row.item; }) ==
                       (leftOut ? 0 : 1),
                   row.title);
@@ -561,7 +561,8 @@ int main() {
         size_t lines = 0;
         for (size_t line = 0; line < tabOnly.size(); line = tabOnly.find('\n', line) + 1) {
             const std::string key = tabOnly.substr(line, tabOnly.find('=', line) - line);
-            if (key == "recording_fov" || key == "height_cm" || key == "eye_aim")
+            if (key == "recording_fov" || key == "recording_smoothing" || key == "height_cm" ||
+                key == "eye_aim")
                 continue;
             ++lines;
             check(at(key) < std::size(profileSettings) &&
@@ -657,9 +658,6 @@ int main() {
         o.hud = 0;
         o.flipSpeed = 300;
         auto& t = mine.tab;
-        t.webRange=500;
-        t.webSpeed=2;
-
         t.hapticWebs = t.hapticWind = t.hapticCombat = t.hapticMovement = false;
         t.automaticReleaseFlip = t.automaticAirBrake = t.automaticCombat = false;
         t.handClimb = t.realisticFlips = t.seated = t.controlledFlips = true;
@@ -669,6 +667,15 @@ int main() {
         t.blowSounds = 1;
         t.webSlingshot = true;
         t.betterClimbing = true;
+        t.smartAnchor = true;
+        t.elasticWeb = 2;
+        t.softRelease = 3;
+        t.swingAssist = true;
+        t.slingshotSpeed = 200;
+        t.recordingSmoothing = 50;
+        t.twoHandZip = t.ropeSteering = true;
+        t.webRange = 500;
+        t.webSpeed = 2;
         t.nearClipMm = 10;
         t.automaticStrength = 75;
         t.automaticSpeed = 360;
@@ -682,8 +689,11 @@ int main() {
         check(profileText(profileOf(PlaySettings{}, "Spidy's own"), "0.4.1") ==
                   "# Spidy settings profile. To use it, in the Spidy launcher: Profile > Paste a profile, "
                   "or Import a file.\nname=Spidy's own\nspidy=0.4.1\narcade_webs=0\ntrigger_webs=0\n"
-                  "aim_markers=1\nair_webs=1\nswing_speed=32\nweight=100\nweb_slingshot=0\n"
-                  "better_climbing=0\nwall_run=1\nsnap_turn=30\nsmooth_turn=0\nhaptics=100\nblow_sounds=0\n"
+                  "aim_markers=1\nair_webs=1\nsmart_anchor=0\nweb_range_m=100\nweb_speed=0\nswing_speed=32\n"
+                  "weight=100\nelastic_web=0\n"
+                  "soft_release=0\nswing_assist=0\nweb_slingshot=0\nslingshot_speed=0\n"
+                  "better_climbing=0\ntwo_hand_zip=0\nrope_steering=0\nwall_run=1\nsnap_turn=30\n"
+                  "smooth_turn=0\nhaptics=100\nblow_sounds=0\n"
                   "body_haptics=100\nbody_haptics_webs=1\nbody_haptics_wind=1\n"
                   "body_haptics_combat=1\nbody_haptics_movement=1\nscreen_size=1\nscreen_depth=2\nhud=2\n"
                   "ui_style=0\ncombat_visuals=1\nnear_clip_mm=20\nseated=0\nflips=0\ncontrolled_flips=0\nflip_speed=180\nhand_climb=0\n"
@@ -691,7 +701,7 @@ int main() {
                   "wall_distance_cm=25\n"
                   "realistic_flips=0\nrotation_strength=50\nrotation_speed=240\nflight_speed_min=3\n"
                   "swing_momentum=1\nrotation_response_ms=500\nhand_momentum=100\nangular_drag_ms=3000\n"
-                  "hand_speed_min_cm=100\nair_rotation_brake=1\nflips_in_combat=1\nweb_range_m=100\nweb_speed=0\n",
+                  "hand_speed_min_cm=100\nair_rotation_brake=1\nflips_in_combat=1\n",
               "the defaults' text: a key shared once keeps its name");
         const std::string message = profileMessage(profileOf(mine), "0.4.1");
         check(message.rfind("```ini\n# Spidy settings profile.", 0) == 0 && message.ends_with("\n```") &&
