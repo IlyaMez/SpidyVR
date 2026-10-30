@@ -117,6 +117,8 @@ inline constexpr ProfileSetting profileSettings[] = {
     tabOnly("hand_speed_min_cm", Item::automaticHandThreshold, 50, 300, &Values::automaticHandThreshold),
     tabOnly("air_rotation_brake", Item::automaticAirBrake, &Values::automaticAirBrake),
     tabOnly("flips_in_combat", Item::automaticCombat, &Values::automaticCombat),
+    tabOnly("two_hand_zip",Item::twoHandZip,0,1,&Values::twoHandZip),
+    tabOnly("rope_steering",Item::ropeSteering,0,1,&Values::ropeSteering),
 };
 } // namespace detail
 using detail::profileSettings;

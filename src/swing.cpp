@@ -719,6 +719,7 @@ void Swing::holdWall(float dt, float before, const World* collision) {
     wall_.distance = distance + shift;
 }
 void Swing::reset(Body b) {
+    resetGestures();
     if (!finite(b.position) || !finite(b.velocity))
         throw std::invalid_argument("Invalid body");
     clearSlingshot();
@@ -875,6 +876,7 @@ WebShot Swing::shot(Pose aim, Vec3 from, const WorldQueries& world) const {
     return out;
 }
 void Swing::releaseAll() {
+    resetGestures();
     clearSlingshot();
     climbing_ = {};
     for (int i = 0; i < 2; ++i) {
@@ -889,6 +891,9 @@ void Swing::releaseAll() {
     zipDirection_ = {};
 }
 void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
+    zipGestureBlock_=std::max(0.f,zipGestureBlock_-dt);
+    if(twoHandZip_ && (!in.hands[0].tracked || !in.hands[1].tracked || dt>.1f ||
+       (gestureSample_ && std::abs(std::remainder(in.trackingYaw-gestureYaw_,6.2831853f))>.12f)))zipGestureBlock_=.2f;
     climbSeconds_ = dt;
     climbInputs(in, world);
     jumpQueued_ |= in.jump && !jumpHeld_;
@@ -1025,6 +1030,7 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
             // Motion must be both fast and deliberate within a short window.
             // Head-relative samples remove virtual movement and room-scale translation.
             if (s.sample && !s.zipUsed && bears(i) && !climbingRope &&
+                !(twoHandZip_ && (twoHandTarget() || zipGestureBlock_>0)) &&
                 !(slingshotEnabled_ && body_.grounded)) {
                 const Vec3 delta = trackingTurn(in).rotate(h.gripRelativeToHead - s.previous);
                 const float pull = -dot(delta, normalized(w.anchor - body_.position));
@@ -1057,7 +1063,72 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
         s.previous = h.gripRelativeToHead;
         s.sample = true;
     }
+    gestures(dt,in,world);
     slingshot(dt, in, world);
+}
+void Swing::resetGestures() {
+    gestureSample_=zipUsed_=gestureTakeoff_=false;zipGestureBlock_=0;
+    gestureLaunch_={};zipPull_[0]=zipPull_[1]=zipWindow_=0;
+    gestureStrands_[0]=gestureStrands_[1]=0;
+}
+bool Swing::twoHandTarget() const {
+    return webs_[0].attached && webs_[1].attached && !webs_[0].airAnchor && !webs_[1].airAnchor &&
+        length(webs_[0].end()-webs_[1].end())<=1.5f;
+}
+void Swing::gestures(float dt,const Input& in,const WorldQueries&) {
+    if(!gesturesEnabled())return;
+    if(!in.focused || !(dt>0) || dt>.1f || !std::isfinite(in.trackingYaw) ||
+       !in.hands[0].tracked || !in.hands[1].tracked ||
+       !finite(in.hands[0].gripRelativeToHead) || !finite(in.hands[1].gripRelativeToHead)) {
+        gestureSample_=false;gestureTakeoff_=false;zipPull_[0]=zipPull_[1]=zipWindow_=0;
+        return;
+    }
+    const bool fresh=gestureSample_ && std::abs(std::remainder(in.trackingYaw-gestureYaw_,6.2831853f))<.12f;
+    Vec3 delta[2]{};
+    if(fresh)for(int i=0;i<2;++i)delta[i]=trackingTurn(in).rotate(in.hands[i].gripRelativeToHead-gesturePrevious_[i]);
+    if(!fresh) {zipPull_[0]=zipPull_[1]=zipWindow_=0;}
+    const bool changed=gestureStrands_[0]!=webs_[0].strand || gestureStrands_[1]!=webs_[1].strand;
+    if(changed || !twoHandTarget()) {zipUsed_=false;zipPull_[0]=zipPull_[1]=zipWindow_=0;}
+    if(twoHandZip_ && twoHandTarget() && !zipUsed_ && fresh && !changed &&
+       !(slingshotEnabled_ && body_.grounded && slingshotCharge_>.1f)) {
+        const Vec3 target=(webs_[0].end()+webs_[1].end())*.5f;
+        const Vec3 toward=normalized(target-body_.position);
+        const Vec3 gaze=length(in.look)>.5f?normalized(in.look):toward;
+        float speed[2]{};
+        zipWindow_+=dt;
+        if(zipWindow_>.24f) {zipWindow_=dt;zipPull_[0]=zipPull_[1]=0;}
+        for(int i=0;i<2;++i) {
+            const float pull=-dot(delta[i],toward);
+            // Retraction toward the chest, not a downward climbing stroke.
+            if(pull>0 && -dot(delta[i],gaze)>pull*.5f && length(delta[i])<config_.maxHandSpeed*dt) {
+                zipPull_[i]+=pull;speed[i]=pull/dt;
+            }
+        }
+        if(dot(toward,gaze)>.55f && std::min(zipPull_[0],zipPull_[1])>=.12f && std::min(speed[0],speed[1])>=1.1f) {
+            const float force=std::clamp((speed[0]+speed[1])*2.5f+std::min(zipPull_[0],zipPull_[1])*12.f,5.f,24.f);
+            if(wall_.on) {leaveWall();sinceWallJump_=0;}
+            body_.velocity=limited(body_.velocity+toward*force,config_.maxSpeed);
+            gestureLaunch_=body_.velocity;gestureTakeoff_=body_.grounded;body_.grounded=false;
+            sinceZip_=0;zipSpeed_=length(body_.velocity);zipDirection_=normalized(Vec3{body_.velocity.x,0,body_.velocity.z});
+            zipUsed_=true;hands_[0].zipUsed=hands_[1].zipUsed=true;
+            events_.push_back({EventKind::Zip,-1,1});
+        }
+    }
+    if(ropeSteering_ && shared() && webs_[0].attached && webs_[1].attached && fresh && !changed &&
+       !body_.grounded && !wall_.on && !zipUsed_) {
+        const int pulling=webs_[1].taken?1:0;
+        const Vec3 radial=normalized(webs_[pulling].anchor-body_.position);
+        const Vec3 sideways=delta[pulling]-radial*dot(delta[pulling],radial);
+        const float speed=length(body_.velocity);
+        if(speed>2 && length(sideways)<config_.maxHandSpeed*dt) {
+            const Vec3 desired=normalized(body_.velocity+sideways*20.f)*speed;
+            // Turn existing momentum; do not create speed or move the anchor.
+            const Vec3 steered=body_.velocity+limited(desired-body_.velocity,25.f*dt);
+            if(length(steered)>.01f)body_.velocity=normalized(steered)*speed;
+        }
+    }
+    for(int i=0;i<2;++i) {gesturePrevious_[i]=in.hands[i].gripRelativeToHead;gestureStrands_[i]=webs_[i].strand;}
+    gestureYaw_=in.trackingYaw;gestureSample_=true;
 }
 void Swing::clearSlingshot() {
     slingshotPair_ = slingshotReleasing_ = false;
@@ -1394,6 +1465,7 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     seconds = std::min(seconds, longestNativeStep);
     if (actual.grounded && !body_.grounded)
         sinceLanding_ = 0;
+    if(!actual.grounded)gestureTakeoff_=false;
     body_ = actual;
     body_.velocity = limited(body_.velocity, config_.maxSpeed);
     stepSeconds_ = seconds;

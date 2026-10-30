@@ -652,6 +652,83 @@ int main() {
             tick();
         }
     };
+    struct TwinZipTest {
+        TestWorld world;Swing solver{inert()};Input in;Body body{{},{},false};unsigned zips{};
+        TwinZipTest(bool enabled=true) {
+            world.anchor={0,0,-30};solver.allowGestures(enabled,false);
+            for(int i=0;i<2;++i) {
+                in.hands[i].tracked=true;in.hands[i].grip=1;
+                in.hands[i].gripRelativeToHead={i?.2f:-.2f,0,-.35f};
+                in.hands[i].aim={{i?.2f:-.2f,0,0},arc({0,0,-1},normalized(world.anchor-Vec3{i?.2f:-.2f,0,0}))};
+            }
+            in.look={0,0,-1};step();
+        }
+        void step(float inputTime=.02f) {
+            const auto result=solver.predictNativeStep(.02f,in,world,body,inputTime);
+            check(result.valid,"zip prediction failed");
+            for(const auto& e:solver.events())zips+=e.kind==EventKind::Zip;
+            body={result.target,result.velocity,body.grounded};
+        }
+        void pull(float distance) {for(auto& h:in.hands)h.gripRelativeToHead.z+=distance;step();}
+    };
+
+    test("sideways rope steering turns existing momentum only while sharing a strand", [] {
+        TestWorld world;Swing on(inert()),off(inert());on.allowGestures(false,true);
+        Input input=aimed();input.hands[0].trigger=0;
+        input.hands[1]={input.hands[0].aim,{0,.3f,0},true,0,0};
+        Body a{{},{0,0,-10},false},b=a;
+        auto step=[&] {
+            const auto x=on.predictNativeStep(.01f,input,world,a),y=off.predictNativeStep(.01f,input,world,b);
+            a={x.target,x.velocity,false};b={y.target,y.velocity,false};
+        };
+        step();input.hands[1].grip=1;step();check(on.shared(),"free hand did not take the rope");
+        for(int i=0;i<10;++i) {input.hands[1].gripRelativeToHead.x+=.02f;step();}
+        check(a.velocity.x>b.velocity.x+1,"sideways pull did not steer");
+        check(length(a.velocity)<10.1f,"rope steering manufactured speed");
+        input.hands[1].grip=0;step();check(!on.shared(),"released hand kept steering grip");
+    });
+    test("turning gestures OFF clears a queued launch and does not replay it", [] {
+        TwinZipTest state;state.body.grounded=true;
+        for(int i=0;i<3;++i)state.pull(.05f);
+        check(state.solver.gestureTakeoff(),"test did not queue a takeoff");
+        state.solver.allowGestures(false,false);
+        check(!state.solver.gestureTakeoff(),"OFF retained a queued launch");
+        near(length(state.solver.gestureLaunch()),0);
+        const unsigned before=state.zips;
+        for(int i=0;i<20;++i)state.step();
+        check(state.zips==before,"OFF replayed the launch");
+    });
+    test("two hand zip rejects one-arm, slow, tracking-gap and yaw-change gestures", [] {
+        TwinZipTest one,slow,gap,yaw;
+        for(int i=0;i<8;++i) {one.in.hands[0].gripRelativeToHead.z+=.04f;one.step();slow.pull(.01f);}
+        check(one.zips==0 && slow.zips==0,"unintentional arm motion zipped");
+        gap.pull(.05f);gap.in.hands[1].tracked=false;gap.step();
+        gap.in.hands[1].tracked=true;gap.pull(.3f);check(gap.zips==0,"tracking gap created a zip");
+        yaw.pull(.05f);yaw.in.trackingYaw=.5f;yaw.pull(.2f);check(yaw.zips==0,"snap turn created a zip");
+    });
+    test("two hand zip uses both retractions once and scales with the arm speed", [] {
+        TwinZipTest medium,strong;
+        for(int i=0;i<5;++i)medium.pull(.028f);
+        for(int i=0;i<3;++i)strong.pull(.05f);
+        check(medium.zips==1 && strong.zips==1,"two-hand gesture missed or duplicated zip");
+        check(-strong.body.velocity.z>-medium.body.velocity.z+3,"stronger pull did not launch harder");
+        for(int i=0;i<30;++i)strong.step(0);
+        check(strong.zips==1,"repeated input relaunched the zip");
+    });
+    test("new optional controls persist and keep their default", [] {
+        using namespace vr_settings;
+        for(int index=0;index<2;++index) {
+            Values value;choose(Item::twoHandZip,index,value);
+            check(choice(Item::twoHandZip,withTabOnly({},tabOnlyText(value)))==index,"saved setting changed");
+        }
+        check(Values{}.twoHandZip==0,"default changed");
+        for(int index=0;index<2;++index) {
+            Values value;choose(Item::ropeSteering,index,value);
+            check(choice(Item::ropeSteering,withTabOnly({},tabOnlyText(value)))==index,"saved setting changed");
+        }
+        check(Values{}.ropeSteering==0,"default changed");
+    });
+
     test("slingshot draws two fixed webs and launches once, capped, toward their midpoint", [] {
         Sling s;
         s.solver.limitSpeed(25);
@@ -726,7 +803,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 10 && s.bytes == 56 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 11 && s.bytes == 64 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -1239,7 +1316,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 10 && s.bytes == 56 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 11 && s.bytes == 64 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -2595,7 +2672,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 10 && s.bytes == 56, "updated settings did not append the climbing field");
+        check(s.version == 11 && s.bytes == 64, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -20690,7 +20767,7 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 41 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 41 + std::size(realistic) + 2, "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
             check(all[41 + i].item == realistic[i], "the realistic flips' rows out of order");
         check(std::strcmp(all[41].title, "REALISTIC FLIPS") == 0 && all[41].choices.empty(),
@@ -20763,7 +20840,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 47,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 49,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -20884,7 +20961,7 @@ int main() {
                                        "angular_drag_ms=3000\nhand_speed_min_cm=100\nair_rotation_brake=1\n"
                                        "flips_in_combat=1\nbody_haptics_webs=1\nbody_haptics_wind=1\nbody_haptics_combat=1\n"
                                        "body_haptics_movement=1\nrecording_fov=0\nui_style=0\ncombat_visuals=1\nblow_sounds=0\n"
-                                       "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\n",
+                                       "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\ntwo_hand_zip=0\nrope_steering=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

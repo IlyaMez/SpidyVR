@@ -518,6 +518,15 @@ class Swing {
     // Hand `hand`'s web holds the body when taut: any web but the longer
     // rope of two hands on one web.
     bool bears(int hand) const;
+    void allowGestures(bool zip,bool steering) {
+        if(twoHandZip_!=zip||ropeSteering_!=steering)resetGestures();
+        twoHandZip_=zip;ropeSteering_=steering;
+    }
+    bool gestureTakeoff() const {return gestureTakeoff_;}
+    Vec3 gestureLaunch() const {return gestureLaunch_;}
+    bool gesturesEnabled() const {return twoHandZip_||ropeSteering_;}
+
+
     const SwingConfig& config() const {
         return config_;
     }
@@ -533,6 +542,16 @@ class Swing {
     uint64_t slingshotSurfaces_[2]{};
     float slingshotCharge_{}, slingshotHold_{}, slingshotRelease_{}, slingshotYaw_{};
     bool betterClimbing_{};
+    bool twoHandZip_{},ropeSteering_{};
+    bool gestureSample_{},zipUsed_{},gestureTakeoff_{};
+    Vec3 gesturePrevious_[2]{},gestureLaunch_{};
+    uint64_t gestureStrands_[2]{};
+    float zipGestureBlock_{},gestureYaw_{},zipPull_[2]{},zipWindow_{};
+    void resetGestures();
+    void gestures(float dt,const Input&,const WorldQueries&);
+    bool twoHandTarget() const;
+
+
     struct HandState {
         // held: grip squeezed, with release hysteresis. A web shoots only on the
         // press that sets it, so a lost web never re-fires while the grip stays held.
