@@ -226,7 +226,7 @@ class RealisticFlip {
             desired = angular_ + limited(orbit * strength, rate * .5f);
         }
         if (flying) {
-            const float gain = 8.f * std::clamp(settings.handStrength, 25, 200) / 100.f;
+            const float gain = 8.f * std::clamp(settings.handStrength, 0, 200) / 100.f;
             const Vec3 hand = tilt_.rotate(flight.handMomentum) * gain;
             // Capture the short arm swing that straddles takeoff, then accept
             // ongoing gestures and opposite gestures that brake the rotation.

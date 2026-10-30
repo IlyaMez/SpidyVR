@@ -44,9 +44,16 @@ inline bool commandApplies(uint64_t nowMs, uint64_t leaseEndMs, uint64_t steps, 
 // that same fall; the game's step is its smoothed frame time, so below 20
 // frames a second every step was such a step (October 10 headset report:
 // three dives out of a swing, each from the first step of 50.4-51.7 ms).
-constexpr float farthestStep = 2, boostedStep=8, maxPlayerSpeed=300;
-inline float commandDistance(const Command& c) { return c.version==2 && c.reserved2==1?boostedStep:farthestStep; }
-inline bool validCommandVersion(const Command& c) { return (c.version==1 && !c.reserved2) || (c.version==2 && c.reserved2<=1); }
+// A command of version 2 with reserved2 1 is a SLINGSHOT SPEED launch over
+// 65 m/s (pull request #45): its steps may go as far as boostedStep, and
+// the module takes speeds up to maxPlayerSpeed.
+constexpr float farthestStep = 2, boostedStep = 8, maxPlayerSpeed = 300;
+inline float commandDistance(const Command& c) {
+    return c.version == 2 && c.reserved2 == 1 ? boostedStep : farthestStep;
+}
+inline bool validCommandVersion(const Command& c) {
+    return (c.version == 1 && !c.reserved2) || (c.version == 2 && c.reserved2 <= 1);
+}
 inline bool drivable(float dt) {
     return std::isfinite(dt) && dt > 0;
 }
