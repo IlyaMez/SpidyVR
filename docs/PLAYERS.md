@@ -679,9 +679,9 @@ the launcher's alone; while it is on it takes the place of the flips above)
   Let go of the web .... the swing's spin goes on (SWING MOMENTUM) and dies
                          away as ANGULAR DRAG says
   Swing your arms ...... in the air, faster than MINIMUM HAND SPEED, and you
-                         turn with them, as much as HAND MOMENTUM says; swing
-                         them back the other way to slow down. A spin can go
-                         past a whole turn
+                         turn with them, as much as HAND MOMENTUM says (0%:
+                         not at all); swing them back the other way to slow
+                         down. A spin can go past a whole turn
   A in the air ......... stops the spin and brings you upright (AIR ROTATION
                          BRAKE); landing does too
   Left stick in the air  with FLIPS on as well: let go of it once in the air,
@@ -758,8 +758,21 @@ VR settings
                    (GRIP or TRIGGER: the one that shoots and holds a web;
                    the other reels in and shoots web balls); AIM MARKERS;
                    webs holding in open air (a web that meets nothing
-                   within 100 m holds there; off, it misses).
-  SWINGING ....... the swing speed limit and your weight.
+                   within 100 m holds there; off, it misses); SMART
+                   ANCHOR (off until you switch it on): with open-air
+                   webs off, a web that just misses, by up to 8
+                   degrees, catches the real surface nearest it.
+  SWINGING ....... the swing speed limit and your weight. ELASTIC WEB (OFF
+                   unless you pick LOW, MEDIUM or HIGH): webs stretch
+                   under your weight and catch you more softly, softest
+                   on HIGH. SOFT RELEASE (OFF unless you pick LOW,
+                   MEDIUM or HIGH): a web you let go of keeps pulling
+                   for a moment, fading out (120, 180 or 240 ms).
+                   SWING ASSIST (off until you switch it on): flying at
+                   a wall on a web, or just after, you slow down in time
+                   instead of slamming into it; nothing turns you or
+                   lifts you, and a late or very fast approach can
+                   still hit.
   COMFORT ........ snap turn and smooth turn.
   HAPTICS ........ controller vibration; BLOW SOUNDS (GAME: your blows
                    sound as the game's own do, its hits on the one you
@@ -800,7 +813,11 @@ VR settings
                    arrows, target circle, impact/combo effects, KO text and
                    automatic combat slow-motion screen effects. Spider-Sense
                    attack warnings and offscreen direction markers remain
-                   visible. Combat controls, sound and vibration still work. Web aim markers and the
+                   visible. Off also removes directional combo requirements:
+                   uppercuts launch freely, downward blows knock standing enemies
+                   down or slam airborne enemies into the ground, even on a
+                   finisher count. Punch speed, contact and free-hand rules
+                   still apply. Sound and vibration still work. Web aim markers and the
                    game's own HUD have their existing separate controls.
   EXPERIMENTAL ... FLIPS (off until you switch it on) uses the right stick
                    in the air; release holds the angle and A returns upright.
@@ -831,7 +848,8 @@ VR settings
                    Desktop: its eye tracking forwarding).
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, HEIGHT, SEATED, EYE AIM, the four body haptics switches and the
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, HEIGHT, SEATED, EYE AIM, SMART ANCHOR, ELASTIC WEB, SOFT RELEASE, SWING
+  ASSIST, the four body haptics switches and the
   CONTROLLED FLIPS and EXPERIMENTAL rows below FLIP SPEED Spidy keeps in
   %APPDATA%\Spidy\spidy_vr.ini, beside the launcher's own settings; the
   launcher shows realistic flips' ten rows while it is on, and the body

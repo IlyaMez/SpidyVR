@@ -79,8 +79,12 @@ inline constexpr ProfileSetting profileSettings[] = {
     launcherOption("trigger_webs", Item::webButton, &SessionOptions::triggerWebs),
     launcherOption("aim_markers", Item::aimMarkers, &SessionOptions::aimMarkers),
     launcherOption("air_webs", Item::airWebs, &SessionOptions::airWebs),
+    tabOnly("smart_anchor", Item::smartAnchor, &Values::smartAnchor),
     launcherOption("swing_speed", Item::swingSpeed, 10, 65, &SessionOptions::swingSpeed),
     launcherOption("weight", Item::weight, 40, 300, &SessionOptions::weight),
+    tabOnly("elastic_web", Item::elasticWeb, 0, 3, &Values::elasticWeb),
+    tabOnly("soft_release", Item::softRelease, 0, 3, &Values::softRelease),
+    tabOnly("swing_assist", Item::swingAssist, &Values::swingAssist),
     tabOnly("web_slingshot", Item::webSlingshot, &Values::webSlingshot),
     tabOnly("better_climbing", Item::betterClimbing, &Values::betterClimbing),
     retired("wall_run", 1),
@@ -112,12 +116,11 @@ inline constexpr ProfileSetting profileSettings[] = {
     tabOnly("flight_speed_min", Item::automaticMinimumSpeed, 3, 16, &Values::automaticMinimumSpeed),
     tabOnly("swing_momentum", Item::automaticReleaseFlip, &Values::automaticReleaseFlip),
     tabOnly("rotation_response_ms", Item::automaticResponse, 100, 750, &Values::automaticResponse),
-    tabOnly("hand_momentum", Item::automaticHandStrength, 25, 200, &Values::automaticHandStrength),
+    tabOnly("hand_momentum", Item::automaticHandStrength, 0, 200, &Values::automaticHandStrength),
     tabOnly("angular_drag_ms", Item::automaticFalloff, 500, 3000, &Values::automaticFalloff),
     tabOnly("hand_speed_min_cm", Item::automaticHandThreshold, 50, 300, &Values::automaticHandThreshold),
     tabOnly("air_rotation_brake", Item::automaticAirBrake, &Values::automaticAirBrake),
     tabOnly("flips_in_combat", Item::automaticCombat, &Values::automaticCombat),
-    tabOnly("swing_assist",Item::swingAssist,0,1,&Values::swingAssist),
 };
 } // namespace detail
 using detail::profileSettings;

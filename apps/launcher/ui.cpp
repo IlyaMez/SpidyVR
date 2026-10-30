@@ -1823,6 +1823,10 @@ void App::options(ImVec2 origin, ImVec2 size) {
                });
         option("Webs hold in open air", "With nothing in reach, a web still holds 100 m out; off, it misses.", S(42),
                [&] { changed |= toggle("##air", &o.airWebs); });
+        option("Smart anchor",
+               "With webs holding in open air off, a web that just misses still catches the real surface "
+               "nearest it.",
+               S(42), [&] { tabToggle("##smartanchor", Item::smartAnchor); });
         option("Aim markers", "Show where each hand's web would land.", S(42),
                [&] { changed |= toggle("##aim", &o.aimMarkers); });
         option("Eye aim",
@@ -1839,6 +1843,13 @@ void App::options(ImVec2 origin, ImVec2 size) {
         option("Weight", "How heavy you are while swinging and after letting go. 100% is real gravity.", S(150), [&] {
             stepCombo("##weight", kWeights, kWeightValues, static_cast<int>(std::size(kWeightValues)), &o.weight);
         });
+        option("Elastic web", "Webs stretch under load and catch you more softly; higher is softer.", S(150),
+               [&] { tabCombo("##elasticweb", Item::elasticWeb); });
+        option("Soft release", "A web's last pull fades briefly as you let go; higher lasts longer.", S(150),
+               [&] { tabCombo("##softrelease", Item::softRelease); });
+        option("Swing assist",
+               "Swinging at a wall, you slow down before you hit it; where you go stays yours.", S(42),
+               [&] { tabToggle("##swingassist", Item::swingAssist); });
         option("Web slingshot", "No auto jump. Draw two fixed webs, hold for vibration, release both to launch.",
                S(42), [&] { tabToggle("##webslingshot", Item::webSlingshot); });
         option("Better climbing", "Take one web in both hands, then pull hand over hand to keep climbing it.",
