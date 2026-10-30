@@ -652,6 +652,33 @@ int main() {
             tick();
         }
     };
+    test("selected slingshot speed bypasses only the ordinary swing cap and resets on landing", [] {
+        for(float speed : {20.f,32.f,65.f,100.f,200.f,300.f}) {
+            Sling s;s.solver.setSlingshotSpeed(speed);s.draw();
+            for(int i=0;i<60;++i)s.tick();
+            s.release();check(s.fired(),"charged launch did not fire");
+            check(length(s.last.velocity)>speed*.99f && length(s.last.velocity)<=speed+.01f,"selected launch speed was capped");
+            check(s.solver.slingshotFlying(),"launch lost flight state");
+            s.body={s.last.target,s.last.velocity,false};s.tick();
+            s.body={s.last.target,{},true};s.tick();
+            check(!s.solver.slingshotFlying(),"landing kept the boosted speed limit");
+            near(s.solver.speedLimit(),s.solver.config().maxSpeed);
+        }
+        native_movement::Command packet;packet.version=2;packet.reserved2=1;
+        check(native_movement::validCommandVersion(packet),"opt-in swept step refused");
+        near(length(native_movement::stepDelta({300,0,0},.02f,native_movement::commandDistance(packet))),6);
+        packet.version=1;check(!native_movement::validCommandVersion(packet),"legacy packet accepted a new flag");
+    });
+
+    test("new optional controls persist and keep their default", [] {
+        using namespace vr_settings;
+        for(int index=0;index<10;++index) {
+            Values value;choose(Item::slingshotSpeed,index,value);
+            check(choice(Item::slingshotSpeed,withTabOnly({},tabOnlyText(value)))==index,"saved setting changed");
+        }
+        check(Values{}.slingshotSpeed==0,"default changed");
+    });
+
     test("slingshot draws two fixed webs and launches once, capped, toward their midpoint", [] {
         Sling s;
         s.solver.limitSpeed(25);
@@ -726,7 +753,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 10 && s.bytes == 56 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 11 && s.bytes == 60 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -1239,7 +1266,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 10 && s.bytes == 56 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 11 && s.bytes == 60 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -2595,7 +2622,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 10 && s.bytes == 56, "updated settings did not append the climbing field");
+        check(s.version == 11 && s.bytes == 60, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -20690,7 +20717,7 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 41 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 41 + std::size(realistic) + 1, "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
             check(all[41 + i].item == realistic[i], "the realistic flips' rows out of order");
         check(std::strcmp(all[41].title, "REALISTIC FLIPS") == 0 && all[41].choices.empty(),
@@ -20763,7 +20790,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 47,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 48,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -20884,7 +20911,7 @@ int main() {
                                        "angular_drag_ms=3000\nhand_speed_min_cm=100\nair_rotation_brake=1\n"
                                        "flips_in_combat=1\nbody_haptics_webs=1\nbody_haptics_wind=1\nbody_haptics_combat=1\n"
                                        "body_haptics_movement=1\nrecording_fov=0\nui_style=0\ncombat_visuals=1\nblow_sounds=0\n"
-                                       "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\n",
+                                       "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\nslingshot_speed=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

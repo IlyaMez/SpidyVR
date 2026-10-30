@@ -140,6 +140,10 @@ bool Swing::onStrand(int i) const {
     const float along = span > 1e-6f ? std::clamp(dot(to, line) / span, 0.f, 1.f) : 0.f;
     return length(to - line * along) <= config_.strandReach;
 }
+void Swing::setSlingshotSpeed(float speed) {
+    if(!std::isfinite(speed)||(speed!=0 && speed<20)||speed>300) throw std::invalid_argument("Invalid slingshot speed");
+    slingshotSpeed_=speed;
+}
 bool Swing::bears(int i) const {
     if (i < 0 || i > 1 || !webs_[i].attached)
         return false;
@@ -740,7 +744,7 @@ void Swing::reset(Body b) {
     sinceWallJump_ = 100;
     mount_ = mountLeft_ = 0;
     mounting_ = offered_ = mountOffered_ = false;
-    strands_ = 0;
+    strands_ = 0;slingshotFlight_=slingshotAirborne_=false;
 }
 void Swing::release(int i, EventKind reason) {
     if (webs_[i].attached)
@@ -875,6 +879,7 @@ WebShot Swing::shot(Pose aim, Vec3 from, const WorldQueries& world) const {
     return out;
 }
 void Swing::releaseAll() {
+    slingshotFlight_=slingshotAirborne_=false;
     clearSlingshot();
     climbing_ = {};
     for (int i = 0; i < 2; ++i) {
@@ -1102,7 +1107,8 @@ void Swing::slingshot(float dt, const Input& in, const WorldQueries& world) {
                 if (charge >= .15f && length(direction) > .9f) {
                     direction.y = std::max(.25f, direction.y + .25f);
                     direction = normalized(direction);
-                    body_.velocity = limited(direction * (12 + 28 * charge), config_.maxSpeed);
+                    slingshotFlight_=true;slingshotAirborne_=false;
+                    body_.velocity=slingshotSpeed_>0?direction*(slingshotSpeed_*(.3f+.7f*charge)):limited(direction*(12+28*charge),config_.maxSpeed);
                     body_.grounded = false;
                     events_.push_back({EventKind::Slingshot, -1, charge});
                 }
@@ -1233,7 +1239,7 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             crest_ -= dt;
             body_.velocity -= crestNormal_ * (config_.crestPush * dt);
         }
-        body_.velocity = limited(body_.velocity, config_.maxSpeed);
+        body_.velocity = limited(body_.velocity, speedLimit());
         body_.grounded = supported;
         if (!supported && !wasGrounded)
             skimGround(dt, world);
@@ -1384,7 +1390,7 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     accumulator_ = 0;
     if (!std::isfinite(seconds) || seconds <= 0 || !input.focused ||
         !std::isfinite(inputSeconds) || inputSeconds < 0 || !finite(actual.position) ||
-        !finite(actual.velocity) || length(actual.velocity) > config_.maxSpeed * 2) {
+        !finite(actual.velocity) || length(actual.velocity) > speedLimit() * 2) {
         releaseAll();
         return {};
     }
@@ -1394,8 +1400,9 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     seconds = std::min(seconds, longestNativeStep);
     if (actual.grounded && !body_.grounded)
         sinceLanding_ = 0;
+    if(slingshotFlight_) {if(!actual.grounded)slingshotAirborne_=true;else if(slingshotAirborne_)slingshotFlight_=slingshotAirborne_=false;}
     body_ = actual;
-    body_.velocity = limited(body_.velocity, config_.maxSpeed);
+    body_.velocity = limited(body_.velocity, speedLimit());
     stepSeconds_ = seconds;
     // A hand moves its rope once per sample of it.
     if (!(inputSeconds > 0))

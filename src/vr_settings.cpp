@@ -75,6 +75,8 @@ static_assert(std::size(automaticStrengthChoices) == std::size(automaticStrength
               std::size(automaticHandStrengthChoices) == std::size(automaticHandStrengths) &&
               std::size(automaticFalloffChoices) == std::size(automaticFalloffs) &&
               std::size(automaticHandThresholdChoices) == std::size(automaticHandThresholds));
+constexpr int slingshotSpeedSteps[]={0,20,32,40,50,65,100,150,200,300};
+constexpr const char* slingshotSpeedLabels[]={"SWING LIMIT","20 M/S","32 M/S","40 M/S","50 M/S","65 M/S","100 M/S","150 M/S","200 M/S","300 M/S"};
 constexpr int screenSizes[] = {0, 1, 2};
 constexpr int hudSizes[] = {0, 1, 2, 3};
 constexpr int depthSteps[] = {0, 1, 2, 3};
@@ -88,6 +90,8 @@ static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(sna
 
 std::span<const int> steps(Item item) {
     switch (item) {
+    case Item::slingshotSpeed:return slingshotSpeedSteps;
+
     case Item::swingSpeed:
         return swingSpeeds;
     case Item::snapTurn:
@@ -140,6 +144,8 @@ std::span<const int> steps(Item item) {
 namespace {
 float numberOf(Item item, const Values& v) {
     switch (item) {
+    case Item::slingshotSpeed:return static_cast<float>(v.slingshotSpeed);
+
     case Item::swingSpeed:
         return v.swingSpeed;
     case Item::snapTurn:
@@ -244,6 +250,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
 } // namespace
 
 Values sanitized(Values v) {
+    v.slingshotSpeed=std::clamp(v.slingshotSpeed,0,300);if(v.slingshotSpeed>0&&v.slingshotSpeed<20)v.slingshotSpeed=20;
+
     v.swingSpeed = std::isfinite(v.swingSpeed) ? std::clamp(v.swingSpeed, 1.f, 65.f) : 32.f;
     v.snapTurn = std::clamp(v.snapTurn, 0, 90);
     v.smoothTurn = std::clamp(v.smoothTurn, 0, 360);
@@ -270,9 +278,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 52>& rows() {
+const std::array<Row, 53>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 52> all{{
+    static const std::array<Row, 53> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -372,6 +380,7 @@ const std::array<Row, 52>& rows() {
          "Press A in the air to stop momentum and smoothly return upright.", {}},
         {Item::automaticCombat, "FLIPS IN COMBAT",
          "Off: with enemies near, arms and webs stop turning you and you come upright.", {}},
+        {Item::slingshotSpeed,"SLINGSHOT SPEED","Swing limit keeps the old launch speed, or choose an independent speed.",slingshotSpeedLabels},
     }};
     return all;
 }
@@ -401,6 +410,8 @@ bool choose(Item item, int index, Values& v) {
         return false;
     const Values before = v;
     switch (item) {
+    case Item::slingshotSpeed:v.slingshotSpeed=s[index];break;
+
     case Item::swingSpeed:
         v.swingSpeed = static_cast<float>(s[index]);
         break;
@@ -514,6 +525,7 @@ constexpr TabOnly tabOnly[] = {
     {"height_cm", nullptr, &Values::heightCm},
     {"seated", &Values::seated, nullptr},
     {"eye_aim", nullptr, &Values::eyeAim},
+    {"slingshot_speed",nullptr,&Values::slingshotSpeed},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

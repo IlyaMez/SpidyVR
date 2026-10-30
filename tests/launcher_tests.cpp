@@ -657,6 +657,8 @@ int main() {
         o.hud = 0;
         o.flipSpeed = 300;
         auto& t = mine.tab;
+        t.slingshotSpeed=200;
+
         t.hapticWebs = t.hapticWind = t.hapticCombat = t.hapticMovement = false;
         t.automaticReleaseFlip = t.automaticAirBrake = t.automaticCombat = false;
         t.handClimb = t.realisticFlips = t.seated = t.controlledFlips = true;
@@ -688,7 +690,7 @@ int main() {
                   "wall_distance_cm=25\n"
                   "realistic_flips=0\nrotation_strength=50\nrotation_speed=240\nflight_speed_min=3\n"
                   "swing_momentum=1\nrotation_response_ms=500\nhand_momentum=100\nangular_drag_ms=3000\n"
-                  "hand_speed_min_cm=100\nair_rotation_brake=1\nflips_in_combat=1\n",
+                  "hand_speed_min_cm=100\nair_rotation_brake=1\nflips_in_combat=1\nslingshot_speed=0\n",
               "the defaults' text: a key shared once keeps its name");
         const std::string message = profileMessage(profileOf(mine), "0.4.1");
         check(message.rfind("```ini\n# Spidy settings profile.", 0) == 0 && message.ends_with("\n```") &&

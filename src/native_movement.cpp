@@ -137,7 +137,7 @@ uintptr_t handleAir(void* self, void* event) {
                        read(config.mover + 0x750, &flags, 4) && !(flags & 0x80000000u) &&
                        read(config.mover + 0x144, &collision, 4) && collisionEnabled(collision) &&
                        drivable(dt);
-    AirOverride override{stepDelta(c.velocity, dt)};
+    AirOverride override{stepDelta(c.velocity, dt,commandDistance(c))};
     auto* previous = currentAir;
     if (drive)
         currentAir = &override;
@@ -255,7 +255,7 @@ uintptr_t query(void* self) {
     Override step{self, position};
     Override* previous = current;
     if (drive) {
-        const Vec3 delta = stepDelta(c.velocity, dt), keepDirection{};
+        const Vec3 delta = stepDelta(c.velocity, dt,commandDistance(c)), keepDirection{};
         // This verified native function sets start/target and prepares its own bookkeeping.
         request(self, &delta, &keepDirection, 0);
         step.target = position + delta;
@@ -326,7 +326,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionStart(void* input) {
             config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
             !GetModuleHandleW(L"Spider-Man.exe") || (config.durationMs && config.durationMs < 1000) ||
             config.durationMs > 30000 || !std::isfinite(config.maxSpeed) || config.maxSpeed <= 0 ||
-            config.maxSpeed > 65 || config.syncAirVelocity > 1 || config.reserved) {
+            config.maxSpeed > maxPlayerSpeed || config.syncAirVelocity > 1 || config.reserved) {
             result = 1001;
             break;
         }
@@ -433,9 +433,9 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionRetarget(void* input) {
 }
 extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionSubmit(void* input) {
     Command c{};
-    if (!read(reinterpret_cast<uintptr_t>(input), &c, sizeof(c)) || c.magic != 0x534d564d || c.version != 1 ||
+    if (!read(reinterpret_cast<uintptr_t>(input), &c, sizeof(c)) || c.magic != 0x534d564d || !validCommandVersion(c) ||
         c.bytes != sizeof(c) || !c.serial || c.enabled > 1 || c.leaseMs > 250 || (c.enabled && !c.leaseMs) ||
-        !finite(c.velocity) || length(c.velocity) > config.maxSpeed || c.reserved || c.reserved2)
+        !finite(c.velocity) || length(c.velocity) > config.maxSpeed || c.reserved)
         return 2001;
     AcquireSRWLockExclusive(&control);
     DWORD result{};

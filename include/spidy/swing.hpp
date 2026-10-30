@@ -518,6 +518,10 @@ class Swing {
     // Hand `hand`'s web holds the body when taut: any web but the longer
     // rope of two hands on one web.
     bool bears(int hand) const;
+    void setSlingshotSpeed(float);
+    bool slingshotFlying()const{return slingshotFlight_;}
+    bool boostedFlight() const {return slingshotFlight_ && slingshotSpeed_>65;}
+    float speedLimit() const {return slingshotFlight_?std::max(config_.maxSpeed,slingshotSpeed_):config_.maxSpeed;}
     const SwingConfig& config() const {
         return config_;
     }
@@ -533,6 +537,7 @@ class Swing {
     uint64_t slingshotSurfaces_[2]{};
     float slingshotCharge_{}, slingshotHold_{}, slingshotRelease_{}, slingshotYaw_{};
     bool betterClimbing_{};
+    float slingshotSpeed_{};bool slingshotFlight_{},slingshotAirborne_{};
     struct HandState {
         // held: grip squeezed, with release hysteresis. A web shoots only on the
         // press that sets it, so a lost web never re-fires while the grip stays held.
