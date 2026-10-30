@@ -654,17 +654,27 @@ int main() {
     };
     test("zero hand momentum is persisted and applies no arm torque", [] {
         using namespace vr_settings;
-        Values v;choose(Item::automaticHandStrength,0,v);
-        check(v.automaticHandStrength==0 && withTabOnly(Values{},tabOnlyText(v)).automaticHandStrength==0,"zero strength did not save");
-        spidy::RealisticFlip zero,strong;
-        RealisticFlipSettings settings;settings.enabled=true;settings.handStrength=0;
-        RealisticFlight flight;flight.valid=true;flight.velocity={0,0,-10};flight.handMomentum={2,0,0};
-        for(int i=0;i<100;++i) {
-            zero.update(flight,true,false,0,.01f,settings);
-            settings.handStrength=100;strong.update(flight,true,false,0,.01f,settings);settings.handStrength=0;
+        Values v;
+        choose(Item::automaticHandStrength, 0, v);
+        check(v.automaticHandStrength == 0 &&
+                  withTabOnly(Values{}, tabOnlyText(v)).automaticHandStrength == 0,
+              "zero strength did not save");
+        spidy::RealisticFlip zero, strong;
+        RealisticFlipSettings settings;
+        settings.enabled = true;
+        settings.handStrength = 0;
+        RealisticFlight flight;
+        flight.valid = true;
+        flight.velocity = {0, 0, -10};
+        flight.handMomentum = {2, 0, 0};
+        for (int i = 0; i < 100; ++i) {
+            zero.update(flight, true, false, 0, .01f, settings);
+            settings.handStrength = 100;
+            strong.update(flight, true, false, 0, .01f, settings);
+            settings.handStrength = 0;
         }
-        check(length(zero.angularVelocity())<1e-5f,"zero still applied arm torque");
-        check(length(strong.angularVelocity())>.05f,"control case generated no arm torque");
+        check(length(zero.angularVelocity()) < 1e-5f, "zero still applied arm torque");
+        check(length(strong.angularVelocity()) > .05f, "control case generated no arm torque");
     });
     test("slingshot draws two fixed webs and launches once, capped, toward their midpoint", [] {
         Sling s;

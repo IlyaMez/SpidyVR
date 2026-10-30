@@ -679,9 +679,9 @@ the launcher's alone; while it is on it takes the place of the flips above)
   Let go of the web .... the swing's spin goes on (SWING MOMENTUM) and dies
                          away as ANGULAR DRAG says
   Swing your arms ...... in the air, faster than MINIMUM HAND SPEED, and you
-                         turn with them, as much as HAND MOMENTUM says; swing
-                         them back the other way to slow down. A spin can go
-                         past a whole turn
+                         turn with them, as much as HAND MOMENTUM says (0%:
+                         not at all); swing them back the other way to slow
+                         down. A spin can go past a whole turn
   A in the air ......... stops the spin and brings you upright (AIR ROTATION
                          BRAKE); landing does too
   Left stick in the air  with FLIPS on as well: let go of it once in the air,
