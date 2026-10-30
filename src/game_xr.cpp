@@ -1314,7 +1314,9 @@ DWORD WINAPI run(void*) {
             s.handClimb = values.handClimb;
             s.webSlingshot = values.webSlingshot;
             s.betterClimbing = values.betterClimbing;
-            s.elasticWeb=values.elasticWeb;
+            s.combatVisuals = values.combatVisuals;
+            s.smartAnchor = values.smartAnchor;
+            s.elasticWeb = static_cast<uint32_t>(values.elasticWeb);
             sentSwingSettings = s;
             swingSettingsSent = true;
             // A hand-over owns the walls while it lasts; the player's own
@@ -1459,11 +1461,14 @@ DWORD WINAPI run(void*) {
                 padRetryMs = GetTickCount64() + 1000;
             }
             // VR play has eye images; the game played on its screen has the
-            // screen's, which these do not count.
+            // screen's, which these do not count. The last pair shown again
+            // counts too: around a menu closing the game can make no new pair
+            // for a few seconds while the headset shows the last one, which
+            // ended VR (pull request #36). Only nothing shown at all does.
             const bool eyesWanted = motion.active && !flatScreen;
-            if (eyesWanted && firstImageDeadline && !lastNewImageMs && GetTickCount64() >= firstImageDeadline)
+            if (eyesWanted && firstImageDeadline && !lastPresentedMs && GetTickCount64() >= firstImageDeadline)
                 throw std::runtime_error("No native eye images reached OpenXR within 3 seconds");
-            if (eyesWanted && lastNewImageMs && GetTickCount64() - lastNewImageMs >= 3000)
+            if (eyesWanted && lastPresentedMs && GetTickCount64() - lastPresentedMs >= 3000)
                 throw std::runtime_error("Native eye presentation stalled for 3 seconds");
             const bool active = runtime.frameStereo(
                 [&](const XrFrame& trackedFrame) {
@@ -2035,8 +2040,10 @@ DWORD WINAPI run(void*) {
                         presented = false;
                     } else if (vrPlay && !wasGameplay) {
                         // Gameplay counts its own images: the screen before it
-                        // may have had none for a while (loading).
-                        lastNewImageMs = 0;
+                        // may have had none for a while (loading). The screen's
+                        // own frames counted as shown, so a play that never
+                        // shows a pair still says so after 3 seconds.
+                        lastPresentedMs = lastNewImageMs = 0;
                         presented = false;
                         firstImageDeadline = nativeStarted ? GetTickCount64() + 3000 : 0;
                     }

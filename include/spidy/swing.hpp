@@ -518,7 +518,16 @@ class Swing {
     // Hand `hand`'s web holds the body when taut: any web but the longer
     // rope of two hands on one web.
     bool bears(int hand) const;
-    void elasticWeb(int level){elasticWeb_=std::clamp(level,0,3);}
+    // With open-air anchors off, a shot that meets nothing straight ahead
+    // takes the best real surface within 8 degrees of its aim (shot()).
+    void allowSmartAnchor(bool on) {
+        smartAnchor_ = on;
+    }
+    // Webs that stretch under load (0 off, a hard rope; 1 to 3 softer):
+    // a damped spring takes the place of the rope's length limit.
+    void elasticWeb(int level) {
+        elasticWeb_ = std::clamp(level, 0, 3);
+    }
     const SwingConfig& config() const {
         return config_;
     }
@@ -534,6 +543,7 @@ class Swing {
     uint64_t slingshotSurfaces_[2]{};
     float slingshotCharge_{}, slingshotHold_{}, slingshotRelease_{}, slingshotYaw_{};
     bool betterClimbing_{};
+    bool smartAnchor_{};
     int elasticWeb_{};
     struct HandState {
         // held: grip squeezed, with release hysteresis. A web shoots only on the

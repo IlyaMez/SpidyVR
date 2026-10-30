@@ -227,12 +227,17 @@ static_assert(sizeof(Config) == 64 && sizeof(Hand) == 52 && sizeof(Command) == 2
 // arcade: arcade webs (the VR settings' WEB STYLE: ARCADE; SwingConfig::
 // arcade). Version 6 (settingsBytesV6) ends before it and leaves the webs'
 // style as it is.
+// Version 13 appends elasticWeb: 0 a hard rope as before, 1 to 3 webs that
+// stretch under load, softer and softer (Swing::elasticWeb).
+// Version 12 appends smartAnchor (off by default): with airWebs off, a shot
+// that just misses catches a nearby real surface (Swing::allowSmartAnchor).
+// Version 11 appends combatVisuals: off allows freely directed combat blows.
 // Version 10 appends betterClimbing (off by default).
 // Version 9 appends webSlingshot (off by default).
 // Version 8 appends handClimb without changing the upstream phone or arcade
 // fields. Older official settings keep their original layout and meaning.
 struct Settings {
-    uint32_t magic = 0x53575354, version = 11, bytes = sizeof(Settings), grab = 1;
+    uint32_t magic = 0x53575354, version = 13, bytes = sizeof(Settings), grab = 1;
     float maxSpeed = 32;
     uint32_t airWebs = 1;
     float gravity = 6;
@@ -243,18 +248,23 @@ struct Settings {
     uint32_t handClimb{};
     uint32_t webSlingshot{};
     uint32_t betterClimbing{};
+    uint32_t combatVisuals = 1;
+    uint32_t smartAnchor{};
     uint32_t elasticWeb{};
-
 };
 constexpr uint32_t settingsBytesV3 = 28, settingsBytesV4 = 32, settingsBytesV5 = 36, settingsBytesV6 = 40,
-                   settingsBytesV7 = 44, settingsBytesV8 = 48, settingsBytesV9 = 52;
-static_assert(sizeof(Settings) == 60 && offsetof(Settings, walls) == settingsBytesV3 &&
+                   settingsBytesV7 = 44, settingsBytesV8 = 48, settingsBytesV9 = 52, settingsBytesV10 = 56,
+                   settingsBytesV11 = 60, settingsBytesV12 = 64;
+static_assert(sizeof(Settings) == 68 && offsetof(Settings, walls) == settingsBytesV3 &&
               offsetof(Settings, physical) == settingsBytesV4 &&
               offsetof(Settings, noBlows) == settingsBytesV5 &&
               offsetof(Settings, arcade) == settingsBytesV6 &&
               offsetof(Settings, handClimb) == settingsBytesV7 &&
               offsetof(Settings, webSlingshot) == settingsBytesV8 &&
-              offsetof(Settings, betterClimbing) == settingsBytesV9);
+              offsetof(Settings, betterClimbing) == settingsBytesV9 &&
+              offsetof(Settings, combatVisuals) == settingsBytesV10 &&
+              offsetof(Settings, smartAnchor) == settingsBytesV11 &&
+              offsetof(Settings, elasticWeb) == settingsBytesV12);
 // SpidySlingshotSample: charge in [0, 1], zero after cancel or release.
 struct SlingshotData {
     uint32_t magic = 0x53534c47, version = 1, bytes = sizeof(SlingshotData);
@@ -373,13 +383,15 @@ inline bool validSettings(const Settings& s) {
          (s.version == 7 && s.bytes == settingsBytesV7) ||
          (s.version == 8 && s.bytes == settingsBytesV8) ||
          (s.version == 9 && s.bytes == settingsBytesV9) ||
-         (s.version == 10 && s.bytes == 56) ||
-         (s.version == 11 && s.bytes == sizeof(Settings))) &&
+         (s.version == 10 && s.bytes == settingsBytesV10) ||
+         (s.version == 11 && s.bytes == settingsBytesV11) ||
+         (s.version == 12 && s.bytes == settingsBytesV12) ||
+         (s.version == 13 && s.bytes == sizeof(Settings))) &&
         s.grab <= 1 && std::isfinite(s.maxSpeed) && s.maxSpeed > 0 && s.maxSpeed <= motionSpeedLimit &&
         s.airWebs <= 1 && std::isfinite(s.gravity) && s.gravity >= 0 && s.gravity <= maxGravity &&
         s.walls <= 4 && s.physical <= 1 && s.noBlows <= 3 && s.arcade <= 1 && s.handClimb <= 1 &&
-        s.webSlingshot <= 1 && s.betterClimbing <= 1 &&
-        (s.version<11 || (s.elasticWeb<=3));
+        s.webSlingshot <= 1 && s.betterClimbing <= 1 && s.combatVisuals <= 1 && s.smartAnchor <= 1 &&
+        s.elasticWeb <= 3;
 }
 static_assert(sizeof(WebState) == 28 && sizeof(Data) == 272 && offsetof(Data, wall) == 240);
 // The player is in the air: Spidy's own flight, or the game's jump or fall,
