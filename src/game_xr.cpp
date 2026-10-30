@@ -1458,18 +1458,15 @@ DWORD WINAPI run(void*) {
                 padRetryMs = GetTickCount64() + 1000;
             }
             // VR play has eye images; the game played on its screen has the
-            // screen's, which these do not count.
+            // screen's, which these do not count. The last pair shown again
+            // counts too: around a menu closing the game can make no new pair
+            // for a few seconds while the headset shows the last one, which
+            // ended VR (pull request #36). Only nothing shown at all does.
             const bool eyesWanted = motion.active && !flatScreen;
-            // A frame that reuses the last good eye pair still counts: the
-            // headset keeps showing something. Only a stretch with nothing
-            // presented at all - new or reused - means eye images truly
-            // stopped reaching OpenXR. The game can pause producing a fresh
-            // stereo pair for a couple of seconds around a menu closing
-            // without that being a failure worth tearing the session down for.
-            if ((eyesWanted && firstImageDeadline && !lastPresentedMs && GetTickCount64() >= firstImageDeadline) ||
-                (eyesWanted && lastPresentedMs && GetTickCount64() - lastPresentedMs >= 3000))
-                throw std::runtime_error(lastPresentedMs ? "Native eye presentation stalled for 3 seconds"
-                                                          : "No native eye images reached OpenXR within 3 seconds");
+            if (eyesWanted && firstImageDeadline && !lastPresentedMs && GetTickCount64() >= firstImageDeadline)
+                throw std::runtime_error("No native eye images reached OpenXR within 3 seconds");
+            if (eyesWanted && lastPresentedMs && GetTickCount64() - lastPresentedMs >= 3000)
+                throw std::runtime_error("Native eye presentation stalled for 3 seconds");
             const bool active = runtime.frameStereo(
                 [&](const XrFrame& trackedFrame) {
                     XrFrame frame = trackedFrame;
@@ -2040,12 +2037,10 @@ DWORD WINAPI run(void*) {
                         presented = false;
                     } else if (vrPlay && !wasGameplay) {
                         // Gameplay counts its own images: the screen before it
-                        // may have had none for a while (loading). Coming back
-                        // from a menu or cutscene, the native renderer is
-                        // switching out of the screen's single stereo pair and
-                        // back to a synced pair for both eyes, which a menu's
-                        // own close hitch can delay past the usual 3 s budget.
-                        lastNewImageMs = 0;
+                        // may have had none for a while (loading). The screen's
+                        // own frames counted as shown, so a play that never
+                        // shows a pair still says so after 3 seconds.
+                        lastPresentedMs = lastNewImageMs = 0;
                         presented = false;
                         firstImageDeadline = nativeStarted ? GetTickCount64() + 3000 : 0;
                     }
