@@ -107,6 +107,7 @@ std::atomic<uint64_t> aimDeadline{};
 uint64_t aimSerial{}, aimMadeMs{};
 // The hands whose motion lands no blow (Settings::noBlows).
 std::atomic<uint32_t> noBlows{};
+std::atomic<bool> combatVisuals{true};
 bool copy(void* destination, const void* source, size_t bytes) {
     __try {
         if (reinterpret_cast<uintptr_t>(source) < 0x10000 ||
@@ -263,38 +264,78 @@ void previewAims(const Command& c, const Input& in, const Body& player, const Wo
     InterlockedIncrement64(&SpidyAimData.sequence);
     ReleaseSRWLockExclusive(&output);
 }
-void idleRopeInput(const Command& c,const Input& in,const native_rays::QueryContext& world,
-                   const Body& player,const native_movement::Data& motion,int64_t qpc) {
-    const float elapsed=inputClock.consume(c);
-    if(!initialized) {solver.reset(player);initialized=true;}
-    bool attached=false,launched=false,newAttach=false;
-    MotionIntent intent{player.position,player.velocity,true};
-    if(elapsed>0) {
-        intent=solver.predictNativeStep(std::min(elapsed,.1f),game_grab::forSwing(in),world,player,elapsed);
-        if(!intent.valid || world.error()) {cancelSwing(true);return;}
-        for(const auto& e:solver.events()) {launched|=e.kind==EventKind::Slingshot;newAttach|=e.kind==EventKind::Attach;}
+// BETTER CLIMBING or the hand gestures, standing with no native step to
+// drive: the swing still takes the hands, so that a pull down a shared web
+// (pull request #44) or a two hand zip (#47) leaves the ground by the
+// game's own takeoff, no jump pressed.
+void idleRopeInput(const Command& c, const Input& in, const native_rays::QueryContext& world,
+                   const Body& player, const native_movement::Data& motion, int64_t qpc) {
+    const float elapsed = inputClock.consume(c);
+    if (!initialized) {
+        solver.reset(player);
+        initialized = true;
     }
-    for(const auto& web:solver.webs()) attached|=web.attached;
-    launched|=solver.gestureTakeoff();
-    const bool lift=false || launched || (!solver.slingshotEnabled() && newAttach);
-    const auto transition=takeoffTransition.update(GetTickCount64(),attached||launched,true,
-        native_movement::collisionEnabled(motion.collisionFlags),lift,lift,player.position,{},
-        solver.gestureTakeoff()?solver.gestureLaunch():launched?intent.velocity:Vec3{},launched);
+    bool attached = false, launched = false, newAttach = false;
+    MotionIntent intent{player.position, player.velocity, true};
+    if (elapsed > 0) {
+        intent =
+            solver.predictNativeStep(std::min(elapsed, .1f), game_grab::forSwing(in), world, player, elapsed);
+        if (!intent.valid || world.error()) {
+            cancelSwing(true);
+            return;
+        }
+        for (const auto& e : solver.events()) {
+            launched |= e.kind == EventKind::Slingshot;
+            newAttach |= e.kind == EventKind::Attach;
+        }
+    }
+    for (const auto& web : solver.webs())
+        attached |= web.attached;
+    launched |= solver.gestureTakeoff();
+    const bool lift = solver.climbTakeoff() || launched || (!solver.slingshotEnabled() && newAttach);
+    const auto transition =
+        takeoffTransition.update(GetTickCount64(), attached || launched, true,
+                                 native_movement::collisionEnabled(motion.collisionFlags), lift, lift,
+                                 player.position, {},
+                                 solver.gestureTakeoff() ? solver.gestureLaunch()
+                                 : launched              ? intent.velocity
+                                                         : Vec3{},
+                                 launched);
     AcquireSRWLockExclusive(&output);
-    auto& d=SpidySwingData;InterlockedIncrement64(&d.sequence);
-    d.status=1;d.qpc=qpc;d.serial=c.serial;d.world=world.identity();d.error=0;
-    d.position=player.position-Vec3{0,1,0};d.velocity={};d.requested={};d.owned=0;d.grounded=1;
-    d.dt=std::min(elapsed,.1f);d.collisionFlags=motion.collisionFlags;
-    d.takeoff=transition.jump;d.takeoffPhase=takeoffTransition.phase();d.takeoffAttempts=takeoffTransition.attempts();
-    d.takeoffTimeouts+=transition.timedOut;
-    for(unsigned i=0;i<2;++i) {
-        const auto& w=solver.webs()[i];
-        d.webs[i]={!w.attached?0u:1u|(solver.shared()?2u:0u)|(w.taken?4u:0u),static_cast<uint32_t>(w.surface),w.anchor,w.length,w.tension};
+    auto& d = SpidySwingData;
+    InterlockedIncrement64(&d.sequence);
+    d.status = 1;
+    d.qpc = qpc;
+    d.serial = c.serial;
+    d.world = world.identity();
+    d.error = 0;
+    d.position = player.position - Vec3{0, 1, 0};
+    d.velocity = {};
+    d.requested = {};
+    d.owned = 0;
+    d.grounded = 1;
+    d.dt = std::min(elapsed, .1f);
+    d.collisionFlags = motion.collisionFlags;
+    d.takeoff = transition.jump;
+    d.takeoffPhase = takeoffTransition.phase();
+    d.takeoffAttempts = takeoffTransition.attempts();
+    d.takeoffTimeouts += transition.timedOut;
+    for (unsigned i = 0; i < 2; ++i) {
+        const auto& w = solver.webs()[i];
+        d.webs[i] = {!w.attached ? 0u : 1u | (solver.shared() ? 2u : 0u) | (w.taken ? 4u : 0u),
+                     static_cast<uint32_t>(w.surface), w.anchor, w.length, w.tension};
     }
-    if(elapsed>0) for(const auto& e:solver.events()) {d.attaches+=e.kind==EventKind::Attach;d.releases+=e.kind==EventKind::Release;}
+    if (elapsed > 0)
+        for (const auto& e : solver.events()) {
+            d.attaches += e.kind == EventKind::Attach;
+            d.releases += e.kind == EventKind::Release;
+        }
     InterlockedIncrement64(&bends.sequence);
-    for(unsigned i=0;i<2;++i)bends.hands[i]=edgesOf(solver.webs()[i]);bends.status=2;
-    InterlockedIncrement64(&bends.sequence);InterlockedIncrement64(&d.sequence);
+    for (unsigned i = 0; i < 2; ++i)
+        bends.hands[i] = edgesOf(solver.webs()[i]);
+    bends.status = 2;
+    InterlockedIncrement64(&bends.sequence);
+    InterlockedIncrement64(&d.sequence);
     ReleaseSRWLockExclusive(&output);
 }
 void visit(const native_rays::QueryContext& world) {
@@ -477,6 +518,7 @@ void visit(const native_rays::QueryContext& world) {
             // the strikes' speeds are.
             fighter.velocity = player.velocity * game_punch::worldScale();
             fighter.busy = noBlows.load(std::memory_order_relaxed);
+            fighter.combatVisuals = combatVisuals.load(std::memory_order_relaxed);
             for (unsigned i = 0; i < 2; ++i) {
                 const bool carried = solver.webs()[i].attached && (owned || !motion.grounded);
                 fighter.swinging |= carried;
@@ -535,8 +577,11 @@ void visit(const native_rays::QueryContext& world) {
         worldIdentity = world.identity();
         return;
     }
-    if(focused && nativeFloor && !owned && !handCrawl && (!fresh || motion.steps==lastStep) &&
-       (solver.gesturesEnabled())) {idleRopeInput(c,in,world,player,motion,now.QuadPart);return;}
+    if (focused && nativeFloor && !owned && !handCrawl && (!fresh || motion.steps == lastStep) &&
+        (solver.betterClimbingEnabled() || solver.gesturesEnabled())) {
+        idleRopeInput(c, in, world, player, motion, now.QuadPart);
+        return;
+    }
     // No step for 50 ms: a long frame, or a paused game. The next step goes on
     // from here; letting go dropped the player into the game's fall (InputHold).
     // With live input and no step for longer than a stutter, the game moves
@@ -660,7 +705,7 @@ void visit(const native_rays::QueryContext& world) {
     // his webs along: they are ropes that pay out, and hold him at their new
     // length once he is in the air (Swing::payOut).
     uint32_t paid{};
-    if (!owned && !solver.gestureTakeoff()) {
+    if (!owned && !solver.climbTakeoff() && !solver.gestureTakeoff()) {
         const float before[2]{solver.webs()[0].length, solver.webs()[1].length};
         solver.payOut(body.position, groundSlack);
         for (unsigned i = 0; i < 2; ++i)
@@ -711,8 +756,11 @@ void visit(const native_rays::QueryContext& world) {
     // The movement module moves the body farthestStep a step at most; the
     // command's own step may be an eighth longer than this one before that
     // shortens it.
-    const float cap =
-        std::min(config.maxSpeed * (1.f - 1e-6f), .875f * native_movement::farthestStep / motion.dt);
+    // A SLINGSHOT SPEED flight may go faster than maxSpeed, and over 65 m/s
+    // with longer steps (Swing::speedLimit, boostedFlight).
+    const float farthest =
+        solver.boostedFlight() ? native_movement::boostedStep : native_movement::farthestStep;
+    const float cap = std::min(solver.speedLimit() * (1.f - 1e-6f), .875f * farthest / motion.dt);
     const Vec3 average = delta / motion.dt;
     Vec3 requested = limited(average, cap);
     bool overhead{};
@@ -720,7 +768,7 @@ void visit(const native_rays::QueryContext& world) {
         overhead |= web.attached && web.anchor.y > body.position.y + .5f;
     // With the slingshot on, a web shot on the ground lifts nothing by
     // itself; the reel still does.
-    const bool wantsLift = in.jump || pointLaunched ||
+    const bool wantsLift = in.jump || pointLaunched || solver.climbTakeoff() ||
         ((!solver.slingshotEnabled() || solver.reeling()) && requested.y > .25f) ||
         (!solver.slingshotEnabled() && newAttachment && overhead);
     // A web strike that goes up from the ground (at a thug an uppercut
@@ -731,7 +779,10 @@ void visit(const native_rays::QueryContext& world) {
         takeoffTransition.update(GetTickCount64(), attached || strikeLift || slingshotLaunched,
                                  body.grounded, collidable, wantsLift || strikeLift,
                                  zipped || pointLaunched || newAttachment, harness,
-                                 motion.achievedVelocity, solver.gestureTakeoff()?solver.gestureLaunch():(zipped || pointLaunched) ? predicted.velocity : Vec3{},
+                                 motion.achievedVelocity,
+                                 solver.gestureTakeoff()   ? solver.gestureLaunch()
+                                 : zipped || pointLaunched ? predicted.velocity
+                                                           : Vec3{},
                                  pointLaunched, length(crawl) > .5f ? crawl : Vec3{0, 1, 0});
     if (transition.resumed)
         requested = limited(requested + transition.launchVelocity - body.velocity, cap);
@@ -866,6 +917,10 @@ void visit(const native_rays::QueryContext& world) {
     if (drive) {
         native_movement::Command request;
         request.enabled = 1;
+        if (solver.boostedFlight()) {
+            request.version = 2;
+            request.reserved2 = 1;
+        }
         request.serial = ++motionSerial;
         // The command is applied by the next native step, one frame from now,
         // and repeated if an observation is missed. With a 50 ms lease, a frame
@@ -885,7 +940,8 @@ void visit(const native_rays::QueryContext& world) {
         // strike's own in real time, at rest once it has arrived.
         inFlight.issued(request.serial, requested,
                         striking ? limited(flight.velocity, config.maxSpeed)
-                                 : limited(predicted.velocity + requested - average, config.maxSpeed));
+                                 : limited(predicted.velocity + requested - average, solver.speedLimit()),
+                        native_movement::commandDistance(request));
         owned = true;
     } else if (owned) {
         relinquishMotion();
@@ -1026,10 +1082,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStart(void* input) {
         motion.durationMs = config.durationMs;
         // The swing caps its own requests at config.maxSpeed, which can rise
         // during play (SpidySwingSettings); the module only rejects faster ones.
-        motion.maxSpeed = motionSpeedLimit;
+        motion.maxSpeed = native_movement::maxPlayerSpeed;
         motion.syncAirVelocity = 1;
         if ((result = startMotion(&motion)))
             break;
+        combatVisuals = true;
         started = true;
         solver = Swing(physicsConfig(config));
         QueryPerformanceFrequency(&frequency);
@@ -1101,7 +1158,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingRetarget(void* input) {
         motion.record = next.record;
         motion.mover = next.mover;
         motion.durationMs = config.durationMs;
-        motion.maxSpeed = motionSpeedLimit;
+        motion.maxSpeed = native_movement::maxPlayerSpeed;
         motion.syncAirVelocity = 1;
         if (!(result = retargetMotion(&motion))) {
             config.record = next.record;
@@ -1127,10 +1184,12 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
     Settings s;
     uint32_t header[3]{};
     if (!copy(header, input, sizeof(header)) ||
-        (header[2] != settingsBytesV3 && header[2] != settingsBytesV4 &&
-         header[2] != settingsBytesV5 && header[2] != settingsBytesV6 &&
-         header[2] != settingsBytesV7 && header[2] != settingsBytesV8 && header[2] != settingsBytesV9 &&
-         header[2] != 56 && header[2] != sizeof(s)) ||
+        (header[2] != settingsBytesV3 && header[2] != settingsBytesV4 && header[2] != settingsBytesV5 &&
+         header[2] != settingsBytesV6 && header[2] != settingsBytesV7 && header[2] != settingsBytesV8 &&
+         header[2] != settingsBytesV9 && header[2] != settingsBytesV10 && header[2] != settingsBytesV11 &&
+         header[2] != settingsBytesV12 && header[2] != settingsBytesV13 && header[2] != settingsBytesV14 &&
+         header[2] != settingsBytesV15 && header[2] != settingsBytesV16 && header[2] != settingsBytesV17 &&
+         header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || !validSettings(s))
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
@@ -1163,6 +1222,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         if (s.version >= 5)
             solver.allowPhysical(s.physical != 0);
         noBlows = s.version >= 6 ? s.noBlows : 0u;
+        combatVisuals = s.version < 11 || s.combatVisuals != 0;
         if (s.version >= 7)
             solver.allowArcade(s.arcade != 0);
         if (s.version >= 8)
@@ -1174,7 +1234,18 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         }
         if (s.version >= 10)
             solver.allowBetterClimbing(s.betterClimbing != 0);
-        if(s.version>=11) {solver.allowGestures(s.twoHandZip!=0,s.ropeSteering!=0);}
+        if (s.version >= 12)
+            solver.allowSmartAnchor(s.smartAnchor != 0);
+        if (s.version >= 13)
+            solver.elasticWeb(static_cast<int>(s.elasticWeb));
+        if (s.version >= 14)
+            solver.softRelease(static_cast<int>(s.softRelease));
+        if (s.version >= 15)
+            solver.allowSwingAssist(s.swingAssist != 0);
+        if (s.version >= 16)
+            solver.setSlingshotSpeed(s.slingshotSpeed);
+        if (s.version >= 17)
+            solver.allowGestures(s.twoHandZip != 0, s.version >= 18 && s.ropeSteering != 0);
         // A swing started without the grab (-NoWebGrab) offers it from now on.
         if (s.grab && !game_grab::offering() && driveMotion && sampleDriven) {
             config.grabKinds = game_grab::movableKinds;

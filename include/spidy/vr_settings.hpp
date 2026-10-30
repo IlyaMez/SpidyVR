@@ -37,6 +37,9 @@ struct Values {
     int haptics = 100;     // controller vibration, percent
     int screenSize = 1;    // the game screen: 0 small, 1 medium, 2 large
     bool airWebs = true;   // a web that meets nothing within reach holds in open air there
+    // With airWebs off, a web that just misses (by up to 8 degrees) catches
+    // the nearest real surface instead (Swing::shot; pull request #39).
+    bool smartAnchor = false;
     bool webShooter = true; // a free hand's trigger shoots web balls
     // Degrees a second the right stick turns you while held over; 0: it snap
     // turns instead.
@@ -141,8 +144,31 @@ struct Values {
     // Only where the headset tracks the eyes (XrRuntime::eyeTracking); 0, or
     // no eye tracker, the hands aim balls and the head zips as before.
     int eyeAim = 0;
-    int twoHandZip=0;
-    int ropeSteering=0;
+    // How far webs stretch under load (the tab's ELASTIC WEB): 0 off, a hard
+    // rope as before; 1 to 3 softer and softer (Swing::elasticWeb; pull
+    // request #40).
+    int elasticWeb = 0;
+    // How long a loaded web's last pull fades after you let go (the tab's
+    // SOFT RELEASE): 0 at once, as before; 1 to 3 for 120, 180 or 240 ms
+    // (Swing::softRelease; pull request #41).
+    int softRelease = 0;
+    // While a web carries you and for a moment after, speed into what is
+    // ahead is cut so you do not slam into it; your lane stays yours (the
+    // tab's SWING ASSIST; Swing::allowSwingAssist; pull request #42).
+    bool swingAssist = false;
+    // How fast WEB SLINGSHOT launches you at full draw, m/s (the tab's
+    // SLINGSHOT SPEED): 0, its launch as before, under the swing's speed
+    // limit; 20 to 300 its own (Swing::setSlingshotSpeed; pull request #45).
+    int slingshotSpeed = 0;
+    // How smoothly RECORDING FOV's window view turns with the head (the tab's
+    // RECORDING SMOOTHING): 0 off; 10 to 100, slower and slower. The
+    // headset's view is never smoothed (pull request #46).
+    int recordingSmoothing = 0;
+    // Hand gestures on webs (pull request #47): TWO HAND WEB ZIP, both webs
+    // on one spot and both arms pulled back fast launch you at it; HAND ROPE
+    // STEERING, the free hand on your web too pulls sideways to turn the
+    // swing (Swing::allowGestures).
+    bool twoHandZip = false, ropeSteering = false;
     bool operator==(const Values&) const = default;
 };
 inline constexpr int eyeAimShots = 1, eyeAimZips = 2;
@@ -236,9 +262,14 @@ enum class Item : uint8_t {
     controlledFlips,
     combatVisuals,
     eyeAim,
+    smartAnchor,
+    elasticWeb,
+    softRelease,
+    swingAssist,
+    slingshotSpeed,
+    recordingSmoothing,
     twoHandZip,
     ropeSteering,
-
 };
 inline constexpr Item lastItem = Item::ropeSteering;
 // Where a row shows: in the tab; on the pause menu's first page instead,
@@ -263,7 +294,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 54>& rows();
+const std::array<Row, 60>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

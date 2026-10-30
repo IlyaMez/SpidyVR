@@ -158,15 +158,16 @@ def main():
         step('air_webs_off', dict(air_webs=False), changes=4)
         press('x', wait=.8)
         step('air_webs_reset', dict(air_webs=True), changes=5)
-        # Down past the SWINGING heading.
-        press('down')
+        # Down past SMART ANCHOR and the SWINGING heading.
+        press('down', 'down')
         press('right', wait=.8)
         step('swing_speed_40', dict(swing_speed=40.0), changes=6)
         press('down')
         press('right', wait=.8)
         step('weight_100', dict(weight=100, swing_speed=40.0), changes=7)
-        # Down past WEB SLINGSHOT, BETTER CLIMBING and the COMFORT heading.
-        press('down', 'down', 'down')
+        # Down past ELASTIC WEB, SOFT RELEASE, SWING ASSIST, WEB SLINGSHOT, SLINGSHOT SPEED, BETTER CLIMBING,
+        # TWO HAND WEB ZIP, HAND ROPE STEERING and the COMFORT heading.
+        press('down', 'down', 'down', 'down', 'down', 'down', 'down', 'down', 'down')
         press('right', wait=.8)
         step('snap_turn_45', dict(snap_turn=45, weight=100), changes=8)
         press('down')
@@ -185,17 +186,17 @@ def main():
         step('hud_small', dict(hud=1, body_haptics=75), changes=11)
         press('left', wait=.8)
         step('hud_off', dict(hud=0), changes=12)
-        # Down past UI STYLE, NEAR CLIP, RECORDING FOV and the BODY heading: a calibration at the next
-        # gameplay.
-        press('down', 'down', 'down', 'down')
+        # Down past UI STYLE, COMBAT VISUALS, NEAR CLIP, RECORDING FOV, RECORDING SMOOTHING and the BODY
+        # heading: a calibration at the next gameplay.
+        press('down', 'down', 'down', 'down', 'down', 'down')
         press('right', wait=.8)
         step('calibrate_on_resume', dict(calibrate=True, hud=0), changes=13)
         # Down past HEIGHT, SEATED and the EXPERIMENTAL heading: the flips, off until switched on.
         press('down', 'down', 'down')
         press('right', wait=.8)
         step('flips_on', dict(flips=True, calibrate=True), changes=14)
-        # The flip speed, 180 degrees a second until stepped up to 240.
-        press('down')
+        # Down past CONTROLLED FLIPS: the flip speed, 180 degrees a second until stepped up to 240.
+        press('down', 'down')
         press('right', wait=.8)
         step('flip_speed_240', dict(flip_speed=240, flips=True), changes=15)
         press('y', wait=1.2)
