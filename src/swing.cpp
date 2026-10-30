@@ -1301,7 +1301,7 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
     // What each rope holds the body to: its anchor, or with physical webs
     // the point that keeps the hand on it.
     const Rope ropes[2] = {{hold(0), webs_[0].length}, {hold(1), webs_[1].length}};
-    if (bearing[0] && bearing[1])
+    if (!elasticWeb_ && bearing[0] && bearing[1])
         move(projectTwoWebs(body_.position, ropes[0], ropes[1]), collision);
 
     // Unilateral, tension-only constraints. Slack rope never pushes the player.
@@ -1318,7 +1318,7 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             if (dist < w.length - nearlyTaut || dist < 1e-5f)
                 continue;
             const Vec3 radial = delta / dist;
-            if (dist > w.length)
+            if (dist > w.length && !elasticWeb_)
                 move(ropes[i].anchor + radial * w.length, collision);
             // A taut rope that is being reeled carries the body inward at the
             // winch rate. With the pull applied to position only, the velocity
@@ -1329,6 +1329,14 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             // Once the other rope has pulled too, this one may have taken more
             // than the two need together. It hands that back, never more than
             // it took: kept, the surplus pushed the body sideways every step.
+            if(elasticWeb_) {
+                const float stiffness=elasticWeb_==1?65.f:elasticWeb_==2?40.f:24.f;
+                const float stretch=std::max(0.f,dist-w.length);
+                const float acceleration=std::clamp(stiffness*stretch+2.f*std::sqrt(stiffness)*outward,0.f,180.f);
+                const float change=acceleration*dt/8;
+                pull[i]+=change;body_.velocity-=radial*change;
+                continue;
+            }
             const float change = std::max(outward, -pull[i]);
             pull[i] += change;
             body_.velocity -= radial * change;
