@@ -1823,6 +1823,10 @@ void App::options(ImVec2 origin, ImVec2 size) {
                });
         option("Webs hold in open air", "With nothing in reach, a web still holds 100 m out; off, it misses.", S(42),
                [&] { changed |= toggle("##air", &o.airWebs); });
+        option("Smart anchor",
+               "With webs holding in open air off, a web that just misses still catches the real surface "
+               "nearest it.",
+               S(42), [&] { tabToggle("##smartanchor", Item::smartAnchor); });
         option("Aim markers", "Show where each hand's web would land.", S(42),
                [&] { changed |= toggle("##aim", &o.aimMarkers); });
         option("Eye aim",

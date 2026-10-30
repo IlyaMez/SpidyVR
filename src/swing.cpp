@@ -860,18 +860,25 @@ WebShot Swing::shot(Pose aim, Vec3 from, const WorldQueries& world) const {
     out.hit = solid(aim.position, direction, config_.maxRange, world, &out.passed);
     // Keep a direct hit exact. With air anchors disabled, catch a nearby
     // real surface inside a small cone instead of requiring pixel-perfect aim.
-    if(!out.hit && !config_.airAnchors && smartAnchor_) {
-        const Vec3 right=normalized(cross(direction,std::abs(direction.y)<.9f?Vec3{0,1,0}:Vec3{1,0,0}));
-        const Vec3 up=cross(right,direction);
-        float nearest=1e9f;
-        for(int k=0;k<8;++k) {
-            const float angle=6.2831853f*k/8;
-            const Vec3 ray=normalized(direction+(right*std::cos(angle)+up*std::sin(angle))*.14054f);
-            const auto candidate=solid(aim.position,ray,config_.maxRange,world);
-            if(candidate && candidate->fixed && finite(candidate->point) && world.exists(candidate->surface)) {
-                const float distance=length(candidate->point-aim.position);
-                const float score=distance*(candidate->point.y<from.y+1?1.6f:1.f)+12.f/std::max(distance,1.f);
-                if(score<nearest) {nearest=score;out.hit=candidate;}
+    if (!out.hit && !config_.airAnchors && smartAnchor_) {
+        const Vec3 right =
+            normalized(cross(direction, std::abs(direction.y) < .9f ? Vec3{0, 1, 0} : Vec3{1, 0, 0}));
+        const Vec3 up = cross(right, direction);
+        float nearest = 1e9f;
+        for (int k = 0; k < 8; ++k) {
+            const float angle = 6.2831853f * k / 8;
+            const Vec3 ray =
+                normalized(direction + (right * std::cos(angle) + up * std::sin(angle)) * .14054f);
+            const auto candidate = solid(aim.position, ray, config_.maxRange, world);
+            if (candidate && candidate->fixed && finite(candidate->point) &&
+                world.exists(candidate->surface)) {
+                const float distance = length(candidate->point - aim.position);
+                const float score = distance * (candidate->point.y < from.y + 1 ? 1.6f : 1.f) +
+                                    12.f / std::max(distance, 1.f);
+                if (score < nearest) {
+                    nearest = score;
+                    out.hit = candidate;
+                }
             }
         }
     }

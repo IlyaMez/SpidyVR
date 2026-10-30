@@ -518,7 +518,11 @@ class Swing {
     // Hand `hand`'s web holds the body when taut: any web but the longer
     // rope of two hands on one web.
     bool bears(int hand) const;
-    void allowSmartAnchor(bool on){smartAnchor_=on;}
+    // With open-air anchors off, a shot that meets nothing straight ahead
+    // takes the best real surface within 8 degrees of its aim (shot()).
+    void allowSmartAnchor(bool on) {
+        smartAnchor_ = on;
+    }
     const SwingConfig& config() const {
         return config_;
     }

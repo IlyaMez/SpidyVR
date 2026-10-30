@@ -37,6 +37,9 @@ struct Values {
     int haptics = 100;     // controller vibration, percent
     int screenSize = 1;    // the game screen: 0 small, 1 medium, 2 large
     bool airWebs = true;   // a web that meets nothing within reach holds in open air there
+    // With airWebs off, a web that just misses (by up to 8 degrees) catches
+    // the nearest real surface instead (Swing::shot; pull request #39).
+    bool smartAnchor = false;
     bool webShooter = true; // a free hand's trigger shoots web balls
     // Degrees a second the right stick turns you while held over; 0: it snap
     // turns instead.
@@ -141,7 +144,6 @@ struct Values {
     // Only where the headset tracks the eyes (XrRuntime::eyeTracking); 0, or
     // no eye tracker, the hands aim balls and the head zips as before.
     int eyeAim = 0;
-    int smartAnchor=0;
     bool operator==(const Values&) const = default;
 };
 inline constexpr int eyeAimShots = 1, eyeAimZips = 2;
@@ -236,7 +238,6 @@ enum class Item : uint8_t {
     combatVisuals,
     eyeAim,
     smartAnchor,
-
 };
 inline constexpr Item lastItem = Item::smartAnchor;
 // Where a row shows: in the tab; on the pause menu's first page instead,

@@ -62,8 +62,8 @@ constexpr int automaticMinimumSpeeds[] = {3, 5, 8, 12, 16};
 constexpr const char* automaticMinimumChoices[] = {"3 M/S", "5 M/S", "8 M/S", "12 M/S", "16 M/S"};
 constexpr int automaticResponses[] = {100, 200, 350, 500, 750};
 constexpr const char* automaticResponseChoices[] = {"100 MS", "200 MS", "350 MS", "500 MS", "750 MS"};
-constexpr int automaticHandStrengths[] = {25, 50, 75, 100, 150, 200};
-constexpr const char* automaticHandStrengthChoices[] = {"25%", "50%", "75%", "100%", "150%", "200%"};
+constexpr int automaticHandStrengths[] = {0, 25, 50, 75, 100, 150, 200};
+constexpr const char* automaticHandStrengthChoices[] = {"0%", "25%", "50%", "75%", "100%", "150%", "200%"};
 constexpr int automaticFalloffs[] = {500, 1000, 1500, 2000, 3000};
 constexpr const char* automaticFalloffChoices[] = {"FAST", "QUICK", "MEDIUM", "SLOW", "VERY SLOW"};
 constexpr int automaticHandThresholds[] = {50, 100, 150, 200, 300};
@@ -75,8 +75,6 @@ static_assert(std::size(automaticStrengthChoices) == std::size(automaticStrength
               std::size(automaticHandStrengthChoices) == std::size(automaticHandStrengths) &&
               std::size(automaticFalloffChoices) == std::size(automaticFalloffs) &&
               std::size(automaticHandThresholdChoices) == std::size(automaticHandThresholds));
-constexpr int smartAnchorSteps[]={0,1};
-constexpr const char* smartAnchorLabels[]={"OFF","ON"};
 constexpr int screenSizes[] = {0, 1, 2};
 constexpr int hudSizes[] = {0, 1, 2, 3};
 constexpr int depthSteps[] = {0, 1, 2, 3};
@@ -90,8 +88,6 @@ static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(sna
 
 std::span<const int> steps(Item item) {
     switch (item) {
-    case Item::smartAnchor:return smartAnchorSteps;
-
     case Item::swingSpeed:
         return swingSpeeds;
     case Item::snapTurn:
@@ -144,8 +140,6 @@ std::span<const int> steps(Item item) {
 namespace {
 float numberOf(Item item, const Values& v) {
     switch (item) {
-    case Item::smartAnchor:return static_cast<float>(v.smartAnchor);
-
     case Item::swingSpeed:
         return v.swingSpeed;
     case Item::snapTurn:
@@ -203,6 +197,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.webSlingshot;
     case Item::betterClimbing:
         return &v.betterClimbing;
+    case Item::smartAnchor:
+        return &v.smartAnchor;
     case Item::combatVisuals:
         return &v.combatVisuals;
     case Item::aimMarkers:
@@ -250,8 +246,6 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
 } // namespace
 
 Values sanitized(Values v) {
-    v.smartAnchor=std::clamp(v.smartAnchor,0,1);
-
     v.swingSpeed = std::isfinite(v.swingSpeed) ? std::clamp(v.swingSpeed, 1.f, 65.f) : 32.f;
     v.snapTurn = std::clamp(v.snapTurn, 0, 90);
     v.smoothTurn = std::clamp(v.smoothTurn, 0, 360);
@@ -273,7 +267,7 @@ Values sanitized(Values v) {
     v.automaticSpeed = std::clamp(v.automaticSpeed, 90, 360);
     v.automaticMinimumSpeed = std::clamp(v.automaticMinimumSpeed, 3, 16);
     v.automaticResponse = std::clamp(v.automaticResponse, 100, 750);
-    v.automaticHandStrength = std::clamp(v.automaticHandStrength, 25, 200);
+    v.automaticHandStrength = std::clamp(v.automaticHandStrength, 0, 200);
     v.automaticFalloff = std::clamp(v.automaticFalloff, 500, 3000);
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
@@ -287,16 +281,24 @@ const std::array<Row, 53>& rows() {
         {Item::webButton, "WEB BUTTON",
          "Which button shoots and holds a web; the other reels in and shoots web balls.", webButtonChoices},
         {Item::aimMarkers, "AIM MARKERS", "Show where each web would land.", {}},
-        {Item::airWebs, "WEBS HOLD IN OPEN AIR",
-         "With nothing in reach, a web still holds in open air, 100 m out.", {}},
+        {Item::airWebs,
+         "WEBS HOLD IN OPEN AIR",
+         "With nothing in reach, a web still holds in open air, 100 m out.",
+         {}},
+        {Item::smartAnchor, "SMART ANCHOR",
+         "With open-air webs off, a near miss catches a real surface in a small cone.", {}},
         {Item::none, "SWINGING", nullptr, {}},
         {Item::swingSpeed, "SWING SPEED LIMIT", "How fast a swing can carry you.", swingChoices},
-        {Item::weight, "WEIGHT", "How heavy you are while swinging and after letting go. 100% is real gravity.",
-         weightChoices},
-        {Item::webSlingshot, "WEB SLINGSHOT",
-         "No auto jump. Draw two fixed webs, hold for vibration, release both to launch.", {}},
-        {Item::betterClimbing, "BETTER CLIMBING",
-         "Take one web in both hands, then pull hand over hand to keep climbing it.", {}},
+        {Item::weight, "WEIGHT",
+         "How heavy you are while swinging and after letting go. 100% is real gravity.", weightChoices},
+        {Item::webSlingshot,
+         "WEB SLINGSHOT",
+         "No auto jump. Draw two fixed webs, hold for vibration, release both to launch.",
+         {}},
+        {Item::betterClimbing,
+         "BETTER CLIMBING",
+         "Take one web in both hands, then pull hand over hand to keep climbing it.",
+         {}},
         {Item::none, "COMFORT", nullptr, {}},
         {Item::snapTurn, "SNAP TURN", "How far a flick of the right stick turns you. Off: no snap turning.",
          snapChoices},
@@ -305,82 +307,107 @@ const std::array<Row, 53>& rows() {
         {Item::none, "HAPTICS", nullptr, {}},
         {Item::haptics, "CONTROLLER VIBRATION", "How strongly webs, grabs and punches buzz in your hands.",
          hapticChoices},
-        {Item::blowSounds, "BLOW SOUNDS", "What your blows sound like: the game's own hits, Spidy's tones, or none.",
-         blowSoundChoices},
+        {Item::blowSounds, "BLOW SOUNDS",
+         "What your blows sound like: the game's own hits, Spidy's tones, or none.", blowSoundChoices},
         {Item::bodyHaptics, "BODY HAPTICS",
          "How strongly bHaptics vest, sleeves and visor play webs, hits and Spider-Sense.", hapticChoices},
-        {Item::hapticWebs, "WEB HAPTICS",
-         "Body haptics for webs: shots, holds, the swing's pull, zips and grabs.", {}},
-        {Item::hapticWind, "WIND HAPTICS",
-         "Body haptics for the wind when you fly or fall free of webs and walls.", {}},
-        {Item::hapticCombat, "COMBAT HAPTICS",
-         "Body haptics for punches, hits, Spider-Sense, dodges, heals and slow motion.", {}},
-        {Item::hapticMovement, "MOVEMENT HAPTICS",
-         "Body haptics for landings, walls, wall climbing and charged leaps.", {}},
+        {Item::hapticWebs,
+         "WEB HAPTICS",
+         "Body haptics for webs: shots, holds, the swing's pull, zips and grabs.",
+         {}},
+        {Item::hapticWind,
+         "WIND HAPTICS",
+         "Body haptics for the wind when you fly or fall free of webs and walls.",
+         {}},
+        {Item::hapticCombat,
+         "COMBAT HAPTICS",
+         "Body haptics for punches, hits, Spider-Sense, dodges, heals and slow motion.",
+         {}},
+        {Item::hapticMovement,
+         "MOVEMENT HAPTICS",
+         "Body haptics for landings, walls, wall climbing and charged leaps.",
+         {}},
         {Item::none, "DISPLAY", nullptr, {}},
-        {Item::view, "VR VIEW", "Play in VR, or the game as it is on a 3D screen, with pad controls.", viewChoices,
-         Place::page},
+        {Item::view, "VR VIEW", "Play in VR, or the game as it is on a 3D screen, with pad controls.",
+         viewChoices, Place::page},
         {Item::screenSize, "GAME SCREEN SIZE", "The screen that shows menus, cutscenes and flat mode.",
          screenChoices},
         {Item::screenDepth, "GAME SCREEN 3D",
-         "Cutscenes and VIEW: GAME SCREEN get depth. Higher brings them nearer. Off: flat.",
-         depthChoices},
+         "Cutscenes and VIEW: GAME SCREEN get depth. Higher brings them nearer. Off: flat.", depthChoices},
         {Item::hud, "HUD", "How large the game's HUD shows in front of you. Off: no HUD in VR.", hudChoices},
         {Item::uiStyle, "UI STYLE",
          "Spidy's own marks, gadget wheel and meters: comic print, or tech like the HUD.", uiStyleChoices},
-        {Item::combatVisuals, "COMBAT VISUALS",
-         "Show punch arrows, target rings, hit effects and KO text. Spider-Sense stays on.", {}},
+        {Item::combatVisuals,
+         "COMBAT VISUALS",
+         "Off: no combat effects; free uppercuts/smashes. Spider-Sense stays on.",
+         {}},
         {Item::nearClip, "NEAR CLIP",
          "How near your eyes things still show. Nearer keeps your hands in view.", nearClipChoices},
         {Item::recordingFov, "RECORDING FOV",
          "A wider view on the monitor, to record. Costs frame rate; no Spidy marks there.",
          recordingFovChoices},
         {Item::none, "BODY", nullptr, {}},
-        {Item::calibrate, "CALIBRATE BODY", "Fit Spider-Man to you: pick ON RESUME, then hold both triggers in a T-pose.",
-         calibrateChoices},
+        {Item::calibrate, "CALIBRATE BODY",
+         "Fit Spider-Man to you: pick ON RESUME, then hold both triggers in a T-pose.", calibrateChoices},
         {Item::height, "HEIGHT",
          "Your height, for Spider-Man's size and SEATED. AUTO measures it in the headset.", heightChoices},
-        {Item::seated, "SEATED",
-         "Play sitting: your view rises to your standing height. Recenter after sitting.", {}},
+        {Item::seated,
+         "SEATED",
+         "Play sitting: your view rises to your standing height. Recenter after sitting.",
+         {}},
         {Item::none, "EXPERIMENTAL", nullptr, {}},
-        {Item::flips, "FLIPS",
-         "Right stick flips; up zips/aims. Release holds the angle. A returns upright.", {}},
-        {Item::controlledFlips, "CONTROLLED FLIPS",
-         "Air: A enables left-stick flips. Release holds. A again resets and exits.", {}},
+        {Item::flips,
+         "FLIPS",
+         "Right stick flips; up zips/aims. Release holds the angle. A returns upright.",
+         {}},
+        {Item::controlledFlips,
+         "CONTROLLED FLIPS",
+         "Air: A enables left-stick flips. Release holds. A again resets and exits.",
+         {}},
         {Item::flipSpeed, "FLIP SPEED", "How fast a flip turns you over at full stick tilt.",
          flipSpeedChoices},
-        {Item::handClimb, "HAND WALL CLIMBING",
-         "Grip and pull. Reach back near the wall to turn. Left stick: run. A: jump.", {}},
-        {Item::wallRunCameraTilt, "WALL RUN CAMERA TILT",
-         "Gently bank the view with the body on horizontal momentum wall runs.", {}},
-        {Item::eyeAim, "EYE AIM", "Web balls and zips go where your eyes look. Needs a headset with eye tracking.",
-         eyeAimChoices},
-        {Item::realisticFlips, "REALISTIC FLIPS",
-         "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.", {}},
+        {Item::handClimb,
+         "HAND WALL CLIMBING",
+         "Grip and pull. Reach back near the wall to turn. Left stick: run. A: jump.",
+         {}},
+        {Item::wallRunCameraTilt,
+         "WALL RUN CAMERA TILT",
+         "Gently bank the view with the body on horizontal momentum wall runs.",
+         {}},
+        {Item::eyeAim, "EYE AIM",
+         "Web balls and zips go where your eyes look. Needs a headset with eye tracking.", eyeAimChoices},
+        {Item::realisticFlips,
+         "REALISTIC FLIPS",
+         "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
+         {}},
         {Item::automaticStrength, "ROTATION STRENGTH",
          "How strongly the body follows the web direction. Heading stays free.", automaticStrengthChoices},
         {Item::automaticSpeed, "MAX ROTATION SPEED",
          "Maximum automatic turning speed, including release flips.", automaticSpeedChoices},
         {Item::automaticMinimumSpeed, "MINIMUM FLIGHT SPEED",
          "Start automatic rotation only above this travel speed.", automaticMinimumChoices, Place::launcher},
-        {Item::automaticReleaseFlip, "SWING MOMENTUM",
-         "Carry orbital momentum when the last web is released. No preset flip.", {}},
+        {Item::automaticReleaseFlip,
+         "SWING MOMENTUM",
+         "Carry orbital momentum when the last web is released. No preset flip.",
+         {}},
         {Item::automaticResponse, "ROTATION RESPONSE",
          "Longer response gives gentler acceleration and braking.", automaticResponseChoices,
          Place::launcher},
         {Item::automaticHandStrength, "HAND MOMENTUM",
          "How much arm movement changes your angular momentum in the air.", automaticHandStrengthChoices},
-        {Item::automaticFalloff, "ANGULAR DRAG",
-         "How quickly rotation slows without more hand or web input.", automaticFalloffChoices,
-         Place::launcher},
+        {Item::automaticFalloff, "ANGULAR DRAG", "How quickly rotation slows without more hand or web input.",
+         automaticFalloffChoices, Place::launcher},
         {Item::automaticHandThreshold, "MINIMUM HAND SPEED",
          "Ignore hand movements slower than this. Faster gestures add momentum.",
          automaticHandThresholdChoices, Place::launcher},
-        {Item::automaticAirBrake, "AIR ROTATION BRAKE",
-         "Press A in the air to stop momentum and smoothly return upright.", {}},
-        {Item::automaticCombat, "FLIPS IN COMBAT",
-         "Off: with enemies near, arms and webs stop turning you and you come upright.", {}},
-        {Item::smartAnchor,"SMART ANCHOR","On a direct miss, catch a real surface within a small cone. Off by default.",smartAnchorLabels},
+        {Item::automaticAirBrake,
+         "AIR ROTATION BRAKE",
+         "Press A in the air to stop momentum and smoothly return upright.",
+         {}},
+        {Item::automaticCombat,
+         "FLIPS IN COMBAT",
+         "Off: with enemies near, arms and webs stop turning you and you come upright.",
+         {}},
     }};
     return all;
 }
@@ -410,8 +437,6 @@ bool choose(Item item, int index, Values& v) {
         return false;
     const Values before = v;
     switch (item) {
-    case Item::smartAnchor:v.smartAnchor=s[index];break;
-
     case Item::swingSpeed:
         v.swingSpeed = static_cast<float>(s[index]);
         break;
@@ -525,7 +550,7 @@ constexpr TabOnly tabOnly[] = {
     {"height_cm", nullptr, &Values::heightCm},
     {"seated", &Values::seated, nullptr},
     {"eye_aim", nullptr, &Values::eyeAim},
-    {"smart_anchor",nullptr,&Values::smartAnchor},
+    {"smart_anchor", &Values::smartAnchor, nullptr},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {
