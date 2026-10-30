@@ -141,6 +141,7 @@ struct Values {
     // Only where the headset tracks the eyes (XrRuntime::eyeTracking); 0, or
     // no eye tracker, the hands aim balls and the head zips as before.
     int eyeAim = 0;
+    int swingAssist=0;
     bool operator==(const Values&) const = default;
 };
 inline constexpr int eyeAimShots = 1, eyeAimZips = 2;
@@ -234,8 +235,10 @@ enum class Item : uint8_t {
     controlledFlips,
     combatVisuals,
     eyeAim,
+    swingAssist,
+
 };
-inline constexpr Item lastItem = Item::eyeAim;
+inline constexpr Item lastItem = Item::swingAssist;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -258,7 +261,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 52>& rows();
+const std::array<Row, 53>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

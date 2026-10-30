@@ -652,6 +652,73 @@ int main() {
             tick();
         }
     };
+    test("assist at a head-on wall adds no sideways or upward movement", [] {
+        struct Facade:TestWorld {
+            std::optional<RayHit> bodyRaycast(Vec3 from,Vec3 d,float reach) const override {
+                if(d.x<=0)return {};const float t=(5-from.x)/d.x;
+                if(t>=0 && t<=reach)return RayHit{from+d*t,{-1,0,0},2,true};return {};
+            }
+        } world;
+        world.anchor={100,5,0};Swing solver(inert());solver.allowSwingAssist(true);
+        Body body{{0,5,0},{12,0,0},false};auto input=aimedAt(body.position,world.anchor);
+        for(int frame=0;frame<180;++frame) {
+            const auto result=solver.predictNativeStep(.01f,input,world,body);
+            near(result.velocity.z,0,.0001f);
+            check(result.velocity.y<.2f,"assist lifted player into an invented route");
+            check(result.target.x<4.7f,"assist failed to brake before wall");
+            body={result.target,result.velocity,false};
+        }
+    });
+    test("swing assist preserves the player lateral motion instead of choosing a lane", [] {
+        Building world;world.low={5,0,-2};world.high={10,30,2};
+        Swing solver(inert());solver.allowSwingAssist(true);
+        Body body{{0,5,0},{10,0,1.5f},false};auto input=aimedAt(body.position,{100,5,0});
+        bool braking=false;
+        for(int frame=0;frame<300;++frame) {
+            input.hands[0].aim.position=body.position;
+            const auto result=solver.predictNativeStep(.01f,input,world,body);
+            check(result.valid,"lane prediction invalid");
+            const auto p=result.target;
+            check(!(p.x>4.65f && p.x<10.35f && std::abs(p.z)<2.35f && p.y<30.35f),"assist entered building capsule clearance");
+            braking|=result.velocity.x<8;
+            near(result.velocity.y,0,.001f);
+            check(result.velocity.z>=0 && result.velocity.z<=1.501f,"assist invented lateral speed");
+            body={result.target,result.velocity,false};
+        }
+        check(braking,"assist failed to reduce approach speed");
+    });
+    test("swing assist brakes before a broad wall without teleporting or adding speed", [] {
+        struct Facade:TestWorld {
+            std::optional<RayHit> bodyRaycast(Vec3 from,Vec3 direction,float reach) const override {
+                if(direction.x<=0)return {};
+                const float t=(5-from.x)/direction.x;
+                if(t>=0 && t<=reach)return RayHit{from+direction*t,{-1,0,0},2,true};
+                return {};
+            }
+        } world;
+        world.anchor={100,5,0};Swing solver(inert());solver.allowSwingAssist(true);
+        Body body{{0,5,0},{10,0,0},false};auto input=aimedAt(body.position,world.anchor);
+        float closest=0;
+        for(int frame=0;frame<250;++frame) {
+            input.hands[0].aim.position=body.position;
+            const auto result=solver.predictNativeStep(.01f,input,world,body);
+            check(result.valid && finite(result.target),"assist prediction invalid");
+            check(length(result.velocity)<=10.01f,"assist added travel speed");
+            check(length(result.target-body.position)<=.101f,"assist teleported body");
+            check(length(result.velocity-body.velocity)<1.2f,"assist changed heading abruptly");
+            closest=std::max(closest,result.target.x);body={result.target,result.velocity,false};
+        }
+        check(closest<4.7f,"assist crossed broad wall");
+    });
+    test("new optional controls persist and keep their default", [] {
+        using namespace vr_settings;
+        for(int index=0;index<2;++index) {
+            Values value;choose(Item::swingAssist,index,value);
+            check(choice(Item::swingAssist,withTabOnly({},tabOnlyText(value)))==index,"saved setting changed");
+        }
+        check(Values{}.swingAssist==0,"default changed");
+    });
+
     test("slingshot draws two fixed webs and launches once, capped, toward their midpoint", [] {
         Sling s;
         s.solver.limitSpeed(25);
@@ -726,7 +793,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 10 && s.bytes == 56 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 11 && s.bytes == 60 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -1239,7 +1306,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 10 && s.bytes == 56 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 11 && s.bytes == 60 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -2595,7 +2662,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 10 && s.bytes == 56, "updated settings did not append the climbing field");
+        check(s.version == 11 && s.bytes == 60, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -20690,7 +20757,7 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 41 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 41 + std::size(realistic) + 1, "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
             check(all[41 + i].item == realistic[i], "the realistic flips' rows out of order");
         check(std::strcmp(all[41].title, "REALISTIC FLIPS") == 0 && all[41].choices.empty(),
@@ -20763,7 +20830,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 47,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 48,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -20884,7 +20951,7 @@ int main() {
                                        "angular_drag_ms=3000\nhand_speed_min_cm=100\nair_rotation_brake=1\n"
                                        "flips_in_combat=1\nbody_haptics_webs=1\nbody_haptics_wind=1\nbody_haptics_combat=1\n"
                                        "body_haptics_movement=1\nrecording_fov=0\nui_style=0\ncombat_visuals=1\nblow_sounds=0\n"
-                                       "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\n",
+                                       "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\nswing_assist=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

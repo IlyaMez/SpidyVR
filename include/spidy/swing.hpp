@@ -518,6 +518,7 @@ class Swing {
     // Hand `hand`'s web holds the body when taut: any web but the longer
     // rope of two hands on one web.
     bool bears(int hand) const;
+    void allowSwingAssist(bool on){swingAssist_=on;if(!on)assistFlight_=0;}
     const SwingConfig& config() const {
         return config_;
     }
@@ -533,6 +534,8 @@ class Swing {
     uint64_t slingshotSurfaces_[2]{};
     float slingshotCharge_{}, slingshotHold_{}, slingshotRelease_{}, slingshotYaw_{};
     bool betterClimbing_{};
+    bool swingAssist_{};Vec3 assistWay_{};float assistFlight_{};
+    void avoidObstacles(float,const Input&,const WorldQueries&);
     struct HandState {
         // held: grip squeezed, with release hysteresis. A web shoots only on the
         // press that sets it, so a lost web never re-fires while the grip stays held.
