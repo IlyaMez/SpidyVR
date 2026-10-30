@@ -12,6 +12,7 @@
 #include "spidy/native_webs.hpp"
 #include "spidy/near_clip.hpp"
 #include "spidy/recording_fov.hpp"
+#include "spidy/spectator_smoothing.hpp"
 #include <MinHook.h>
 #include <atomic>
 #include <cstdint>
@@ -31,7 +32,12 @@ float spidy::near_clip::metres() {
 }
 // RECORDING FOV's angle (recording_fov.hpp), degrees, 0 for off: the XR
 // worker sets it, each frame's rest and the game's view's lens read it.
-std::atomic<int> recordingFov{};
+std::atomic<int> recordingFov{}, recordingSmoothLevel{};
+SpectatorSmoothing recordingSmoothing;
+uint64_t recordingTick{};
+void spidy::recording_fov::smoothing(int level) {
+    recordingSmoothLevel.store(std::clamp(level,0,100),std::memory_order_relaxed);
+}
 void spidy::recording_fov::set(int degrees) {
     recordingFov.store(recording_fov::sanitized(degrees), std::memory_order_relaxed);
 }
@@ -1753,6 +1759,38 @@ void placeEyes() {
             reinterpret_cast<Submit>(base + 0x1899ab0)(eye, &descriptor);
             matchDistances(eye, descriptor, index);
         }
+    // Port the fork's independent recording descriptor, after both eye jobs
+    // have copied their unsmoothed poses. The early head-aligned covering
+    // lens remains the upstream path for head/eye culling and shared lighting.
+    // Only the existing monitor view gets this final narrow/smoothed lens.
+    const int degrees=recordingFov.load(std::memory_order_relaxed);
+    if(!degrees || !latchedImmersive || live.load()!=2 || native_gpu::screenRequested()) {
+        recordingSmoothing.reset(); recordingTick=0;
+    } else {
+        Mat4 pose{}; native_eyes::Bounds headLens{};
+        if(native_eyes::headView(desired,pose,headLens)) {
+            pose[12]+=placed.offset.x; pose[13]+=placed.offset.y; pose[14]+=placed.offset.z;
+            const int level=recordingSmoothLevel.load(std::memory_order_relaxed);
+            if(level>0) {
+                static const double frequency=[] { LARGE_INTEGER f{};QueryPerformanceFrequency(&f);return static_cast<double>(f.QuadPart); }();
+                LARGE_INTEGER tick{};QueryPerformanceCounter(&tick);
+                const auto now=static_cast<uint64_t>(tick.QuadPart);
+                const float seconds=recordingTick?static_cast<float>((now-recordingTick)/frequency):0;
+                recordingTick=now;
+                pose=recordingSmoothing.update(pose,seconds,true,level*5);
+            } else { recordingSmoothing.reset();recordingTick=0; }
+            float aspect=flatAspect.load();
+            if(!std::isfinite(aspect)||aspect<.2f||aspect>6) aspect=16.f/9;
+            const float halfWidth=std::tan(static_cast<float>(degrees)*.00872664626f);
+            const float halfHeight=halfWidth/aspect;
+            auto desktop=main;
+            reinterpret_cast<Lens>(base+0x187bb00)(&desktop,near_clip::metres(),main.farZ(),
+                -halfWidth,halfWidth,-halfHeight,halfHeight,0,0,main.values[0x428/4],main.values[0x42c/4],false,false);
+            reinterpret_cast<SetPose>(base+0x187ca10)(&desktop,pose.data());
+            if(native_view::valid(desktop)) originalSubmit(reinterpret_cast<void*>(primary),&desktop);
+        }
+    }
+
 }
 // A KeyLightContext's cascades: +d and +f count them, +150 holds one each
 // 0x3e0 bytes, with its box's half sizes at +170 and its transform at +198.

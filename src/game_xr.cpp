@@ -1362,6 +1362,7 @@ DWORD WINAPI run(void*) {
             native_hud::setSize(values.hud);
             near_clip::set(values.nearClipMm);
             recording_fov::set(values.recordingFov);
+            recording_fov::smoothing(values.recordingSmoothing);
             sendSwingSettings();
             if (swingStarted && startPunch && samplePunch) {
                 if (values.punch && !punchStarted) {

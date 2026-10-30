@@ -33,7 +33,7 @@ constexpr const char* depthChoices[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
 constexpr const char* nearClipChoices[] = {"1 CM", "1.5 CM", "2 CM", "3 CM", "5 CM", "7.5 CM", "10 CM"};
 static_assert(std::size(nearClipChoices) == std::size(nearClips));
 // RECORDING FOV: the least the monitor's view shows across (recording_fov.hpp).
-constexpr const char* recordingFovChoices[] = {"OFF", "130\xC2\xB0", "140\xC2\xB0", "150\xC2\xB0"};
+constexpr const char* recordingFovChoices[]={"OFF","70","80","90","100","110","120","130","140","150","160"};
 static_assert(std::size(recordingFovChoices) == std::size(recording_fov::choices));
 // UI STYLE, a list (ui_style.hpp's UiStyle in order) so that a style can
 // come after them: COMIC, the printed marks, or TECH, the game's own look.
@@ -75,6 +75,8 @@ static_assert(std::size(automaticStrengthChoices) == std::size(automaticStrength
               std::size(automaticHandStrengthChoices) == std::size(automaticHandStrengths) &&
               std::size(automaticFalloffChoices) == std::size(automaticFalloffs) &&
               std::size(automaticHandThresholdChoices) == std::size(automaticHandThresholds));
+constexpr int recordingSmoothingSteps[]={0,5,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100};
+constexpr const char* recordingSmoothingLabels[]={"OFF","5","10","15","20","25","30","35","40","45","50","55","60","65","70","75","80","85","90","95","100"};
 constexpr int screenSizes[] = {0, 1, 2};
 constexpr int hudSizes[] = {0, 1, 2, 3};
 constexpr int depthSteps[] = {0, 1, 2, 3};
@@ -88,6 +90,8 @@ static_assert(std::size(swingChoices) == std::size(swingSpeeds) && std::size(sna
 
 std::span<const int> steps(Item item) {
     switch (item) {
+    case Item::recordingSmoothing:return recordingSmoothingSteps;
+
     case Item::swingSpeed:
         return swingSpeeds;
     case Item::snapTurn:
@@ -140,6 +144,8 @@ std::span<const int> steps(Item item) {
 namespace {
 float numberOf(Item item, const Values& v) {
     switch (item) {
+    case Item::recordingSmoothing:return static_cast<float>(v.recordingSmoothing);
+
     case Item::swingSpeed:
         return v.swingSpeed;
     case Item::snapTurn:
@@ -244,6 +250,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
 } // namespace
 
 Values sanitized(Values v) {
+    v.recordingSmoothing=std::clamp(v.recordingSmoothing,0,100);
+
     v.swingSpeed = std::isfinite(v.swingSpeed) ? std::clamp(v.swingSpeed, 1.f, 65.f) : 32.f;
     v.snapTurn = std::clamp(v.snapTurn, 0, 90);
     v.smoothTurn = std::clamp(v.smoothTurn, 0, 360);
@@ -270,9 +278,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 52>& rows() {
+const std::array<Row, 53>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 52> all{{
+    static const std::array<Row, 53> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -372,6 +380,7 @@ const std::array<Row, 52>& rows() {
          "Press A in the air to stop momentum and smoothly return upright.", {}},
         {Item::automaticCombat, "FLIPS IN COMBAT",
          "Off: with enemies near, arms and webs stop turning you and you come upright.", {}},
+        {Item::recordingSmoothing,"FOV SMOOTHING","Soften recording rotation only, with no horizon lock. Higher is softer.",recordingSmoothingLabels},
     }};
     return all;
 }
@@ -397,10 +406,14 @@ bool choose(Item item, int index, Values& v) {
         return *on != was;
     }
     const auto s = steps(item);
+    if ((item == Item::recordingFov || item == Item::recordingSmoothing) && !s.empty())
+        index = (index % static_cast<int>(s.size()) + static_cast<int>(s.size())) % static_cast<int>(s.size());
     if (index < 0 || index >= static_cast<int>(s.size()))
         return false;
     const Values before = v;
     switch (item) {
+    case Item::recordingSmoothing:v.recordingSmoothing=s[index];break;
+
     case Item::swingSpeed:
         v.swingSpeed = static_cast<float>(s[index]);
         break;
@@ -514,6 +527,7 @@ constexpr TabOnly tabOnly[] = {
     {"height_cm", nullptr, &Values::heightCm},
     {"seated", &Values::seated, nullptr},
     {"eye_aim", nullptr, &Values::eyeAim},
+    {"recording_smoothing",nullptr,&Values::recordingSmoothing},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

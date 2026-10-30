@@ -551,7 +551,7 @@ int main() {
                 continue;
             const bool leftOut = row.item == Item::view || row.item == Item::calibrate ||
                                  row.item == Item::height || row.item == Item::recordingFov ||
-                                 row.item == Item::eyeAim;
+                                 row.item == Item::eyeAim || row.item==Item::recordingSmoothing;
             check(std::count_if(begin, end, [&](const ProfileSetting& s) { return s.item == row.item; }) ==
                       (leftOut ? 0 : 1),
                   row.title);
@@ -561,7 +561,7 @@ int main() {
         size_t lines = 0;
         for (size_t line = 0; line < tabOnly.size(); line = tabOnly.find('\n', line) + 1) {
             const std::string key = tabOnly.substr(line, tabOnly.find('=', line) - line);
-            if (key == "recording_fov" || key == "height_cm" || key == "eye_aim")
+            if (key == "recording_fov" || key == "height_cm" || key == "eye_aim" || key=="recording_smoothing")
                 continue;
             ++lines;
             check(at(key) < std::size(profileSettings) &&
@@ -657,6 +657,8 @@ int main() {
         o.hud = 0;
         o.flipSpeed = 300;
         auto& t = mine.tab;
+        t.recordingSmoothing=50;
+
         t.hapticWebs = t.hapticWind = t.hapticCombat = t.hapticMovement = false;
         t.automaticReleaseFlip = t.automaticAirBrake = t.automaticCombat = false;
         t.handClimb = t.realisticFlips = t.seated = t.controlledFlips = true;

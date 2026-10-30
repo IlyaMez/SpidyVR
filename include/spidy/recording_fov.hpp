@@ -16,7 +16,7 @@
 // degrees out, 44 in, 48 up and down) in a 16:9 window needs about 128.
 namespace spidy::recording_fov {
 // The tab's choices, degrees across; 0 is off.
-inline constexpr int choices[] = {0, 130, 140, 150};
+inline constexpr int choices[] = {0,70,80,90,100,110,120,130,140,150,160};
 // 0 for off; any other angle within the choices'.
 inline int sanitized(int degrees) {
     return degrees <= 0 ? 0 : std::clamp(degrees, choices[1], std::end(choices)[-1]);
@@ -34,4 +34,5 @@ inline native_eyes::Bounds covering(const native_eyes::Bounds& eyes, int degrees
 }
 // From the VR settings (game_xr.cpp), as they start and whenever they change.
 void set(int degrees);
+void smoothing(int level);
 } // namespace spidy::recording_fov

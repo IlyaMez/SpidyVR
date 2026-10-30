@@ -23,6 +23,7 @@
 #include "spidy/vr_settings.hpp"
 #include "spidy/recording_fov.hpp"
 #include "spidy/native_stream.hpp"
+#include "spidy/spectator_smoothing.hpp"
 #include "spidy/body_haptics.hpp"
 #include "spidy/web_visual.hpp"
 #include "spidy/web_pull.hpp"
@@ -652,6 +653,35 @@ int main() {
             tick();
         }
     };
+    test("recording smoothing uses OFF then strength 5 through 100 and survives saving", [] {
+        using namespace vr_settings;
+        Values v;check(v.recordingSmoothing==0,"smoothing started on");
+        for(int i=0;i<=20;++i) {
+            choose(Item::recordingSmoothing,i,v);
+            check(v.recordingSmoothing==i*5 && choice(Item::recordingSmoothing,v)==i,"strength did not round trip");
+            check(withTabOnly(Values{},tabOnlyText(v)).recordingSmoothing==v.recordingSmoothing,"strength did not save");
+        }
+        choose(Item::recordingSmoothing,21,v);check(v.recordingSmoothing==0,"strength did not cycle to off");
+        Mat4 initial{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+        auto target=initial;const auto turn=Quat::around({1,1,1},.5f);
+        for(int r=0;r<3;++r) {const auto q=turn.rotate({initial[r*4],initial[r*4+1],initial[r*4+2]});target[r*4]=q.x;target[r*4+1]=q.y;target[r*4+2]=q.z;}
+        target[12]=.2f;target[13]=.3f;target[14]=.4f;
+        SpectatorSmoothing filter;filter.update(initial,.01f,true,150);
+        const auto smooth=filter.update(target,.01f,true,150);
+        near(smooth[12],.2f);near(smooth[13],.3f);near(smooth[14],.4f);
+        check(std::abs(smooth[0]-target[0])>.001f,"rotation was not smoothed");
+        filter.reset();const auto off=filter.update(target,.01f,false,150);
+        for(int i=0;i<16;++i)near(off[i],target[i]);
+    });
+    test("new optional controls persist and keep their default", [] {
+        using namespace vr_settings;
+        for(int index=0;index<21;++index) {
+            Values value;choose(Item::recordingSmoothing,index,value);
+            check(choice(Item::recordingSmoothing,withTabOnly({},tabOnlyText(value)))==index,"saved setting changed");
+        }
+        check(Values{}.recordingSmoothing==0,"default changed");
+    });
+
     test("slingshot draws two fixed webs and launches once, capped, toward their midpoint", [] {
         Sling s;
         s.solver.limitSpeed(25);
@@ -20690,7 +20720,7 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 41 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 41 + std::size(realistic) + 1, "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
             check(all[41 + i].item == realistic[i], "the realistic flips' rows out of order");
         check(std::strcmp(all[41].title, "REALISTIC FLIPS") == 0 && all[41].choices.empty(),
@@ -20743,8 +20773,8 @@ int main() {
               "the near clip under the UI style: 1 to 10 cm");
         check(all[29].item == Item::recordingFov && std::strcmp(all[29].title, "RECORDING FOV") == 0 &&
                   all[29].choices.size() == std::size(recording_fov::choices) &&
-                  std::strcmp(all[29].choices[0], "OFF") == 0 && std::strcmp(all[29].choices[3], "150\xC2\xB0") == 0,
-              "the recording FOV last under DISPLAY: OFF, then 130 to 150 degrees");
+                  std::strcmp(all[29].choices[0], "OFF") == 0 && std::strcmp(all[29].choices[9], "150") == 0,
+              "the recording FOV last under DISPLAY: OFF, then 70 to 160 degrees");
         // Webs are always physical (the user, October 15: "remove non physical web, no need for it").
         for (const auto& row : all)
             check(std::strcmp(row.title, "PHYSICAL WEBS") != 0, "webs can still be made non-physical");
@@ -20763,7 +20793,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 47,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 48,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -20845,11 +20875,12 @@ int main() {
             check(withTabOnly(Values{}, tabOnlyText(v)).recordingFov == v.recordingFov,
                   "the recording FOV did not come back from the tab's own file");
         }
-        check(!choose(Item::recordingFov, 4, v) && !choose(Item::recordingFov, -1, v), "a choice out of range taken");
+        choose(Item::recordingFov,11,v);check(v.recordingFov==0,"FOV did not cycle to OFF");
+        choose(Item::recordingFov,-1,v);check(v.recordingFov==160,"reverse FOV cycle failed");
         // Off at 0 or below, else 130-150: a hand-written 100 shows as 130.
         check(withTabOnly(Values{}, "recording_fov=-20\n").recordingFov == 0 &&
-                  withTabOnly(Values{}, "recording_fov=100\n").recordingFov == 130 &&
-                  withTabOnly(Values{}, "recording_fov=170\n").recordingFov == 150,
+                  withTabOnly(Values{}, "recording_fov=100\n").recordingFov == 100 &&
+                  withTabOnly(Values{}, "recording_fov=170\n").recordingFov == 160,
               "the recording FOV's range");
         // The window's shape, at least the angle across, centred, and never
         // less than the eyes' lens (lopsided here, and taller than 16:9).
@@ -20884,7 +20915,7 @@ int main() {
                                        "angular_drag_ms=3000\nhand_speed_min_cm=100\nair_rotation_brake=1\n"
                                        "flips_in_combat=1\nbody_haptics_webs=1\nbody_haptics_wind=1\nbody_haptics_combat=1\n"
                                        "body_haptics_movement=1\nrecording_fov=0\nui_style=0\ncombat_visuals=1\nblow_sounds=0\n"
-                                       "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\n",
+                                       "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\nrecording_smoothing=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;
