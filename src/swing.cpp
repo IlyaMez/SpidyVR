@@ -740,14 +740,18 @@ void Swing::reset(Body b) {
     sinceWallJump_ = 100;
     mount_ = mountLeft_ = 0;
     mounting_ = offered_ = mountOffered_ = false;
-    strands_ = 0;releasePull_={};releaseLeft_=0;
+    strands_ = 0;
+    releasePull_ = {};
+    releaseLeft_ = 0;
 }
 void Swing::release(int i, EventKind reason) {
-    if(softRelease_ && reason==EventKind::Release && webs_[i].attached && webs_[i].tension>0 && !body_.grounded && !wall_.on) {
-        releasePull_=limited(releasePull_+normalized(hold(i)-body_.position)*std::min(webs_[i].tension,30.f),40.f);
-        releaseLeft_=.06f+.06f*softRelease_;
+    // SOFT RELEASE: a loaded web let go of keeps its pull for a moment (step()).
+    if (softRelease_ && reason == EventKind::Release && webs_[i].attached && webs_[i].tension > 0 &&
+        !body_.grounded && !wall_.on) {
+        releasePull_ = limited(
+            releasePull_ + normalized(hold(i) - body_.position) * std::min(webs_[i].tension, 30.f), 40.f);
+        releaseLeft_ = .06f + .06f * softRelease_;
     }
-
     if (webs_[i].attached)
         events_.push_back({reason, i, .2f});
     // One web in both hands, and the hand that bore the body lets go: the
@@ -863,6 +867,30 @@ WebShot Swing::shot(Pose aim, Vec3 from, const WorldQueries& world) const {
     }
     const Vec3 direction = normalized(forward);
     out.hit = solid(aim.position, direction, config_.maxRange, world, &out.passed);
+    // Keep a direct hit exact. With air anchors disabled, catch a nearby
+    // real surface inside a small cone instead of requiring pixel-perfect aim.
+    if (!out.hit && !config_.airAnchors && smartAnchor_) {
+        const Vec3 right =
+            normalized(cross(direction, std::abs(direction.y) < .9f ? Vec3{0, 1, 0} : Vec3{1, 0, 0}));
+        const Vec3 up = cross(right, direction);
+        float nearest = 1e9f;
+        for (int k = 0; k < 8; ++k) {
+            const float angle = 6.2831853f * k / 8;
+            const Vec3 ray =
+                normalized(direction + (right * std::cos(angle) + up * std::sin(angle)) * .14054f);
+            const auto candidate = solid(aim.position, ray, config_.maxRange, world);
+            if (candidate && candidate->fixed && finite(candidate->point) &&
+                world.exists(candidate->surface)) {
+                const float distance = length(candidate->point - aim.position);
+                const float score = distance * (candidate->point.y < from.y + 1 ? 1.6f : 1.f) +
+                                    12.f / std::max(distance, 1.f);
+                if (score < nearest) {
+                    nearest = score;
+                    out.hit = candidate;
+                }
+            }
+        }
+    }
     const bool airAnchor = !out.hit && config_.airAnchors;
     if (!out.hit && !airAnchor)
         return out;
@@ -887,7 +915,8 @@ void Swing::releaseAll() {
         hands_[i].sample = false;
         hands_[i].held = true; // a grip already held is not a new shot
     }
-    releasePull_={};releaseLeft_=0;
+    releasePull_ = {};
+    releaseLeft_ = 0;
     jumpQueued_ = false;
     accumulator_ = 0;
     sinceZip_ = sinceLanding_ = 100;
@@ -1166,7 +1195,10 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
     sinceZip_ += dt;
     sinceLanding_ += dt;
     const bool wasGrounded = body_.grounded;
-    if(body_.grounded || wall_.on) {releasePull_={};releaseLeft_=0;}
+    if (body_.grounded || wall_.on) {
+        releasePull_ = {};
+        releaseLeft_ = 0;
+    }
     if (leapQueued_ > 0) {
         // A charged leap: up, and along the stick. From the ground only.
         if (body_.grounded && !wall_.on) {
@@ -1228,13 +1260,16 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             body_.velocity.x *= damping;
             body_.velocity.z *= damping;
         }
-        if(releaseLeft_>0) {
-            if(body_.grounded || !in.focused) {releaseLeft_=0;releasePull_={};}
-            else {
-                const float duration=.06f+.06f*softRelease_;
-                body_.velocity+=releasePull_*(std::clamp(releaseLeft_/duration,0.f,1.f)*dt);
-                releaseLeft_=std::max(0.f,releaseLeft_-dt);
-                if(releaseLeft_==0)releasePull_={};
+        if (releaseLeft_ > 0) {
+            if (body_.grounded || !in.focused) {
+                releaseLeft_ = 0;
+                releasePull_ = {};
+            } else {
+                const float duration = .06f + .06f * softRelease_;
+                body_.velocity += releasePull_ * (std::clamp(releaseLeft_ / duration, 0.f, 1.f) * dt);
+                releaseLeft_ = std::max(0.f, releaseLeft_ - dt);
+                if (releaseLeft_ == 0)
+                    releasePull_ = {};
             }
         }
         // A native prediction has no sweep to cancel gravity at the floor. Keep
@@ -1317,7 +1352,7 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
     // What each rope holds the body to: its anchor, or with physical webs
     // the point that keeps the hand on it.
     const Rope ropes[2] = {{hold(0), webs_[0].length}, {hold(1), webs_[1].length}};
-    if (bearing[0] && bearing[1])
+    if (!elasticWeb_ && bearing[0] && bearing[1])
         move(projectTwoWebs(body_.position, ropes[0], ropes[1]), collision);
 
     // Unilateral, tension-only constraints. Slack rope never pushes the player.
@@ -1334,7 +1369,7 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             if (dist < w.length - nearlyTaut || dist < 1e-5f)
                 continue;
             const Vec3 radial = delta / dist;
-            if (dist > w.length)
+            if (dist > w.length && !elasticWeb_)
                 move(ropes[i].anchor + radial * w.length, collision);
             // A taut rope that is being reeled carries the body inward at the
             // winch rate. With the pull applied to position only, the velocity
@@ -1345,6 +1380,18 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             // Once the other rope has pulled too, this one may have taken more
             // than the two need together. It hands that back, never more than
             // it took: kept, the surplus pushed the body sideways every step.
+            // An elastic web is a damped spring instead: no snap back to its
+            // length, its pull (per unit mass) bounded and shared by the passes.
+            if (elasticWeb_) {
+                const float stiffness = elasticWeb_ == 1 ? 65.f : elasticWeb_ == 2 ? 40.f : 24.f;
+                const float stretch = std::max(0.f, dist - w.length);
+                const float acceleration =
+                    std::clamp(stiffness * stretch + 2.f * std::sqrt(stiffness) * outward, 0.f, 180.f);
+                const float change = acceleration * dt / 8;
+                pull[i] += change;
+                body_.velocity -= radial * change;
+                continue;
+            }
             const float change = std::max(outward, -pull[i]);
             pull[i] += change;
             body_.velocity -= radial * change;

@@ -518,7 +518,25 @@ class Swing {
     // Hand `hand`'s web holds the body when taut: any web but the longer
     // rope of two hands on one web.
     bool bears(int hand) const;
-    void softRelease(int level){softRelease_=std::clamp(level,0,3);if(!softRelease_){releasePull_={};releaseLeft_=0;}}
+    // With open-air anchors off, a shot that meets nothing straight ahead
+    // takes the best real surface within 8 degrees of its aim (shot()).
+    void allowSmartAnchor(bool on) {
+        smartAnchor_ = on;
+    }
+    // Webs that stretch under load (0 off, a hard rope; 1 to 3 softer):
+    // a damped spring takes the place of the rope's length limit.
+    void elasticWeb(int level) {
+        elasticWeb_ = std::clamp(level, 0, 3);
+    }
+    // A loaded web let go keeps pulling for a moment, fading (0 off; 1 to 3
+    // for 120, 180 or 240 ms), so that letting go is no jolt.
+    void softRelease(int level) {
+        softRelease_ = std::clamp(level, 0, 3);
+        if (!softRelease_) {
+            releasePull_ = {};
+            releaseLeft_ = 0;
+        }
+    }
     const SwingConfig& config() const {
         return config_;
     }
@@ -534,7 +552,12 @@ class Swing {
     uint64_t slingshotSurfaces_[2]{};
     float slingshotCharge_{}, slingshotHold_{}, slingshotRelease_{}, slingshotYaw_{};
     bool betterClimbing_{};
-    int softRelease_{};Vec3 releasePull_{};float releaseLeft_{};
+    bool smartAnchor_{};
+    int elasticWeb_{};
+    // SOFT RELEASE: the pull (m/s^2) still to come, and for how long.
+    int softRelease_{};
+    Vec3 releasePull_{};
+    float releaseLeft_{};
     struct HandState {
         // held: grip squeezed, with release hysteresis. A web shoots only on the
         // press that sets it, so a lost web never re-fires while the grip stays held.
