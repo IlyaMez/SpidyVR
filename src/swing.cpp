@@ -740,9 +740,14 @@ void Swing::reset(Body b) {
     sinceWallJump_ = 100;
     mount_ = mountLeft_ = 0;
     mounting_ = offered_ = mountOffered_ = false;
-    strands_ = 0;
+    strands_ = 0;releasePull_={};releaseLeft_=0;
 }
 void Swing::release(int i, EventKind reason) {
+    if(softRelease_ && reason==EventKind::Release && webs_[i].attached && webs_[i].tension>0 && !body_.grounded && !wall_.on) {
+        releasePull_=limited(releasePull_+normalized(hold(i)-body_.position)*std::min(webs_[i].tension,30.f),40.f);
+        releaseLeft_=.06f+.06f*softRelease_;
+    }
+
     if (webs_[i].attached)
         events_.push_back({reason, i, .2f});
     // One web in both hands, and the hand that bore the body lets go: the
@@ -882,6 +887,7 @@ void Swing::releaseAll() {
         hands_[i].sample = false;
         hands_[i].held = true; // a grip already held is not a new shot
     }
+    releasePull_={};releaseLeft_=0;
     jumpQueued_ = false;
     accumulator_ = 0;
     sinceZip_ = sinceLanding_ = 100;
@@ -1160,6 +1166,7 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
     sinceZip_ += dt;
     sinceLanding_ += dt;
     const bool wasGrounded = body_.grounded;
+    if(body_.grounded || wall_.on) {releasePull_={};releaseLeft_=0;}
     if (leapQueued_ > 0) {
         // A charged leap: up, and along the stick. From the ground only.
         if (body_.grounded && !wall_.on) {
@@ -1220,6 +1227,15 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             const float damping = std::exp(-5 * dt);
             body_.velocity.x *= damping;
             body_.velocity.z *= damping;
+        }
+        if(releaseLeft_>0) {
+            if(body_.grounded || !in.focused) {releaseLeft_=0;releasePull_={};}
+            else {
+                const float duration=.06f+.06f*softRelease_;
+                body_.velocity+=releasePull_*(std::clamp(releaseLeft_/duration,0.f,1.f)*dt);
+                releaseLeft_=std::max(0.f,releaseLeft_-dt);
+                if(releaseLeft_==0)releasePull_={};
+            }
         }
         // A native prediction has no sweep to cancel gravity at the floor. Keep
         // the measured support until a jump or rope pull actually lifts the body.

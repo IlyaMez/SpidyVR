@@ -518,6 +518,7 @@ class Swing {
     // Hand `hand`'s web holds the body when taut: any web but the longer
     // rope of two hands on one web.
     bool bears(int hand) const;
+    void softRelease(int level){softRelease_=std::clamp(level,0,3);if(!softRelease_){releasePull_={};releaseLeft_=0;}}
     const SwingConfig& config() const {
         return config_;
     }
@@ -533,6 +534,7 @@ class Swing {
     uint64_t slingshotSurfaces_[2]{};
     float slingshotCharge_{}, slingshotHold_{}, slingshotRelease_{}, slingshotYaw_{};
     bool betterClimbing_{};
+    int softRelease_{};Vec3 releasePull_{};float releaseLeft_{};
     struct HandState {
         // held: grip squeezed, with release hysteresis. A web shoots only on the
         // press that sets it, so a lost web never re-fires while the grip stays held.
