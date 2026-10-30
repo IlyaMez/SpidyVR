@@ -666,6 +666,10 @@ int main() {
         t.blowSounds = 1;
         t.webSlingshot = true;
         t.betterClimbing = true;
+        t.smartAnchor = true;
+        t.elasticWeb = 2;
+        t.softRelease = 3;
+        t.swingAssist = true;
         t.nearClipMm = 10;
         t.automaticStrength = 75;
         t.automaticSpeed = 360;
@@ -679,7 +683,8 @@ int main() {
         check(profileText(profileOf(PlaySettings{}, "Spidy's own"), "0.4.1") ==
                   "# Spidy settings profile. To use it, in the Spidy launcher: Profile > Paste a profile, "
                   "or Import a file.\nname=Spidy's own\nspidy=0.4.1\narcade_webs=0\ntrigger_webs=0\n"
-                  "aim_markers=1\nair_webs=1\nswing_speed=32\nweight=100\nweb_slingshot=0\n"
+                  "aim_markers=1\nair_webs=1\nsmart_anchor=0\nswing_speed=32\nweight=100\nelastic_web=0\n"
+                  "soft_release=0\nswing_assist=0\nweb_slingshot=0\n"
                   "better_climbing=0\nwall_run=1\nsnap_turn=30\nsmooth_turn=0\nhaptics=100\nblow_sounds=0\n"
                   "body_haptics=100\nbody_haptics_webs=1\nbody_haptics_wind=1\n"
                   "body_haptics_combat=1\nbody_haptics_movement=1\nscreen_size=1\nscreen_depth=2\nhud=2\n"
