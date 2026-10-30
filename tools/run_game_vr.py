@@ -1519,6 +1519,29 @@ def stream_snapshot(game, address):
     return None
 
 
+def reproject_snapshot(game, address):
+    """SpidyReprojectData (flip_reprojection.hpp): FLIP REPROJECTION, the eye pair turned by the player's own
+    turn since it was rendered."""
+    for _ in range(8):
+        raw = game.read(address, 72)
+        if len(raw) != 72:
+            return None
+        if struct.unpack_from('<3I', raw) != (0x53525052, 1, 72):
+            raise RuntimeError('Flip reprojection protocol mismatch')
+        if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
+            continue
+        features = struct.unpack_from('<I', raw, 12)[0]
+        turned, still, passed, reused = struct.unpack_from('<4Q', raw, 24)
+        last, most = struct.unpack_from('<2f', raw, 56)
+        total = struct.unpack_from('<d', raw, 64)[0]
+        # Immersive frames: turned (over 0.05 degrees), shown as rendered (no turn to make), passed over (a
+        # turn past the limit, a snap turn or a recenter, or none known), and turned while a pair was shown again.
+        return dict(on=bool(features & 1), turned=turned, still=still, passed=passed, reused_turned=reused,
+                    last_deg=round(last, 2), most_deg=round(most, 2),
+                    mean_deg=round(total / turned, 2) if turned else 0.0)
+    return None
+
+
 def eye_snapshot(game, address):
     """Header of the newest copy of the left eye as shown in the headset (include/spidy/eye_snapshot.hpp)."""
     for _ in range(8):
@@ -2292,7 +2315,7 @@ def session(a, startup):
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
                                            'SpidyBodyData', 'SpidySlowMotionData', 'SpidyHudData',
                                            'SpidySteamData', 'SpidyPromptData', 'SpidyImpostorReach',
-                                           'SpidyHapticsData', 'SpidyStreamData'))
+                                           'SpidyHapticsData', 'SpidyStreamData', 'SpidyReprojectData'))
         stage_haptics(xr_hash)
         saved = vr_display.Registry().read(('ScreenSpaceReflections', 'RTReflections'))
         reflections, reflections_line = eye_reflections(saved.get('ScreenSpaceReflections'), a.no_eye_reflections,
@@ -2335,7 +2358,7 @@ def session(a, startup):
         eye_shots = deque()
         eye_folder = a.output.with_name(a.output.stem+'-eyes')
         shot_count = 0
-        appearance = streaming = None
+        appearance = streaming = reprojection = None
         # The player's body and fists: the latest of each, and a sample when punches land.
         body = punch = None
         punch_samples = deque(maxlen=2000)
@@ -2427,7 +2450,7 @@ def session(a, startup):
                         slow_motion=slow_motion, slow_motion_samples=list(slow_motion_samples), hud=hud_last,
                         haptics=haptics_last, prompts=prompt_section(list(samples)),
                         ray_samples=list(ray_samples), appearance=appearance, streaming=streaming,
-                        eye_jobs=eye_jobs,
+                        flip_reprojection=reprojection, eye_jobs=eye_jobs,
                         render_memory=render_memory, timing=timing, network=links,
                         stream_stalls=stream_stalls(list(samples)),
                         free_commit_mb=dict(start=start_commit, lowest=lowest_commit),
@@ -2491,6 +2514,10 @@ def session(a, startup):
                     appearance = appearance_snapshot(game, xr['SpidyAppearanceData']) or appearance
                     sample['appearance'] = appearance
                     streaming = stream_snapshot(game, xr['SpidyStreamData']) or streaming
+                    reprojection = reproject_snapshot(game, xr['SpidyReprojectData']) or reprojection
+                    if reprojection:
+                        sample['flip_reprojection'] = {k: reprojection[k] for k in ('on', 'turned', 'passed',
+                                                                                    'last_deg')}
                     if streaming:
                         sample['streaming'] = {k: streaming[k] for k in ('cone_margin_deg', 'pool_used',
                                                                          'texture_budget_mb', 'video_usage_mb')}
@@ -2735,6 +2762,7 @@ def session(a, startup):
             slow_motion_samples=list(slow_motion_samples), haptics=haptics_last,
             motion_samples=list(motion_samples), appearance=appearance_snapshot(game,xr['SpidyAppearanceData']),
             streaming=stream_snapshot(game, xr['SpidyStreamData']) or streaming,
+            flip_reprojection=reproject_snapshot(game, xr['SpidyReprojectData']) or reprojection,
             hud=hud_snapshot(game, xr['SpidyHudData']),
             prompts=prompt_snapshot(game, xr['SpidyPromptData']),
             eye_jobs=frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs,

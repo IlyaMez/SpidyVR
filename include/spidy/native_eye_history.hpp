@@ -1,5 +1,6 @@
 #pragma once
 #include "body_calibration.hpp"
+#include "flip_reprojection.hpp"
 #include "gadget_wheel.hpp"
 #include "game_swing.hpp"
 #include "game_tracking.hpp"
@@ -13,6 +14,9 @@ struct NativeEyeFrame {
     uint64_t serial{};
     GameMotionFrame motion;
     std::array<TrackedEye, 2> trackingEyes;
+    // The tracking space's turn in the world the pair was rendered with
+    // (flip_reprojection.hpp).
+    flip_reprojection::Turn rigTurn{};
     std::array<game_swing::WebState, 2> webs;
     std::array<WebTimeline::Hand, 2> webTimes{};
     game_swing::WebFlightData webFlight;

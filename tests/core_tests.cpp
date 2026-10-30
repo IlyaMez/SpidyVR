@@ -4,6 +4,7 @@
 #include "spidy/native_eye_frame.hpp"
 #include "spidy/native_hud.hpp"
 #include "spidy/native_eye_history.hpp"
+#include "spidy/flip_reprojection.hpp"
 #include "spidy/eye_job_table.hpp"
 #include "spidy/eye_pair_state.hpp"
 #include "spidy/native_rays.hpp"
@@ -21475,10 +21476,10 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 51 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 52 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[51 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[51].title, "REALISTIC FLIPS") == 0 && all[51].choices.empty(),
+            check(all[52 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[52].title, "REALISTIC FLIPS") == 0 && all[52].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[46].item == Item::controlledFlips && all[49].item == Item::wallRunCameraTilt, "custom switches misplaced");
         // EYE AIM, before the realistic flips: what the eyes aim, off by default (only a headset that tracks
@@ -21499,6 +21500,21 @@ int main() {
             check(tabOnlyText({}).find("eye_aim=0\n") != std::string::npos &&
                       withTabOnly({}, "eye_aim=2\n").eyeAim == eyeAimZips && withTabOnly({}, "eye_aim=9\n").eyeAim == 3,
                   "spidy_vr.ini keeps EYE AIM as eye_aim, within its range");
+        }
+        // FLIP REPROJECTION, after EYE AIM: a switch in the tab, off by default so the headset can compare
+        // (the user, October 29), kept in spidy_vr.ini.
+        check(all[51].item == Item::flipReprojection && std::strcmp(all[51].title, "FLIP REPROJECTION") == 0 &&
+                  all[51].choices.empty() && all[51].place == Place::tab,
+              "FLIP REPROJECTION: a switch in the tab, after EYE AIM");
+        {
+            Values v;
+            check(!v.flipReprojection && defaultChoice(Item::flipReprojection) == 0, "flip reprojection on by default");
+            check(choose(Item::flipReprojection, 1, v) && v.flipReprojection && choice(Item::flipReprojection, v) == 1,
+                  "the switch did not turn it on");
+            check(tabOnlyText(v).find("flip_reprojection=1\n") != std::string::npos &&
+                      withTabOnly({}, "flip_reprojection=1\n").flipReprojection &&
+                      !withTabOnly({}, "flip_reprojection=0\n").flipReprojection,
+                  "spidy_vr.ini keeps FLIP REPROJECTION as flip_reprojection");
         }
 
         // The wall view has no row of its own (the player, October 14: "i dont
@@ -21543,7 +21559,7 @@ int main() {
               "the view above the game screen's rows: VR, or GAME SCREEN");
         // VR VIEW is on the pause menu's first page, beside RESUME, and no other row is; the realistic
         // flips' thresholds and how a spin builds and dies away are the launcher's alone (the user,
-        // October 25: "cleanup the redundant"). The other 43 rows are the tab's.
+        // October 25: "cleanup the redundant"). The other 44 rows are the tab's.
         for (const auto& row : all) {
             const bool launcherOnly =
                 row.item == Item::automaticMinimumSpeed || row.item == Item::automaticResponse ||
@@ -21553,7 +21569,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 57,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 58,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -21715,7 +21731,8 @@ int main() {
                                        "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\n"
                                        "smart_anchor=0\nelastic_web=0\nsoft_release=0\nswing_assist=0\n"
                                        "slingshot_speed=0\nrecording_smoothing=0\n"
-                                       "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\n",
+                                       "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\n"
+                                       "flip_reprojection=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;
@@ -21744,6 +21761,7 @@ int main() {
         changed.heightCm = 178;
         changed.seated = true;
         changed.eyeAim = 3;
+        changed.flipReprojection = true;
         check(withTabOnly(defaults, tabOnlyText(changed)) == sanitized(changed),
               "the settings did not come back");
         check(withTabOnly(defaults, "height_cm=40\n").heightCm == 120 &&
@@ -23857,6 +23875,99 @@ int main() {
               "another class was read as a body");
     });
 #endif
+    // FLIP REPROJECTION (flip_reprojection.hpp). The user, October 29: head turns are smooth in the headset,
+    // flips, spins and smooth turns judder; each pair went to OpenXR with the tracking pose it was rendered
+    // from, and the runtime turns a pair only to the newer head.
+    test("flip reprojection: a pair shows the world where the player's own turn has taken it since", [] {
+        namespace fr = flip_reprojection;
+        // Tracked eyes looking a little right and down, 64 mm apart.
+        const Quat look = Quat::around({0, 1, 0}, -.3f) * Quat::around({1, 0, 0}, -.2f);
+        const std::array<Pose, 2> eyes{Pose{{-.032f, 1.6f, .1f}, look}, Pose{{.032f, 1.6f, .1f}, look}};
+        // The tracking space in a backflip under a smooth turn when the pair was asked for, and two frames on.
+        const Quat rendered = Quat::yaw(.7f) * Quat::around({1, 0, 0}, 1.1f);
+        const Quat now = Quat::yaw(.75f) * Quat::around({1, 0, 0}, 1.25f);
+        const auto c = fr::correction({rendered, true}, {now, true});
+        check(c.applied && c.angle > .1f && c.angle < fr::maxTurn, "a 9 degree turn not applied");
+        near(c.angle, fr::angle(now.conjugate() * rendered), 1e-4f);
+        const auto layer = fr::layerEyes(eyes, c.layer);
+        for (unsigned e = 0; e < 2; ++e)
+            for (const Vec3 world : {Vec3{0, 0, -1}, Vec3{.6f, .3f, -.74f}, Vec3{-.2f, -.9f, .38f}}) {
+                const Vec3 d = normalized(world);
+                // The pixel that saw `d`, in the rendered eye's own axes, shows in the tracking space where
+                // the world is now.
+                const Vec3 pixel = (rendered * eyes[e].orientation).conjugate().rotate(d);
+                check(length(layer[e].orientation.rotate(pixel) - now.conjugate().rotate(d)) < 5e-4f,
+                      "the world is not where the turn has taken it");
+            }
+        // About the head: the eyes keep their distance and their middle.
+        near(length(layer[1].position - layer[0].position), .064f, 1e-5f);
+        check(length(layer[0].position + layer[1].position - eyes[0].position - eyes[1].position) < 1e-5f,
+              "the head moved");
+        // No turn since: the eyes as tracked.
+        const auto none = fr::correction({rendered, true}, {rendered, true});
+        check(none.applied && none.angle < 1e-3f, "no turn, yet turned");
+        const auto same = fr::layerEyes(eyes, none.layer);
+        check(length(same[0].position - eyes[0].position) < 1e-5f &&
+                  length(same[1].orientation.rotate({0, 0, -1}) - look.rotate({0, 0, -1})) < 1e-5f,
+              "eyes moved without a turn");
+    });
+    test("flip reprojection: snap turns, recenters and unknown turns show the pair as rendered", [] {
+        namespace fr = flip_reprojection;
+        // A 30 degree snap turn between render and display: past the limit, its angle still reported.
+        const auto snap = fr::correction({Quat::yaw(.2f), true}, {Quat::yaw(.2f + .5235988f), true});
+        check(!snap.applied, "a snap turn was reprojected");
+        near(snap.angle, .5235988f, 1e-4f);
+        check(!fr::correction({}, {Quat::yaw(.1f), true}).applied && !fr::correction({Quat::yaw(.1f), true}, {}).applied,
+              "turned with a turn not known");
+        // The tracking space's turn from the world's head and the tracked one.
+        const Quat space = Quat::yaw(1.2f) * Quat::around({0, 0, 1}, .4f);
+        const Quat tracked = Quat::around({1, 0, 0}, -.3f);
+        const auto t = fr::trackingTurn(space * tracked, tracked);
+        check(t.valid && length(t.turn.rotate({0, 0, -1}) - space.rotate({0, 0, -1})) < 1e-5f &&
+                  length(t.turn.rotate({0, 1, 0}) - space.rotate({0, 1, 0})) < 1e-5f,
+              "the tracking space's turn");
+        check(!fr::trackingTurn({0, 0, 0, 0}, tracked).valid &&
+                  !fr::trackingTurn(space, {std::numeric_limits<float>::quiet_NaN(), 0, 0, 1}).valid,
+              "a turn from a broken head");
+    });
+    test("flip reprojection: what the player holds stays with the head, the eyes' views as rendered", [] {
+        namespace fr = flip_reprojection;
+        const Quat rendered = Quat::yaw(-.4f) * Quat::around({1, 0, 0}, -.9f);
+        const Quat now = Quat::yaw(-.45f) * Quat::around({1, 0, 0}, -1.1f);
+        const auto c = fr::correction({rendered, true}, {now, true});
+        // The rendered frame: the tracking space at `rendered`, 1 km out in the city.
+        const Vec3 origin{1200, 85, -640};
+        const auto toWorld = [&](Pose p) { return Pose{origin + rendered.rotate(p.position), rendered * p.orientation}; };
+        const std::array<Pose, 2> eyes{Pose{{-.032f, 1.6f, 0}, {}}, Pose{{.032f, 1.6f, 0}, {}}};
+        GameMotionFrame f;
+        for (unsigned i = 0; i < 2; ++i) {
+            const Vec3 at = toWorld(eyes[i]).position;
+            f.eyes[i][12] = at.x;
+            f.eyes[i][13] = at.y;
+            f.eyes[i][14] = at.z;
+        }
+        const Pose hand{{.25f, 1.2f, -.4f}, Quat::around({0, 1, 0}, .5f)};
+        f.grips[1] = f.hands[1] = f.swing.hands[1].aim = toWorld(hand);
+        f.headPose = toWorld({{0, 1.6f, 0}, {}});
+        f.swing.trackingYaw = -.4f;
+        f.swing.tilt = Quat::around({1, 0, 0}, -.9f);
+        const auto shown = fr::held(f, c.world);
+        // Where the turned layer shows the drawn grip, in the tracking space: where the hand is.
+        const Vec3 middle = fr::eyesMiddle(f), trackedMiddle{0, 1.6f, 0};
+        const Vec3 seen = trackedMiddle + c.layer.rotate(rendered.conjugate().rotate(shown.grips[1].position - middle));
+        check(length(seen - hand.position) < 5e-4f, "the hand left the head");
+        const Quat seenTurn = c.layer * rendered.conjugate() * shown.grips[1].orientation;
+        check(length(seenTurn.rotate({0, 0, -1}) - hand.orientation.rotate({0, 0, -1})) < 1e-4f,
+              "the hand turned away");
+        check(length(shown.swing.hands[1].aim.position - shown.grips[1].position) < 1e-4f &&
+                  length(shown.hands[1].position - shown.grips[1].position) < 1e-4f,
+              "the aim or the glove left the grip");
+        // The aims are steadied in the tracking space's turn: it turns with them.
+        check(length(trackingTurn(shown.swing).rotate({0, 0, -1}) - (c.world * rendered).rotate({0, 0, -1})) < 1e-4f,
+              "the aims' turn");
+        // The eyes stay as rendered: the overlay's views must match the image.
+        check(shown.eyes == f.eyes && length(fr::eyesMiddle(shown) - middle) < 1e-3f, "the eyes were turned");
+    });
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;
 }

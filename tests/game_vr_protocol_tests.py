@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, Mock, patch
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]/'tools'))
 from probe_stereo_gpu import snapshot as gpu_snapshot, save_eye_images
 from run_game_vr import (snapshot as xr_snapshot, accepted as accepted_xr, timing_snapshot, frame_rates,
-                         appearance_snapshot, stream_snapshot, eye_snapshot, save_eye_snapshot, rgb_rows,
+                         appearance_snapshot, stream_snapshot, reproject_snapshot, eye_snapshot, save_eye_snapshot, rgb_rows,
                          crop_origin,
                          game_memory, keep_game_log, body_snapshot,
                          punch_snapshot, strike_snapshot, focus_snapshot, sound_snapshot, dodge_snapshot,
@@ -330,6 +330,28 @@ class ProtocolTests(unittest.TestCase):
         bad = struct.pack('<4IQ2Q2I', 0x53434c44, 1, 48, 1, 2, 7, 9, 4, 0)
         with self.assertRaisesRegex(RuntimeError, 'Invalid wall contact'):
             climb_snapshot(Reader(bad, struct.pack('<Q', 2)), 0)
+
+    def test_flip_reprojection_decodes_its_frames_and_turns_and_rejects_torn_reads(self):
+        raw = bytearray(72)
+        struct.pack_into('<4IQ4Q2fd', raw, 0, 0x53525052, 1, 72, 1, 6, 400, 900, 3, 25, 4.5, 12.25, 1000.0)
+        result = reproject_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)
+        self.assertEqual(result, dict(on=True, turned=400, still=900, passed=3, reused_turned=25, last_deg=4.5,
+                                      most_deg=12.25, mean_deg=2.5))
+        # Off: nothing turned, no mean to divide.
+        struct.pack_into('<I', raw, 12, 0)
+        struct.pack_into('<4Q', raw, 24, 0, 0, 0, 0)
+        struct.pack_into('<d', raw, 64, 0.0)
+        result = reproject_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)
+        self.assertFalse(result['on'])
+        self.assertEqual((result['turned'], result['mean_deg']), (0, 0.0))
+        bad = bytearray(raw)
+        struct.pack_into('<I', bad, 4, 2)
+        with self.assertRaisesRegex(RuntimeError, 'protocol mismatch'):
+            reproject_snapshot(Reader(bytes(bad)), 0)
+        odd = bytearray(raw)
+        struct.pack_into('<Q', odd, 16, 7)
+        self.assertIsNone(reproject_snapshot(Reader(*([bytes(odd)] * 8)), 0))
+        self.assertIsNone(reproject_snapshot(Reader(bytes(raw[:40])), 0))
 
     def test_stream_decodes_the_cone_the_slot_pool_and_the_texture_budget(self):
         raw = bytearray(88)

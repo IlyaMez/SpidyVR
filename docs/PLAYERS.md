@@ -850,9 +850,10 @@ VR settings
                    FLIP SPEED sets how fast either steering stick turns you.
                    HAND WALL CLIMBING (off until you switch it on, above)
                    uses a fixed wall-camera clearance. EYE AIM (OFF unless
-                   you pick WEB BALLS, ZIPS or BOTH; below). REALISTIC FLIPS
-                   (off until you switch it on, above) and the ten rows that
-                   tune it.
+                   you pick WEB BALLS, ZIPS or BOTH; below). FLIP
+                   REPROJECTION (off until you switch it on; below).
+                   REALISTIC FLIPS (off until you switch it on, above) and
+                   the ten rows that tune it.
   EYE AIM ........ for a headset whose VR runtime gives games your eyes
                    (OpenXR's eye gaze: Quest Pro, Varjo, Pimax Crystal and
                    the like; a Quest 3 has no eye tracker). The session log
@@ -871,6 +872,20 @@ VR settings
                    or Virtual Desktop sends its eyes to PC games only with
                    that switched on (Quest Link: Settings > Beta; Virtual
                    Desktop: its eye tracking forwarding).
+  FLIP REPROJECTION  turns the picture in the headset by however far a
+                   flip, a swing's spin or a smooth turn has turned you
+                   since the game drew it, as the headset already does for
+                   your head: those turns judder less. Your hands, the
+                   phone and the gadget wheel stay with you; Spider-Man's
+                   own arms and the game's HUD are part of the game's
+                   picture and turn with it by that little. Snap turns are
+                   left as they are. Off by default, to compare. Best
+                   with a headset refresh rate the game keeps up with
+                   (72 Hz on a Quest 3 over Virtual Desktop): when the
+                   headset shows a picture twice, your view stays steady
+                   but those arms, the HUD and things close by judder
+                   instead, since only the turn is made up, not the
+                   ground the swing covers.
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
   NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, HEIGHT, SEATED, EYE AIM,
