@@ -67,14 +67,16 @@ class InFlightStep {
         // The movement module moves the body as far as stepDelta says: a
         // command it shortened (a step much longer than the one before it,
         // at the speed limit) is no collision, and takes no speed away.
-        Vec3 travel = flight ? native_movement::stepDelta(flight->requested, s.dt) : s.achieved * s.dt;
+        Vec3 travel = flight ? native_movement::stepDelta(flight->requested, s.dt, flight->distance)
+                             : s.achieved * s.dt;
         // The step that produced the observed velocity: the one observed
         // before this one, or an unobserved one about as long as this one.
         const float took = s.step == step_ + 1 && dt_ > 0 ? dt_ : s.dt;
         if (produced && took > 0) {
             // Collision took this part of the command away. Remove motion into
             // that surface; a projection cannot remove one contact twice.
-            const Vec3 lost = native_movement::stepDelta(produced->requested, took) / took - s.achieved;
+            const Vec3 lost =
+                native_movement::stepDelta(produced->requested, took, produced->distance) / took - s.achieved;
             if (length(lost) > .25f) {
                 const Vec3 into = normalized(lost);
                 velocity -= into * std::max(0.f, dot(velocity, into));
@@ -87,9 +89,10 @@ class InFlightStep {
         dt_ = s.dt;
         return {s.position + travel, velocity, grounded};
     }
-    // A submitted command: its velocity and the solver's velocity at its end.
-    void issued(uint64_t serial, Vec3 requested, Vec3 end) {
-        records_[next_++ % records_.size()] = {serial, requested, end};
+    // A submitted command: its velocity, the solver's velocity at its end and
+    // the farthest its step may go (native_movement::commandDistance).
+    void issued(uint64_t serial, Vec3 requested, Vec3 end, float distance = native_movement::farthestStep) {
+        records_[next_++ % records_.size()] = {serial, requested, end, distance};
     }
     void reset() {
         *this = {};
@@ -99,6 +102,7 @@ class InFlightStep {
     struct Record {
         uint64_t serial{};
         Vec3 requested{}, end{};
+        float distance = native_movement::farthestStep;
     };
     const Record* find(uint64_t serial) const {
         for (const auto& record : records_)
@@ -227,12 +231,23 @@ static_assert(sizeof(Config) == 64 && sizeof(Hand) == 52 && sizeof(Command) == 2
 // arcade: arcade webs (the VR settings' WEB STYLE: ARCADE; SwingConfig::
 // arcade). Version 6 (settingsBytesV6) ends before it and leaves the webs'
 // style as it is.
+// Version 16 appends slingshotSpeed, m/s: 0 the slingshot's launch as before,
+// under maxSpeed; 20 to 300 its own (Swing::setSlingshotSpeed).
+// Version 15 appends swingAssist (off by default): flying at something,
+// speed into it is cut in time (Swing::allowSwingAssist).
+// Version 14 appends softRelease: 0 a web lets go at once, as before; 1 to 3
+// its last pull fades over 120, 180 or 240 ms (Swing::softRelease).
+// Version 13 appends elasticWeb: 0 a hard rope as before, 1 to 3 webs that
+// stretch under load, softer and softer (Swing::elasticWeb).
+// Version 12 appends smartAnchor (off by default): with airWebs off, a shot
+// that just misses catches a nearby real surface (Swing::allowSmartAnchor).
+// Version 11 appends combatVisuals: off allows freely directed combat blows.
 // Version 10 appends betterClimbing (off by default).
 // Version 9 appends webSlingshot (off by default).
 // Version 8 appends handClimb without changing the upstream phone or arcade
 // fields. Older official settings keep their original layout and meaning.
 struct Settings {
-    uint32_t magic = 0x53575354, version = 10, bytes = sizeof(Settings), grab = 1;
+    uint32_t magic = 0x53575354, version = 16, bytes = sizeof(Settings), grab = 1;
     float maxSpeed = 32;
     uint32_t airWebs = 1;
     float gravity = 6;
@@ -243,16 +258,30 @@ struct Settings {
     uint32_t handClimb{};
     uint32_t webSlingshot{};
     uint32_t betterClimbing{};
+    uint32_t combatVisuals = 1;
+    uint32_t smartAnchor{};
+    uint32_t elasticWeb{};
+    uint32_t softRelease{};
+    uint32_t swingAssist{};
+    float slingshotSpeed{};
 };
 constexpr uint32_t settingsBytesV3 = 28, settingsBytesV4 = 32, settingsBytesV5 = 36, settingsBytesV6 = 40,
-                   settingsBytesV7 = 44, settingsBytesV8 = 48, settingsBytesV9 = 52;
-static_assert(sizeof(Settings) == 56 && offsetof(Settings, walls) == settingsBytesV3 &&
+                   settingsBytesV7 = 44, settingsBytesV8 = 48, settingsBytesV9 = 52, settingsBytesV10 = 56,
+                   settingsBytesV11 = 60, settingsBytesV12 = 64, settingsBytesV13 = 68,
+                   settingsBytesV14 = 72, settingsBytesV15 = 76;
+static_assert(sizeof(Settings) == 80 && offsetof(Settings, walls) == settingsBytesV3 &&
               offsetof(Settings, physical) == settingsBytesV4 &&
               offsetof(Settings, noBlows) == settingsBytesV5 &&
               offsetof(Settings, arcade) == settingsBytesV6 &&
               offsetof(Settings, handClimb) == settingsBytesV7 &&
               offsetof(Settings, webSlingshot) == settingsBytesV8 &&
-              offsetof(Settings, betterClimbing) == settingsBytesV9);
+              offsetof(Settings, betterClimbing) == settingsBytesV9 &&
+              offsetof(Settings, combatVisuals) == settingsBytesV10 &&
+              offsetof(Settings, smartAnchor) == settingsBytesV11 &&
+              offsetof(Settings, elasticWeb) == settingsBytesV12 &&
+              offsetof(Settings, softRelease) == settingsBytesV13 &&
+              offsetof(Settings, swingAssist) == settingsBytesV14 &&
+              offsetof(Settings, slingshotSpeed) == settingsBytesV15);
 // SpidySlingshotSample: charge in [0, 1], zero after cancel or release.
 struct SlingshotData {
     uint32_t magic = 0x53534c47, version = 1, bytes = sizeof(SlingshotData);
@@ -371,11 +400,19 @@ inline bool validSettings(const Settings& s) {
          (s.version == 7 && s.bytes == settingsBytesV7) ||
          (s.version == 8 && s.bytes == settingsBytesV8) ||
          (s.version == 9 && s.bytes == settingsBytesV9) ||
-         (s.version == 10 && s.bytes == sizeof(Settings))) &&
+         (s.version == 10 && s.bytes == settingsBytesV10) ||
+         (s.version == 11 && s.bytes == settingsBytesV11) ||
+         (s.version == 12 && s.bytes == settingsBytesV12) ||
+         (s.version == 13 && s.bytes == settingsBytesV13) ||
+         (s.version == 14 && s.bytes == settingsBytesV14) ||
+         (s.version == 15 && s.bytes == settingsBytesV15) ||
+         (s.version == 16 && s.bytes == sizeof(Settings))) &&
         s.grab <= 1 && std::isfinite(s.maxSpeed) && s.maxSpeed > 0 && s.maxSpeed <= motionSpeedLimit &&
         s.airWebs <= 1 && std::isfinite(s.gravity) && s.gravity >= 0 && s.gravity <= maxGravity &&
         s.walls <= 4 && s.physical <= 1 && s.noBlows <= 3 && s.arcade <= 1 && s.handClimb <= 1 &&
-        s.webSlingshot <= 1 && s.betterClimbing <= 1;
+        s.webSlingshot <= 1 && s.betterClimbing <= 1 && s.combatVisuals <= 1 && s.smartAnchor <= 1 &&
+        s.elasticWeb <= 3 && s.softRelease <= 3 && s.swingAssist <= 1 && std::isfinite(s.slingshotSpeed) &&
+        (s.slingshotSpeed == 0 || (s.slingshotSpeed >= 20 && s.slingshotSpeed <= 300));
 }
 static_assert(sizeof(WebState) == 28 && sizeof(Data) == 272 && offsetof(Data, wall) == 240);
 // The player is in the air: Spidy's own flight, or the game's jump or fall,

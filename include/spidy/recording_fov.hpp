@@ -10,13 +10,15 @@
 // game render its own view again (stereo_probe.cpp, restGameView), which costs
 // frame time, and the window shows that view, without Spidy's drawings. The
 // view is the engine's active view, whose culling, occlusion and far
-// buildings' full models the eyes rely on, so its lens never covers less than
-// the head's lens covering both eyes: the angle is the least the window shows
-// across, and a taller headset or a wider window gets more. A Quest 3 (54
-// degrees out, 44 in, 48 up and down) in a 16:9 window needs about 128.
+// buildings' full models the eyes rely on, so the lens it culls with
+// (covering) never covers less than the head's lens covering both eyes. A
+// Quest 3 (54 degrees out, 44 in, 48 up and down) in a 16:9 window needs
+// about 128. Since pull request #46 the frame's last submit gives the window
+// just the angle across, narrower than the eyes too, its turns smoothed by
+// RECORDING SMOOTHING (spectator_smoothing.hpp); the headset's view never is.
 namespace spidy::recording_fov {
 // The tab's choices, degrees across; 0 is off.
-inline constexpr int choices[] = {0,70,80,90,100,110,120,130,140,150,160};
+inline constexpr int choices[] = {0, 70, 90, 110, 120, 130, 140, 150, 160};
 // 0 for off; any other angle within the choices'.
 inline int sanitized(int degrees) {
     return degrees <= 0 ? 0 : std::clamp(degrees, choices[1], std::end(choices)[-1]);
@@ -34,5 +36,7 @@ inline native_eyes::Bounds covering(const native_eyes::Bounds& eyes, int degrees
 }
 // From the VR settings (game_xr.cpp), as they start and whenever they change.
 void set(int degrees);
+// RECORDING SMOOTHING: 0 off; 10 to 100, how slowly the window's view
+// follows the head's turns (5 ms of response a step).
 void smoothing(int level);
 } // namespace spidy::recording_fov
