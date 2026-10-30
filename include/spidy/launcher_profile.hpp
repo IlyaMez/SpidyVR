@@ -112,7 +112,7 @@ inline constexpr ProfileSetting profileSettings[] = {
     tabOnly("flight_speed_min", Item::automaticMinimumSpeed, 3, 16, &Values::automaticMinimumSpeed),
     tabOnly("swing_momentum", Item::automaticReleaseFlip, &Values::automaticReleaseFlip),
     tabOnly("rotation_response_ms", Item::automaticResponse, 100, 750, &Values::automaticResponse),
-    tabOnly("hand_momentum", Item::automaticHandStrength, 25, 200, &Values::automaticHandStrength),
+    tabOnly("hand_momentum", Item::automaticHandStrength, 0, 200, &Values::automaticHandStrength),
     tabOnly("angular_drag_ms", Item::automaticFalloff, 500, 3000, &Values::automaticFalloff),
     tabOnly("hand_speed_min_cm", Item::automaticHandThreshold, 50, 300, &Values::automaticHandThreshold),
     tabOnly("air_rotation_brake", Item::automaticAirBrake, &Values::automaticAirBrake),
