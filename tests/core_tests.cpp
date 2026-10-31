@@ -42,6 +42,8 @@
 #include "spidy/slow_motion.hpp"
 #include "spidy/spectator_smoothing.hpp"
 #include "spidy/hand_pose.hpp"
+#include "spidy/hud_capture.hpp"
+#include "spidy/steady_hud.hpp"
 #include "spidy/impact_sound.hpp"
 #include "spidy/web_strike.hpp"
 #include "spidy/spider_sense.hpp"
@@ -21475,10 +21477,10 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 51 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 52 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[51 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[51].title, "REALISTIC FLIPS") == 0 && all[51].choices.empty(),
+            check(all[52 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[52].title, "REALISTIC FLIPS") == 0 && all[52].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[46].item == Item::controlledFlips && all[49].item == Item::wallRunCameraTilt, "custom switches misplaced");
         // EYE AIM, before the realistic flips: what the eyes aim, off by default (only a headset that tracks
@@ -21499,6 +21501,20 @@ int main() {
             check(tabOnlyText({}).find("eye_aim=0\n") != std::string::npos &&
                       withTabOnly({}, "eye_aim=2\n").eyeAim == eyeAimZips && withTabOnly({}, "eye_aim=9\n").eyeAim == 3,
                   "spidy_vr.ini keeps EYE AIM as eye_aim, within its range");
+        }
+        // STEADY HUD, after EYE AIM: a switch in the tab, off by default to compare, kept in
+        // spidy_vr.ini.
+        check(all[51].item == Item::steadyHud && std::strcmp(all[51].title, "STEADY HUD") == 0 &&
+                  all[51].choices.empty() && all[51].place == Place::tab,
+              "STEADY HUD: a switch in the tab, after EYE AIM");
+        {
+            Values v;
+            check(!v.steadyHud && defaultChoice(Item::steadyHud) == 0, "steady HUD on by default");
+            check(choose(Item::steadyHud, 1, v) && v.steadyHud && choice(Item::steadyHud, v) == 1,
+                  "the switch did not turn it on");
+            check(tabOnlyText(v).find("steady_hud=1\n") != std::string::npos &&
+                      withTabOnly({}, "steady_hud=1\n").steadyHud && !withTabOnly({}, "steady_hud=0\n").steadyHud,
+                  "spidy_vr.ini keeps STEADY HUD as steady_hud");
         }
 
         // The wall view has no row of its own (the player, October 14: "i dont
@@ -21543,7 +21559,7 @@ int main() {
               "the view above the game screen's rows: VR, or GAME SCREEN");
         // VR VIEW is on the pause menu's first page, beside RESUME, and no other row is; the realistic
         // flips' thresholds and how a spin builds and dies away are the launcher's alone (the user,
-        // October 25: "cleanup the redundant"). The other 43 rows are the tab's.
+        // October 25: "cleanup the redundant"). The other 44 rows are the tab's.
         for (const auto& row : all) {
             const bool launcherOnly =
                 row.item == Item::automaticMinimumSpeed || row.item == Item::automaticResponse ||
@@ -21553,7 +21569,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 57,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 58,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -21715,7 +21731,8 @@ int main() {
                                        "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\n"
                                        "smart_anchor=0\nelastic_web=0\nsoft_release=0\nswing_assist=0\n"
                                        "slingshot_speed=0\nrecording_smoothing=0\n"
-                                       "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\n",
+                                       "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\n"
+                                       "steady_hud=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;
@@ -23857,6 +23874,69 @@ int main() {
               "another class was read as a body");
     });
 #endif
+    test("the steadier-HUD probe snapshots now and then and reads back only 8-bit colour", [] {
+        using namespace spidy::hud_capture;
+        check(snapshotDue(100, 0, false), "no first snapshot");
+        check(!snapshotDue(100 + snapshotMs - 1, 100, true) && snapshotDue(100 + snapshotMs, 100, true),
+              "snapshots not every few seconds");
+        bool swap{};
+        check(readableBytes(DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, swap) == 4 && !swap, "RGBA not read");
+        check(readableBytes(DXGI_FORMAT_B8G8R8A8_UNORM, swap) == 4 && swap, "BGRA not swapped");
+        check(readableBytes(DXGI_FORMAT_R16G16B16A16_FLOAT, swap) == 0 &&
+                  readableBytes(DXGI_FORMAT_R10G10B10A2_UNORM, swap) == 0,
+              "a format the picture cannot show was read");
+    });
+    // STEADY HUD (steady_hud.hpp): the panel as a quad layer of its own. The user, October 30: the arms and the
+    // HUD judder when the headset shows a pair again.
+    test("steady HUD: the layer spans what the panel did, where Follow holds it, as the markers see it", [] {
+        const Vec3 head{.1f, 1.6f, .2f};
+        const Quat facing = Quat::yaw(.5f) * Quat::around({1, 0, 0}, -.2f);
+        const float halfWidth = native_hud::halfWidth(2), distance = native_hud::Shape{}.distance;
+        const auto q = steady_hud::quad(head, facing, halfWidth, distance, 1920, 1080);
+        check(q.valid, "a medium HUD gave no layer");
+        // Two metres ahead the way the panel faces, facing back at the head.
+        check(length(q.pose.position - (head + facing.rotate({0, 0, -distance}))) < 1e-5f, "not ahead of the head");
+        check(length(q.pose.orientation.rotate({0, 0, 1}) - facing.rotate({0, 0, 1})) < 1e-5f, "not facing the head");
+        // 60 degrees across at medium, as high as the texture's shape.
+        near(q.width, 2 * std::tan(30.f * 3.14159265f / 180) * distance, 1e-4f);
+        near(q.height, q.width * 1080 / 1920, 1e-4f);
+        // The game projects its world markers onto the panel from the head (native_hud::project): a point
+        // on the layer's corner or edge shows at that place on the texture.
+        const Vec3 right = facing.rotate({1, 0, 0}), up = facing.rotate({0, 1, 0}), ahead = facing.rotate({0, 0, -1});
+        const Mat4 view{right.x, right.y, right.z, 0, -up.x, -up.y, -up.z, 0, ahead.x, ahead.y, ahead.z, 0,
+                        head.x,  head.y,  head.z,  1};
+        const struct {
+            float u, v;
+        } spots[] = {{0, 0}, {1, 1}, {.25f, .8f}, {.5f, .5f}};
+        for (const auto s : spots) {
+            const Vec3 at = q.pose.position + right * ((s.u - .5f) * q.width) + up * ((.5f - s.v) * q.height);
+            float x{}, y{};
+            bool front{};
+            check(native_hud::project(view, halfWidth, 1920.f / 1080, at, .1f, x, y, front) && front,
+                  "a point on the layer not projected");
+            near(x, s.u, 1e-4f);
+            near(y, s.v, 1e-4f);
+        }
+        // A facing not quite of unit length still faces that way.
+        const Quat scaled{facing.x * 1.5f, facing.y * 1.5f, facing.z * 1.5f, facing.w * 1.5f};
+        const auto again = steady_hud::quad(head, scaled, halfWidth, distance, 1920, 1080);
+        check(again.valid && length(again.pose.position - q.pose.position) < 1e-5f, "a scaled facing moved it");
+        // The HUD off, no texture, a broken head: no layer.
+        check(!steady_hud::quad(head, facing, 0, distance, 1920, 1080).valid &&
+                  !steady_hud::quad(head, facing, halfWidth, distance, 0, 1080).valid &&
+                  !steady_hud::quad(head, {0, 0, 0, 0}, halfWidth, distance, 1920, 1080).valid &&
+                  !steady_hud::quad({std::numeric_limits<float>::quiet_NaN(), 0, 0}, facing, halfWidth, distance,
+                                    1920, 1080)
+                       .valid,
+              "a layer without a panel");
+    });
+    test("steady HUD: a copy shows only while the game's pairs keep coming", [] {
+        using steady_hud::holdMs;
+        check(steady_hud::fresh(1000, 1000, true) && steady_hud::fresh(1000 + holdMs, 1000, true),
+              "a new copy not shown");
+        check(!steady_hud::fresh(1001 + holdMs, 1000, true), "a stale copy shown: the eyes would lack the panel");
+        check(!steady_hud::fresh(1000, 0, false) && !steady_hud::fresh(1000, 1200, true), "no copy, yet shown");
+    });
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;
 }

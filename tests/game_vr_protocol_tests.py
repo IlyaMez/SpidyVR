@@ -13,6 +13,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]/'tools'))
 from probe_stereo_gpu import snapshot as gpu_snapshot, save_eye_images
 from run_game_vr import (snapshot as xr_snapshot, accepted as accepted_xr, timing_snapshot, frame_rates,
                          appearance_snapshot, stream_snapshot, eye_snapshot, save_eye_snapshot, rgb_rows,
+                         hud_capture_snapshot, save_hud_capture,
                          crop_origin,
                          game_memory, keep_game_log, body_snapshot,
                          punch_snapshot, strike_snapshot, focus_snapshot, sound_snapshot, dodge_snapshot,
@@ -330,6 +331,43 @@ class ProtocolTests(unittest.TestCase):
         bad = struct.pack('<4IQ2Q2I', 0x53434c44, 1, 48, 1, 2, 7, 9, 4, 0)
         with self.assertRaisesRegex(RuntimeError, 'Invalid wall contact'):
             climb_snapshot(Reader(bad, struct.pack('<Q', 2)), 0)
+
+    def test_hud_capture_decodes_the_probe_and_saves_its_snapshot_and_drops_replaced_ones(self):
+        raw = bytearray(184)
+        struct.pack_into('<4IQ', raw, 0, 0x53484350, 2, 184, 2, 6)
+        struct.pack_into('<Q6I', raw, 24, 0x1234, 64, 64, 87, 1, 4, 1)
+        struct.pack_into('<5Q2I', raw, 56, 900, 880, 0, 1, 2, 64, 1)
+        struct.pack_into('<2Q2I', raw, 104, 300, 3, 0, 0)
+        struct.pack_into('<2Q2I', raw, 128, 3, 0x40000, 256, 1)
+        # STEADY HUD: copies with the pairs, into the layer, frames that showed it; the last pair's state unknown.
+        struct.pack_into('<3QI', raw, 152, 700, 690, 1400, 2)
+        shot = hud_capture_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)
+        self.assertEqual((shot['path'], shot['found'], shot['width'], shot['format']), ('wrapped', True, 64, 87))
+        self.assertEqual((shot['barriers'], shot['executed'], shot['odd'], shot['mismatched']), (900, 880, 1, 2))
+        self.assertEqual((shot['state'], shot['known'], shot['copies'], shot['skip']), (64, True, 3, 'copied'))
+        self.assertEqual((shot['snapshots'], shot['row_pitch'], shot['swap']), (3, 256, True))
+        self.assertEqual((shot['staged'], shot['layer_copies'], shot['layer_frames'], shot['stage_skip']),
+                         (700, 690, 1400, 'unknown_state'))
+        # Torn the whole time: nothing; too short: nothing.
+        self.assertIsNone(hud_capture_snapshot(Reader(*([raw, struct.pack('<Q', 8)] * 8)), 0))
+        self.assertIsNone(hud_capture_snapshot(Reader(raw[:40]), 0))
+        # BGRA pixels: the left half covered in blue, the right half clear.
+        pixels = bytearray(64 * 64 * 4)
+        for y in range(64):
+            for x in range(32):
+                pixels[(y * 64 + x) * 4:(y * 64 + x) * 4 + 4] = bytes((255, 0, 0, 255))
+        with tempfile.TemporaryDirectory() as folder:
+            folder = pathlib.Path(folder)
+            files = save_hud_capture(Reader(bytes(pixels), raw, struct.pack('<Q', 6)), 0, shot, folder, '0003')
+            self.assertEqual((files['color'], files['alpha'], files['scale'], files['covered']),
+                             ('0003-color.png', '0003-alpha.png', 1, .5))
+            self.assertTrue((folder / '0003-color.png').read_bytes().startswith(b'\x89PNG'))
+            newer = bytearray(raw)
+            struct.pack_into('<Q', newer, 128, 4)
+            self.assertIsNone(save_hud_capture(Reader(bytes(pixels), newer, struct.pack('<Q', 6)), 0, shot,
+                                               folder, '0003'))
+            self.assertIsNone(save_hud_capture(Reader(bytes(pixels[:100]), raw, struct.pack('<Q', 6)), 0, shot,
+                                               folder, '0003'))
 
     def test_stream_decodes_the_cone_the_slot_pool_and_the_texture_budget(self):
         raw = bytearray(88)
@@ -1548,7 +1586,8 @@ class ProtocolTests(unittest.TestCase):
                                      (grab_snapshot,0x53475244,368),(body_snapshot,0x53424453,144),
                                      (punch_snapshot,0x53505544,168),(shooter_snapshot,0x53484f44,296),
                                      (strike_snapshot,0x53535452,328),(focus_snapshot,0x53464344,56),
-                                     (sound_snapshot,0x53534e44,72),(dodge_snapshot,0x53444744,128)):
+                                     (sound_snapshot,0x53534e44,72),(dodge_snapshot,0x53444744,128),
+                                     (hud_capture_snapshot,0x53484350,184)):
             raw = bytearray(size)
             struct.pack_into('<4IQ', raw, 0, magic, 99, size, 2, 4)
             with self.assertRaisesRegex(RuntimeError, 'protocol mismatch'):

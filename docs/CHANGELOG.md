@@ -3,7 +3,53 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 30): Spidy 0.7.0, the community patch - twelve pull
+**Latest build (October 31, on 0.7.0): STEADY HUD - the HUD shown by the
+headset itself.** You: the arms, the HUD and things close by judder when
+the headset shows a pair again (the game slower than the display rate).
+
+- **The cause.** The HUD panel is drawn by the game into each eye pair, so
+  it is part of the picture: a pair shown again is turned to the newer head,
+  and the panel with it.
+- **First a probe, nothing changed in the headset** (session
+  `game-vr-20261031-124941`). The panel's colour texture is found from the
+  stream `native_hud` resizes, by the eye views' path (a wrapper whose +40 is
+  the game's texture object, its +38 the D3D12 resource): 1920 x 1080,
+  `R8G8B8A8_UNORM`, one mip, render target and unordered access. Its state
+  followed through the game's barriers: 41,680 executed, all on the game's
+  queue, none with flags or one subresource, none whose state before was not
+  the one followed; known from the panel's first frame to the menu. 43
+  copies back to memory, one every five seconds, none skipped: the whole HUD
+  (minimap, markers, the hint box, the button prompts) on a clear
+  background, its colour already multiplied by its cover (no pixel's colour
+  above its alpha).
+- **The change.** STEADY HUD (SPIDY VR > EXPERIMENTAL, after EYE AIM, and
+  the launcher's Flips card; off by default, not saved in profiles). While on
+  and immersive, each new eye pair's copy also copies the panel's texture,
+  as the pair's frame left it, on the game's queue (`native_eye_gpu.cpp`);
+  each headset frame shows it as an OpenXR quad layer over the eye views
+  (`xr_session.cpp`), in the tracking space, where Follow holds the panel,
+  as wide as the panel showed (`steady_hud.hpp`). The eyes leave the panel
+  out while the layer shows, as with the HUD off; when the copies stop for a
+  quarter second (a load, a menu), the panel is back in the eyes. The world
+  markers and prompts the game draws onto the panel come with it. The layer
+  lies over everything in the eye views, the overlay's hands too.
+- **Report.** `hud_capture` (version 2) adds `staged` (copies with the
+  pairs), `layer_copies`, `layer_frames` and `stage_skip`; each sample also
+  has `executed`, the game's barriers on the panel.
+- **In the headset** (Quest 3 over Virtual Desktop, 36 minutes,
+  `game-vr-20261031-140604`, with FLIP REPROJECTION, a pull request of its
+  own, on too): the HUD held still and kept updating. The layer showed in
+  122,104 headset frames; the panel was copied with 145,862 pairs and into
+  the layer 116,989 times, none skipped; 95 of 156,430 frames dropped, no
+  error. With the eyes no longer reading the panel the game's barriers on it
+  fell from about 190 a second to a few a minute; its state stayed known.
+- **Checks.** `spidy_tests` (new: the layer's place and size against the
+  markers' projection, the copy's hold, the switch, its `spidy_vr.ini` key),
+  the launcher's checks (the profile leaves it out), the six Python suites
+  (new: `SpidyHudCapture` decoded, torn and of another version, its picture
+  saved), ctest 3/3.
+
+**Earlier build (October 30): Spidy 0.7.0, the community patch - twelve pull
 requests.** You: "review open prs and fix what needs fixes, merge whats
 done", then "make a 0.7 release from what you merged - call it community
 patch".

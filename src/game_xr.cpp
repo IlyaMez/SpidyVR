@@ -45,6 +45,7 @@
 #include "spidy/recording_fov.hpp"
 #include "spidy/seated.hpp"
 #include "spidy/slow_motion.hpp"
+#include "spidy/steady_hud.hpp"
 #include "spidy/throw_aim.hpp"
 #include "spidy/vr_settings.hpp"
 #include "spidy/web_pull.hpp"
@@ -1004,6 +1005,14 @@ DWORD WINAPI run(void*) {
         // (native_hud::Follow), and starts in front of it again with play,
         // the immersive view and a recentred room.
         native_hud::Follow hudFollow;
+        // STEADY HUD: where the panel goes this headset frame (the tracked
+        // head, and the way Follow turned it), and the panel copy the layer's
+        // image last got.
+        Vec3 hudHead{};
+        Quat hudFacing{};
+        bool hudPlaced{};
+        uint64_t hudLayerCopies{};
+        bool hudLayerFilled{};
         GameScreen gameScreen;
         // Whether the game is playing a scene on the screen (its time runs),
         // and whether that scene's stereo eyes have the HUD's panel.
@@ -1373,6 +1382,7 @@ DWORD WINAPI run(void*) {
             rig.wallDistance(static_cast<float>(vr_settings::fixedWallDistance) / 100.f);
             rig.automaticFlips(realisticFlips(values));
             native_hud::setSize(values.hud);
+            native_gpu::wantHudLayer(values.steadyHud && values.hud > 0);
             near_clip::set(values.nearClipMm);
             recording_fov::set(values.recordingFov);
             recording_fov::smoothing(values.recordingSmoothing);
@@ -4032,7 +4042,9 @@ DWORD WINAPI run(void*) {
                     // The HUD panel for this command's frame, as the head sees it:
                     // fixed in the room, so a reused image the headset turns to a
                     // newer head shows it where it was.
-                    const Quat hudFacing = hudFollow.update(frame.head.orientation, frame.seconds);
+                    hudFacing = hudFollow.update(frame.head.orientation, frame.seconds);
+                    hudHead = frame.head.position;
+                    hudPlaced = true;
                     native_hud::follow(eyes.serial, frame.head.orientation.conjugate() * hudFacing);
                     NativeEyeFrame saved;
                     saved.serial = eyes.serial;
@@ -4209,6 +4221,28 @@ DWORD WINAPI run(void*) {
                                                     : Presentation::immersive;
                         runtime.presentation(saved->flatScreen, saved->screenPose, saved->screenAspect,
                                              vr_settings::screenWidth(values.screenSize), saved->stereoScreen);
+                        // STEADY HUD: the panel as a layer of its own, placed for this headset frame; the
+                        // eyes leave it out while it shows (native_hud::layered).
+                        uint32_t hudWidth{}, hudHeight{};
+                        uint64_t hudCopies{}, hudCopiedMs{};
+                        if (drawn == Presentation::immersive && values.steadyHud && values.hud > 0 && hudPlaced &&
+                            native_gpu::latestHud(hudWidth, hudHeight, hudCopies, hudCopiedMs) &&
+                            steady_hud::fresh(GetTickCount64(), hudCopiedMs, true)) {
+                            if (hudCopies != hudLayerCopies) {
+                                hudLayerFilled = runtime.fillHud(hudWidth, hudHeight, [](ID3D12Resource* image) {
+                                    return native_gpu::fillHudLayer(image);
+                                });
+                                hudLayerCopies = hudCopies;
+                            }
+                            const auto quad =
+                                steady_hud::quad(hudHead, hudFacing, native_hud::halfWidth(values.hud),
+                                                 native_hud::Shape{}.distance, hudWidth, hudHeight);
+                            if (hudLayerFilled && quad.valid) {
+                                runtime.hudQuad(quad.pose, quad.width, quad.height);
+                                native_hud::layered();
+                                native_gpu::hudLayerShown();
+                            }
+                        }
                         const auto& rendered = saved->motion;
                         for (unsigned eye = 0; eye < 2; ++eye) {
                             const auto& pose = saved->trackingEyes[eye].pose;

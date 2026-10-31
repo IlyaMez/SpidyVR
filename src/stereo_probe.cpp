@@ -13,6 +13,7 @@
 #include "spidy/near_clip.hpp"
 #include "spidy/recording_fov.hpp"
 #include "spidy/spectator_smoothing.hpp"
+#include "spidy/steady_hud.hpp"
 #include <MinHook.h>
 #include <atomic>
 #include <cstdint>
@@ -865,7 +866,11 @@ void hudPlace(void* follower) {
     // game's own view does on the flat one.
     const bool screen = head.controlled && head.command.enabled == 3 && !retiring();
     // The HUD off: the eyes (immersive or the flat screen) leave the panel out.
-    const bool hide = !native_hud::size() && head.controlled && !screen && !retiring();
+    // STEADY HUD: the immersive eyes do too while the headset shows it as a
+    // layer of its own (steady_hud.hpp).
+    const bool layered = head.controlled && head.command.enabled == 1 && native_hud::size() &&
+                         native_hud::layered(steady_hud::holdMs);
+    const bool hide = (!native_hud::size() || layered) && head.controlled && !screen && !retiring();
     hiddenHud = hide ? placed.instance : 0;
     if (hide)
         native_hud::publish([](native_hud::Data& d) { ++d.hiddenFrames; });

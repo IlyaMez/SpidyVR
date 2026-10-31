@@ -26,6 +26,8 @@ XrRuntime::~XrRuntime() {
     for (auto& e : eyes_)
         if (e.swapchain)
             xrDestroySwapchain(e.swapchain);
+    if (hud_.swapchain)
+        xrDestroySwapchain(hud_.swapchain);
     for (auto s : aimSpaces_)
         if (s)
             xrDestroySpace(s);
@@ -673,6 +675,64 @@ bool XrRuntime::frame(const std::function<void(const XrFrame&)>& update,
             return true;
         });
 }
+bool XrRuntime::fillHud(unsigned width, unsigned height, const std::function<bool(ID3D12Resource*)>& fill) {
+    if (!session_ || !running_ || !validEyeSize(width) || !validEyeSize(height))
+        return hud_.filled;
+    if (hud_.width != width || hud_.height != height) {
+        if (hud_.swapchain)
+            xrDestroySwapchain(hud_.swapchain);
+        hud_.swapchain = {};
+        hud_.images.clear();
+        hud_.filled = hud_.failed = false;
+        hud_.width = width;
+        hud_.height = height;
+    }
+    if (hud_.failed)
+        return false;
+    if (!hud_.swapchain) {
+        XrSwapchainCreateInfo sc{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+        sc.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
+        sc.format = format_;
+        sc.sampleCount = 1;
+        sc.width = width;
+        sc.height = height;
+        sc.faceCount = sc.arraySize = sc.mipCount = 1;
+        uint32_t count{};
+        if (XR_FAILED(xrCreateSwapchain(session_, &sc, &hud_.swapchain)) ||
+            XR_FAILED(xrEnumerateSwapchainImages(hud_.swapchain, 0, &count, nullptr)) || !count) {
+            hud_.failed = true;
+            return false;
+        }
+        hud_.images.resize(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
+        if (XR_FAILED(xrEnumerateSwapchainImages(hud_.swapchain, count, &count,
+                                                 reinterpret_cast<XrSwapchainImageBaseHeader*>(hud_.images.data())))) {
+            hud_.failed = true;
+            return false;
+        }
+        std::cout << "HUD layer: " << width << 'x' << height << " (" << count << " images)\n";
+    }
+    uint32_t image{};
+    XrSwapchainImageAcquireInfo acquire{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+    XrSwapchainImageWaitInfo wait{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+    wait.timeout = XR_INFINITE_DURATION;
+    if (XR_FAILED(xrAcquireSwapchainImage(hud_.swapchain, &acquire, &image)))
+        return hud_.filled = false;
+    bool filled = false;
+    if (XR_SUCCEEDED(xrWaitSwapchainImage(hud_.swapchain, &wait))) {
+        // An image filled only in part shows nothing rather than stale or undefined pixels.
+        try {
+            filled = image < hud_.images.size() && fill(hud_.images[image].texture);
+        } catch (...) {
+            XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+            xrReleaseSwapchainImage(hud_.swapchain, &release);
+            hud_.filled = false;
+            throw;
+        }
+    }
+    XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    hud_.filled = XR_SUCCEEDED(xrReleaseSwapchainImage(hud_.swapchain, &release)) && filled;
+    return hud_.filled;
+}
 bool XrRuntime::frameStereo(const std::function<bool(const XrFrame&)>& prepare,
                             const std::function<bool(std::array<EyeTarget, 2>&)>& draw) {
     using Clock = std::chrono::steady_clock;
@@ -680,6 +740,7 @@ bool XrRuntime::frameStereo(const std::function<bool(const XrFrame&)>& prepare,
     auto elapsed = [](auto t) { return std::chrono::duration<double, std::milli>(Clock::now() - t).count(); };
     frameTiming_ = {};
     lastFrameSubmitted_ = false;
+    hud_.shown = false;
     poll();
     if (exit_)
         return false;
@@ -792,13 +853,31 @@ bool XrRuntime::frameStereo(const std::function<bool(const XrFrame&)>& prepare,
             rightScreen.eyeVisibility = XR_EYE_VISIBILITY_RIGHT;
             rightScreen.subImage = projectionViews[1].subImage;
         }
-        const XrCompositionLayerBaseHeader* layers[] = {
-            flatScreen_ ? reinterpret_cast<const XrCompositionLayerBaseHeader*>(&screen)
-                        : reinterpret_cast<const XrCompositionLayerBaseHeader*>(&layer),
-            reinterpret_cast<const XrCompositionLayerBaseHeader*>(&rightScreen)};
+        // STEADY HUD: over the eye views, its colour already multiplied by its cover.
+        XrCompositionLayerQuad hud{XR_TYPE_COMPOSITION_LAYER_QUAD};
+        hud.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        hud.space = space_;
+        hud.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        hud.subImage.swapchain = hud_.swapchain;
+        hud.subImage.imageRect.extent = {static_cast<int32_t>(hud_.width), static_cast<int32_t>(hud_.height)};
+        hud.pose = {{hud_.pose.orientation.x, hud_.pose.orientation.y, hud_.pose.orientation.z,
+                     hud_.pose.orientation.w},
+                    {hud_.pose.position.x, hud_.pose.position.y, hud_.pose.position.z}};
+        hud.size = hud_.size;
+        std::array<const XrCompositionLayerBaseHeader*, 3> layers{};
+        uint32_t layerCount{};
+        if (flatScreen_) {
+            layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&screen);
+            if (stereoScreen_)
+                layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&rightScreen);
+        } else {
+            layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&layer);
+            if (hud_.shown && hud_.filled && hud_.swapchain)
+                layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&hud);
+        }
         if (state.shouldRender && tracked.valid && ready && drawn) {
-            end.layerCount = flatScreen_ && stereoScreen_ ? 2 : 1;
-            end.layers = layers;
+            end.layerCount = layerCount;
+            end.layers = layers.data();
         }
         endCalled = true;
         phase = Clock::now();

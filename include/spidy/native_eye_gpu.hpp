@@ -105,6 +105,25 @@ struct ScreenData {
     uint32_t skip{}, backBufferFormat{};
 };
 static_assert(sizeof(ScreenData) == 72);
+// The steadier-HUD probe (hud_capture.hpp, SpidyHudCapture). native_hud (main
+// thread) registers the panel's texture as it finds it (`path`: how), and
+// says whether it is wanted; while it is, a Present now and then copies the
+// texture back to memory, in the state the game's executed barriers left it.
+// Nothing here can stop the eye views: the probe's own failures only skip.
+void registerHud(ID3D12Resource* resource, uint32_t path);
+void refuseHud();
+void wantHud(bool wanted);
+// STEADY HUD (steady_hud.hpp). While wanted, the copy of each new eye pair
+// also copies the registered panel texture, as the pair's frame left it.
+// latestHud: the newest such copy's size, how many were made and when
+// (GetTickCount64); false before the first. fillHudLayer: that copy into
+// `target` (the layer's image: RENDER_TARGET state, RGBA8, the same size), on
+// the game's queue; false when it was not. hudLayerShown counts a headset
+// frame that showed the layer (SpidyHudCapture).
+void wantHudLayer(bool wanted);
+bool latestHud(uint32_t& width, uint32_t& height, uint64_t& copies, uint64_t& copiedMs);
+bool fillHudLayer(ID3D12Resource* target);
+void hudLayerShown();
 DWORD start(void* input);
 DWORD stop();
 } // namespace spidy::native_gpu

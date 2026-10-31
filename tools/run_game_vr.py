@@ -1608,6 +1608,72 @@ def save_eye_snapshot(game, address, shot, folder, name, view=544, crop=512):
     return files
 
 
+HUD_SHOTS = 6
+HUD_CAPTURE_SKIPS = ('copied', 'no_resource', 'unknown_state', 'other_device', 'busy', 'format', 'failed')
+HUD_CAPTURE_PATHS = ('none', 'texture', 'wrapped', 'target')
+
+
+def hud_capture_snapshot(game, address):
+    """The steadier-HUD probe (include/spidy/hud_capture.hpp): the panel texture's resource, its barriers
+    and copies, the header of its newest snapshot, and STEADY HUD's layer (include/spidy/steady_hud.hpp)."""
+    for _ in range(8):
+        raw = game.read(address, 184)
+        if len(raw) != 184:
+            return None
+        if struct.unpack_from('<3I', raw) != (0x53484350, 2, 184):
+            raise RuntimeError('HUD capture protocol mismatch')
+        sequence = struct.unpack_from('<Q', raw, 16)[0]
+        if sequence & 1 or raw[16:24] != game.read(address+16, 8):
+            continue
+        path = struct.unpack_from('<I', raw, 12)[0]
+        resource = struct.unpack_from('<Q', raw, 24)[0]
+        width, height, fmt, mips, flags, samples = struct.unpack_from('<6I', raw, 32)
+        barriers, executed, other, odd, mismatched = struct.unpack_from('<5Q', raw, 56)
+        state, known = struct.unpack_from('<2I', raw, 96)
+        presents, copies = struct.unpack_from('<2Q', raw, 104)
+        skip, refused = struct.unpack_from('<2I', raw, 120)
+        snapshots, pixels = struct.unpack_from('<2Q', raw, 128)
+        row_pitch, swap = struct.unpack_from('<2I', raw, 144)
+        staged, layer_copies, layer_frames = struct.unpack_from('<3Q', raw, 152)
+        stage_skip = struct.unpack_from('<I', raw, 176)[0]
+        return dict(sequence=sequence, path=HUD_CAPTURE_PATHS[path] if path < len(HUD_CAPTURE_PATHS) else path,
+                    found=bool(resource), width=width, height=height, format=fmt, mips=mips, flags=flags,
+                    samples=samples, barriers=barriers, executed=executed, other_queue=other, odd=odd,
+                    mismatched=mismatched, state=state, known=bool(known), presents=presents, copies=copies,
+                    skip=HUD_CAPTURE_SKIPS[skip] if skip < len(HUD_CAPTURE_SKIPS) else skip, refused=refused,
+                    snapshots=snapshots, pixels=pixels, row_pitch=row_pitch, swap=bool(swap), staged=staged,
+                    layer_copies=layer_copies, layer_frames=layer_frames,
+                    stage_skip=HUD_CAPTURE_SKIPS[stage_skip] if stage_skip < len(HUD_CAPTURE_SKIPS) else stage_skip)
+    return None
+
+
+def save_hud_capture(game, address, shot, folder, name, view=960):
+    """Save the newest HUD snapshot: its colours and its alpha (as grey), reduced to about `view` pixels.
+    Returns the file names, or None if the snapshot was replaced or unreadable."""
+    width, height, pitch = shot['width'], shot['height'], shot['row_pitch']
+    if not (64 <= width <= 16384 and 64 <= height <= 16384 and pitch == width*4) or shot['pixels'] < 0x10000:
+        return None
+    data = game.read(shot['pixels'], pitch*height)
+    again = hud_capture_snapshot(game, address)
+    if len(data) != pitch*height or not again or again['snapshots'] != shot['snapshots']:
+        return None
+    if shot['swap']:
+        swapped = bytearray(data)
+        swapped[0::4], swapped[2::4] = data[2::4], data[0::4]
+        data = bytes(swapped)
+    folder.mkdir(parents=True, exist_ok=True)
+    step = max(1, math.ceil(max(width, height)/view))
+    columns, rows, rgb = rgb_rows(data, pitch, 0, 0, width, height, step)
+    write_rgb_png(folder/f'{name}-color.png', columns, rows, rgb)
+    alpha = bytearray(data)
+    alpha[0::4] = alpha[1::4] = alpha[2::4] = data[3::4]
+    columns, rows, grey = rgb_rows(bytes(alpha), pitch, 0, 0, width, height, step)
+    write_rgb_png(folder/f'{name}-alpha.png', columns, rows, grey)
+    lit = sum(1 for a in data[3::4*step*step] if a)
+    return dict(color=f'{name}-color.png', alpha=f'{name}-alpha.png', scale=step,
+                covered=round(lit/max(1, len(data[3::4*step*step])), 4))
+
+
 def timing_snapshot(game, address):
     names=('frame','wait_frame','tracking','prepare','acquire','copy_wait','hand_overlay','release','end_frame','display_period')
     for _ in range(8):
@@ -2292,7 +2358,7 @@ def session(a, startup):
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
                                            'SpidyBodyData', 'SpidySlowMotionData', 'SpidyHudData',
                                            'SpidySteamData', 'SpidyPromptData', 'SpidyImpostorReach',
-                                           'SpidyHapticsData', 'SpidyStreamData'))
+                                           'SpidyHapticsData', 'SpidyStreamData', 'SpidyHudCapture'))
         stage_haptics(xr_hash)
         saved = vr_display.Registry().read(('ScreenSpaceReflections', 'RTReflections'))
         reflections, reflections_line = eye_reflections(saved.get('ScreenSpaceReflections'), a.no_eye_reflections,
@@ -2335,6 +2401,11 @@ def session(a, startup):
         eye_shots = deque()
         eye_folder = a.output.with_name(a.output.stem+'-eyes')
         shot_count = 0
+        # The steadier-HUD probe's snapshots, the newest few.
+        hud_shots = deque()
+        hud_folder = a.output.with_name(a.output.stem+'-hud')
+        hud_shot_count = 0
+        hud_capture = None
         appearance = streaming = None
         # The player's body and fists: the latest of each, and a sample when punches land.
         body = punch = None
@@ -2432,6 +2503,8 @@ def session(a, startup):
                         stream_stalls=stream_stalls(list(samples)),
                         free_commit_mb=dict(start=start_commit, lowest=lowest_commit),
                         eye_snapshots=list(eye_shots), eye_snapshot_folder=str(eye_folder) if eye_shots else None,
+                        hud_capture=hud_capture, hud_captures=list(hud_shots),
+                        hud_capture_folder=str(hud_folder) if hud_shots else None,
                         frame_rates=frame_rates(list(samples)), freeze=freeze,
                         final=samples[-1] if samples else None, **extra)
 
@@ -2555,6 +2628,26 @@ def session(a, startup):
                     # makes: kept for the report however the session ends.
                     prompt_last = prompt_snapshot(game, xr['SpidyPromptData']) or prompt_last
                     hud = hud_snapshot(game, xr['SpidyHudData'])
+                    capture = hud_capture_snapshot(game, xr['SpidyHudCapture'])
+                    if capture:
+                        hud_capture = capture
+                        sample['hud_capture'] = {k: capture[k] for k in ('found', 'known', 'copies', 'snapshots',
+                                                                         'skip', 'state', 'executed', 'staged',
+                                                                         'layer_copies', 'layer_frames',
+                                                                         'stage_skip')}
+                        if capture['snapshots'] != hud_shot_count and capture['pixels']:
+                            hud_shot_count = capture['snapshots']
+                            try:
+                                files = save_hud_capture(game, xr['SpidyHudCapture'], capture, hud_folder,
+                                                         f"{capture['snapshots']:04d}")
+                            except OSError:
+                                files = None  # a full disk must not end the session
+                            if files:
+                                hud_shots.append(dict(seconds=sample['seconds'], files=files))
+                                while len(hud_shots) > HUD_SHOTS:
+                                    for name in ('color', 'alpha'):
+                                        (hud_folder/hud_shots[0]['files'][name]).unlink(missing_ok=True)
+                                    hud_shots.popleft()
                     if hud:
                         hud_last = hud
                         sample['hud'] = {k: hud[k] for k in ('placed_frames', 'layer_frames', 'marker_projections',
@@ -2736,6 +2829,8 @@ def session(a, startup):
             motion_samples=list(motion_samples), appearance=appearance_snapshot(game,xr['SpidyAppearanceData']),
             streaming=stream_snapshot(game, xr['SpidyStreamData']) or streaming,
             hud=hud_snapshot(game, xr['SpidyHudData']),
+            hud_capture=hud_capture_snapshot(game, xr['SpidyHudCapture']) or hud_capture,
+            hud_captures=list(hud_shots), hud_capture_folder=str(hud_folder) if hud_shots else None,
             prompts=prompt_snapshot(game, xr['SpidyPromptData']),
             eye_jobs=frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs,
             render_memory=final_render_memory or render_memory, render_stop=render_stop,

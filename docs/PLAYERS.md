@@ -871,6 +871,12 @@ VR settings
                    or Virtual Desktop sends its eyes to PC games only with
                    that switched on (Quest Link: Settings > Beta; Virtual
                    Desktop: its eye tracking forwarding).
+  STEADY HUD       shows the HUD in the headset as a layer of its own,
+                   which the headset places every frame, instead of
+                   drawn by the game into its picture: it holds still
+                   when the headset shows a picture twice. It lies
+                   over everything, your hands too. Needs the HUD on.
+                   Off by default, to compare.
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
   NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, HEIGHT, SEATED, EYE AIM,
