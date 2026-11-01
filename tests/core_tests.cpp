@@ -1413,7 +1413,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 20 && s.bytes == 96 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 21 && s.bytes == 100 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -1926,7 +1926,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 20 && s.bytes == 96 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 21 && s.bytes == 100 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -3262,10 +3262,10 @@ int main() {
     });
     test("grip climbing settings keep old packets and reject invalid versions, sizes and switches", [] {
         using namespace game_swing;
-        for (uint32_t version = 3; version <= 20; ++version) {
+        for (uint32_t version = 3; version <= 21; ++version) {
             Settings s;
             s.version = version;
-            s.bytes = 16 + 4 * version; // official v3=28 through custom v20=96
+            s.bytes = 16 + 4 * version; // official v3=28 through custom v21=100
             check(validSettings(s), "compatible settings packet was refused");
             ++s.bytes;
             check(!validSettings(s), "wrong settings length was accepted");
@@ -3282,7 +3282,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 20 && s.bytes == 96, "updated settings did not append the climbing field");
+        check(s.version == 21 && s.bytes == 100, "updated settings did not append the half-damage field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -21018,7 +21018,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 20 && s.bytes == 96 && s.combatVisuals == 1 &&
+        check(s.version == 21 && s.bytes == 100 && s.combatVisuals == 1 &&
                   offsetof(Settings, combatVisuals) == 56,
               "free combat broke the settings defaults or layout");
         s.combatVisuals = 0;
@@ -21082,7 +21082,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version==12 && s.bytes==64 && s.combatVisuals==1 &&
+        check(s.version==21 && s.bytes==100 && s.combatVisuals==1 &&
               offsetof(Settings,combatVisuals)==56,"free combat broke the settings defaults or layout");
         s.combatVisuals=0;
         check(validSettings(s),"free combat setting refused");
@@ -21120,8 +21120,8 @@ int main() {
         check(!withTabOnly(Values{},"combat_visuals=0\n").halfPunchDamage,"old settings reduced damage");
         check(choose(Item::halfPunchDamage,0,v) && !v.halfPunchDamage,"full damage did not restore");
         game_swing::Settings packet;
-        check(packet.version==12 && packet.bytes==64 && !packet.halfPunchDamage &&
-              offsetof(game_swing::Settings,halfPunchDamage)==60,"damage protocol shifted older fields");
+        check(packet.version==21 && packet.bytes==100 && !packet.halfPunchDamage &&
+              offsetof(game_swing::Settings,halfPunchDamage)==96,"damage protocol shifted older fields");
         packet.halfPunchDamage=1;
         check(game_swing::validSettings(packet),"half-damage packet refused");
         packet.halfPunchDamage=2;
@@ -21690,20 +21690,20 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 52 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 54 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[52 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[52].title, "REALISTIC FLIPS") == 0 && all[52].choices.empty(),
+            check(all[54 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[54].title, "REALISTIC FLIPS") == 0 && all[54].choices.empty(),
               "realistic flips: a switch, first of its rows");
-        check(all[46].item == Item::controlledFlips && all[49].item == Item::wallRunCameraTilt, "custom switches misplaced");
-        check(all[36].item == Item::controlledFlips && all[39].item == Item::joystickRunCamera &&
-              all[40].item == Item::wallRunCameraTilt, "custom switches misplaced");
+        check(all[46].item == Item::controlledFlips && all[49].item == Item::joystickRunCamera &&
+              all[50].item == Item::wallRunCameraTilt && all[51].item == Item::halfPunchDamage,
+              "custom switches misplaced");
         // EYE AIM, before the realistic flips: what the eyes aim, off by default (only a headset that tracks
         // the eyes can).
-        check(all[50].item == Item::eyeAim && std::strcmp(all[50].title, "EYE AIM") == 0 &&
-                  all[50].choices.size() == 4 && std::strcmp(all[50].choices[0], "OFF") == 0 &&
-                  std::strcmp(all[50].choices[1], "WEB BALLS") == 0 && std::strcmp(all[50].choices[2], "ZIPS") == 0 &&
-                  std::strcmp(all[50].choices[3], "BOTH") == 0 && all[50].place == Place::tab,
+        check(all[52].item == Item::eyeAim && std::strcmp(all[52].title, "EYE AIM") == 0 &&
+                  all[52].choices.size() == 4 && std::strcmp(all[52].choices[0], "OFF") == 0 &&
+                  std::strcmp(all[52].choices[1], "WEB BALLS") == 0 && std::strcmp(all[52].choices[2], "ZIPS") == 0 &&
+                  std::strcmp(all[52].choices[3], "BOTH") == 0 && all[52].place == Place::tab,
               "EYE AIM: OFF, WEB BALLS, ZIPS, BOTH, in the tab before the realistic flips");
         {
             Values v;
@@ -21719,8 +21719,8 @@ int main() {
         }
         // FLIP REPROJECTION, after EYE AIM: a switch in the tab, off by default so the headset can compare
         // (the user, October 29), kept in spidy_vr.ini.
-        check(all[51].item == Item::flipReprojection && std::strcmp(all[51].title, "FLIP REPROJECTION") == 0 &&
-                  all[51].choices.empty() && all[51].place == Place::tab,
+        check(all[53].item == Item::flipReprojection && std::strcmp(all[53].title, "FLIP REPROJECTION") == 0 &&
+                  all[53].choices.empty() && all[53].place == Place::tab,
               "FLIP REPROJECTION: a switch in the tab, after EYE AIM");
         {
             Values v;
@@ -21785,7 +21785,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 58,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 60,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
