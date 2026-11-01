@@ -801,6 +801,10 @@ VR settings
   HAPTICS ........ controller vibration; REEL HAPTICS (off until you switch
                    it on): reeling a web in ticks in that hand like a winch,
                    once for every 0.75 m of rope, denser the faster it reels;
+                   SWING HAPTICS (off until you switch it on): swinging on
+                   a taut web ticks softly in that hand, once for every 2 m
+                   you travel - a quick purr at speed, slow ticks at the
+                   swing's turning point, none hanging still;
                    BLOW SOUNDS (GAME: your blows
                    sound as the game's own do, its hits on the one you
                    struck; SPIDY: Spidy's own tones, as before October 22;

@@ -178,6 +178,10 @@ struct Values {
     // The reel felt in the hand (the tab's REEL HAPTICS; reel_haptics.hpp):
     // the reeling hand's controller ticks like a winch. Off by default.
     bool reelHaptics = false;
+    // The swing felt in the hand (the tab's SWING HAPTICS; swing_haptics.hpp):
+    // a taut web's hand ticks with the body's travel, fainter than the reel.
+    // Off by default.
+    bool swingHaptics = false;
     bool operator==(const Values&) const = default;
 };
 inline constexpr int eyeAimShots = 1, eyeAimZips = 2;
@@ -282,8 +286,9 @@ enum class Item : uint8_t {
     webRange,
     webSpeed,
     reelHaptics,
+    swingHaptics,
 };
-inline constexpr Item lastItem = Item::reelHaptics;
+inline constexpr Item lastItem = Item::swingHaptics;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -306,7 +311,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 63>& rows();
+const std::array<Row, 64>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;
