@@ -154,10 +154,10 @@ std::optional<WebStrike::Opening> WebStrike::open(float seconds, const std::arra
         // Thrown out from the player; or, with an enemy marked, swung the way
         // the flow calls: a hook, an uppercut and a blow down go across.
         const bool outward = dot(way, normalized(f.position - neck)) >= config_.outward;
-        const bool vertical =
-            wish.freeDirections && verticalBlow(Punches{}.blow(way, speed), false) != CueWay::None;
-        const bool swung =
-            wished && (vertical || (length(calledWay) > .5f && dot(way, calledWay) >= config_.calledAim));
+        const bool vertical = wish.freeDirections &&
+            verticalBlow(Punches{}.blow(way, speed), false) != CueWay::None;
+        const bool swung = wished && (vertical ||
+            (length(calledWay) > .5f && dot(way, calledWay) >= config_.calledAim));
         const bool thrown = finiteBody && speed >= config_.minSpeed && (outward || swung);
         thrownFor = thrown ? thrownFor + dt : 0.f;
         if (!thrown || thrownFor < config_.sustain || phase_ == Phase::Flying || sinceEnd_ < config_.pause || !armed)
@@ -458,6 +458,7 @@ Delivery deliver(const PunchEvent& blow, bool targetAirborne, int count, const F
         // knocks down (kMelee kKnockdown: a hit reaction, then BotStateStunned).
         d.knockback = Knockback::Knockdown;
     }
+    if (c.halfDamage) d.damage *= .5f;
     return d;
 }
 

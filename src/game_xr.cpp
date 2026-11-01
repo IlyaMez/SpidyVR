@@ -1321,6 +1321,7 @@ DWORD WINAPI run(void*) {
             s.webSlingshot = values.webSlingshot;
             s.betterClimbing = values.betterClimbing;
             s.combatVisuals = values.combatVisuals;
+            s.halfPunchDamage = values.halfPunchDamage;
             s.smartAnchor = values.smartAnchor;
             s.elasticWeb = static_cast<uint32_t>(values.elasticWeb);
             s.softRelease = static_cast<uint32_t>(values.softRelease);
@@ -1367,6 +1368,7 @@ DWORD WINAPI run(void*) {
             rig.triggerWebs(values.triggerWebs);
             rig.standOnWalls(values.standOnWalls);
             rig.handClimb(values.handClimb);
+            rig.joystickWallRunCamera(values.joystickRunCamera);
             rig.wallRunCameraTilt(values.wallRunCameraTilt);
             rig.wallRunCameraDistance(vr_settings::fixedRunCameraDistance * .01f);
             rig.momentumWallRun(vr_settings::fixedMomentumCameraDistance * .01f,
@@ -2971,8 +2973,10 @@ DWORD WINAPI run(void*) {
                         }
                         padLayerWas = layerOn;
                         if (playing) {
-                            walk.right = mounting ? 0 : motion.walkRight;
-                            walk.forward = mounting ? 0 : motion.walkForward;
+                            const bool momentumDrive = game_swing::momentumWallDrive(
+                                motion.joystickWallRun && !values.joystickRunCamera, swingFresh, swingState);
+                            walk.right = mounting || momentumDrive ? 0 : motion.walkRight;
+                            walk.forward = mounting || momentumDrive ? 0 : motion.walkForward;
                             // Hand pulls become ordinary native crawl input. The
                             // game keeps vent collision and its supported state.
                             const bool handCrawl = motion.ventCrawl && values.handClimb && motion.active &&
@@ -4007,11 +4011,9 @@ DWORD WINAPI run(void*) {
                         // A flip's tilt in world axes: the body turns with the player.
                         // Standing on a surface, the body already stands along it:
                         // only a flip turns its planted pose further (none on a wall).
-                        // The running body follows the existing wall-standing
-                        // view about its eyes. Momentum runs retain their pose;
-                        // residual surface rotation also follows on stick release.
-                        const Quat bodyTilt = runningPose
-                            ? (motion.viewTilt > .0001f ? motion.swing.tilt : Quat{}) : motion.bodyTilt();
+                        // Both joystick and momentum runs use the travel-driven
+                        // pose, independent of the optional camera transition.
+                        const Quat bodyTilt = motion.bodyTilt(runningPose);
                         if (const Quat tilt = bodyTilt;
                             tilt.x != 0 || tilt.y != 0 || tilt.z != 0) {
                             const Quat yaw = Quat::yaw(motion.swing.trackingYaw);

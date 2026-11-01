@@ -284,7 +284,7 @@ void breakAttack(const SpiderSense::Counter& c, Vec3 head) {
     way.y = 0;
     request.direction = length(way) > 1e-3f ? normalized(way) : Vec3{0, 0, -1};
     request.normal = request.direction * -1.f;
-    request.amount = 1;
+    request.amount = fighter.halfPunchDamage ? .5f : 1.f;
     request.type = 1; // kMelee
     request.knockback = static_cast<int32_t>(Knockback::Knockback);
     request.knockbackAmount = 3;
@@ -421,7 +421,8 @@ void land(PunchEvent e, bool byStrike) {
     if (uncalled)
         flow.keep();
     const int count = uncalled ? flow.count() : flow.hit();
-    auto d = deliver(e, airborne, count, flow, {}, called ? before.way : CueWay::None, cues.config().damage,
+    auto d = deliver(e, airborne, count, flow, DeliveryConfig{.halfDamage = fighter.halfPunchDamage},
+                     called ? before.way : CueWay::None, cues.config().damage,
                      !fighter.combatVisuals);
     if (uncalled && (d.fly || d.knockback >= Knockback::Knockdown)) {
         d.kind = BlowKind::Hit;
@@ -437,7 +438,8 @@ void land(PunchEvent e, bool byStrike) {
         if (made)
             noteCounter(*made, false);
         ++senseTally.counterBlows;
-        if (d.kind == BlowKind::Hit && (fighter.combatVisuals || verticalBlow(e, airborne) != CueWay::Down)) {
+        if (d.kind == BlowKind::Hit &&
+            (fighter.combatVisuals || verticalBlow(e, airborne) != CueWay::Down)) {
             Vec3 along = e.direction;
             along.y = 0;
             along = length(along) > 1e-3f ? normalized(along) : Vec3{0, 0, -1};
