@@ -7,6 +7,35 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
 
 Not in a build yet, newest first. The release adds these to the next build's entry.
 
+**RUN CURVE, NATIVE RUN AT and RUN LOGS, the run update's first part.**
+
+- **Before.** On the ground the stick's tilt went to the game as it was, so
+  the full run needed the stick all the way over; NATIVE RUN held the game's
+  RT past 70% of it and let go under 50%, fixed.
+- **RUN CURVE** (EXPERIMENTAL, after DODGE TUMBLE; `run_curve` in
+  `spidy_vr.ini` and profiles; off by default): only where the game has the
+  player on his feet (NATIVE RUN's ground), the stick past its dead zone is
+  stretched so 80% of its tilt is a full one, and bent (0.7) to give more of
+  the run early (`run_update::curveStick`). Its way is kept. The air, webs,
+  walls, vents and the pad layer get the stick as before.
+- **NATIVE RUN AT** (`native_run_at_percent`, 50 to 90%, 70 by default): the
+  tilt past which NATIVE RUN holds RT; it lets go 20 points under it (70 and
+  50, as before).
+- **RUN LOGS** (`run_logs`, off by default): lines in the session's timeline
+  (`run log: ...`) with the ground speed measured from the body's position
+  each half second (and its top), the swing's own idea of it, the stick as
+  read and as sent, how much of the time NATIVE RUN held RT and how much the
+  mod drove the body on the ground (and at what speed it asked); each
+  touchdown's speeds and the speed 0.3 s after it; each takeoff's. Nothing
+  moves differently. They answer what the run update could not measure
+  without the game: the native sprint's speed, whether the swing's ground
+  velocity follows it, and whether a body driven on the ground goes where it
+  is sent.
+- **Validation.** Core checks cover the curve (unchanged while off, a full run
+  at 80%, rising, its way kept), the thresholds (70 as before), the log's
+  lines and the rows and keys; launcher checks the profile keys. Not played
+  in a headset yet.
+
 **DODGE TUMBLE, a view you can tell a dodge by.**
 
 - **Before.** A dodge moved Spider-Man while the headset view stayed level,

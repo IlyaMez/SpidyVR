@@ -117,6 +117,9 @@ static_assert(std::size(webAngleChoices) == std::size(webAngles));
 constexpr int dodgeTumbles[] = {0, 1, 2};
 constexpr const char* dodgeTumbleChoices[] = {"OFF", "LEAN", "ROLL"};
 static_assert(std::size(dodgeTumbleChoices) == std::size(dodgeTumbles));
+constexpr int nativeRunPercents[] = {50, 60, 70, 80, 90};
+constexpr const char* nativeRunPercentChoices[] = {"50%", "60%", "70%", "80%", "90%"};
+static_assert(std::size(nativeRunPercentChoices) == std::size(nativeRunPercents));
 } // namespace
 
 std::span<const int> steps(Item item) {
@@ -157,6 +160,8 @@ std::span<const int> steps(Item item) {
         return webAngles;
     case Item::dodgeTumble:
         return dodgeTumbles;
+    case Item::nativeRunAt:
+        return nativeRunPercents;
     case Item::nearClip:
         return nearClips;
     case Item::recordingFov:
@@ -228,6 +233,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.webAngle);
     case Item::dodgeTumble:
         return static_cast<float>(v.dodgeTumble);
+    case Item::nativeRunAt:
+        return static_cast<float>(v.nativeRunPercent);
     case Item::nearClip:
         return static_cast<float>(v.nearClipMm);
     case Item::recordingFov:
@@ -329,6 +336,10 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.airSlingshot;
     case Item::wristShooters:
         return &v.wristShooters;
+    case Item::runLogs:
+        return &v.runLogs;
+    case Item::runCurve:
+        return &v.runCurve;
     case Item::seated:
         return &v.seated;
     case Item::flipReprojection:
@@ -361,6 +372,7 @@ Values sanitized(Values v) {
     v.singleHandYankPercent = std::clamp(v.singleHandYankPercent, 50, 300);
     v.webAngle = std::clamp(v.webAngle, -45, 45);
     v.dodgeTumble = std::clamp(v.dodgeTumble, 0, 2);
+    v.nativeRunPercent = std::clamp(v.nativeRunPercent, 50, 90);
     v.nearClipMm = std::clamp(v.nearClipMm, nearClips[0], std::end(nearClips)[-1]);
     v.recordingFov = recording_fov::sanitized(v.recordingFov);
     v.uiStyle = std::clamp(v.uiStyle, uiStyles[0], std::end(uiStyles)[-1]);
@@ -377,9 +389,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 76>& rows() {
+const std::array<Row, 79>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 76> all{{
+    static const std::array<Row, 79> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -555,6 +567,13 @@ const std::array<Row, 76>& rows() {
          {}},
         {Item::dodgeTumble, "DODGE TUMBLE",
          "The view leans or rolls with the game's dodge, so you see it was one.", dodgeTumbleChoices},
+        {Item::runCurve,
+         "RUN CURVE",
+         "Ground only: full run at 80% of the stick, faster sooner. Off as before.",
+         {}},
+        {Item::nativeRunAt, "NATIVE RUN AT", "The stick's tilt past which NATIVE RUN sprints. 70% as before.",
+         nativeRunPercentChoices},
+        {Item::runLogs, "RUN LOGS", "Writes run speeds and landings to the session log, to send back.", {}},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
          "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
@@ -673,6 +692,9 @@ bool choose(Item item, int index, Values& v) {
     case Item::dodgeTumble:
         v.dodgeTumble = s[index];
         break;
+    case Item::nativeRunAt:
+        v.nativeRunPercent = s[index];
+        break;
     case Item::nearClip:
         v.nearClipMm = s[index];
         break;
@@ -780,6 +802,9 @@ constexpr TabOnly tabOnly[] = {
     {"web_angle_degrees", nullptr, &Values::webAngle},
     {"wrist_shooters", &Values::wristShooters, nullptr},
     {"dodge_tumble", nullptr, &Values::dodgeTumble},
+    {"run_curve", &Values::runCurve, nullptr},
+    {"native_run_at_percent", nullptr, &Values::nativeRunPercent},
+    {"run_logs", &Values::runLogs, nullptr},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

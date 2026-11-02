@@ -1919,6 +1919,18 @@ void App::options(ImVec2 origin, ImVec2 size) {
             "On the ground, the left stick past 70% holds the game's RT: its sprint, vaults and wall runs. "
             "Under 50% it jogs again. Never in the air, on webs or on walls. Off: the stick jogs, as before.",
             S(42), [&] { tabToggle("##nativerun", Item::nativeRun); });
+        option("Run curve (experimental)",
+               "On the ground the left stick reaches the game's full run at 80% of its tilt, with more of "
+               "its speed early. Off: the stick as it is, as before.",
+               S(42), [&] { tabToggle("##runcurve", Item::runCurve); });
+        option("Native run at",
+               "How far the left stick tilts before NATIVE RUN holds the game's RT for its sprint; it lets "
+               "go 20 points under it. 70%, as before.",
+               S(150), [&] { tabCombo("##nativerunatpercent", Item::nativeRunAt); });
+        option("Run logs",
+               "Writes how fast you run, land and leap to the session's log, for sending back. Changes "
+               "nothing in play.",
+               S(42), [&] { tabToggle("##runlogs", Item::runLogs); });
     });
     group(0, "Flips", [&] {
         option("Flips (experimental)",

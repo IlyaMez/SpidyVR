@@ -49,6 +49,7 @@
 #include "spidy/offer_pointing.hpp"
 #include "spidy/presentation_gate.hpp"
 #include "spidy/recording_fov.hpp"
+#include "spidy/run_update.hpp"
 #include "spidy/seated.hpp"
 #include "spidy/slow_motion.hpp"
 #include "spidy/steady_hud.hpp"
@@ -952,6 +953,7 @@ DWORD WINAPI run(void*) {
         // leap let go of, for the swing's next commands.
         game_pad::ChargeJump chargeJump;
         game_pad::NativeRun nativeRun; // NATIVE RUN's RT on the ground
+        run_update::RunLog runLog;     // RUN LOGS' lines
         game_pad::TemplePress templePress;
         uint32_t chargesBefore{}, leapsBefore{}, scansBefore{};
         // Both hands at the chest with both triggers pulled: the game's suit
@@ -3616,10 +3618,37 @@ DWORD WINAPI run(void*) {
                                 gate.grips[i] = frame.hands[i].squeeze;
                                 gate.triggers[i] = frame.hands[i].trigger;
                             }
+                            // RUN CURVE (off by default): on the game's own ground the
+                            // stick reaches the full run sooner (run_update::curveStick);
+                            // NATIVE RUN AT moves where its RT holds. Off and 70%: as before.
+                            const float stickTilt = std::hypot(walk.right, walk.forward);
+                            if (gate.playing && !gate.calibrating && !gate.padLayer && !gate.mounting &&
+                                !gate.ventCrawl && !gate.onSurface && !gate.onCrawl && gate.gameOwnsGround)
+                                run_update::curveStick(walk.right, walk.forward, values.runCurve);
+                            const auto runAt = run_update::nativeRunThresholds(values.nativeRunPercent);
+                            nativeRun.thresholds(runAt.onAbove, runAt.offBelow);
                             const bool runAllowed = game_pad::nativeRunAllowed(gate, walk);
                             nativeRun.update(runAllowed, walk.right, walk.forward);
                             if (nativeRun.held())
                                 walk.parkour = true;
+                            // RUN LOGS (off by default): what running did, in the
+                            // session's timeline (run_update::RunLog). Changes nothing.
+                            if (values.runLogs) {
+                                run_update::RunSample sample;
+                                sample.seconds = frame.seconds;
+                                sample.fresh = swingFresh && steering && !calibrationInput;
+                                sample.grounded = swingState.grounded != 0;
+                                sample.owned = swingState.owned != 0;
+                                sample.webbed = swingState.webs[0].attached || swingState.webs[1].attached;
+                                sample.nativeRun = nativeRun.held();
+                                sample.position = swingState.position;
+                                sample.velocity = swingState.velocity;
+                                sample.requested = swingState.requested;
+                                sample.stick = stickTilt;
+                                sample.sent = std::hypot(walk.right, walk.forward);
+                                if (const char* line = runLog.update(sample))
+                                    game_prompts::note(line);
+                            }
                         }
                         walk.scan = templePress.held() && steering;
                         walk.suit = suitPress.held() && steering;

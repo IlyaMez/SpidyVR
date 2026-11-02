@@ -60,6 +60,7 @@
 #include "spidy/throw_aim.hpp"
 #include "spidy/vd_eyes.hpp"
 #include "spidy/dodge_tumble.hpp"
+#include "spidy/run_update.hpp"
 #include "spidy/game_dodge.hpp"
 #include "spidy/web_aim.hpp"
 #include <algorithm>
@@ -10372,6 +10373,92 @@ int main() {
         const auto s=fromControllers(f,Mapping::gameplay,w);
         check(s.rightTrigger==255&&s.leftTrigger==0&&(s.buttons&a)==0,"native run was not RT alone");
         check(fromControllers(f,Mapping::menus,w).rightTrigger==0,"the menus got native run's RT");
+    });
+    test("RUN CURVE: off the stick is as it was; on, the full run at 80%, its way kept", [] {
+        using namespace run_update;
+        for (float x = -1; x <= 1; x += .05f)
+            for (float y = -1; y <= 1; y += .05f) {
+                float r = x, f = y;
+                curveStick(r, f, false);
+                check(r == x && f == y, "the curve changed the stick while off");
+            }
+        float r = 0, f = .05f;
+        curveStick(r, f, true);
+        check(r == 0 && f == .05f, "the curve changed a stick inside the dead zone");
+        r = 0, f = .8f;
+        curveStick(r, f, true);
+        near(f, 1);
+        r = .6f, f = .6f; // past the snap on a diagonal: a full run that way
+        curveStick(r, f, true);
+        near(std::hypot(r, f), 1);
+        near(r, f);
+        float last = 0;
+        bool rising = true, faster = true;
+        for (float y = .11f; y <= 1; y += .01f) {
+            float a = 0, b = y;
+            curveStick(a, b, true);
+            rising &= b >= last - 1e-6f;
+            faster &= b >= y - 1e-6f;
+            last = b;
+        }
+        check(rising && faster, "the curve is not rising, or runs slower than the stick");
+        r = .3f, f = -.4f;
+        curveStick(r, f, true);
+        near(r / f, .3f / -.4f);
+        r = NAN, f = 1;
+        curveStick(r, f, true);
+        check(std::isnan(r) && f == 1, "the curve made a number of a stick that was none");
+        // NATIVE RUN AT: 70 is the thresholds as before; the release 20 points under.
+        const auto t = nativeRunThresholds(70);
+        near(t.onAbove, game_pad::NativeRun::defaultOnAbove);
+        near(t.offBelow, game_pad::NativeRun::defaultOffBelow);
+        near(nativeRunThresholds(50).onAbove, .5f);
+        near(nativeRunThresholds(50).offBelow, .3f);
+        near(nativeRunThresholds(200).onAbove, .9f);
+    });
+    test("RUN LOGS: measured ground speed, touchdowns and takeoffs, and nothing while off the record", [] {
+        using namespace run_update;
+        RunLog log;
+        RunSample s;
+        s.seconds = 1.f / 90;
+        s.fresh = true;
+        s.grounded = true;
+        s.stick = 1;
+        s.sent = 1;
+        s.nativeRun = true;
+        int lines = 0;
+        std::string last;
+        for (int i = 0; i < 90; ++i) {
+            s.position = {0, 0, -9.f * i / 90};
+            s.velocity = {0, 0, -9};
+            if (const char* line = log.update(s))
+                ++lines, last = line;
+        }
+        check(lines >= 1 && last.find("run log: ground") == 0, "no ground line");
+        check(std::abs(log.measured() - 9) < .3f, "the measured run speed is not the body's");
+        s.grounded = false;
+        s.velocity = {0, 3, -9};
+        const char* off = log.update(s);
+        check(off && std::string(off).find("off the ground") != std::string::npos, "no takeoff line");
+        s.velocity = {0, -12, -20};
+        log.update(s);
+        s.grounded = true;
+        const char* down = log.update(s);
+        check(down &&
+                  std::string(down).find("touchdown at 20.0 m/s across, 12.0 m/s down") != std::string::npos,
+              "no touchdown line, or not its speeds");
+        bool after = false;
+        for (int i = 0; i < 40; ++i) {
+            s.position.z -= .05f;
+            if (const char* line = log.update(s))
+                after |= std::string(line).find("after touchdown") != std::string::npos;
+        }
+        check(after, "no line of the speed after the touchdown");
+        s.fresh = false;
+        check(!log.update(s), "a line from a stale sample");
+        s.fresh = true;
+        s.velocity = {NAN, 0, 0};
+        check(!log.update(s), "a line from a velocity that is no number");
     });
     test("NATIVE RUN's gate: every condition of the ground run, in one place", [] {
         using namespace game_pad;
@@ -22302,10 +22389,10 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 65 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 68 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[65 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[65].title, "REALISTIC FLIPS") == 0 && all[65].choices.empty(),
+            check(all[68 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[68].title, "REALISTIC FLIPS") == 0 && all[68].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[50].item == Item::controlledFlips && all[53].item == Item::joystickRunCamera &&
                   all[54].item == Item::wallRunCameraTilt && all[55].item == Item::halfPunchDamage,
@@ -22379,6 +22466,30 @@ int main() {
                   all[64].choices.size() == 3 && std::strcmp(all[64].choices[0], "OFF") == 0 &&
                   std::strcmp(all[64].choices[2], "ROLL") == 0 && all[64].place == Place::tab,
               "DODGE TUMBLE: OFF, LEAN or ROLL in the tab, after WRIST SHOOTERS");
+        // The run update's rows, after DODGE TUMBLE: RUN CURVE, NATIVE RUN AT (50 to 90%, 70 as before),
+        // RUN LOGS.
+        check(all[65].item == Item::runCurve && std::strcmp(all[65].title, "RUN CURVE") == 0 &&
+                  all[65].choices.empty() && all[65].place == Place::tab &&
+                  all[66].item == Item::nativeRunAt && std::strcmp(all[66].title, "NATIVE RUN AT") == 0 &&
+                  all[66].choices.size() == 5 && std::strcmp(all[66].choices[2], "70%") == 0 &&
+                  all[66].place == Place::tab && all[67].item == Item::runLogs &&
+                  std::strcmp(all[67].title, "RUN LOGS") == 0 && all[67].choices.empty() &&
+                  all[67].place == Place::tab,
+              "RUN CURVE, NATIVE RUN AT and RUN LOGS: in the tab, after DODGE TUMBLE");
+        {
+            Values v;
+            check(!v.runCurve && !v.runLogs && v.nativeRunPercent == 70 &&
+                      defaultChoice(Item::runCurve) == 0 && defaultChoice(Item::nativeRunAt) == 2 &&
+                      defaultChoice(Item::runLogs) == 0,
+                  "the run update's rows not as before by default");
+            check(choose(Item::nativeRunAt, 4, v) && v.nativeRunPercent == 90 &&
+                      !choose(Item::nativeRunAt, 5, v),
+                  "NATIVE RUN AT: 90% last");
+            check(withTabOnly({}, "native_run_at_percent=10\n").nativeRunPercent == 50 &&
+                      withTabOnly({}, "run_curve=1\nrun_logs=1\n").runCurve &&
+                      withTabOnly({}, "run_curve=1\nrun_logs=1\n").runLogs,
+                  "spidy_vr.ini keeps run_curve, native_run_at_percent and run_logs, within range");
+        }
         {
             Values v;
             check(!v.nativeRun && defaultChoice(Item::nativeRun) == 0, "native run on by default");
@@ -22442,7 +22553,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 71,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 74,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -22701,7 +22812,7 @@ int main() {
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
                   "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
                   "degrees=0\nwrist_shooters=0\n"
-                  "dodge_tumble=0\n",
+                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

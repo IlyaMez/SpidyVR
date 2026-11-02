@@ -226,6 +226,18 @@ struct Values {
     // 2 ROLL. The view leans or rolls with a dodge of the game's, so it reads
     // as one. OFF by default: the view stays level, as before.
     int dodgeTumble = 0;
+    // RUN CURVE (the tab's RUN CURVE; run_update::curveStick): on the ground
+    // the stick reaches the game's full run at 80% of its tilt, more of it
+    // early. Off by default: the stick as it is, as before.
+    bool runCurve = false;
+    // NATIVE RUN AT, percent of the stick's tilt (the tab's NATIVE RUN AT;
+    // run_update::nativeRunThresholds): past it NATIVE RUN holds the game's
+    // RT, and lets go 20 points under it. 70 by default (70 and 50, as before).
+    int nativeRunPercent = 70;
+    // RUN LOGS (the tab's RUN LOGS; run_update::RunLog): lines in the
+    // session's timeline about running, landing and the mod's ground run, to
+    // send back. Off by default. Nothing moves differently either way.
+    bool runLogs = false;
     // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
     // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
     int singleHandYankPercent = 100;
@@ -346,8 +358,11 @@ enum class Item : uint8_t {
     webAngle,
     wristShooters,
     dodgeTumble,
+    runCurve,
+    nativeRunAt,
+    runLogs,
 };
-inline constexpr Item lastItem = Item::dodgeTumble;
+inline constexpr Item lastItem = Item::runLogs;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -370,7 +385,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 76>& rows();
+const std::array<Row, 79>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

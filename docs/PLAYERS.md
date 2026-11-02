@@ -976,9 +976,18 @@ VR settings
                    view tips toward the dodge (LEAN) or turns a full roll
                    (ROLL, sideways dodges) so you can tell it dodged. Your
                    hands stay where they are. Pick LEAN if ROLL is too much.
+  RUN CURVE        (off until you switch it on) on the ground the left
+                   stick reaches the full run at 80% of its tilt, with more
+                   of its speed early. Never in the air, on webs or walls.
+  NATIVE RUN AT    how far the stick tilts before NATIVE RUN holds the
+                   game's RT, 50% to 90%; it lets go 20 points under it.
+                   70%, as before.
+  RUN LOGS         (off until you switch it on) writes how fast you run,
+                   land and take off to the session's log, for sending
+                   back. Changes nothing in play.
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches
