@@ -3,7 +3,51 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (November 2): pull request #51 by GolexPrime, built on 0.7.0
+**Latest build (November 2): pull request #52 by GolexPrime, built on the reel
+on November 1 - the swing felt in the hand.**
+GolexPrime: something like the reel's ticks, "only weaker", "correlated with
+the speed on the rope": at the end of a pendulum swing "bup, bup, bup",
+slower and slower, until you stand still.
+
+- **Before.** A web was felt as it took hold, let go and (REEL HAPTICS) reeled;
+  the swing itself not at all.
+- **The change.** While a hand's web holds the body taut in the air (its
+  tension), that controller ticks once for every 2 m the body travels
+  (`swing_haptics::Ticks`): 20 m/s is 10 ticks a second, the swing's turning
+  point a few slow ones, below 1 m/s none. Fainter than the reel's ticks
+  (0.12, up to 0.22 at 25 m/s; the reel's 0.3), which go instead while the hand
+  reels. HAPTICS scales it as the rest; a web's own pulses go first.
+- **SWING HAPTICS**, under HAPTICS after REEL HAPTICS (the launcher's haptics
+  card, `swing_haptics` in `spidy_vr.ini` and in settings profiles): off by
+  default, so nothing changes for players who leave it.
+- **Tests.** Core: a tick every 2 m, faint at a slow swing and stronger at
+  speed, slow ticks at the turning point, none hanging still, slack or let
+  go; the switch, off by default and kept as `swing_haptics`. Launcher
+  (profiles), the Python suites.
+
+**Earlier build (November 2): pull request #52 by GolexPrime, built on 0.7.0
+on October 31 - the reel felt in the hand.** GolexPrime:
+"There's no vibration when you reel the web in with the trigger while hanging
+somewhere."
+
+- **Before.** A web vibrated as it took hold and as it let go; a reel was not
+  felt at all.
+- **The change.** While a hand's web reels in, that controller ticks like a
+  winch, once for every 0.75 m of rope taken in (`reel_haptics::Ticks`): 16 m/s
+  of reel is about 21 ticks a second, a slower one fewer, and a reel at the
+  web's shortest is still. The reel's start is a firmer pulse. The swing tells
+  the XR loop which hand reels (`game_swing::WebState::attached` bit 8, from
+  `Swing::reeling(hand)`). HAPTICS scales it as the rest; a web's own pulses
+  (arriving, a grab) go first.
+- **REEL HAPTICS**, under HAPTICS after CONTROLLER VIBRATION (and the
+  launcher's haptics card, `reel_haptics` in `spidy_vr.ini` and in settings
+  profiles): off by default, so nothing changes for players who leave it.
+- **Tests.** Core 736/736: the ticks for the rope taken in, none paid out or at
+  the shortest, a jump of metres no rope, a new reel afresh; the switch, off by
+  default and kept as `reel_haptics`. Launcher 38/38 (profiles), the Python
+  suites.
+
+**Earlier build (November 2): pull request #51 by GolexPrime, built on 0.7.0
 on October 31 - STEADY HUD, the HUD shown by the headset itself.**
 GolexPrime: the arms, the HUD and things close by judder when the headset
 shows a pair again (the game slower than the display rate).

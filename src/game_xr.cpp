@@ -24,6 +24,8 @@
 #include "spidy/game_sense.hpp"
 #include "spidy/gadget_wheel.hpp"
 #include "spidy/phone.hpp"
+#include "spidy/reel_haptics.hpp"
+#include "spidy/swing_haptics.hpp"
 #include "spidy/phone_music.hpp"
 #include "spidy/game_shooter.hpp"
 #include "spidy/game_sound.hpp"
@@ -1053,6 +1055,10 @@ DWORD WINAPI run(void*) {
         // takes the hand's haptics again (predicted display time, ns).
         int64_t pulseUntil[2]{};
         WebTimeline webTimes;
+        // The reel's ticks in each hand (reel_haptics.hpp).
+        reel_haptics::Ticks reelTicks[2];
+        // The swing's ticks in each hand (swing_haptics.hpp).
+        swing_haptics::Ticks swingTicks[2];
         bool attachedBefore[2]{};
         // Which of the game's two ropes draws which hand's web (one web in
         // both hands has one rope), and when a free hand last came onto the
@@ -2482,6 +2488,22 @@ DWORD WINAPI run(void*) {
                                 runtime.haptic(i, 1);
                                 zipHands |= 1u << i;
                             }
+                            // Reeling in, the hand ticks like a winch (REEL HAPTICS, reel_haptics.hpp).
+                            if (const auto reel =
+                                    reelTicks[i].update(values.reelHaptics && attached && !grabbing &&
+                                                            (swingState.webs[i].attached & 8),
+                                                        swingState.webs[i].length);
+                                reel && displayAt >= pulseUntil[i])
+                                runtime.haptic(i, reel.strength, reel.seconds);
+                            // Swinging on it taut, the hand ticks with the body's travel
+                            // (SWING HAPTICS, swing_haptics.hpp); a reel's ticks go instead.
+                            if (const auto swing = swingTicks[i].update(
+                                    values.swingHaptics && attached && !grabbing &&
+                                        !(swingState.webs[i].attached & 8) && !swingState.grounded &&
+                                        swingState.webs[i].tension > .5f,
+                                    length(swingState.velocity), frame.seconds);
+                                swing && displayAt >= pulseUntil[i])
+                                runtime.haptic(i, swing.strength, swing.seconds);
                             attachedBefore[i] = attached;
                             webTaken[i] = taken;
                             webTimes.update(i, attached, swingState.webs[i].anchor,

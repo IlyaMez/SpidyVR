@@ -149,7 +149,9 @@ Swinging
                           where your hand points: along it, past the knuckles
   Squeeze a grip ........ shoot that hand's web; hold to swing
   Release the grip ...... let go
-  Trigger ............... reel in while the web is attached
+  Trigger ............... reel in while the web is attached; with REEL
+                          HAPTICS on, the hand ticks like a winch for each
+                          bit of rope taken in
   Pull a hand sharply ... zip toward the web's anchor
   Pull a hand in ........ the web is a rope in your hand: hanging from it,
                           you go where you pull it, as fast as you pull
@@ -796,7 +798,14 @@ VR settings
                    lifts you, and a late or very fast approach can
                    still hit.
   COMFORT ........ snap turn and smooth turn.
-  HAPTICS ........ controller vibration; BLOW SOUNDS (GAME: your blows
+  HAPTICS ........ controller vibration; REEL HAPTICS (off until you switch
+                   it on): reeling a web in ticks in that hand like a winch,
+                   once for every 0.75 m of rope, denser the faster it reels;
+                   SWING HAPTICS (off until you switch it on): swinging on
+                   a taut web ticks softly in that hand, once for every 2 m
+                   you travel - a quick purr at speed, slow ticks at the
+                   swing's turning point, none hanging still;
+                   BLOW SOUNDS (GAME: your blows
                    sound as the game's own do, its hits on the one you
                    struck; SPIDY: Spidy's own tones, as before October 22;
                    OFF: none, nor a web strike's rush); BODY HAPTICS (a bHaptics vest, sleeves and
@@ -911,7 +920,8 @@ VR settings
   NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
-  SMOOTHING, the four body haptics switches and the
+  SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches
+  and the
   CONTROLLED FLIPS and EXPERIMENTAL rows below FLIP SPEED Spidy keeps in
   %APPDATA%\Spidy\spidy_vr.ini, beside the launcher's own settings; the
   launcher shows realistic flips' ten rows while it is on, and the body
