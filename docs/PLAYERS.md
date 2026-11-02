@@ -792,6 +792,9 @@ VR settings
                    ROPE STEERING (off until you switch it on): hold your
                    web with the free hand too and pull it sideways to
                    turn your swing; it makes you no faster.
+                   SINGLE HAND YANK STRENGTH (100% by default): increase
+                   the speed gained from a fast one-hand web yank, up to
+                   300%; two-hand zips are unchanged.
                    SWING ASSIST (off until you switch it on): flying at
                    a wall on a web, or just after, you slow down in time
                    instead of slamming into it; nothing turns you or

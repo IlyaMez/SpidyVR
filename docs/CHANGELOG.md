@@ -3,6 +3,15 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
+**0.7.1 local build: choose how much speed a single-hand web yank adds.**
+
+- **SINGLE HAND YANK STRENGTH** offers 50% through 300%, with 100% preserving
+  the previous yank impulse. It affects one-hand yanks only; two-hand zips keep
+  their existing strength. The choice is saved in `spidy_vr.ini` and older
+  settings packets retain the original 100% behavior.
+- **Validation.** The feature builds with the Windows compiler. Core and
+  launcher checks cover the setting, persistence, and settings packet layout.
+
 **Latest build (October 31, on 0.7.0): the reel felt in the hand.** GolexPrime:
 "There's no vibration when you reel the web in with the trigger while hanging
 somewhere."

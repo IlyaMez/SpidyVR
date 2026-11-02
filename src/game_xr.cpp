@@ -1325,6 +1325,7 @@ DWORD WINAPI run(void*) {
             s.betterClimbing = values.betterClimbing;
             s.combatVisuals = values.combatVisuals;
             s.halfPunchDamage = values.halfPunchDamage;
+            s.singleHandYankPercent = static_cast<uint32_t>(values.singleHandYankPercent);
             s.smartAnchor = values.smartAnchor;
             s.elasticWeb = static_cast<uint32_t>(values.elasticWeb);
             s.softRelease = static_cast<uint32_t>(values.softRelease);
