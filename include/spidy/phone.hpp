@@ -262,9 +262,9 @@ class PocketDraw {
     // seat (GolexPrime, October 31: 17 of 18 squeezes seated missed it as too
     // high, the hand 35 cm under the neck and 16 cm behind it).
     static constexpr float pocketBelow = 1.f, pocketAbove = .45f, pocketAboveSeated = .25f, pocketSide = .05f,
-                           pocketOut = .4f,
-                           behind = .06f, front = .15f, raised = .65f, drawSeconds = 1.5f, pressed = .6f,
-                           released = .3f, yawDeadZone = 1.2f, yawSpeed = 6, yawDrift = .2f, lostSeconds = .5f;
+                           pocketOut = .4f, behind = .06f, front = .15f, raised = .65f, drawSeconds = 1.5f,
+                           pressed = .6f, released = .3f, yawDeadZone = 1.2f, yawSpeed = 6, yawDrift = .2f,
+                           lostSeconds = .5f;
     // A lost hand's way: its last velocity, measured over about `smoothing`,
     // no faster than carrySpeed, for carrySeconds at most.
     static constexpr float carrySeconds = .3f, carrySpeed = 2.5f, smoothing = .05f;

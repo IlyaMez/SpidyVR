@@ -108,6 +108,7 @@ uint64_t aimSerial{}, aimMadeMs{};
 // The hands whose motion lands no blow (Settings::noBlows).
 std::atomic<uint32_t> noBlows{};
 std::atomic<bool> combatVisuals{true};
+std::atomic<bool> halfPunchDamage{};
 bool copy(void* destination, const void* source, size_t bytes) {
     __try {
         if (reinterpret_cast<uintptr_t>(source) < 0x10000 ||
@@ -323,7 +324,9 @@ void idleRopeInput(const Command& c, const Input& in, const native_rays::QueryCo
     d.takeoffTimeouts += transition.timedOut;
     for (unsigned i = 0; i < 2; ++i) {
         const auto& w = solver.webs()[i];
-        d.webs[i] = {!w.attached ? 0u : 1u | (solver.shared() ? 2u : 0u) | (w.taken ? 4u : 0u),
+        d.webs[i] = {!w.attached ? 0u
+                                 : 1u | (solver.shared() ? 2u : 0u) | (w.taken ? 4u : 0u) |
+                                       (solver.reeling(static_cast<int>(i)) ? 8u : 0u),
                      static_cast<uint32_t>(w.surface), w.anchor, w.length, w.tension};
     }
     if (elapsed > 0)
@@ -520,6 +523,7 @@ void visit(const native_rays::QueryContext& world) {
             fighter.velocity = player.velocity * game_punch::worldScale();
             fighter.busy = noBlows.load(std::memory_order_relaxed);
             fighter.combatVisuals = combatVisuals.load(std::memory_order_relaxed);
+            fighter.halfPunchDamage = halfPunchDamage.load(std::memory_order_relaxed);
             for (unsigned i = 0; i < 2; ++i) {
                 const bool carried = solver.webs()[i].attached && (owned || !motion.grounded);
                 fighter.swinging |= carried;
@@ -1035,7 +1039,9 @@ void visit(const native_rays::QueryContext& world) {
     }
     for (unsigned i = 0; i < 2; ++i) {
         const auto& w = solver.webs()[i];
-        d.webs[i] = {!w.attached ? 0u : 1u | (solver.shared() ? 2u : 0u) | (w.taken ? 4u : 0u),
+        d.webs[i] = {!w.attached ? 0u
+                                 : 1u | (solver.shared() ? 2u : 0u) | (w.taken ? 4u : 0u) |
+                                       (solver.reeling(static_cast<int>(i)) ? 8u : 0u),
                      static_cast<uint32_t>(w.surface), w.anchor, w.length, w.tension};
     }
     InterlockedIncrement64(&d.sequence);
@@ -1088,6 +1094,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStart(void* input) {
         if ((result = startMotion(&motion)))
             break;
         combatVisuals = true;
+        halfPunchDamage = false;
         started = true;
         solver = Swing(physicsConfig(config));
         QueryPerformanceFrequency(&frequency);
@@ -1190,7 +1197,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
          header[2] != settingsBytesV9 && header[2] != settingsBytesV10 && header[2] != settingsBytesV11 &&
          header[2] != settingsBytesV12 && header[2] != settingsBytesV13 && header[2] != settingsBytesV14 &&
          header[2] != settingsBytesV15 && header[2] != settingsBytesV16 && header[2] != settingsBytesV17 &&
-         header[2] != settingsBytesV18 && header[2] != settingsBytesV19 && header[2] != sizeof(s)) ||
+         header[2] != settingsBytesV18 && header[2] != settingsBytesV19 && header[2] != settingsBytesV20 &&
+         header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || !validSettings(s))
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
@@ -1224,6 +1232,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
             solver.allowPhysical(s.physical != 0);
         noBlows = s.version >= 6 ? s.noBlows : 0u;
         combatVisuals = s.version < 11 || s.combatVisuals != 0;
+        halfPunchDamage = s.version >= 21 && s.halfPunchDamage != 0;
         if (s.version >= 7)
             solver.allowArcade(s.arcade != 0);
         if (s.version >= 8)
