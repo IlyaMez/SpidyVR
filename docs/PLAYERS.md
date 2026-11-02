@@ -844,15 +844,30 @@ VR settings
                    finisher count. Punch speed, contact and free-hand rules
                    still apply. Sound and vibration still work. Web aim markers and the
                    game's own HUD have their existing separate controls.
+  JOYSTICK WALL RUN CAMERA ... in EXPERIMENTAL under HAND WALL CLIMBING, on
+                   by default: a joystick run along a wall turns your view
+                   onto the wall, as before. Off: the left stick supplies
+                   wall velocity while the game sees a neutral movement
+                   stick, so the existing momentum wall-running gait and
+                   camera placement take over. The normal momentum wall
+                   clearance is retained; no new body lean or close-view
+                   pose is added. WALL RUN CAMERA TILT controls the
+                   momentum camera bank.
+  HALF PUNCH DAMAGE ... in EXPERIMENTAL, off by default. On halves VR punch and web-strike
+                   health damage, including uppercuts, smashes, counters and
+                   finishers. Launch and smash velocity, knockback, combo
+                   rules and punch recognition do not change. Off restores
+                   normal damage. This is not a global game damage setting.
   EXPERIMENTAL ... FLIPS (off until you switch it on) uses the right stick
                    in the air; release holds the angle and A returns upright.
                    CONTROLLED FLIPS is a separate A-toggle mode, above.
                    FLIP SPEED sets how fast either steering stick turns you.
                    HAND WALL CLIMBING (off until you switch it on, above)
                    uses a fixed wall-camera clearance. EYE AIM (OFF unless
-                   you pick WEB BALLS, ZIPS or BOTH; below). REALISTIC FLIPS
-                   (off until you switch it on, above) and the ten rows that
-                   tune it.
+                   you pick WEB BALLS, ZIPS or BOTH; below). FLIP
+                   REPROJECTION (off until you switch it on; below).
+                   REALISTIC FLIPS (off until you switch it on, above) and
+                   the ten rows that tune it.
   EYE AIM ........ for a headset whose VR runtime gives games your eyes
                    (OpenXR's eye gaze: Quest Pro, Varjo, Pimax Crystal and
                    the like; a Quest 3 has no eye tracker). The session log
@@ -871,6 +886,20 @@ VR settings
                    or Virtual Desktop sends its eyes to PC games only with
                    that switched on (Quest Link: Settings > Beta; Virtual
                    Desktop: its eye tracking forwarding).
+  FLIP REPROJECTION  turns the picture in the headset by however far a
+                   flip, a swing's spin or a smooth turn has turned you
+                   since the game drew it, as the headset already does for
+                   your head: those turns judder less. Your hands, the
+                   phone and the gadget wheel stay with you; Spider-Man's
+                   own arms and the game's HUD are part of the game's
+                   picture and turn with it by that little. Snap turns are
+                   left as they are. Off by default, to compare. Best
+                   with a headset refresh rate the game keeps up with
+                   (72 Hz on a Quest 3 over Virtual Desktop): when the
+                   headset shows a picture twice, your view stays steady
+                   but those arms, the HUD and things close by judder
+                   instead, since only the turn is made up, not the
+                   ground the swing covers.
   STEADY HUD       shows the HUD in the headset as a layer of its own,
                    which the headset places every frame, instead of
                    drawn by the game into its picture: it holds still

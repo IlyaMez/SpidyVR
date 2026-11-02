@@ -271,6 +271,10 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.handClimb;
     case Item::wallRunCameraTilt:
         return &v.wallRunCameraTilt;
+    case Item::joystickRunCamera:
+        return &v.joystickRunCamera;
+    case Item::halfPunchDamage:
+        return &v.halfPunchDamage;
     case Item::view:
         return &v.flatScreen;
     case Item::realisticFlips:
@@ -291,6 +295,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.hapticMovement;
     case Item::seated:
         return &v.seated;
+    case Item::flipReprojection:
+        return &v.flipReprojection;
     case Item::steadyHud:
         return &v.steadyHud;
     default:
@@ -332,9 +338,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 63>& rows() {
+const std::array<Row, 66>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 63> all{{
+    static const std::array<Row, 66> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -361,8 +367,10 @@ const std::array<Row, 63>& rows() {
          levelChoices},
         {Item::softRelease, "SOFT RELEASE",
          "A web's last pull fades briefly as you let go. Higher lasts longer.", levelChoices},
-        {Item::swingAssist, "SWING ASSIST",
-         "Swinging at a wall, you slow down before it. Your line stays yours.", {}},
+        {Item::swingAssist,
+         "SWING ASSIST",
+         "Swinging at a wall, you slow down before it. Your line stays yours.",
+         {}},
         {Item::webSlingshot,
          "WEB SLINGSHOT",
          "No auto jump. Draw two fixed webs, hold for vibration, release both to launch.",
@@ -373,10 +381,14 @@ const std::array<Row, 63>& rows() {
          "BETTER CLIMBING",
          "Take one web in both hands, then pull hand over hand to keep climbing it.",
          {}},
-        {Item::twoHandZip, "TWO HAND WEB ZIP",
-         "Both webs on one spot: pull both arms back fast to launch at it.", {}},
-        {Item::ropeSteering, "HAND ROPE STEERING",
-         "Hold your web with the free hand too and pull sideways to turn your swing.", {}},
+        {Item::twoHandZip,
+         "TWO HAND WEB ZIP",
+         "Both webs on one spot: pull both arms back fast to launch at it.",
+         {}},
+        {Item::ropeSteering,
+         "HAND ROPE STEERING",
+         "Hold your web with the free hand too and pull sideways to turn your swing.",
+         {}},
         {Item::none, "COMFORT", nullptr, {}},
         {Item::snapTurn, "SNAP TURN", "How far a flick of the right stick turns you. Off: no snap turning.",
          snapChoices},
@@ -422,8 +434,7 @@ const std::array<Row, 63>& rows() {
         {Item::nearClip, "NEAR CLIP",
          "How near your eyes things still show. Nearer keeps your hands in view.", nearClipChoices},
         {Item::recordingFov, "RECORDING FOV",
-         "A view this wide on the monitor to record. Costs frame rate; no Spidy marks.",
-         recordingFovChoices},
+         "A view this wide on the monitor to record. Costs frame rate; no Spidy marks.", recordingFovChoices},
         {Item::recordingSmoothing, "RECORDING SMOOTHING",
          "Softens how the recording view turns, not the headset's. Higher is softer.",
          recordingSmoothingChoices},
@@ -451,14 +462,28 @@ const std::array<Row, 63>& rows() {
          "HAND WALL CLIMBING",
          "Grip and pull. Reach back near the wall to turn. Left stick: run. A: jump.",
          {}},
+        {Item::joystickRunCamera,
+         "JOYSTICK WALL RUN CAMERA",
+         "On: old wall-floor view. Off: joystick drives the existing momentum wall run.",
+         {}},
         {Item::wallRunCameraTilt,
          "WALL RUN CAMERA TILT",
          "Gently bank the view with the body on horizontal momentum wall runs.",
          {}},
+        {Item::halfPunchDamage,
+         "HALF PUNCH DAMAGE",
+         "Punches and web strikes deal 50% damage. Launches and smash force stay the same.",
+         {}},
         {Item::eyeAim, "EYE AIM",
          "Web balls and zips go where your eyes look. Needs a headset with eye tracking.", eyeAimChoices},
-        {Item::steadyHud, "STEADY HUD",
-         "The HUD shown by the headset itself: it holds still when the game falls behind.", {}},
+        {Item::flipReprojection,
+         "FLIP REPROJECTION",
+         "Flips, spins and smooth turns shown as steadily as head turns.",
+         {}},
+        {Item::steadyHud,
+         "STEADY HUD",
+         "The HUD shown by the headset itself: it holds still when the game falls behind.",
+         {}},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
          "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
@@ -626,7 +651,9 @@ constexpr TabOnly tabOnly[] = {
     {"controlled_flips", &Values::controlledFlips, nullptr},
     {"near_clip_mm", nullptr, &Values::nearClipMm},
     {"hand_climb", &Values::handClimb, nullptr},
+    {"joystick_wall_run_camera", &Values::joystickRunCamera, nullptr},
     {"wall_run_camera_tilt", &Values::wallRunCameraTilt, nullptr},
+    {"half_punch_damage", &Values::halfPunchDamage, nullptr},
     {"realistic_flips", &Values::realisticFlips, nullptr},
     {"rotation_strength", nullptr, &Values::automaticStrength},
     {"rotation_speed", nullptr, &Values::automaticSpeed},
@@ -661,6 +688,7 @@ constexpr TabOnly tabOnly[] = {
     {"rope_steering", &Values::ropeSteering, nullptr},
     {"web_range_m", nullptr, &Values::webRange},
     {"web_speed", nullptr, &Values::webSpeed},
+    {"flip_reprojection", &Values::flipReprojection, nullptr},
     {"steady_hud", &Values::steadyHud, nullptr},
 };
 } // namespace

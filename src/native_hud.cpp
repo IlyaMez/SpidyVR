@@ -122,11 +122,13 @@ bool movieSize(uint32_t size[2]) {
 // The steadier-HUD probe (hud_capture.hpp): the panel's colour texture's
 // D3D12 resource, found as the eye views' is (stereo_probe.cpp: a texture
 // object of the class at 4e56c80, whose +38 leads to it), handed to the GPU
-// bridge when it changes; wanted while the headset shows the eye views.
+// bridge when it changes; wanted while the headset shows the eye views. Only
+// with STEADY HUD on: off, the game's panel is left as it was.
 void probeTexture(uintptr_t texture, uintptr_t target) {
     static uintptr_t seen{};
-    native_gpu::wantHud(texture && eyesRecent());
-    if (!texture || texture == seen)
+    const bool layer = native_gpu::hudLayerOn();
+    native_gpu::wantHud(layer && texture && eyesRecent());
+    if (!layer || !texture || texture == seen)
         return;
     seen = texture;
     const auto textureClass = base + 0x4e56c80;

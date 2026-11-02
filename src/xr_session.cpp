@@ -704,8 +704,9 @@ bool XrRuntime::fillHud(unsigned width, unsigned height, const std::function<boo
             return false;
         }
         hud_.images.resize(count, {XR_TYPE_SWAPCHAIN_IMAGE_D3D12_KHR});
-        if (XR_FAILED(xrEnumerateSwapchainImages(hud_.swapchain, count, &count,
-                                                 reinterpret_cast<XrSwapchainImageBaseHeader*>(hud_.images.data())))) {
+        if (XR_FAILED(xrEnumerateSwapchainImages(
+                hud_.swapchain, count, &count,
+                reinterpret_cast<XrSwapchainImageBaseHeader*>(hud_.images.data())))) {
             hud_.failed = true;
             return false;
         }

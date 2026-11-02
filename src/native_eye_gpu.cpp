@@ -281,7 +281,8 @@ void STDMETHODCALLTYPE barrier(ID3D12GraphicsCommandList* list, UINT count,
     if (enabled) {
         const auto* left = watched[0].load();
         const auto* right = watched[1].load();
-        const auto* panel = hudWatched.load();
+        // The panel's only while STEADY HUD is on: off, its barriers pass as before.
+        const auto* panel = hudLayerWanted ? hudWatched.load() : nullptr;
         bool relevant{};
         for (UINT n = 0; n < count; ++n)
             relevant |= bs[n].Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION &&
@@ -303,7 +304,7 @@ void STDMETHODCALLTYPE barrier(ID3D12GraphicsCommandList* list, UINT count,
                         add(list, e);
                     }
                 // The HUD probe's: a full list is skipped, never a fault.
-                if (hud.resource && bs[n].Transition.pResource == hud.resource.Get()) {
+                if (panel && hud.resource && bs[n].Transition.pResource == hud.resource.Get()) {
                     ++hud.barriers;
                     auto found = lists.find(list);
                     if (found == lists.end() && lists.size() < 4096)
@@ -1013,10 +1014,10 @@ void readHud() { // submission and recording held by caller
     hud.pending = false;
     const auto rowBytes = hud.shotWidth * hud.shotBytes;
     void* data{};
-    D3D12_RANGE range{0, static_cast<SIZE_T>(hud.layout.Offset +
-                                             static_cast<UINT64>(hud.layout.Footprint.RowPitch) *
-                                                 (hud.shotHeight - 1) +
-                                             rowBytes)};
+    D3D12_RANGE range{
+        0, static_cast<SIZE_T>(hud.layout.Offset +
+                               static_cast<UINT64>(hud.layout.Footprint.RowPitch) * (hud.shotHeight - 1) +
+                               rowBytes)};
     if (FAILED(hud.readback->Map(0, &range, &data))) {
         hud.skip = hud_capture::skipFailed;
         return;
@@ -1071,7 +1072,7 @@ thread_local bool presenting{};
 void presentFrame(IDXGISwapChain* swapchain, UINT flags) {
     if (!enabled || (flags & DXGI_PRESENT_TEST))
         return;
-    if (hudWanted)
+    if (hudWanted && hudLayerWanted)
         captureHud(swapchain);
     if (screenWanted)
         captureScreen(swapchain);
@@ -1348,8 +1349,8 @@ void registerHud(ID3D12Resource* resource, uint32_t path) {
     D3D12_RESOURCE_DESC desc{};
     if (fits) {
         desc = resource->GetDesc();
-        fits = desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D && desc.Width >= 64 && desc.Width <= 16384 &&
-               desc.Height >= 64 && desc.Height <= 16384 && desc.DepthOrArraySize == 1;
+        fits = desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D && desc.Width >= 64 &&
+               desc.Width <= 16384 && desc.Height >= 64 && desc.Height <= 16384 && desc.DepthOrArraySize == 1;
     }
     if (!fits) {
         ++hud.refused;
@@ -1377,7 +1378,17 @@ void wantHud(bool wanted) {
     hudWanted = wanted;
 }
 void wantHudLayer(bool wanted) {
-    hudLayerWanted = wanted;
+    // Its barriers are followed only while it is on: switched on again, the
+    // state the game left the panel in is learnt anew.
+    if (wanted && !hudLayerWanted.exchange(true)) {
+        std::lock_guard lock(recording);
+        hud.known = false;
+    } else if (!wanted) {
+        hudLayerWanted = false;
+    }
+}
+bool hudLayerOn() {
+    return hudLayerWanted;
 }
 bool latestHud(uint32_t& hudWidth, uint32_t& hudHeight, uint64_t& copies, uint64_t& copiedMs) {
     std::lock_guard recordLock(recording);
@@ -1407,7 +1418,8 @@ bool fillHudLayer(ID3D12Resource* target) {
     auto* slot = readyCommands(hudLayerCommands);
     if (!slot)
         return false; // earlier copies still in flight: the layer keeps its last image
-    copyEyeTexture(slot->list.Get(), hud.staged.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, target, originalBarrier);
+    copyEyeTexture(slot->list.Get(), hud.staged.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, target,
+                   originalBarrier);
     if (!submitCommands(*slot))
         return false;
     ++hud.layerCopies;

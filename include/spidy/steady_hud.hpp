@@ -36,7 +36,8 @@ inline Quad quad(Vec3 head, const Quat& facing, float halfWidth, float distance,
         !std::isfinite(head.x + head.y + head.z + halfWidth + distance) ||
         !std::isfinite(facing.x + facing.y + facing.z + facing.w))
         return q;
-    const float n = std::sqrt(facing.x * facing.x + facing.y * facing.y + facing.z * facing.z + facing.w * facing.w);
+    const float n =
+        std::sqrt(facing.x * facing.x + facing.y * facing.y + facing.z * facing.z + facing.w * facing.w);
     if (!(n > .5f && n < 2))
         return q;
     const Quat f{facing.x / n, facing.y / n, facing.z / n, facing.w / n};

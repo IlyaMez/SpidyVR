@@ -5,12 +5,13 @@
 namespace spidy::hud_capture {
 // A probe for a steadier HUD: can Spidy take the game's HUD panel texture
 // (native_hud.hpp) on the GPU, so that it could draw the panel itself every
-// headset frame instead of the game drawing it into each eye pair? Nothing
-// the headset shows changes. While immersive, the panel's colour texture is
-// found from the stream native_hud resizes, its D3D12 resource is followed
-// through the game's barriers (native_eye_gpu.cpp), and every few seconds,
-// at a Present of the game's frame, it is copied back to memory for the
-// session report (SpidyHudCapture; the report saves it as a picture).
+// headset frame instead of the game drawing it into each eye pair? Only with
+// STEADY HUD on; nothing the headset shows changes. While immersive, the
+// panel's colour texture is found from the stream native_hud resizes, its
+// D3D12 resource is followed through the game's barriers (native_eye_gpu.cpp),
+// and every few seconds, at a Present of the game's frame, it is copied back
+// to memory for the session report (SpidyHudCapture; the report saves it as a
+// picture).
 // STEADY HUD (steady_hud.hpp) copies the same texture with every eye pair.
 
 // How the D3D12 resource was reached from the stream's colour texture (+10).
@@ -26,9 +27,9 @@ enum Skip : uint32_t {
     skipNoResource = 1, // no panel texture registered
     skipUnknownState = 2,
     skipOtherDevice = 3,
-    skipBusy = 4,       // the last copy is still on the GPU
-    skipFormat = 5,     // not a format the probe reads back
-    skipFailed = 6,     // a D3D12 call failed
+    skipBusy = 4,   // the last copy is still on the GPU
+    skipFormat = 5, // not a format the probe reads back
+    skipFailed = 6, // a D3D12 call failed
 };
 // Snapshots taken at most this often.
 inline constexpr uint64_t snapshotMs = 5000;

@@ -484,6 +484,7 @@ __declspec(dllexport) SlowMotionData SpidySlowMotionData;
 __declspec(dllexport) HapticsData SpidyHapticsData;
 __declspec(dllexport) XrTimingData SpidyXrTimingData;
 __declspec(dllexport) EyeSnapshot SpidyXrSnapshot;
+__declspec(dllexport) flip_reprojection::Data SpidyReprojectData;
 DWORD WINAPI SpidyStart(void*);
 DWORD WINAPI SpidyEyeTemporal(void*);
 DWORD WINAPI SpidyEyeShadows(void*);
@@ -1128,6 +1129,8 @@ DWORD WINAPI run(void*) {
         uint64_t shotsBefore[2]{};
         uint64_t submittedFrames{};
         uint64_t previousPresentedGeneration{};
+        // The pair FLIP REPROJECTION last turned, to count a pair shown again.
+        uint64_t reprojectedGeneration{};
         // The player's standing eye height above the floor: it rises at once
         // to a higher head and sinks a centimetre a second, so crouching
         // does not shrink the body.
@@ -1336,6 +1339,7 @@ DWORD WINAPI run(void*) {
             s.ropeSteering = values.ropeSteering;
             s.webRange = static_cast<float>(values.webRange);
             s.webSpeed = static_cast<uint32_t>(values.webSpeed);
+            s.halfPunchDamage = values.halfPunchDamage;
             sentSwingSettings = s;
             swingSettingsSent = true;
             // A hand-over owns the walls while it lasts; the player's own
@@ -1373,6 +1377,7 @@ DWORD WINAPI run(void*) {
             rig.triggerWebs(values.triggerWebs);
             rig.standOnWalls(values.standOnWalls);
             rig.handClimb(values.handClimb);
+            rig.joystickWallRunCamera(values.joystickRunCamera);
             rig.wallRunCameraTilt(values.wallRunCameraTilt);
             rig.wallRunCameraDistance(vr_settings::fixedRunCameraDistance * .01f);
             rig.momentumWallRun(vr_settings::fixedMomentumCameraDistance * .01f,
@@ -1491,6 +1496,9 @@ DWORD WINAPI run(void*) {
                 throw std::runtime_error("No native eye images reached OpenXR within 3 seconds");
             if (eyesWanted && lastPresentedMs && GetTickCount64() - lastPresentedMs >= 3000)
                 throw std::runtime_error("Native eye presentation stalled for 3 seconds");
+            // The tracking space's turn in the world for this frame's display
+            // time, once the frame placed it (FLIP REPROJECTION).
+            flip_reprojection::Turn turnNow{};
             const bool active = runtime.frameStereo(
                 [&](const XrFrame& trackedFrame) {
                     XrFrame frame = trackedFrame;
@@ -2975,8 +2983,10 @@ DWORD WINAPI run(void*) {
                         }
                         padLayerWas = layerOn;
                         if (playing) {
-                            walk.right = mounting ? 0 : motion.walkRight;
-                            walk.forward = mounting ? 0 : motion.walkForward;
+                            const bool momentumDrive = game_swing::momentumWallDrive(
+                                motion.joystickWallRun && !values.joystickRunCamera, swingFresh, swingState);
+                            walk.right = mounting || momentumDrive ? 0 : motion.walkRight;
+                            walk.forward = mounting || momentumDrive ? 0 : motion.walkForward;
                             // Hand pulls become ordinary native crawl input. The
                             // game keeps vent collision and its supported state.
                             const bool handCrawl = motion.ventCrawl && values.handClimb && motion.active &&
@@ -4011,11 +4021,13 @@ DWORD WINAPI run(void*) {
                         // A flip's tilt in world axes: the body turns with the player.
                         // Standing on a surface, the body already stands along it:
                         // only a flip turns its planted pose further (none on a wall).
-                        // The running body follows the existing wall-standing
-                        // view about its eyes. Momentum runs retain their pose;
-                        // residual surface rotation also follows on stick release.
-                        const Quat bodyTilt = runningPose
-                            ? (motion.viewTilt > .0001f ? motion.swing.tilt : Quat{}) : motion.bodyTilt();
+                        // JOYSTICK WALL RUN CAMERA on (the default): the running body
+                        // follows the wall-standing view about its eyes, residual
+                        // surface rotation too. Off, joystick and momentum runs both
+                        // take the travel-driven pose.
+                        const Quat bodyTilt = runningPose && values.joystickRunCamera
+                                                  ? (motion.viewTilt > .0001f ? motion.swing.tilt : Quat{})
+                                                  : motion.bodyTilt(runningPose);
                         if (const Quat tilt = bodyTilt;
                             tilt.x != 0 || tilt.y != 0 || tilt.z != 0) {
                             const Quat yaw = Quat::yaw(motion.swing.trackingYaw);
@@ -4050,6 +4062,10 @@ DWORD WINAPI run(void*) {
                     saved.serial = eyes.serial;
                     saved.motion = motion;
                     saved.trackingEyes = frame.eyes;
+                    if (motion.active)
+                        saved.rigTurn =
+                            flip_reprojection::trackingTurn(motion.headPose.orientation, frame.head.orientation);
+                    turnNow = saved.rigTurn;
                     saved.flatScreen = flatScreen;
                     saved.uiStyle = values.uiStyle == 1 ? UiStyle::tech : UiStyle::comic;
                     saved.combatVisuals = values.combatVisuals;
@@ -4225,13 +4241,14 @@ DWORD WINAPI run(void*) {
                         // eyes leave it out while it shows (native_hud::layered).
                         uint32_t hudWidth{}, hudHeight{};
                         uint64_t hudCopies{}, hudCopiedMs{};
-                        if (drawn == Presentation::immersive && values.steadyHud && values.hud > 0 && hudPlaced &&
-                            native_gpu::latestHud(hudWidth, hudHeight, hudCopies, hudCopiedMs) &&
+                        if (drawn == Presentation::immersive && values.steadyHud && values.hud > 0 &&
+                            hudPlaced && native_gpu::latestHud(hudWidth, hudHeight, hudCopies, hudCopiedMs) &&
                             steady_hud::fresh(GetTickCount64(), hudCopiedMs, true)) {
                             if (hudCopies != hudLayerCopies) {
-                                hudLayerFilled = runtime.fillHud(hudWidth, hudHeight, [](ID3D12Resource* image) {
-                                    return native_gpu::fillHudLayer(image);
-                                });
+                                hudLayerFilled =
+                                    runtime.fillHud(hudWidth, hudHeight, [](ID3D12Resource* image) {
+                                        return native_gpu::fillHudLayer(image);
+                                    });
                                 hudLayerCopies = hudCopies;
                             }
                             const auto quad =
@@ -4243,9 +4260,52 @@ DWORD WINAPI run(void*) {
                                 native_gpu::hudLayerShown();
                             }
                         }
-                        const auto& rendered = saved->motion;
+                        // FLIP REPROJECTION: the pair turned by the player's own turn
+                        // since it was rendered, about the head (flip_reprojection.hpp).
+                        const bool reproject =
+                            values.flipReprojection && !saved->flatScreen && !saved->stereoScreen;
+                        const auto reprojection = reproject
+                                                      ? flip_reprojection::correction(saved->rigTurn, turnNow)
+                                                      : flip_reprojection::Correction{};
+                        std::array<Pose, 2> layerEyes{saved->trackingEyes[0].pose, saved->trackingEyes[1].pose};
+                        if (reprojection.applied)
+                            layerEyes = flip_reprojection::layerEyes(layerEyes, reprojection.layer);
+                        // What the player holds stays with the head: turned the other
+                        // way in the world, about the eyes' middle, before it is drawn.
+                        // The eyes' own views stay as rendered, as the image is.
+                        const GameMotionFrame rendered =
+                            reprojection.applied ? flip_reprojection::held(saved->motion, reprojection.world)
+                                                 : saved->motion;
+                        const Vec3 heldAbout = flip_reprojection::eyesMiddle(saved->motion);
+                        const auto heldPose = [&](Pose p) {
+                            return reprojection.applied
+                                       ? flip_reprojection::about(p, reprojection.world, heldAbout)
+                                       : p;
+                        };
+                        {
+                            std::lock_guard lock(telemetry);
+                            auto& r = SpidyReprojectData;
+                            InterlockedIncrement64(&r.sequence);
+                            r.features = values.flipReprojection ? 1u : 0u;
+                            if (reproject) {
+                                const float degrees = reprojection.angle * 57.29578f;
+                                r.lastDegrees = degrees;
+                                if (!reprojection.applied) {
+                                    ++r.passed;
+                                } else if (degrees < .05f) {
+                                    ++r.still;
+                                } else {
+                                    ++r.turned;
+                                    r.reusedTurned += imageGeneration == reprojectedGeneration;
+                                    r.mostDegrees = std::max(r.mostDegrees, degrees);
+                                    r.sumDegrees += degrees;
+                                }
+                                reprojectedGeneration = imageGeneration;
+                            }
+                            InterlockedIncrement64(&r.sequence);
+                        }
                         for (unsigned eye = 0; eye < 2; ++eye) {
-                            const auto& pose = saved->trackingEyes[eye].pose;
+                            const auto& pose = layerEyes[eye];
                             const auto& f = saved->trackingEyes[eye].fov;
                             targets[eye].view.pose = {{pose.orientation.x, pose.orientation.y,
                                                        pose.orientation.z, pose.orientation.w},
@@ -4512,9 +4572,12 @@ DWORD WINAPI run(void*) {
                         // panel is translucent, as the game's menus are.
                         if (!saved->flatScreen && saved->calibration.phase != body_calibration::Phase::idle) {
                             auto view = saved->calibration;
+                            view.panel = heldPose(view.panel);
                             view.panel.position += travel;
-                            for (auto& grip : view.grips)
+                            for (auto& grip : view.grips) {
+                                grip = heldPose(grip);
                                 grip.position += travel;
+                            }
                             auto& panel = saved->uiStyle == UiStyle::tech ? translucent : vertices;
                             body_calibration::appendView(panel, view, viewer, saved->uiStyle);
                         }
@@ -4523,6 +4586,13 @@ DWORD WINAPI run(void*) {
                         // laid down in order over all the rest.
                         if (!saved->flatScreen && saved->gadgetWheel.open) {
                             auto view = saved->gadgetWheel;
+                            if (reprojection.applied) {
+                                auto& w = view.frame;
+                                w.centre = flip_reprojection::about(w.centre, reprojection.world, heldAbout);
+                                w.right = reprojection.world.rotate(w.right);
+                                w.up = reprojection.world.rotate(w.up);
+                                w.out = reprojection.world.rotate(w.out);
+                            }
                             view.frame.centre += travel;
                             appendGadgetWheel(translucent, view, viewer, pixelAngle, saved->uiStyle);
                         }
@@ -4551,7 +4621,7 @@ DWORD WINAPI run(void*) {
                         D3D12Renderer::Picture phonePicture;
                         if (!saved->flatScreen && saved->phone.open) {
                             auto view = phoneShown;
-                            const Pose& toWorld = saved->phone.toWorld;
+                            const Pose toWorld = heldPose(saved->phone.toWorld);
                             const auto& f = phone.place();
                             view.open = true;
                             view.age = phone.age();

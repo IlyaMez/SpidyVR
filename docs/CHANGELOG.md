@@ -3,9 +3,15 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 31, on 0.7.0): STEADY HUD - the HUD shown by the
-headset itself.** You: the arms, the HUD and things close by judder when
-the headset shows a pair again (the game slower than the display rate).
+**Latest build (November 2): pull request #51 by GolexPrime, built on 0.7.0
+on October 31 - STEADY HUD, the HUD shown by the headset itself.**
+GolexPrime: the arms, the HUD and things close by judder when the headset
+shows a pair again (the game slower than the display rate).
+
+- **Merged with the probe behind the switch.** Looking up the panel's
+  texture, following the game's barriers on it and the five-second
+  snapshots now run only while STEADY HUD is on (and the HUD with it). Off,
+  the panel's texture is neither held nor copied, as before this build.
 
 - **The cause.** The HUD panel is drawn by the game into each eye pair, so
   it is part of the picture: a pair shown again is turned to the newer head,
@@ -48,6 +54,162 @@ the headset shows a pair again (the game slower than the display rate).
   the launcher's checks (the profile leaves it out), the six Python suites
   (new: `SpidyHudCapture` decoded, torn and of another version, its picture
   saved), ctest 3/3.
+
+**Earlier build (November 2): pull request #49 by GolexPrime, built on 0.7.0
+on October 30 - FLIP REPROJECTION, flips, spins and smooth turns shown as
+steadily as head turns.** GolexPrime: head turns are smooth in the
+headset; flips, the swing's spin and smooth turns judder (Quest 3 over
+Virtual Desktop).
+
+- **The cause, in the code.** Each eye pair goes to OpenXR with the tracking
+  pose it was rendered from (`game_xr.cpp`, `xr_session.cpp`'s projection
+  views), so the runtime turns a pair only to the newer head. The player's
+  own turn - the rig's yaw, a flip's tilt, the turns onto walls and into
+  ducts - is in the world the game renders, never in the layer's pose. A
+  pair shown a frame late, or again, shows the world where it stood when it
+  was asked for.
+- **What the October 28 session report says.** The headset ran at 72 Hz
+  (13.9 ms a frame; `prepare` 0.0 ms, the copy 0.1, the overlay 0.2, the rest
+  waiting on Virtual Desktop). In VR play 71.6 pairs a second went to the
+  headset, 69.9 of them new: `draw` was almost never refused (0.02 a second
+  dropped). The 37 new pairs a second and 0.9 reused of the whole session
+  were averages over 180 s of game screen and 49 s of loading. Reused pairs
+  came in bursts: none in 119 of 246 seconds, 3 to 13 in 51 of them. At 72 Hz
+  a 360 degree a second flip turns 5 degrees a frame and a 240 degree smooth
+  turn 3.3: every reused or late pair stood those still.
+- **What changed: FLIP REPROJECTION** (EXPERIMENTAL, after EYE AIM; the
+  launcher's Flips card; `flip_reprojection` in spidy_vr.ini; off by
+  default; not in profiles, as EYE AIM is not: a comparison on one
+  headset). Each pair keeps the tracking space's turn it was rendered with
+  (`NativeEyeFrame::rigTurn`); each frame's own, placed for its display
+  time, is the turn now. The layer's eye poses are turned by
+  conjugate(now) * rendered about the eyes' middle. What the player holds is
+  turned the other way in the world before the overlay draws it, so it stays
+  with the head: the hands, web shooters and webs' starts, aims, wrist
+  meters, sightline marks, the calibration panel, the gadget wheel and the
+  phone. World marks (anchors, aim points, bursts) turn with the city. A
+  turn over 0.5 rad (a 30 degree snap turn, a recenter) is shown as
+  rendered.
+- **Not covered.** Spider-Man's own arms and the game's HUD panel are in the
+  game's picture and turn with it, by the turn since it was rendered (about
+  5 degrees in a fast flip). The pair's position is not moved: the swing's
+  travel between render and display is not reprojected.
+- **Tried in the headset (October 29, Quest 3 over Virtual Desktop, RTX 4080
+  Super, Ryzen 7 5800X3D), switching it on and off.** The own view is
+  clearly steadier in flips, spins and swings. The game made about 75 new
+  pairs a second in VR at every resolution tried (61 to 100 a second), so
+  the headset's rate decides how many pairs are shown twice: at 120 Hz 33 to
+  39% (73 to 79 new a second), at 90 Hz 15% (76), at 72 Hz 4% (68, 2.7
+  reused a second, none in 31 of 112 seconds). A pair shown twice now keeps
+  the city steady, and what is in the picture but moves with you judders
+  instead: Spider-Man's arms and the HUD panel, by the turn between the two
+  (whatever the turn, the picture's own uneven timing shows on one of the
+  two), and things close by, by the travel not made up (30 cm at 30 m/s in
+  a 120 Hz frame; much at 3 m, nothing at 100 m). At 72 Hz it felt good,
+  in a two-minute run and then in a 12-minute session (707 s in VR, the
+  switch on throughout): 68 new pairs a second (62 or fewer in a tenth of
+  the seconds), 6% shown twice (4.2 a second, in bursts where the game
+  dips below 72: none in 84 of 710 seconds, more than 5 in 176), 0.007
+  dropped a second. The turn made up was 2.3 degrees on average (most
+  28.6; 962 of about 157,000 frames past the limit): the time from render
+  to display, not pairs shown again. PLAYERS.md tells
+  players to pick a rate the game keeps up with.
+- **The report's `flip_reprojection`** (`SpidyReprojectData`, a new export;
+  XrData unchanged): frames turned, shown as rendered, passed over (past the
+  limit), turned while a pair was shown again, and the last, largest and mean
+  turn in degrees; each sample has `on`, `turned`, `passed`, `last_deg`.
+- **Checked:** 706 core tests (new: the world where the turn has taken it for
+  both eyes, the eyes' distance and middle kept, snap turns and unknown turns
+  left alone, the tracking space's turn from the heads, held things staying
+  with the head while the eyes' views stay as rendered; the row, its key and
+  its default), the launcher's checks (the profile leaves it out), the six
+  Python suites (new: `SpidyReprojectData` decoded, torn and of another
+  version), ctest 3/3; in the headset as above. On 0.7.0 the row is the
+  tab's 63rd, after EYE AIM, and `flip_reprojection` the last line of
+  spidy_vr.ini.
+
+**Earlier build (November 1): one eye pair a headset frame, room for the
+city's detail, and no speed blur in the eyes.** You: "there are still
+imposters or lod or textures or shaders not loading in time or in range
+causing frequent very visible ugly buildings and props ... also preformance is
+not stellar. could we be hogging the resourses with our logs? anyway fix
+both.", then "Fix the speed blur too".
+
+- **What your October 30 sessions showed.** The game drew 78 to 157 eye pairs
+  a second against the headset's 90, unsynced with it: below 90 the headset
+  repeated pairs (up to 14 a second), above it the pairs it never showed cost
+  the card, and the newest pair was a different time old at each headset
+  frame, so what moves stepped unevenly (Discord players: judder at over 100
+  frames a second). Both limits the October 27 build raised were full: the
+  texture budget (7,741 to 7,748 MB of 7,748 from the fourth minute on, 18 GB
+  of the card unused; a player found the blur gone with Texture Quality up),
+  and the scene's slot pool the far buildings' full models share with the
+  props near you (96% at most), which shrank the head cone to 0-15 degrees.
+- **Not the logs.** The launcher reads the game's counters 20 times a second
+  from its own process, about 3 ms a pass (5% of one core), and writes the
+  report after the game closes. Reports now say so (`launcher`).
+- **Pacing (native_pace.hpp).** Each game frame now takes its head from a
+  newer command of the XR worker's than the last frame's, waiting for the
+  next headset frame if none has come: one pair a headset frame, each begun
+  at the same point of it. A game slower than the headset never waits.
+  `--no-eye-pacing` draws as fast as the game can, as before.
+- **The slot pool twice the game's (SpidyScenePool, 819,200 slots).** The
+  render memory module, there from the game's start, raises the one Scene
+  setting the pool is made from, as the scene registry's setup reads it
+  (19116c0): its free-slot bitset and its share of the Scene Gpu Registry
+  (52 MB more video memory) are sized together. A game started before the
+  launcher keeps its own (`scene_pool` says which).
+- **The texture budget up to four times the game's** (it was twice), still
+  leaving an eighth of the card free; **far buildings' full models out to
+  200% of the game's 145 m** (it was 150%).
+- **The game's speed blur left out of the eyes.** Your eye snapshots of
+  October 30 show it mid-swing (0385, 0386): buildings and clouds streaked
+  outward from the middle of the lens. It is the game's radial blur, a kind
+  of visual effect the game plays, like its lens flares and trails. Each
+  frame one plays, the game asks it of every view it has, the eyes among
+  them, weaker the farther the view is from the effect; the eyes sit on the
+  hero. One function queues it for a view (RadialBlur::Schedule, 1841bf0),
+  and nothing else does: Spidy now takes that call and returns for the two
+  eyes. The game's own view (the monitor's normal camera, RECORDING FOV)
+  keeps it. The swing's motion blur bonus (HeroSlideConfig's
+  MotionBlurBonus*) never reached the eyes, whatever this entry said before:
+  the game's motion blur needs three render targets an eye's buffers do not
+  have, and returns at once there.
+- **A session that never showed a frame no longer resets your VR settings.**
+  On November 1 Virtual Desktop refused the eye images five times (a PC
+  restart cleared it). The XR worker reports its settings with its first
+  frame and zeros before it, and the launcher saved those zeros as settings
+  changed in the headset: the next session started at every setting's least
+  (swing speed 10, weight 40%), which floated the hero and slowed the swing.
+  `settings_line` now hands nothing over from a session without frames.
+- **New in reports:** `pacing` (frames that waited, how long),
+  `streaming`'s room checks the pool refused far buildings
+  (`building_refusals`) and nearby props (`zone_refusals`), `scene_pool`,
+  `launcher`, `speed_blur` (how often the game asked its blur of its own view
+  and of an eye; `eyes_left_out`, the times an eye went without).
+- **Measured** with a new probe (`tools/probe_vr_swing.py`: both eyes at 2688
+  x 2880 as your Quest 3 has them, 77% upscaling, eye commands 90 a second,
+  the game's own swing carrying the hero from your save's street; 6 km in
+  four games). Paced: 89.6-90.0 pairs a second, the newest pair's age within
+  0.65 ms (11.6 ms unpaced in a swing), GPU 54-63% and 264-279 W against
+  90-97% and 375-401 W unpaced (157-169 pairs a second), hitches 0.8-1.8% of
+  the time against 6%.
+  The game's pool refused 90 far buildings at 95% full; the doubled one
+  peaked at 50% (411,484 slots, more than the game's whole pool) with the
+  cone at its full 30 degrees and nothing refused, at 150% and 200% reach and
+  with a 60-degree cone. 200% reach cost no measurable frames (155.9-159.0 a
+  second unpaced, both reaches). Texture budget 15,496 MB, in use growing.
+  The speed blur: in the game, the blur function called for the left eye went
+  to Spidy and was left out (`blur_hook_check` in
+  `reports/vr-swing-blur-8.json`), and the eyes ran on at 90 pairs a second.
+- **Not run in the headset:** Virtual Desktop had no headset (asleep). Your
+  next session's report has every number above for the real thing. The game
+  never asked for its speed blur in nine probe games: not in its own swing
+  (17-30 m/s), web zips, point launches, 50 m/s dives or 46 m/s pushes
+  through the movement bridge, or falls from about 100 m. So there is no
+  before-and-after picture, and which effects carry the blur is not known;
+  `speed_blur` in your next report counts the times the eyes went without.
+- **Checked:** 736 core tests, the six Python protocol suites.
 
 **Earlier build (October 30): Spidy 0.7.0, the community patch - twelve pull
 requests.** You: "review open prs and fix what needs fixes, merge whats

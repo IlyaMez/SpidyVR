@@ -7,6 +7,7 @@
 #include "spidy/native_eye_frame.hpp"
 #include "spidy/native_eye_gpu.hpp"
 #include "spidy/native_hud.hpp"
+#include "spidy/native_pace.hpp"
 #include "spidy/native_stream.hpp"
 #include "spidy/native_view.hpp"
 #include "spidy/native_webs.hpp"
@@ -93,6 +94,17 @@ struct ShadowData {
     ShadowEye eyes[2];
 };
 static_assert(sizeof(ShadowEye) == 336 && sizeof(ShadowData) == 736);
+// The game's speed blur (radialBlur below): on, the hook that leaves it out
+// of the eyes is in place; keep, the eyes have it all the same
+// (SpidyEyeSpeedBlur); and how often the game's visual effects asked it, a
+// frame and a view at a time, of its own views and of the eyes, left out or
+// kept.
+struct BlurData {
+    uint32_t magic = 0x424c5552, version = 1, bytes = sizeof(BlurData), on{};
+    uint32_t keep{}, reserved{};
+    volatile LONG64 game{}, eyesLeftOut{}, eyesKept{};
+};
+static_assert(sizeof(BlurData) == 48);
 extern "C" {
 __declspec(dllexport) CommandData SpidyCommandData;
 __declspec(dllexport) ShadowData SpidyShadowData;
@@ -101,6 +113,10 @@ __declspec(dllexport) native_eyes::FrameData SpidyStereoFrames;
 __declspec(dllexport) native_appearance::Data SpidyAppearanceData;
 // The far buildings' cone and the texture budget (native_stream.hpp).
 __declspec(dllexport) native_stream::Data SpidyStreamData;
+// The game's frames paced by the headset's (native_pace.hpp).
+__declspec(dllexport) native_pace::Data SpidyPaceData;
+// The game's speed blur, which the eyes go without.
+__declspec(dllexport) BlurData SpidyBlurData;
 // Frames in which the eyes marked what they drew for the game (rested, below).
 __declspec(dllexport) volatile LONG64 SpidyDrawnFrames;
 }
@@ -300,6 +316,39 @@ std::atomic<uint32_t> coneDegrees{static_cast<uint32_t>(native_stream::coneMargi
 Descriptor impostorCone{};
 uint64_t impostorConePass = UINT64_MAX;
 float easedMargin{};
+// The slot pool's room check (190cb80) as the far buildings' full models
+// (16f7f30, back at 16f7fff) and the hibernate zones (1a22530, back at
+// 1a22fa2) ask it, counted while the eyes render (native_stream::Data): how
+// often each was refused is what says whether the pool, the cone or the reach
+// keeps buildings cards and props away.
+using PoolRoom = bool (*)(void*, int32_t);
+PoolRoom originalPoolRoom{};
+void* poolRoomHook{};
+bool poolCounts{};
+std::atomic<uint64_t> buildingChecks{}, buildingRefusals{}, zoneChecks{}, zoneRefusals{};
+std::atomic<int32_t> mostAsked{};
+// The game's speed blur, RadialBlur::Schedule (1841bf0). A visual effect with
+// a Radial Blur emitter (kRadialBlur) asks it each frame it plays, through the
+// effects manager (7a81000: list +70, count +2c4, which 19ca590, the one
+// caller, reads and empties), of every view in the pool, the eyes among them,
+// faded by the view's distance from the effect (19ec0f0): a strength up to 1
+// (xmm1), where it starts and ends out from the picture's centre (xmm2,
+// xmm3), and a centre in the world or none (on the stack). It queues
+// RadialBlur (command 0x91, 18416d0; nothing else queues it) on the view's
+// list, which streaks the picture outward from that centre: buildings and
+// clouds smeared about the middle of the lens in the user's swings of October
+// 30. The eyes go without it unless SpidyEyeSpeedBlur keeps it; the game's own
+// view keeps it. Which effects carry one is not known: the game's swing, zips,
+// point launches, dives and falls played none in tools/probe_vr_swing.py.
+// (The swing's motion blur bonus, HeroSlideConfig's MotionBlurBonus*, never
+// reaches the eyes: MotionBlurApply, 0x90 at 183cca0, returns at once in a
+// buffer set without kMbAaTarget0/1 and kMbDisocclTarget, kind 2, and an
+// eye's has none; see initBuffers.)
+using RadialBlur = void (*)(void*, float, float, float, const float*);
+RadialBlur originalRadialBlur{};
+void* radialBlurHook{};
+bool radialBlurs{};
+std::atomic<bool> eyeSpeedBlur{};
 // The texture streamer's budget while the eyes render (keepTextureBudget):
 // the game's, and the one the eyes got (0 none). SpidyTextureBudget(0) keeps
 // the game's. Given back for the session where the card ran short.
@@ -383,6 +432,15 @@ bool hooked{}, attempted{}, retired[2]{};
 SRWLOCK commandLock = SRWLOCK_INIT, jobLock = SRWLOCK_INIT;
 native_eyes::Command command{};
 std::atomic<uint64_t> commandDeadline{};
+// Frame pacing (native_pace.hpp): SpidySetEyes signals paceEvent for each
+// command and keeps the headset's period from their arrivals (commandLock);
+// paceFrame, on the main thread, waits on it as a frame takes its head.
+// pacedSerial: the command the main thread's last frame took.
+std::atomic<bool> pacing{};
+HANDLE paceEvent{};
+int64_t qpcFrequency{1}, paceArrival{};
+double paceAverage{};
+uint64_t pacedSerial{};
 std::atomic<float> flatAspect{16.f / 9};
 std::atomic<uint64_t> latchedSerial{}, generation{};
 EyeJobTable jobs; // jobLock
@@ -706,11 +764,67 @@ void moveHead(FrameHead& head, Vec3 hero) {
         (*m)[14] += head.offset.z;
     }
 }
+// Main thread, as a frame takes its head (latchHead): while the eyes render in
+// place of the game's resting view, a command newer than the last frame's, or
+// the wait for the next (native_pace.hpp). The wait comes after the frame's
+// gameplay, before its head: the head stays the newest the worker sent.
+void paceFrame() {
+    AcquireSRWLockShared(&commandLock);
+    uint64_t serial = command.serial;
+    const bool immersive = command.enabled == 1;
+    const double average = paceAverage;
+    ReleaseSRWLockShared(&commandLock);
+    if (!pacing.load(std::memory_order_relaxed) || !paceEvent || !immersive || !rested.load() ||
+        live.load() != 2 || stopRequested) {
+        pacedSerial = serial;
+        return;
+    }
+    bool waited{}, timedOut{};
+    LARGE_INTEGER start{}, now{};
+    if (serial <= pacedSerial) {
+        waited = true;
+        const auto limit = static_cast<int64_t>(native_pace::waitMs(average, qpcFrequency));
+        QueryPerformanceCounter(&start);
+        for (;;) {
+            QueryPerformanceCounter(&now);
+            const auto elapsed = (now.QuadPart - start.QuadPart) * 1000 / qpcFrequency;
+            if (elapsed >= limit) {
+                timedOut = true;
+                break;
+            }
+            WaitForSingleObject(paceEvent, static_cast<DWORD>(limit - elapsed));
+            AcquireSRWLockShared(&commandLock);
+            serial = command.serial;
+            ReleaseSRWLockShared(&commandLock);
+            if (serial > pacedSerial)
+                break;
+        }
+        QueryPerformanceCounter(&now);
+    }
+    pacedSerial = serial;
+    const auto waitedUs =
+        waited ? static_cast<uint32_t>((now.QuadPart - start.QuadPart) * 1000000 / qpcFrequency) : 0u;
+    AcquireSRWLockExclusive(&telemetry);
+    auto& d = SpidyPaceData;
+    InterlockedIncrement64(&d.sequence);
+    ++d.frames;
+    if (waited) {
+        ++d.waits;
+        d.waitedUs += waitedUs;
+        d.mostWaitUs = std::max(d.mostWaitUs, waitedUs);
+    }
+    if (timedOut)
+        ++d.timeouts;
+    d.periodUs = static_cast<uint32_t>(average * 1000000 / static_cast<double>(qpcFrequency));
+    InterlockedIncrement64(&d.sequence);
+    ReleaseSRWLockExclusive(&telemetry);
+}
 // This frame's head (FrameHead), latched at its first use in the frame: after
 // the frame's gameplay has moved the player.
 const FrameHead& latchHead() {
     if (frameHead.frame == frameIndex)
         return frameHead;
+    paceFrame();
     // This frame's rope-update sample of the hero, if one ran since the last
     // frame (taken once a frame, immersive or not, as FrameHero requires).
     uint64_t ropeSamples{};
@@ -1444,6 +1558,41 @@ void restGameView(uintptr_t primary, bool rest) {
         rested = primary;
     native_gpu::mirror(rested.load() != 0);
 }
+// 190cb80: room in the scene's slot pool for `wanted` more slots (poolRoomHook
+// above). Job threads ask it, so the counts are atomics, published with the
+// pool's size (slotPool).
+bool poolRoom(void* registry, int32_t wanted) {
+    const bool room = originalPoolRoom(registry, wanted);
+    if (enabled.load(std::memory_order_relaxed)) {
+        const auto caller = reinterpret_cast<uintptr_t>(_ReturnAddress()) - base;
+        if (caller == 0x16f7fff) {
+            buildingChecks.fetch_add(1, std::memory_order_relaxed);
+            if (!room)
+                buildingRefusals.fetch_add(1, std::memory_order_relaxed);
+        } else if (caller == 0x1a22fa2) {
+            zoneChecks.fetch_add(1, std::memory_order_relaxed);
+            if (!room)
+                zoneRefusals.fetch_add(1, std::memory_order_relaxed);
+        }
+        for (auto most = mostAsked.load(std::memory_order_relaxed);
+             wanted > most && !mostAsked.compare_exchange_weak(most, wanted, std::memory_order_relaxed);) {
+        }
+    }
+    return room;
+}
+// 1841bf0: the game's speed blur for one view (radialBlurHook above), on the
+// main thread.
+void radialBlur(void* view, float strength, float inner, float outer, const float* centre) {
+    if (view && (view == eyes[0].load() || view == eyes[1].load())) {
+        if (!eyeSpeedBlur.load(std::memory_order_relaxed)) {
+            InterlockedIncrement64(&SpidyBlurData.eyesLeftOut);
+            return;
+        }
+        InterlockedIncrement64(&SpidyBlurData.eyesKept);
+    } else
+        InterlockedIncrement64(&SpidyBlurData.game);
+    originalRadialBlur(view, strength, inner, outer, centre);
+}
 // The scene's slot pool (native_stream::poolMargin): its size and the slots in
 // use (7a42f80 +1c8, +1cc), into SpidyStreamData. False where it does not read.
 bool slotPool(int32_t& capacity, int32_t& used) {
@@ -1460,6 +1609,11 @@ bool slotPool(int32_t& capacity, int32_t& used) {
     data.poolMost = std::max(data.poolMost, used);
     if (capacity > 0 && used >= capacity * .85f)
         ++data.poolFullFrames;
+    data.buildingChecks = buildingChecks.load(std::memory_order_relaxed);
+    data.buildingRefusals = buildingRefusals.load(std::memory_order_relaxed);
+    data.zoneChecks = zoneChecks.load(std::memory_order_relaxed);
+    data.zoneRefusals = zoneRefusals.load(std::memory_order_relaxed);
+    data.mostAsked = mostAsked.load(std::memory_order_relaxed);
     InterlockedIncrement64(&data.sequence);
     ReleaseSRWLockExclusive(&telemetry);
     return true;
@@ -2073,7 +2227,14 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySetEyes(void* input) {
     }
     command = incoming;
     commandDeadline = GetTickCount64() + incoming.leaseMs;
+    LARGE_INTEGER now{};
+    QueryPerformanceCounter(&now);
+    if (paceArrival)
+        paceAverage = native_pace::period(paceAverage, now.QuadPart - paceArrival, qpcFrequency);
+    paceArrival = now.QuadPart;
     ReleaseSRWLockExclusive(&commandLock);
+    if (paceEvent)
+        SetEvent(paceEvent);
     AcquireSRWLockExclusive(&jobLock);
     InterlockedIncrement64(&SpidyStereoFrames.sequence);
     SpidyStereoFrames.accepted = incoming.serial;
@@ -2130,6 +2291,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
         const unsigned char copyJobBytes[] = {0x48, 0x89, 0x5c, 0x24, 0x20, 0x55, 0x56, 0x57};
         const unsigned char beginJobBytes[] = {0x48, 0x89, 0x5c, 0x24, 0x08, 0x57, 0x48, 0x83, 0xec, 0x30};
         const unsigned char initBuffersBytes[] = {0x40, 0x53, 0x48, 0x83, 0xec, 0x30, 0x44, 0x8b, 0x4a, 0x04};
+        const unsigned char radialBlurBytes[] = {0x40, 0x53, 0x48, 0x83, 0xec, 0x50, 0x0f,
+                                                 0x29, 0x74, 0x24, 0x40, 0x0f, 0x28, 0xc1};
         // A buffer set's sizes; the test for which targets its kind gets, and
         // the kinds' masks it reads (3d11b18: an offscreen view's is 0x20);
         // TemporalAa up to its test of the render context's anti-aliasing.
@@ -2287,6 +2450,13 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
                   entry(0x18911f4, budgetStoreBytes, sizeof(budgetStoreBytes)) &&
                   entry(0x19b2ed3, reserveBytes, sizeof(reserveBytes));
         SpidyStreamData.features = (cones ? 1u : 0u) | (budgets ? 2u : 0u);
+        // Frame pacing's signal from the commands (paceFrame).
+        if (!paceEvent)
+            paceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        LARGE_INTEGER frequency{};
+        if (QueryPerformanceFrequency(&frequency) && frequency.QuadPart > 0)
+            qpcFrequency = frequency.QuadPart;
+        SpidyPaceData.on = pacing.load() ? 1u : 0u;
         if (!hooked) {
             auto s = MH_Initialize();
             if (s != MH_OK && s != MH_ERROR_ALREADY_INITIALIZED) {
@@ -2378,6 +2548,16 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
                 break;
             }
             hooked = true;
+            // Counting the pool's room checks is no reason to fail the start.
+            poolRoomHook = reinterpret_cast<void*>(base + 0x190cb80);
+            poolCounts = cones && MH_CreateHook(poolRoomHook, reinterpret_cast<void*>(poolRoom),
+                                                reinterpret_cast<void**>(&originalPoolRoom)) == MH_OK;
+            // Nor is leaving the speed blur out of the eyes: another game
+            // build keeps it.
+            radialBlurHook = reinterpret_cast<void*>(base + 0x1841bf0);
+            radialBlurs = entry(0x1841bf0, radialBlurBytes, sizeof(radialBlurBytes)) &&
+                          MH_CreateHook(radialBlurHook, reinterpret_cast<void*>(radialBlur),
+                                        reinterpret_cast<void**>(&originalRadialBlur)) == MH_OK;
         }
         attempted = false;
         stopRequested = false;
@@ -2395,15 +2575,24 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStart(void* value) {
         for (auto hook : eyeHooks)
             if (s == MH_OK)
                 s = MH_QueueEnableHook(hook);
+        poolCounts = poolCounts && s == MH_OK && MH_QueueEnableHook(poolRoomHook) == MH_OK;
+        radialBlurs = radialBlurs && s == MH_OK && MH_QueueEnableHook(radialBlurHook) == MH_OK;
         if (s == MH_OK)
             s = MH_ApplyQueued();
         if (s != MH_OK) {
             for (auto hook : eyeHooks)
                 MH_QueueDisableHook(hook);
+            if (poolCounts)
+                MH_QueueDisableHook(poolRoomHook);
+            if (radialBlurs)
+                MH_QueueDisableHook(radialBlurHook);
             MH_ApplyQueued();
             result = 1300 + s;
             break;
         }
+        if (poolCounts)
+            SpidyStreamData.features |= 4;
+        SpidyBlurData.on = radialBlurs ? 1u : 0u;
         enabled = true;
         // The rest of the HUD on the panel (native_hud.cpp). Without it the
         // panel still goes in front of the head; SpidyHudData says why not.
@@ -2454,6 +2643,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyStop(void*) {
             if (s != MH_OK && s != MH_ERROR_DISABLED)
                 result = 1500 + s;
         }
+        if (poolCounts)
+            MH_DisableHook(poolRoomHook);
+        if (radialBlurs)
+            MH_DisableHook(radialBlurHook);
+        SpidyBlurData.on = 0;
     }
     // Maintenance normally restores the avatar. If the game stopped running
     // frames (for example during a load), restore the same live instance here.
@@ -2558,6 +2752,32 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyBuildingCone(void* degrees) {
     if (value > 60)
         return 4501;
     coneDegrees = static_cast<uint32_t>(value);
+    return 0;
+}
+// Frame pacing (paceFrame): 1 one game frame a headset frame (a VR session
+// asks for it), 0 the game's frames as fast as it draws them (unless set, as
+// probes that send eye commands at their own rate need). From the next frame.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyEyePacing(void* on) {
+    const auto value = reinterpret_cast<uintptr_t>(on);
+    if (value > 1)
+        return 4701;
+    pacing = value != 0;
+    AcquireSRWLockExclusive(&telemetry);
+    InterlockedIncrement64(&SpidyPaceData.sequence);
+    SpidyPaceData.on = pacing.load() ? 1u : 0u;
+    InterlockedIncrement64(&SpidyPaceData.sequence);
+    ReleaseSRWLockExclusive(&telemetry);
+    return 0;
+}
+// The game's speed blur in the eyes (radialBlur): 0 they go without it (unless
+// set), 1 they keep it as the game's own view does, as before November 1
+// (tools/probe_vr_swing.py compares the two). From the next frame.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyEyeSpeedBlur(void* keep) {
+    const auto value = reinterpret_cast<uintptr_t>(keep);
+    if (value > 1)
+        return 4801;
+    eyeSpeedBlur = value != 0;
+    SpidyBlurData.keep = static_cast<uint32_t>(value);
     return 0;
 }
 // The texture budget while the eyes render (keepTextureBudget): 1 raised where
