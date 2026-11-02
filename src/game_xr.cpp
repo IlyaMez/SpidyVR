@@ -1390,6 +1390,7 @@ DWORD WINAPI run(void*) {
             s.halfPunchDamage = values.halfPunchDamage;
             s.singleHandYankPercent = static_cast<uint32_t>(values.singleHandYankPercent);
             s.webTie = values.webTie;
+            s.airSlingshot = values.airSlingshot;
             sentSwingSettings = s;
             swingSettingsSent = true;
             // A hand-over owns the walls while it lasts; the player's own
@@ -2567,10 +2568,11 @@ DWORD WINAPI run(void*) {
                         check(sampleSwing(&swingState), "Native swing feedback");
                         game_swing::SlingshotData slingshot;
                         slingshotPulseSeconds += frame.seconds;
-                        if (values.webSlingshot && input.focused && sampleSlingshot &&
-                            !sampleSlingshot(&slingshot) && slingshot.magic == 0x53534c47 &&
-                            slingshot.version == 1 && slingshot.bytes == sizeof(slingshot) &&
-                            slingshot.charge > 0 && slingshot.charge <= 1) {
+                        if ((values.webSlingshot || values.airSlingshot) && input.focused &&
+                            sampleSlingshot && !sampleSlingshot(&slingshot) &&
+                            slingshot.magic == 0x53534c47 && slingshot.version == 1 &&
+                            slingshot.bytes == sizeof(slingshot) && slingshot.charge > 0 &&
+                            slingshot.charge <= 1) {
                             if (slingshotPulseSeconds >= .06f) {
                                 for (unsigned i = 0; i < 2; ++i)
                                     runtime.haptic(i, .15f + .65f * slingshot.charge, .045f);

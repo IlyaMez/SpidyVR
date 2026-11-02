@@ -1867,6 +1867,10 @@ void App::options(ImVec2 origin, ImVec2 size) {
         option("Slingshot speed",
                "How fast a full draw launches you: under the swing speed limit, or at a speed of its own.",
                S(150), [&] { tabCombo("##slingshotspeed", Item::slingshotSpeed); });
+        option("Air slingshot (experimental)",
+               "In the air with two taut webs: hold both grips, draw both arms back until the hands buzz, "
+               "then let go to launch along the webs. Off: letting go in the air only releases, as before.",
+               S(42), [&] { tabToggle("##airslingshot", Item::airSlingshot); });
         option("Better climbing", "Take one web in both hands, then pull hand over hand to keep climbing it.",
                S(42), [&] { tabToggle("##betterclimbing", Item::betterClimbing); });
         option("Single hand yank strength",

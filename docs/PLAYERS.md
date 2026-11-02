@@ -957,9 +957,16 @@ VR settings
                    in the air, on a web or on a wall, and not while a
                    grip or trigger is held: swinging and the webs are as
                    they were.
+  AIR SLINGSHOT    (off until you switch it on) the web slingshot in the
+                   air: with both webs attached and pulling (taut), hold
+                   both grips, draw both arms back until the hands buzz,
+                   then let go of both: you launch along the two webs,
+                   never slower than you were going that way. A release
+                   without the draw only lets go, as before. Its own
+                   switch: WEB SLINGSHOT on the ground is as it was.
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches

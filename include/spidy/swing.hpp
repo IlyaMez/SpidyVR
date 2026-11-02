@@ -370,6 +370,23 @@ class Swing {
     bool slingshotEnabled() const {
         return slingshotEnabled_;
     }
+    // AIR SLINGSHOT (off until set): the same draw and release in the air,
+    // from two webs both under tension (slingshotTaut), launching along them.
+    // Its own switch: the ground's WEB SLINGSHOT stays as it is either way.
+    void allowAirSlingshot(bool on) {
+        if (airSlingshot_ != on) {
+            airSlingshot_ = on;
+            clearSlingshot();
+        }
+    }
+    bool airSlingshotEnabled() const {
+        return airSlingshot_;
+    }
+    // A slingshot drawn far enough to launch now: its charge buzzes the hands
+    // (game_xr), and in the air a hand's yank and the two-hand zip wait.
+    bool slingshotDrawn() const {
+        return slingshotCharge_ > .1f && (body_.grounded ? slingshotEnabled_ : airSlingshot_);
+    }
     float slingshotCharge() const {
         return slingshotCharge_;
     }
@@ -639,6 +656,11 @@ class Swing {
     void clearSlingshot();
     void slingshot(float dt, const Input&, const WorldQueries&);
     bool slingshotEnabled_{}, slingshotPair_{}, slingshotReleasing_{};
+    // AIR SLINGSHOT: on; the pair being drawn is the air's (a landing or a
+    // takeoff while drawing starts over). slingshotTaut: web i is under
+    // tension now, pulling the body or stretched to its length.
+    bool airSlingshot_{}, slingshotInAir_{};
+    bool slingshotTaut(int i) const;
     Vec3 slingshotHands_[2]{}, slingshotEnds_[2]{};
     uint64_t slingshotSurfaces_[2]{};
     float slingshotCharge_{}, slingshotHold_{}, slingshotRelease_{}, slingshotYaw_{};

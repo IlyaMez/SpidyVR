@@ -123,6 +123,7 @@ inline constexpr ProfileSetting profileSettings[] = {
     tabOnly("half_punch_damage", Item::halfPunchDamage, &Values::halfPunchDamage),
     tabOnly("web_tie", Item::webTie, &Values::webTie),
     tabOnly("native_run", Item::nativeRun, &Values::nativeRun),
+    tabOnly("air_slingshot", Item::airSlingshot, &Values::airSlingshot),
     retired("wall_distance_cm", vr_settings::fixedWallDistance),
     tabOnly("realistic_flips", Item::realisticFlips, &Values::realisticFlips),
     tabOnly("rotation_strength", Item::automaticStrength, 25, 100, &Values::automaticStrength),

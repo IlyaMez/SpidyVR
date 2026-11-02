@@ -1418,9 +1418,112 @@ int main() {
         s.webRange = 1001;
         check(!game_swing::validSettings(s), "a web range over 1000 m accepted");
     });
+    test("AIR SLINGSHOT: two taut webs in the air draw and launch along them; off, the air only lets go", [] {
+        {
+            // AIR SLINGSHOT: two taut webs in the air, both arms drawn until the
+            // charge buzzes, both let go: a launch along the webs.
+            auto airborne = [](bool ground, bool air) {
+                auto s = std::make_unique<Sling>(ground);
+                s->solver.allowAirSlingshot(air);
+                s->body.grounded = false;
+                s->tick();
+                return s;
+            };
+            {
+                auto s = airborne(true, false);
+                s->draw();
+                near(s->solver.slingshotCharge(), 0);
+                s->release();
+                check(!s->fired(), "AIR SLINGSHOT off: a release in the air launched");
+                check(!s->solver.webs()[0].attached && !s->solver.webs()[1].attached,
+                      "AIR SLINGSHOT off: no release");
+            }
+            {
+                auto s = airborne(false, true);
+                s->draw();
+                check(s->solver.slingshotCharge() > .9f && s->solver.slingshotDrawn(),
+                      "air draw never charged");
+                check(std::none_of(s->solver.events().begin(), s->solver.events().end(),
+                                   [](const Event& e) { return e.kind == EventKind::Zip; }),
+                      "the air draw yanked");
+                s->release();
+                check(s->fired() && s->last.velocity.z < -10 && s->last.velocity.y > 0,
+                      "no air launch along the webs");
+                check(length(s->last.velocity) <= s->solver.speedLimit() + .01f, "air launch over the limit");
+                check(!s->solver.webs()[0].attached && !s->solver.webs()[1].attached,
+                      "air launch kept its webs");
+            }
+            {
+                // Faster along the launch already: it keeps that speed.
+                auto s = airborne(false, true);
+                s->solver.limitSpeed(60);
+                s->draw();
+                s->body.velocity = normalized(Vec3{0, .6f, -1}) * 50;
+                s->tick();
+                s->release();
+                check(s->fired() && length(s->last.velocity) > 40, "the air launch slowed the swing");
+            }
+            {
+                // A release with no draw only lets go, as before.
+                auto s = airborne(false, true);
+                for (int i = 0; i < 100; ++i)
+                    s->tick();
+                s->release();
+                check(!s->fired(), "an undrawn air release launched");
+            }
+            {
+                // A landing while drawing starts over (the ground's own is off).
+                auto s = airborne(false, true);
+                s->draw();
+                s->body.grounded = true;
+                s->tick();
+                near(s->solver.slingshotCharge(), 0);
+                s->release();
+                check(!s->fired(), "a landing kept the air charge");
+            }
+            {
+                // The ground's slingshot is unchanged by the air's switch.
+                Sling ground;
+                ground.solver.allowAirSlingshot(true);
+                ground.tick();
+                ground.draw();
+                ground.release();
+                check(ground.fired() && ground.last.velocity.y > 0, "the ground slingshot changed");
+            }
+            {
+                // Slack lines never start a draw.
+                auto s = airborne(false, true);
+                s->body.position.z -= 6;
+                s->body.position.y += 3;
+                for (int i = 0; i < 5; ++i)
+                    s->tick();
+                s->draw();
+                check(s->solver.slingshotCharge() == 0, "slack webs charged an air slingshot");
+            }
+        }
+    });
+    test("AIR SLINGSHOT's settings: version 24, off by default, kept as air_slingshot", [] {
+        game_swing::Settings s;
+        check(!s.airSlingshot && offsetof(game_swing::Settings, airSlingshot) == game_swing::settingsBytesV23,
+              "air slingshot not appended, or on by default");
+        s.airSlingshot = 1;
+        check(game_swing::validSettings(s), "air slingshot ON refused");
+        s.airSlingshot = 2;
+        check(!game_swing::validSettings(s), "an invalid air slingshot switch accepted");
+        vr_settings::Values v;
+        check(!v.airSlingshot && vr_settings::defaultChoice(vr_settings::Item::airSlingshot) == 0,
+              "air slingshot on by default");
+        check(vr_settings::choose(vr_settings::Item::airSlingshot, 1, v) && v.airSlingshot &&
+                  vr_settings::tabOnlyText(v).find("air_slingshot=1\n") != std::string::npos &&
+                  vr_settings::withTabOnly({}, "air_slingshot=1\n").airSlingshot &&
+                  !vr_settings::withTabOnly({}, "").airSlingshot,
+              "spidy_vr.ini keeps AIR SLINGSHOT as air_slingshot, off when absent");
+        Swing solver;
+        check(!solver.airSlingshotEnabled() && !solver.slingshotDrawn(), "the solver's air slingshot on");
+    });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 23 && s.bytes == 108 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 24 && s.bytes == 112 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -1968,7 +2071,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 23 && s.bytes == 108 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 24 && s.bytes == 112 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -3304,10 +3407,10 @@ int main() {
     });
     test("grip climbing settings keep old packets and reject invalid versions, sizes and switches", [] {
         using namespace game_swing;
-        for (uint32_t version = 3; version <= 23; ++version) {
+        for (uint32_t version = 3; version <= 24; ++version) {
             Settings s;
             s.version = version;
-            s.bytes = 16 + 4 * version; // official v3=28 through custom v23=108
+            s.bytes = 16 + 4 * version; // official v3=28 through custom v24=112
             check(validSettings(s), "compatible settings packet was refused");
             ++s.bytes;
             check(!validSettings(s), "wrong settings length was accepted");
@@ -3324,7 +3427,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 23 && s.bytes == 108, "updated settings did not append the climbing field");
+        check(s.version == 24 && s.bytes == 112, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -21379,7 +21482,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 23 && s.bytes == 108 && s.combatVisuals == 1 &&
+        check(s.version == 24 && s.bytes == 112 && s.combatVisuals == 1 &&
                   offsetof(Settings, combatVisuals) == 56,
               "free combat broke the settings defaults or layout");
         s.combatVisuals = 0;
@@ -21426,9 +21529,11 @@ int main() {
         check(withTabOnly(Values{}, "single_hand_yank_percent=999\n").singleHandYankPercent == 300,
               "saved single-hand yank strength was not clamped");
         game_swing::Settings packet;
-        check(packet.version==23 && packet.bytes==108 && !packet.halfPunchDamage &&
-              packet.singleHandYankPercent==100 && offsetof(game_swing::Settings,halfPunchDamage)==96 &&
-              offsetof(game_swing::Settings,singleHandYankPercent)==100,"yank protocol shifted older fields");
+        check(packet.version == 24 && packet.bytes == 112 && !packet.halfPunchDamage &&
+                  packet.singleHandYankPercent == 100 &&
+                  offsetof(game_swing::Settings, halfPunchDamage) == 96 &&
+                  offsetof(game_swing::Settings, singleHandYankPercent) == 100,
+              "yank protocol shifted older fields");
         packet.halfPunchDamage=1;
         check(game_swing::validSettings(packet),"half-damage packet refused");
         packet.halfPunchDamage=2;
@@ -21437,8 +21542,14 @@ int main() {
         check(game_swing::validSettings(packet),"maximum yank strength refused");
         packet.singleHandYankPercent=301;
         check(!game_swing::validSettings(packet),"out-of-range yank strength accepted");
-        packet={}; packet.version=22; packet.bytes=game_swing::settingsBytesV22;
-        check(game_swing::validSettings(packet),"version 22 settings packet refused");
+        packet = {};
+        packet.version = 22;
+        packet.bytes = game_swing::settingsBytesV22;
+        check(game_swing::validSettings(packet), "version 22 settings packet refused");
+        packet = {};
+        packet.version = 23;
+        packet.bytes = game_swing::settingsBytesV23;
+        check(game_swing::validSettings(packet), "version 23 settings packet refused");
         packet={}; packet.version=21; packet.bytes=game_swing::settingsBytesV21;
         check(game_swing::validSettings(packet),"version 21 settings packet refused");
         packet={}; packet.version=20; packet.bytes=game_swing::settingsBytesV20;
@@ -22005,10 +22116,10 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 61 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 62 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[61 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[61].title, "REALISTIC FLIPS") == 0 && all[61].choices.empty(),
+            check(all[62 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[62].title, "REALISTIC FLIPS") == 0 && all[62].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[50].item == Item::controlledFlips && all[53].item == Item::joystickRunCamera &&
                   all[54].item == Item::wallRunCameraTilt && all[55].item == Item::halfPunchDamage,
@@ -22069,6 +22180,9 @@ int main() {
         check(all[60].item == Item::nativeRun && std::strcmp(all[60].title, "NATIVE RUN") == 0 &&
                   all[60].choices.empty() && all[60].place == Place::tab,
               "NATIVE RUN: a switch in the tab, after STEADY HUD");
+        check(all[61].item == Item::airSlingshot && std::strcmp(all[61].title, "AIR SLINGSHOT") == 0 &&
+                  all[61].choices.empty() && all[61].place == Place::tab,
+              "AIR SLINGSHOT: a switch in the tab, after NATIVE RUN");
         {
             Values v;
             check(!v.nativeRun && defaultChoice(Item::nativeRun) == 0, "native run on by default");
@@ -22132,7 +22246,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 67,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 68,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -22375,20 +22489,21 @@ int main() {
     test("VR settings only the tab offers: kept as key=value lines, read back sanitized, the rest left", [] {
         using namespace vr_settings;
         const Values defaults;
-        check(tabOnlyText(defaults) == "controlled_flips=0\nnear_clip_mm=20\nhand_climb=0\n"
-                                       "joystick_wall_run_camera=1\nwall_run_camera_tilt=1\nhalf_punch_damage=0\n"
-                                       "realistic_flips=0\n"
-                                       "rotation_strength=50\nrotation_speed=240\nflight_speed_min=3\n"
-                                       "swing_momentum=1\nrotation_response_ms=500\nhand_momentum=100\n"
-                                       "angular_drag_ms=3000\nhand_speed_min_cm=100\nair_rotation_brake=1\n"
-                                       "flips_in_combat=1\nbody_haptics_webs=1\nbody_haptics_wind=1\nbody_haptics_combat=1\n"
-                                       "body_haptics_movement=1\nrecording_fov=0\nui_style=0\ncombat_visuals=1\nblow_sounds=0\n"
-                                       "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\n"
-                                       "smart_anchor=0\nelastic_web=0\nsoft_release=0\nswing_assist=0\n"
-                                       "slingshot_speed=0\nrecording_smoothing=0\n"
-                                       "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\n"
-                                       "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
-                                       "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\n",
+        check(tabOnlyText(defaults) ==
+                  "controlled_flips=0\nnear_clip_mm=20\nhand_climb=0\n"
+                  "joystick_wall_run_camera=1\nwall_run_camera_tilt=1\nhalf_punch_damage=0\n"
+                  "realistic_flips=0\n"
+                  "rotation_strength=50\nrotation_speed=240\nflight_speed_min=3\n"
+                  "swing_momentum=1\nrotation_response_ms=500\nhand_momentum=100\n"
+                  "angular_drag_ms=3000\nhand_speed_min_cm=100\nair_rotation_brake=1\n"
+                  "flips_in_combat=1\nbody_haptics_webs=1\nbody_haptics_wind=1\nbody_haptics_combat=1\n"
+                  "body_haptics_movement=1\nrecording_fov=0\nui_style=0\ncombat_visuals=1\nblow_sounds=0\n"
+                  "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\n"
+                  "smart_anchor=0\nelastic_web=0\nsoft_release=0\nswing_assist=0\n"
+                  "slingshot_speed=0\nrecording_smoothing=0\n"
+                  "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\n"
+                  "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
+                  "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

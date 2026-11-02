@@ -210,6 +210,11 @@ struct Values {
     // vaults, wall runs - until it falls under 50%. Off by default: the stick
     // jogs as before. Never in the air, on a web or on a wall.
     bool nativeRun = false;
+    // AIR SLINGSHOT (the tab's AIR SLINGSHOT; Swing::allowAirSlingshot): the
+    // slingshot's draw in the air too - both webs under tension, both grips
+    // held and both arms drawn until the hands buzz, then let go: a launch
+    // along the two webs. Off by default: in the air a release only lets go.
+    bool airSlingshot = false;
     // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
     // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
     int singleHandYankPercent = 100;
@@ -326,8 +331,9 @@ enum class Item : uint8_t {
     singleHandYankStrength,
     webTie,
     nativeRun,
+    airSlingshot,
 };
-inline constexpr Item lastItem = Item::nativeRun;
+inline constexpr Item lastItem = Item::airSlingshot;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -350,7 +356,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 72>& rows();
+const std::array<Row, 73>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

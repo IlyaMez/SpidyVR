@@ -1128,7 +1128,8 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
             // Head-relative samples remove virtual movement and room-scale translation.
             if (s.sample && !s.zipUsed && bears(i) && !climbingRope &&
                 !(twoHandZip_ && (twoHandTarget() || zipGestureBlock_ > 0)) &&
-                !(slingshotEnabled_ && body_.grounded)) {
+                !(slingshotEnabled_ && body_.grounded) &&
+                !(airSlingshot_ && !body_.grounded && slingshotDrawn())) {
                 const Vec3 delta = trackingTurn(in).rotate(h.gripRelativeToHead - s.previous);
                 const float pull = -dot(delta, normalized(w.anchor - body_.position));
                 if (pull > 0) {
@@ -1200,8 +1201,7 @@ void Swing::gestures(float dt, const Input& in, const WorldQueries&) {
         zipUsed_ = false;
         zipPull_[0] = zipPull_[1] = zipWindow_ = 0;
     }
-    if (twoHandZip_ && twoHandTarget() && !zipUsed_ && fresh && !changed &&
-        !(slingshotEnabled_ && body_.grounded && slingshotCharge_ > .1f)) {
+    if (twoHandZip_ && twoHandTarget() && !zipUsed_ && fresh && !changed && !slingshotDrawn()) {
         const Vec3 target = (webs_[0].end() + webs_[1].end()) * .5f;
         const Vec3 toward = normalized(target - body_.position);
         const Vec3 gaze = length(in.look) > .5f ? normalized(in.look) : toward;
@@ -1265,12 +1265,26 @@ void Swing::clearSlingshot() {
     slingshotPair_ = slingshotReleasing_ = false;
     slingshotCharge_ = slingshotHold_ = slingshotRelease_ = 0;
 }
+bool Swing::slingshotTaut(int i) const {
+    const auto& w = webs_[i];
+    if (!w.ready())
+        return false;
+    // The pull it gave the body over the last step, m/s^2: a hanging body
+    // pulls at a few. Or stretched to its length, at the top of an arc where
+    // it pulls nothing for a moment.
+    return w.tension > .5f || length(body_.position - w.anchor) >= w.length - .1f;
+}
 void Swing::slingshot(float dt, const Input& in, const WorldQueries& world) {
     // Only real arm travel charges it; walking, a snap turn, loss of tracking,
     // or a missing anchor cancels the gesture rather than launching later.
-    if (!slingshotEnabled_ || !in.focused || !body_.grounded || wall_.on || in.jump || in.leap > 0 ||
-        !in.hands[0].tracked || !in.hands[1].tracked || !finite(in.move) || length(in.move) > .2f ||
-        length(body_.velocity) > 2 || !std::isfinite(dt) || dt <= 0 || dt > .1f) {
+    // In the air (AIR SLINGSHOT) the body moves as it swings, so neither its
+    // speed nor the stick counts; a landing or a takeoff starts it over.
+    const bool air = !body_.grounded;
+    const bool on = air ? airSlingshot_ : slingshotEnabled_;
+    if (!on || !in.focused || wall_.on || in.jump || in.leap > 0 || !in.hands[0].tracked ||
+        !in.hands[1].tracked || !std::isfinite(dt) || dt <= 0 || dt > .1f ||
+        (!air && (!finite(in.move) || length(in.move) > .2f || length(body_.velocity) > 2)) ||
+        (slingshotPair_ && slingshotInAir_ != air)) {
         clearSlingshot();
         return;
     }
@@ -1306,9 +1320,15 @@ void Swing::slingshot(float dt, const Input& in, const WorldQueries& world) {
                     direction = normalized(direction);
                     slingshotFlight_ = true;
                     slingshotAirborne_ = false;
-                    body_.velocity = slingshotSpeed_ > 0
-                                         ? direction * (slingshotSpeed_ * (.3f + .7f * charge))
-                                         : limited(direction * (12 + 28 * charge), config_.maxSpeed);
+                    const float speed = slingshotSpeed_ > 0 ? slingshotSpeed_ * (.3f + .7f * charge)
+                                                            : std::min(12 + 28 * charge, config_.maxSpeed);
+                    // In the air it never slows him: what he already goes
+                    // along the launch stays, if that is more; across it, it
+                    // goes, as a launch from the ground has none.
+                    body_.velocity =
+                        air ? limited(direction * std::max(speed, dot(body_.velocity, direction)),
+                                      speedLimit())
+                            : direction * speed;
                     body_.grounded = false;
                     events_.push_back({EventKind::Slingshot, -1, charge});
                 }
@@ -1321,8 +1341,12 @@ void Swing::slingshot(float dt, const Input& in, const WorldQueries& world) {
         clearSlingshot();
         return;
     }
+    // In the air the pair starts only with both lines under tension.
+    if (air && !slingshotPair_ && (!slingshotTaut(0) || !slingshotTaut(1)))
+        return;
     if (!slingshotPair_) {
         slingshotPair_ = true;
+        slingshotInAir_ = air;
         slingshotYaw_ = in.trackingYaw;
         for (unsigned i = 0; i < 2; ++i) {
             slingshotHands_[i] = in.hands[i].gripRelativeToHead;
@@ -1338,6 +1362,11 @@ void Swing::slingshot(float dt, const Input& in, const WorldQueries& world) {
     for (unsigned i = 0; i < 2; ++i) {
         const Vec3 travel = trackingTurn(in).rotate(in.hands[i].gripRelativeToHead - slingshotHands_[i]);
         pull = std::min(pull, -dot(travel, normalized(slingshotEnds_[i] - body_.position)));
+    }
+    // In the air a line gone slack holds the charge where it is.
+    if (air && (!slingshotTaut(0) || !slingshotTaut(1))) {
+        slingshotHold_ = 0;
+        return;
     }
     if (pull > .16f) {
         slingshotHold_ += dt;
