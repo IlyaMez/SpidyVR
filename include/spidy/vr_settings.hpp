@@ -185,6 +185,11 @@ struct Values {
     // spins and smooth turns as steady as head turns. Off by default, to
     // compare in the headset.
     bool flipReprojection = false;
+    // The HUD as a layer of its own that the headset shows at its own rate
+    // (the tab's STEADY HUD; steady_hud.hpp), instead of drawn into each eye
+    // pair by the game: it holds still when the headset repeats a pair. Off
+    // by default, to compare in the headset.
+    bool steadyHud = false;
     bool operator==(const Values&) const = default;
 };
 inline constexpr int eyeAimShots = 1, eyeAimZips = 2;
@@ -291,8 +296,9 @@ enum class Item : uint8_t {
     joystickRunCamera,
     halfPunchDamage,
     flipReprojection,
+    steadyHud,
 };
-inline constexpr Item lastItem = Item::flipReprojection;
+inline constexpr Item lastItem = Item::steadyHud;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -315,7 +321,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 65>& rows();
+const std::array<Row, 66>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;
@@ -332,7 +338,8 @@ bool choose(Item, int choice, Values&);
 int defaultChoice(Item);
 // The settings no launcher.ini key or XrConfig field carries: NEAR CLIP,
 // RECORDING FOV, UI STYLE, BLOW SOUNDS, HEIGHT, SEATED, WEB SLINGSHOT, BETTER CLIMBING, HAND WALL
-// CLIMBING, EYE AIM, FLIP REPROJECTION, the realistic flips' eleven rows and the body haptics' four groups. The game
+// CLIMBING, EYE AIM, FLIP REPROJECTION, STEADY HUD, the realistic flips' eleven rows and the body
+// haptics' four groups. The game
 // module keeps them as these key=value lines in a file of their own, beside
 // the launcher's settings (game_xr.cpp, tabOnlyPath), and reads them back
 // when VR starts; the launcher's options read and write the same file.

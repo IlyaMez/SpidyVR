@@ -545,14 +545,16 @@ int main() {
     test("a profile holds every setting of the SPIDY VR tab, the tab's own ones by spidy_vr.ini's keys", [&] {
         // Not VR VIEW (each session starts in VR), CALIBRATE BODY (a request), HEIGHT (the player's own, as a
         // calibration is), RECORDING FOV (the monitor's, which suits one PC, as the graphics options do),
-        // EYE AIM (the headset's: an eye tracker or none) or FLIP REPROJECTION (a comparison on one headset).
+        // EYE AIM (the headset's: an eye tracker or none), FLIP REPROJECTION or STEADY HUD (comparisons on
+        // one headset).
         for (const auto& row : spidy::vr_settings::rows()) {
             if (row.item == Item::none)
                 continue;
             const bool leftOut = row.item == Item::view || row.item == Item::calibrate ||
                                  row.item == Item::height || row.item == Item::recordingFov ||
                                  row.item == Item::eyeAim || row.item == Item::recordingSmoothing ||
-                                 row.item == Item::flipReprojection;
+                                 row.item == Item::flipReprojection ||
+                                 row.item == Item::steadyHud;
             check(std::count_if(begin, end, [&](const ProfileSetting& s) { return s.item == row.item; }) ==
                       (leftOut ? 0 : 1),
                   row.title);
@@ -563,7 +565,7 @@ int main() {
         for (size_t line = 0; line < tabOnly.size(); line = tabOnly.find('\n', line) + 1) {
             const std::string key = tabOnly.substr(line, tabOnly.find('=', line) - line);
             if (key == "recording_fov" || key == "recording_smoothing" || key == "height_cm" ||
-                key == "eye_aim" || key == "flip_reprojection")
+                key == "eye_aim" || key == "flip_reprojection" || key == "steady_hud")
                 continue;
             ++lines;
             check(at(key) < std::size(profileSettings) &&

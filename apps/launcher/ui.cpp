@@ -2051,6 +2051,10 @@ void App::options(ImVec2 origin, ImVec2 size) {
             static constexpr int sizes[] = {0, 1, 2, 3};
             stepCombo("##hud", kHudSizes, sizes, 4, &o.hud);
         });
+        option("Steady HUD (experimental)",
+               "The HUD shown by the headset itself, at its own rate, instead of drawn into the game's "
+               "picture: it holds still when the game falls behind. Off: as before, to compare.",
+               S(42), [&] { tabToggle("##steadyhud", Item::steadyHud); });
         option("UI style",
                "Spidy's own marks, gadget wheel and meters: Comic, printed like Spidy's videos, or Tech, like the "
                "game's HUD.",

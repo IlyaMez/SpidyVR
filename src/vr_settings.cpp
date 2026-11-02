@@ -297,6 +297,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.seated;
     case Item::flipReprojection:
         return &v.flipReprojection;
+    case Item::steadyHud:
+        return &v.steadyHud;
     default:
         return nullptr;
     }
@@ -336,9 +338,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 65>& rows() {
+const std::array<Row, 66>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 65> all{{
+    static const std::array<Row, 66> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -474,8 +476,14 @@ const std::array<Row, 65>& rows() {
          {}},
         {Item::eyeAim, "EYE AIM",
          "Web balls and zips go where your eyes look. Needs a headset with eye tracking.", eyeAimChoices},
-        {Item::flipReprojection, "FLIP REPROJECTION",
-         "Flips, spins and smooth turns shown as steadily as head turns.", {}},
+        {Item::flipReprojection,
+         "FLIP REPROJECTION",
+         "Flips, spins and smooth turns shown as steadily as head turns.",
+         {}},
+        {Item::steadyHud,
+         "STEADY HUD",
+         "The HUD shown by the headset itself: it holds still when the game falls behind.",
+         {}},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
          "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
@@ -681,6 +689,7 @@ constexpr TabOnly tabOnly[] = {
     {"web_range_m", nullptr, &Values::webRange},
     {"web_speed", nullptr, &Values::webSpeed},
     {"flip_reprojection", &Values::flipReprojection, nullptr},
+    {"steady_hud", &Values::steadyHud, nullptr},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {
