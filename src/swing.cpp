@@ -1130,7 +1130,8 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
                     }
                     const float speed = pull / dt;
                     if (s.pullDistance >= config_.yankDistance && speed >= config_.yankSpeed) {
-                        const float impulse = std::min(speed * config_.zipMultiplier, config_.maxZipImpulse);
+                        const float impulse = std::min(speed * config_.zipMultiplier, config_.maxZipImpulse) *
+                                              singleHandYankStrength_;
                         body_.velocity =
                             limited(body_.velocity + normalized(w.anchor - body_.position) * impulse,
                                     config_.maxSpeed);

@@ -107,6 +107,10 @@ static_assert(std::size(webRangeChoices) == std::size(webRanges));
 constexpr int webSpeeds[] = {0, 1, 2, 3};
 constexpr const char* webSpeedChoices[] = {"OFF", "SLOW", "MEDIUM", "FAST"};
 static_assert(std::size(webSpeedChoices) == std::size(webSpeeds));
+constexpr int singleHandYankStrengths[] = {50, 75, 100, 125, 150, 200, 250, 300};
+constexpr const char* singleHandYankStrengthChoices[] = {"50%",  "75%",  "100%", "125%",
+                                                         "150%", "200%", "250%", "300%"};
+static_assert(std::size(singleHandYankStrengthChoices) == std::size(singleHandYankStrengths));
 } // namespace
 
 std::span<const int> steps(Item item) {
@@ -141,6 +145,8 @@ std::span<const int> steps(Item item) {
         return webRanges;
     case Item::webSpeed:
         return webSpeeds;
+    case Item::singleHandYankStrength:
+        return singleHandYankStrengths;
     case Item::nearClip:
         return nearClips;
     case Item::recordingFov:
@@ -206,6 +212,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.webRange);
     case Item::webSpeed:
         return static_cast<float>(v.webSpeed);
+    case Item::singleHandYankStrength:
+        return static_cast<float>(v.singleHandYankPercent);
     case Item::nearClip:
         return static_cast<float>(v.nearClipMm);
     case Item::recordingFov:
@@ -328,6 +336,7 @@ Values sanitized(Values v) {
     v.recordingSmoothing = std::clamp(v.recordingSmoothing, 0, 100);
     v.webRange = std::clamp(v.webRange, 10, 1000);
     v.webSpeed = std::clamp(v.webSpeed, 0, 3);
+    v.singleHandYankPercent = std::clamp(v.singleHandYankPercent, 50, 300);
     v.nearClipMm = std::clamp(v.nearClipMm, nearClips[0], std::end(nearClips)[-1]);
     v.recordingFov = recording_fov::sanitized(v.recordingFov);
     v.uiStyle = std::clamp(v.uiStyle, uiStyles[0], std::end(uiStyles)[-1]);
@@ -344,9 +353,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 69>& rows() {
+const std::array<Row, 70>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 69> all{{
+    static const std::array<Row, 70> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -387,6 +396,9 @@ const std::array<Row, 69>& rows() {
          "BETTER CLIMBING",
          "Take one web in both hands, then pull hand over hand to keep climbing it.",
          {}},
+        {Item::singleHandYankStrength, "SINGLE HAND YANK STRENGTH",
+         "How much speed a fast one-hand yank adds. 100% as before; two-hand zips stay.",
+         singleHandYankStrengthChoices},
         {Item::twoHandZip,
          "TWO HAND WEB ZIP",
          "Both webs on one spot: pull both arms back fast to launch at it.",
@@ -608,6 +620,9 @@ bool choose(Item item, int index, Values& v) {
     case Item::webSpeed:
         v.webSpeed = s[index];
         break;
+    case Item::singleHandYankStrength:
+        v.singleHandYankPercent = s[index];
+        break;
     case Item::nearClip:
         v.nearClipMm = s[index];
         break;
@@ -708,6 +723,7 @@ constexpr TabOnly tabOnly[] = {
     {"reel_haptics", &Values::reelHaptics, nullptr},
     {"swing_haptics", &Values::swingHaptics, nullptr},
     {"pc_media", &Values::pcMedia, nullptr},
+    {"single_hand_yank_percent", nullptr, &Values::singleHandYankPercent},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

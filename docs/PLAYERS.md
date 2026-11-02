@@ -789,10 +789,13 @@ VR settings
                    BETTER CLIMBING (off until you switch it on): take a
                    web in both hands and pull hand over hand to climb
                    it, an open-air web too; standing, a pull down it
-                   takes you off the ground, no jump needed. TWO HAND
-                   WEB ZIP (off until you switch it on): with both webs
-                   on one spot, pull both arms back fast toward it and
-                   you launch at it, harder the faster you pull. HAND
+                   takes you off the ground, no jump needed. SINGLE HAND
+                   YANK STRENGTH (100% unless you pick another): how much
+                   speed a fast one-hand web yank adds, from 50 to 300%
+                   of what it adds now; two-hand zips are unchanged. TWO
+                   HAND WEB ZIP (off until you switch it on): with both
+                   webs on one spot, pull both arms back fast toward it
+                   and you launch at it, harder the faster you pull. HAND
                    ROPE STEERING (off until you switch it on): hold your
                    web with the free hand too and pull it sideways to
                    turn your swing; it makes you no faster.
@@ -930,7 +933,7 @@ VR settings
   its options show every one of them but VR VIEW too.
   NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
-  ASSIST, SLINGSHOT SPEED, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
+  ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches
   and the
   CONTROLLED FLIPS and EXPERIMENTAL rows below FLIP SPEED Spidy keeps in

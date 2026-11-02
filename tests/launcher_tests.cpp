@@ -667,6 +667,7 @@ int main() {
         t.wallRunCameraTilt = false;
         t.joystickRunCamera = false;
         t.halfPunchDamage = true;
+        t.singleHandYankPercent = 200;
         t.uiStyle = 1;
         t.combatVisuals = false;
         t.blowSounds = 1;
@@ -700,7 +701,7 @@ int main() {
                   "aim_markers=1\nair_webs=1\nsmart_anchor=0\nweb_range_m=100\nweb_speed=0\nswing_speed=32\n"
                   "weight=100\nelastic_web=0\n"
                   "soft_release=0\nswing_assist=0\nweb_slingshot=0\nslingshot_speed=0\n"
-                  "better_climbing=0\ntwo_hand_zip=0\nrope_steering=0\nwall_run=1\nsnap_turn=30\n"
+                  "better_climbing=0\nsingle_hand_yank_percent=100\ntwo_hand_zip=0\nrope_steering=0\nwall_run=1\nsnap_turn=30\n"
                   "smooth_turn=0\nhaptics=100\nreel_haptics=0\nswing_haptics=0\nblow_sounds=0\npc_media=0\n"
                   "body_haptics=100\nbody_haptics_webs=1\nbody_haptics_wind=1\n"
                   "body_haptics_combat=1\nbody_haptics_movement=1\nscreen_size=1\nscreen_depth=2\nhud=2\n"

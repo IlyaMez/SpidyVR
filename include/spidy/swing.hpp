@@ -1,5 +1,6 @@
 #pragma once
 #include "math.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -623,6 +624,9 @@ class Swing {
     const SwingConfig& config() const {
         return config_;
     }
+    void singleHandYankStrength(float multiplier) {
+        singleHandYankStrength_ = std::clamp(multiplier, .5f, 3.f);
+    }
     const std::vector<Event>& events() const {
         return events_;
     }
@@ -657,6 +661,7 @@ class Swing {
     void gestures(float dt, const Input&, const WorldQueries&);
     bool twoHandTarget() const;
     int webSpeedMode_{};
+    float singleHandYankStrength_ = 1.f;
     struct HandState {
         // held: grip squeezed, with release hysteresis. A web shoots only on the
         // press that sets it, so a lost web never re-fires while the grip stays held.

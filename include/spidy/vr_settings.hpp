@@ -200,6 +200,9 @@ struct Values {
     // The phone's MUSIC plays what the PC plays (the tab's PC MEDIA;
     // phone_pc_media.hpp): Spotify, a browser. Off by default: the Music folder.
     bool pcMedia = false;
+    // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
+    // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
+    int singleHandYankPercent = 100;
     bool operator==(const Values&) const = default;
 };
 inline constexpr int eyeAimShots = 1, eyeAimZips = 2;
@@ -310,8 +313,9 @@ enum class Item : uint8_t {
     reelHaptics,
     swingHaptics,
     pcMedia,
+    singleHandYankStrength,
 };
-inline constexpr Item lastItem = Item::pcMedia;
+inline constexpr Item lastItem = Item::singleHandYankStrength;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -334,7 +338,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 69>& rows();
+const std::array<Row, 70>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

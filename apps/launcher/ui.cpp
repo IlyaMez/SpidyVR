@@ -1864,6 +1864,9 @@ void App::options(ImVec2 origin, ImVec2 size) {
                S(150), [&] { tabCombo("##slingshotspeed", Item::slingshotSpeed); });
         option("Better climbing", "Take one web in both hands, then pull hand over hand to keep climbing it.",
                S(42), [&] { tabToggle("##betterclimbing", Item::betterClimbing); });
+        option("Single hand yank strength",
+               "How much speed a fast one-hand web yank adds. 100% as before; two-hand zips are unchanged.",
+               S(150), [&] { tabCombo("##singlehandyank", Item::singleHandYankStrength); });
         option("Two hand web zip", "Both webs on one spot: pull both arms back fast to launch at it.",
                S(42), [&] { tabToggle("##twohandzip", Item::twoHandZip); });
         option("Hand rope steering",

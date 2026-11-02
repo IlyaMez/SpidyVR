@@ -1198,7 +1198,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
          header[2] != settingsBytesV12 && header[2] != settingsBytesV13 && header[2] != settingsBytesV14 &&
          header[2] != settingsBytesV15 && header[2] != settingsBytesV16 && header[2] != settingsBytesV17 &&
          header[2] != settingsBytesV18 && header[2] != settingsBytesV19 && header[2] != settingsBytesV20 &&
-         header[2] != sizeof(s)) ||
+         header[2] != settingsBytesV21 && header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || !validSettings(s))
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
@@ -1233,6 +1233,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         noBlows = s.version >= 6 ? s.noBlows : 0u;
         combatVisuals = s.version < 11 || s.combatVisuals != 0;
         halfPunchDamage = s.version >= 21 && s.halfPunchDamage != 0;
+        solver.singleHandYankStrength((s.version >= 22 ? s.singleHandYankPercent : 100u) / 100.f);
         if (s.version >= 7)
             solver.allowArcade(s.arcade != 0);
         if (s.version >= 8)

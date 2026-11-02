@@ -3,7 +3,19 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (November 2): pull request #54 by GolexPrime, built on 0.7.0
+**Latest build (November 2): pull request #55 by ImStillDead - SINGLE HAND
+YANK STRENGTH, how much speed a one-hand web yank adds.**
+
+- **SINGLE HAND YANK STRENGTH** (SWINGING, before TWO HAND WEB ZIP; the
+  launcher's Moving card; `single_hand_yank_percent` in `spidy_vr.ini` and
+  profiles) offers 50% through 300%, with 100% keeping the yank as it was.
+  It scales a fast one-hand yank's impulse (`Swing::singleHandYankStrength`);
+  two-hand zips keep their strength, and the swing speed limit still holds.
+  Swing settings version 22; older packets keep 100%.
+- **Validation.** Core and launcher checks cover the setting, its saving,
+  the settings packet's layout and a doubled yank's speed.
+
+**Earlier build (November 2): pull request #54 by GolexPrime, built on 0.7.0
 on November 1 - the phone plays what the PC plays.**
 GolexPrime: "is it possible to get a Spotify integration, so that we play the
 Spotify app in the phone?"

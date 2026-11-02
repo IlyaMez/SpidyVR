@@ -90,6 +90,8 @@ inline constexpr ProfileSetting profileSettings[] = {
     tabOnly("web_slingshot", Item::webSlingshot, &Values::webSlingshot),
     tabOnly("slingshot_speed", Item::slingshotSpeed, 0, 300, &Values::slingshotSpeed),
     tabOnly("better_climbing", Item::betterClimbing, &Values::betterClimbing),
+    tabOnly("single_hand_yank_percent", Item::singleHandYankStrength, 50, 300,
+            &Values::singleHandYankPercent),
     tabOnly("two_hand_zip", Item::twoHandZip, &Values::twoHandZip),
     tabOnly("rope_steering", Item::ropeSteering, &Values::ropeSteering),
     retired("wall_run", 1),
