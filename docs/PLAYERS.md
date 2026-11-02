@@ -972,9 +972,13 @@ VR settings
                    hand, out of the palm side, as Spider-Man's shooters
                    on the inside of his wrists do: turn your palm toward
                    where the web should go. WEB ANGLE tilts that line too.
+  DODGE TUMBLE     (OFF until you pick one) when the game dodges, your
+                   view tips toward the dodge (LEAN) or turns a full roll
+                   (ROLL, sideways dodges) so you can tell it dodged. Your
+                   hands stay where they are. Pick LEAN if ROLL is too much.
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches

@@ -1879,6 +1879,12 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "Webs leave square to the hand, out of the palm side, as Spider-Man's shooters do: turn the "
                "palm to where the web should go. Off: along the controller, as before.",
                S(42), [&] { tabToggle("##wristshooters", Item::wristShooters); });
+        option(
+            "Dodge tumble (experimental)",
+            "When the game takes your dodge, the view leans (LEAN, 24 degrees, under half a second) or rolls "
+            "a whole turn (ROLL, 0.6 s) the way you dodged; ahead or back it only leans. The HUD and your "
+            "hands stay put. Off: the view stays level, as before.",
+            S(150), [&] { tabCombo("##dodgetumble", Item::dodgeTumble); });
         option("Better climbing", "Take one web in both hands, then pull hand over hand to keep climbing it.",
                S(42), [&] { tabToggle("##betterclimbing", Item::betterClimbing); });
         option("Single hand yank strength",

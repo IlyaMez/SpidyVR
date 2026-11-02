@@ -114,6 +114,9 @@ static_assert(std::size(singleHandYankStrengthChoices) == std::size(singleHandYa
 constexpr int webAngles[] = {-45, -30, -15, 0, 15, 30, 45};
 constexpr const char* webAngleChoices[] = {"DOWN 45", "DOWN 30", "DOWN 15", "0", "UP 15", "UP 30", "UP 45"};
 static_assert(std::size(webAngleChoices) == std::size(webAngles));
+constexpr int dodgeTumbles[] = {0, 1, 2};
+constexpr const char* dodgeTumbleChoices[] = {"OFF", "LEAN", "ROLL"};
+static_assert(std::size(dodgeTumbleChoices) == std::size(dodgeTumbles));
 } // namespace
 
 std::span<const int> steps(Item item) {
@@ -152,6 +155,8 @@ std::span<const int> steps(Item item) {
         return singleHandYankStrengths;
     case Item::webAngle:
         return webAngles;
+    case Item::dodgeTumble:
+        return dodgeTumbles;
     case Item::nearClip:
         return nearClips;
     case Item::recordingFov:
@@ -221,6 +226,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.singleHandYankPercent);
     case Item::webAngle:
         return static_cast<float>(v.webAngle);
+    case Item::dodgeTumble:
+        return static_cast<float>(v.dodgeTumble);
     case Item::nearClip:
         return static_cast<float>(v.nearClipMm);
     case Item::recordingFov:
@@ -353,6 +360,7 @@ Values sanitized(Values v) {
     v.webSpeed = std::clamp(v.webSpeed, 0, 3);
     v.singleHandYankPercent = std::clamp(v.singleHandYankPercent, 50, 300);
     v.webAngle = std::clamp(v.webAngle, -45, 45);
+    v.dodgeTumble = std::clamp(v.dodgeTumble, 0, 2);
     v.nearClipMm = std::clamp(v.nearClipMm, nearClips[0], std::end(nearClips)[-1]);
     v.recordingFov = recording_fov::sanitized(v.recordingFov);
     v.uiStyle = std::clamp(v.uiStyle, uiStyles[0], std::end(uiStyles)[-1]);
@@ -369,9 +377,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 75>& rows() {
+const std::array<Row, 76>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 75> all{{
+    static const std::array<Row, 76> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -545,6 +553,8 @@ const std::array<Row, 75>& rows() {
          "WRIST SHOOTERS",
          "Webs leave square to the hand, out of the palm side, as Spider-Man's do.",
          {}},
+        {Item::dodgeTumble, "DODGE TUMBLE",
+         "The view leans or rolls with the game's dodge, so you see it was one.", dodgeTumbleChoices},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
          "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
@@ -660,6 +670,9 @@ bool choose(Item item, int index, Values& v) {
     case Item::webAngle:
         v.webAngle = s[index];
         break;
+    case Item::dodgeTumble:
+        v.dodgeTumble = s[index];
+        break;
     case Item::nearClip:
         v.nearClipMm = s[index];
         break;
@@ -766,6 +779,7 @@ constexpr TabOnly tabOnly[] = {
     {"air_slingshot", &Values::airSlingshot, nullptr},
     {"web_angle_degrees", nullptr, &Values::webAngle},
     {"wrist_shooters", &Values::wristShooters, nullptr},
+    {"dodge_tumble", nullptr, &Values::dodgeTumble},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

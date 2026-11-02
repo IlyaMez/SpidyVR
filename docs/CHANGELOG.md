@@ -7,6 +7,24 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
 
 Not in a build yet, newest first. The release adds these to the next build's entry.
 
+**DODGE TUMBLE, a view you can tell a dodge by.**
+
+- **Before.** A dodge moved Spider-Man while the headset view stayed level,
+  so it was hard to tell a dodge happened.
+- **DODGE TUMBLE** (EXPERIMENTAL, after WRIST SHOOTERS; OFF, LEAN or ROLL;
+  `dodge_tumble` in `spidy_vr.ini` and profiles; OFF by default). When the
+  game starts a dodge (`HeroDodgeManager` kind 4 or 5, read by
+  `game_dodge.cpp` and exported as `SpidyDodgeLive`), the eyes alone turn
+  about the head: LEAN tips 24 degrees toward the dodge and back in 0.45 s;
+  ROLL turns a full roll in 0.6 s for a sideways dodge (ahead and back
+  dodges lean). Hands, aim and the body are never turned. It never runs on
+  the flat screen, in calibration, on a web or while the game owns the
+  camera, and a stopped tumble fades out. It does not lock the camera to the
+  head bone: no reader for that bone exists yet. Diagnostics go to the log.
+- **Validation.** Core checks cover the tumble curves, the direction, the
+  eye-only turn, the export layout and the rows and `spidy_vr.ini` key;
+  launcher checks the profile key. Not played in a headset yet.
+
 **WEB ANGLE and WRIST SHOOTERS, which way the webs
 leave the hands.**
 

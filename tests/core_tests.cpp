@@ -59,6 +59,8 @@
 #include "spidy/tech_marks.hpp"
 #include "spidy/throw_aim.hpp"
 #include "spidy/vd_eyes.hpp"
+#include "spidy/dodge_tumble.hpp"
+#include "spidy/game_dodge.hpp"
 #include "spidy/web_aim.hpp"
 #include <algorithm>
 #include <bitset>
@@ -1802,6 +1804,121 @@ int main() {
         f.predictedDisplayTime=2;out=rig.update(f,{10,20,30},{0,0,-1},true);
         check(out.swing.hands[0].tracked&&out.swing.hands[1].tracked,"hands not independent");
         near(out.swing.hands[0].gripRelativeToHead.y,-.5f);
+    });
+    test("DODGE TUMBLE: a lean that comes back, a roll that ends upright, never a snap", [] {
+        using namespace dodge_tumble;
+        Tumble t;
+        check(!t.active() && t.angle() == 0, "a tumble before a dodge");
+        t.start(Style::off, {0, 0, -1}, 1);
+        check(!t.active(), "OFF tumbled");
+        t.start(Style::lean, {0, 0, -1}, 1);
+        float most = 0;
+        int frames = 0;
+        while (t.active() && frames < 1000) {
+            t.update(1.f / 90, true);
+            most = std::max(most, std::abs(t.angle()));
+            ++frames;
+        }
+        check(most > .4f && most <= leanAngle + 1e-4f, "a lean not 24 degrees at most");
+        check(frames <= static_cast<int>(leanSeconds * 90) + 2, "a lean too long");
+        check(t.angle() == 0 && t.turn().w == 1, "a lean not back level");
+        t.start(Style::roll, {0, 0, -1}, -1);
+        float previous = 0;
+        bool monotonic = true;
+        frames = 0;
+        while (t.active() && frames < 1000) {
+            t.update(1.f / 90, true);
+            if (t.active()) {
+                monotonic &= t.angle() <= previous + 1e-5f;
+                previous = t.angle();
+            }
+            ++frames;
+        }
+        check(monotonic && previous < -6.f, "a left roll not one whole turn the left way");
+        check(frames <= static_cast<int>(rollSeconds * 90) + 2 && !t.active(), "a roll too long");
+        // Cut short: a lean fades within fadeSeconds, a roll hurries round.
+        t.start(Style::lean, {0, 0, -1}, 1);
+        for (int i = 0; i < 18; ++i)
+            t.update(1.f / 90, true);
+        const float at = std::abs(t.angle());
+        t.update(1.f / 90, false);
+        check(std::abs(t.angle()) < at && std::abs(t.angle()) > at * .8f, "a cut lean snapped or held");
+        for (int i = 0; i < 12; ++i)
+            t.update(1.f / 90, false);
+        check(!t.active(), "a cut lean did not end in its fade");
+        t.start(Style::roll, {0, 0, -1}, 1);
+        for (int i = 0; i < 10; ++i)
+            t.update(1.f / 90, true);
+        frames = 0;
+        while (t.active() && frames < 1000) {
+            t.update(1.f / 90, false);
+            ++frames;
+        }
+        check(frames > 3 && frames <= 20, "a cut roll did not hurry round");
+        // Bad input: nothing.
+        t.start(Style::roll, {0, 0, 0}, 1);
+        check(!t.active(), "a roll about no axis");
+        t.start(Style::roll, {0, 0, -1}, NAN);
+        check(!t.active(), "a roll to no side");
+    });
+    test("DODGE TUMBLE's way and kinds: a roll to the stick's side, a flip ahead or back, the game's own dodges", [] {
+        using namespace dodge_tumble;
+        const Vec3 ahead{0, 0, -1}, right{1, 0, 0};
+        auto w = way(1, 0, ahead, right);
+        check(!w.pitch && w.side > 0 && w.axis.z == -1, "a dodge right not a roll right");
+        w = way(-.8f, .3f, ahead, right);
+        check(!w.pitch && w.side < 0, "a dodge left not a roll left");
+        w = way(0, 1, ahead, right);
+        check(w.pitch && w.side < 0 && w.axis.x == 1, "a dodge ahead not a front flip's way");
+        w = way(0, 0, ahead, right);
+        check(w.pitch && w.side > 0, "no stick not a back flip's way");
+        w = way(NAN, 1, ahead, right);
+        check(w.pitch && w.side > 0, "a stick that is not a number");
+        // The right side goes down in a roll to the right.
+        Tumble t;
+        t.start(Style::lean, ahead, 1);
+        for (int i = 0; i < 20; ++i)
+            t.update(1.f / 90, true);
+        check(t.turn().rotate(right).y < -.2f, "a roll right lifted the right side");
+        check(tumbles(4) && tumbles(5) && !tumbles(0) && !tumbles(8) && !tumbles(14), "the wrong kinds tumble");
+        const Pose eye{{.032f, 1.7f, 0}, {}};
+        const Pose turned = turnedAbout(eye, {0, 1.7f, 0}, Quat::around(ahead, 3.14159265f));
+        check(length(turned.position - Vec3{-.032f, 1.7f, 0}) < 1e-4f, "an eye not turned about the head");
+        check(vr_settings::Values{}.dodgeTumble == 0 && vr_settings::defaultChoice(vr_settings::Item::dodgeTumble) == 0,
+              "DODGE TUMBLE on by default");
+        vr_settings::Values v;
+        check(vr_settings::choose(vr_settings::Item::dodgeTumble, 2, v) && v.dodgeTumble == 2 &&
+                  vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).dodgeTumble == 2 &&
+                  vr_settings::withTabOnly({}, "dodge_tumble=9\n").dodgeTumble == 2 &&
+                  vr_settings::withTabOnly({}, "").dodgeTumble == 0,
+              "spidy_vr.ini keeps DODGE TUMBLE as dodge_tumble, 0 to 2, OFF when absent");
+        game_dodge::Live live;
+        check(live.magic == 0x5344474c && live.version == 1 && live.bytes == 40 && !live.starts, "the live dodge's header");
+    });
+    test("DODGE TUMBLE turns the eyes alone about the head; the identity changes nothing", [] {
+        auto f = trackedFrame();
+        GameTrackingRig plain, turned;
+        plain.update(f, {10, 20, 30}, {0, 0, -1}, true);
+        turned.update(f, {10, 20, 30}, {0, 0, -1}, true);
+        f.predictedDisplayTime = 2;
+        turned.viewTurn(Quat{});
+        const auto a = plain.update(f, {10, 20, 30}, {0, 0, -1}, true);
+        auto b = turned.update(f, {10, 20, 30}, {0, 0, -1}, true);
+        check(a.eyes == b.eyes && a.head == b.head, "the identity turn changed the view");
+        f.predictedDisplayTime = 3;
+        turned.viewTurn(Quat::around({0, 0, -1}, 3.14159265f));
+        const auto c = plain.update(f, {10, 20, 30}, {0, 0, -1}, true);
+        b = turned.update(f, {10, 20, 30}, {0, 0, -1}, true);
+        check(c.head == b.head && length(c.hands[0].position - b.hands[0].position) == 0 &&
+                  length(c.swing.hands[1].aim.position - b.swing.hands[1].aim.position) == 0,
+              "the tumble moved the head or the hands");
+        // Upside down: the eyes swap sides about the head, and the up points down.
+        near(b.eyes[0][12] - b.eyes[1][12], c.eyes[1][12] - c.eyes[0][12]);
+        near(b.eyes[0][5], -c.eyes[0][5]);
+        turned.viewTurn(Quat{NAN, 0, 0, 1});
+        f.predictedDisplayTime = 4;
+        check(plain.update(f, {10, 20, 30}, {0, 0, -1}, true).eyes == turned.update(f, {10, 20, 30}, {0, 0, -1}, true).eyes,
+              "a turn that is not a number turned the view");
     });
     test("each hand aims from its web shooter, on the wrist the body draws, where the hand points", [] {
         // Meta's runtimes, and Virtual Desktop's, turn the aim pose 30 degrees
@@ -22185,10 +22302,10 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 64 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 65 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[64 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[64].title, "REALISTIC FLIPS") == 0 && all[64].choices.empty(),
+            check(all[65 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[65].title, "REALISTIC FLIPS") == 0 && all[65].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[50].item == Item::controlledFlips && all[53].item == Item::joystickRunCamera &&
                   all[54].item == Item::wallRunCameraTilt && all[55].item == Item::halfPunchDamage,
@@ -22258,6 +22375,10 @@ int main() {
                   std::strcmp(all[63].title, "WRIST SHOOTERS") == 0 && all[63].choices.empty() &&
                   all[63].place == Place::tab,
               "WEB ANGLE and WRIST SHOOTERS: in the tab, after AIR SLINGSHOT");
+        check(all[64].item == Item::dodgeTumble && std::strcmp(all[64].title, "DODGE TUMBLE") == 0 &&
+                  all[64].choices.size() == 3 && std::strcmp(all[64].choices[0], "OFF") == 0 &&
+                  std::strcmp(all[64].choices[2], "ROLL") == 0 && all[64].place == Place::tab,
+              "DODGE TUMBLE: OFF, LEAN or ROLL in the tab, after WRIST SHOOTERS");
         {
             Values v;
             check(!v.nativeRun && defaultChoice(Item::nativeRun) == 0, "native run on by default");
@@ -22321,7 +22442,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 70,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 71,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -22579,7 +22700,8 @@ int main() {
                   "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\n"
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
                   "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
-                  "degrees=0\nwrist_shooters=0\n",
+                  "degrees=0\nwrist_shooters=0\n"
+                  "dodge_tumble=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

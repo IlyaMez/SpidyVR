@@ -13,6 +13,7 @@
 #include "spidy/monitor_rate.hpp"
 #include "spidy/eye_snapshot.hpp"
 #include "spidy/game_bridge_protocol.hpp"
+#include "spidy/dodge_tumble.hpp"
 #include "spidy/game_dodge.hpp"
 #include "spidy/game_fp.hpp"
 #include "spidy/web_aim.hpp"
@@ -517,6 +518,9 @@ const game_sound::Data* soundResults{};
 // The game's own dodges for a player a web carries (game_dodge.hpp), read in
 // place; null from an older ray module, which has none.
 const game_dodge::Data* dodgeResults{};
+// The hero's dodge as the game has it each frame (game_dodge.hpp's Live), for
+// DODGE TUMBLE; null from an older ray module, which has none.
+const game_dodge::Live* dodgeLive{};
 // The tab's BLOW SOUNDS to the ray module (SpidySoundMode; optional).
 DWORD(WINAPI* soundMode)(void*){};
 BridgeCall startSwing{}, submitSwing{}, sampleSwing{}, stopSwing{}, retargetSwing{}, sampleGrab{}, sampleAim{};
@@ -965,6 +969,17 @@ DWORD WINAPI run(void*) {
         // moment after B went down with the game's time at full speed. The
         // side its whoosh starts on (body_haptics' azimuth: + the right).
         float dodgeWatch{}, dodgeFrom{};
+        // DODGE TUMBLE (dodge_tumble.hpp): the view's lean or roll with a
+        // dodge the game took, started from the game's own dodge start
+        // (dodgeLive) within half a second of the player's ask for one (B, or
+        // a dodge by moving). The way he asked, how long ago, whether that
+        // ask is still waiting for the game's dodge, the game's starts seen,
+        // and whether play stepped the tumble this frame (if not, it ends).
+        dodge_tumble::Tumble dodgeTumble;
+        dodge_tumble::Way tumbleWay{{0, 0, -1}, 1, false};
+        float tumbleAskAge = 1e9f;
+        bool tumbleAskWaiting{}, tumbleStepped{};
+        uint64_t tumbleStartsSeen = UINT64_MAX;
         // A dodge by moving (spider_sense.hpp's MoveDodge): the head out of a
         // warned attack's way is the game's B, the way it went.
         MoveDodge moveDodge;
@@ -2047,6 +2062,12 @@ DWORD WINAPI run(void*) {
                         rig.sceneFacing(fpFacingMs && GetTickCount64() - fpFacingMs < 4000 && !motion.active,
                                         fpFacing);
                     }
+                    // DODGE TUMBLE: the eyes take the tumble's turn from the
+                    // last frame of play; with none (a menu, a scene), it ends.
+                    if (!tumbleStepped)
+                        dodgeTumble.reset();
+                    tumbleStepped = false;
+                    rig.viewTurn(dodgeTumble.turn());
                     motion = rig.update(seated::raised(controller, seatRaise), feet, {camera[8], camera[9], camera[10]}, gameplay,
                                         swingState.owned ? Vec3{0, 1, 0} : heroUp,
                                         game_swing::airborne(swingState, now.QuadPart, frequency.QuadPart), hold,
@@ -3757,6 +3778,82 @@ DWORD WINAPI run(void*) {
                             game_prompts::note(line);
                         }
                         interacting = walk.interact;
+                        // DODGE TUMBLE (off by default): the view leans or rolls
+                        // with a dodge, from the game's own start of one
+                        // (dodgeLive: its ground dodge, kind 4, or its dodge on
+                        // the move, 5; never Spidy's on a web) within half a
+                        // second of the player's ask, and only while the game,
+                        // not the swing, moves him and no web holds him. Each
+                        // start and each ask the game did not answer goes in
+                        // the session's timeline (game_prompts::note).
+                        {
+                            using dodge_tumble::Style;
+                            const auto style = static_cast<Style>(std::clamp(values.dodgeTumble, 0, 2));
+                            const float dt =
+                                std::isfinite(frame.seconds) ? std::clamp(frame.seconds, 0.f, .1f) : 0.f;
+                            const bool webbed = swingState.webs[0].attached || swingState.webs[1].attached;
+                            const bool allowed = style != Style::off && motion.active && !flatScreen &&
+                                                 !calibrationInput && swingFresh && !swingState.owned &&
+                                                 !webbed;
+                            tumbleAskAge += dt;
+                            if (walk.dodge && !dodging) {
+                                Vec3 ahead = motion.headPose.orientation.rotate({0, 0, -1});
+                                ahead.y = 0;
+                                ahead = length(ahead) > .1f ? normalized(ahead) : motion.walkForwardAxis;
+                                tumbleWay = dodge_tumble::way(walk.right, walk.forward, ahead,
+                                                              normalized(cross(ahead, {0, 1, 0})));
+                                tumbleAskAge = 0;
+                                tumbleAskWaiting = style != Style::off;
+                            }
+                            char line[128];
+                            if (dodgeLive) {
+                                const volatile game_dodge::Live* live = dodgeLive;
+                                const uint64_t starts = live->starts;
+                                MemoryBarrier();
+                                const uint32_t kind = live->lastKind, ours = live->ours;
+                                if (tumbleStartsSeen == UINT64_MAX)
+                                    tumbleStartsSeen = starts;
+                                if (starts != tumbleStartsSeen) {
+                                    tumbleStartsSeen = starts;
+                                    if (style != Style::off) {
+                                        const bool asked = tumbleAskWaiting && tumbleAskAge <= .5f;
+                                        const bool tumbles =
+                                            allowed && asked && dodge_tumble::tumbles(kind) && !ours;
+                                        if (tumbles)
+                                            dodgeTumble.start(
+                                                tumbleWay.pitch && style == Style::roll ? Style::lean : style,
+                                                tumbleWay.axis, tumbleWay.side);
+                                        sprintf_s(
+                                            line,
+                                            "dodge tumble: the game's dodge began (kind %u%s), %d ms after "
+                                            "the ask%s -> %s",
+                                            kind, ours ? ", Spidy's web dodge" : "",
+                                            asked ? static_cast<int>(tumbleAskAge * 1000) : -1,
+                                            asked ? "" : " (none asked)",
+                                            tumbles ? (tumbleWay.pitch ? "a flip's lean" : "a roll's tumble")
+                                                    : "no tumble");
+                                        game_prompts::note(line);
+                                        tumbleAskWaiting = false;
+                                    }
+                                }
+                            } else if (allowed && walk.dodge && !dodging) {
+                                // An older ray module: the ask alone, unconfirmed.
+                                dodgeTumble.start(tumbleWay.pitch && style == Style::roll ? Style::lean
+                                                                                          : style,
+                                                  tumbleWay.axis, tumbleWay.side);
+                                game_prompts::note(
+                                    "dodge tumble: no SpidyDodgeLive, tumbling on the ask alone");
+                                tumbleAskWaiting = false;
+                            }
+                            if (tumbleAskWaiting && tumbleAskAge > .5f) {
+                                game_prompts::note(
+                                    "dodge tumble: a dodge asked for, and none of the game's began "
+                                    "within 500 ms");
+                                tumbleAskWaiting = false;
+                            }
+                            dodgeTumble.update(dt, allowed);
+                            tumbleStepped = true;
+                        }
                         dodges += walk.dodge && !dodging;
                         dodging = walk.dodge;
                         heals += walk.heal && !healing;
@@ -5350,6 +5447,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
                                                           soundResults->version != expected.version ||
                                                           soundResults->bytes != expected.bytes))
         soundResults = nullptr;
+    dodgeLive = reinterpret_cast<const game_dodge::Live*>(GetProcAddress(rays, "SpidyDodgeLive"));
+    if (const game_dodge::Live expected;
+        dodgeLive && (dodgeLive->magic != expected.magic || dodgeLive->version != expected.version ||
+                      dodgeLive->bytes != expected.bytes))
+        dodgeLive = nullptr;
     dodgeResults = reinterpret_cast<const game_dodge::Data*>(GetProcAddress(rays, "SpidyDodgeData"));
     if (const game_dodge::Data expected; dodgeResults && (dodgeResults->magic != expected.magic ||
                                                           dodgeResults->version != expected.version ||

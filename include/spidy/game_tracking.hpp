@@ -372,6 +372,13 @@ class GameTrackingRig {
     void standOnWalls(bool on) {
         standOnWalls_ = on;
     }
+    // DODGE TUMBLE (dodge_tumble.hpp): a world turn the eyes alone take about
+    // the head at the next updates, until set back to the identity. The head
+    // pose, the hands and all placed from them stay where they are. The
+    // identity until set; reset() keeps it.
+    void viewTurn(Quat turn) {
+        viewTurn_ = finite(Vec3{turn.x, turn.y, turn.z}) && std::isfinite(turn.w) ? turn : Quat{};
+    }
     // The eyes out of what the world is built of (HeadClearance). Before an
     // update: a point inside the player's body, where no wall is (the rays'
     // start), and each surface found since the last one - by the rays the
@@ -473,6 +480,7 @@ class GameTrackingRig {
     Quat surfaceTurn_{};
     Vec3 surfaceShift_{};
     bool standing_{}, standOnWalls_ = true;
+    Quat viewTurn_{};
     bool handClimb_{};
     unsigned wallHands_{};
     float runCameraDistance_ = .9f;
