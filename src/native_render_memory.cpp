@@ -11,6 +11,7 @@ using namespace spidy;
 using namespace spidy::native_render_memory;
 extern "C" {
 __declspec(dllexport) Data SpidyRenderMemoryData;
+__declspec(dllexport) ScenePoolData SpidyScenePoolData;
 }
 namespace {
 using Create = uint8_t (*)(void*);
@@ -46,6 +47,37 @@ template <class F> void publish(F&& change) {
     change(SpidyRenderMemoryData);
     InterlockedIncrement64(&SpidyRenderMemoryData.sequence);
     ReleaseSRWLockExclusive(&telemetry);
+}
+template <class F> void publishPool(F&& change) {
+    AcquireSRWLockExclusive(&telemetry);
+    InterlockedIncrement64(&SpidyScenePoolData.sequence);
+    change(SpidyScenePoolData);
+    InterlockedIncrement64(&SpidyScenePoolData.sequence);
+    ReleaseSRWLockExclusive(&telemetry);
+}
+// The scene registry's setup and the Scene setting it sizes the slot pool by
+// (native_render_memory.hpp: scenePool); the registry, whose pool size reads
+// -1 until that setup has run (1904a00 makes it so).
+constexpr uintptr_t sceneSetupRva = 0x19116c0, sceneSettingRva = 0x7a89780, sceneRegistryRva = 0x7a42f80;
+using SceneSetup = uint8_t (*)(void*);
+SceneSetup originalSceneSetup{};
+void* sceneSetupHook{};
+std::atomic<uint32_t> scenePercent{};
+uint8_t sceneSetup(void* registry) {
+    int32_t slots{};
+    if (const auto percent = scenePercent.exchange(0);
+        percent && reinterpret_cast<uintptr_t>(registry) == base + sceneRegistryRva &&
+        read(base + sceneSettingRva, &slots, sizeof(slots))) {
+        const auto raised = scenePool(slots, percent);
+        *reinterpret_cast<volatile int32_t*>(base + sceneSettingRva) = raised;
+        publishPool([&](ScenePoolData& d) {
+            d.status = 2;
+            d.gameSlots = slots;
+            d.slots = raised;
+        });
+    }
+    publishPool([](ScenePoolData& d) { ++d.setups; });
+    return originalSceneSetup(registry);
 }
 // 1872d90 reserves and commits the ring and resets the allocator (called from
 // the renderer's start, 188a19c). No frame exists yet, so nothing refers to
@@ -183,6 +215,68 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyRenderMemoryStart(void* megab
     } while (false);
     if (result)
         publish([&](Data& d) { d.error = result; });
+    ReleaseSRWLockExclusive(&lifecycle);
+    return result;
+}
+// A slot pool of `percent` of the game's (100-400; native_render_memory.hpp:
+// scenePool), from the scene registry's setup on, if the game has not set it
+// up yet. 0 also when it has (status 3): a game started before the launcher's.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyScenePool(void* percent) {
+    const auto wanted = reinterpret_cast<uintptr_t>(percent);
+    if (wanted < 100 || wanted > scenePoolMost)
+        return 7501;
+    AcquireSRWLockExclusive(&lifecycle);
+    DWORD result{};
+    uint32_t status = 1;
+    do {
+        base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+        // The setup's start, its only read of the setting, and its only call.
+        const unsigned char setupBytes[] = {0x48, 0x89, 0x5c, 0x24, 0x20, 0x55, 0x56, 0x57,
+                                            0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57};
+        const unsigned char settingRead[] = {0x8b, 0x05, 0x6e, 0x7d, 0x17, 0x06};
+        const unsigned char setupCall[] = {0x48, 0x8d, 0x0d, 0x31, 0x4f, 0x34, 0x06, 0xe8, 0x6c, 0x36, 0x21, 0x00};
+        int32_t poolSize{};
+        if (!GetModuleHandleW(L"Spider-Man.exe") || !entry(sceneSetupRva, setupBytes, sizeof(setupBytes)) ||
+            !entry(0x1911a0c, settingRead, sizeof(settingRead)) ||
+            !entry(0x16fe048, setupCall, sizeof(setupCall)) ||
+            !read(base + sceneRegistryRva + 0x1c8, &poolSize, sizeof(poolSize))) {
+            status = 4;
+            break;
+        }
+        // -1 from the registry's constructor (1904a00), 0 before it: not set up yet.
+        if (poolSize != -1 && poolSize != 0) {
+            status = 3;
+            break;
+        }
+        if (!sceneSetupHook) {
+            auto s = MH_Initialize();
+            if (s != MH_OK && s != MH_ERROR_ALREADY_INITIALIZED) {
+                result = 7600 + s;
+                break;
+            }
+            sceneSetupHook = reinterpret_cast<void*>(base + sceneSetupRva);
+            s = MH_CreateHook(sceneSetupHook, reinterpret_cast<void*>(sceneSetup),
+                              reinterpret_cast<void**>(&originalSceneSetup));
+            if (s == MH_OK)
+                s = MH_EnableHook(sceneSetupHook);
+            if (s != MH_OK) {
+                MH_RemoveHook(sceneSetupHook);
+                sceneSetupHook = nullptr;
+                result = 7700 + s;
+                break;
+            }
+        }
+        scenePercent = static_cast<uint32_t>(wanted);
+        // A setup that ran between the look above and the hook found no percent.
+        if (read(base + sceneRegistryRva + 0x1c8, &poolSize, sizeof(poolSize)) && poolSize != -1 && poolSize &&
+            scenePercent.exchange(0))
+            status = 3;
+    } while (false);
+    publishPool([&](ScenePoolData& d) {
+        d.percent = static_cast<uint32_t>(wanted);
+        if (d.status != 2)
+            d.status = result ? 4 : status;
+    });
     ReleaseSRWLockExclusive(&lifecycle);
     return result;
 }
