@@ -9,6 +9,8 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
   the previous yank impulse. It affects one-hand yanks only; two-hand zips keep
   their existing strength. The choice is saved in `spidy_vr.ini` and older
   settings packets retain the original 100% behavior.
+- The launcher exposes SINGLE HAND YANK STRENGTH under Moving and JOYSTICK
+  WALL RUN CAMERA under Walls.
 - **Validation.** The feature builds with the Windows compiler. Core and
   launcher checks cover the setting, persistence, and settings packet layout.
 

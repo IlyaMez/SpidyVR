@@ -1869,6 +1869,9 @@ void App::options(ImVec2 origin, ImVec2 size) {
         option("Hand rope steering",
                "Hold your web with the free hand too and pull sideways to turn your swing.", S(42),
                [&] { tabToggle("##ropesteering", Item::ropeSteering); });
+        option("Single hand yank strength",
+               "How much speed a fast one-hand web yank adds. 100% keeps the current strength; two-hand zips are unchanged.",
+               S(150), [&] { tabCombo("##singlehandyankstrength", Item::singleHandYankStrength); });
         option("Snap turn", "How far a flick of the right stick turns you.", S(150), [&] {
             stepCombo("##snap", kSnapTurns, kSnapValues, static_cast<int>(std::size(kSnapValues)), &o.snapTurn);
         });
@@ -1882,6 +1885,9 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "On a wall with the left stick at rest, squeeze a grip near the wall to hold on and pull to "
                "climb; both grips held roll your view along it.",
                S(42), [&] { tabToggle("##handclimb", Item::handClimb); });
+        option("Joystick wall run camera",
+               "On: the old wall-floor camera transition. Off: the joystick drives the momentum wall run.", S(42),
+               [&] { tabToggle("##joystickruncamera", Item::joystickRunCamera); });
         option("Wall Run Camera Tilt", "Gently bank with the body on horizontal momentum wall runs.", S(42),
                [&] { tabToggle("##wallruncameratilt", Item::wallRunCameraTilt); });
     });

@@ -794,7 +794,8 @@ VR settings
                    turn your swing; it makes you no faster.
                    SINGLE HAND YANK STRENGTH (100% by default): increase
                    the speed gained from a fast one-hand web yank, up to
-                   300%; two-hand zips are unchanged.
+                   300%; two-hand zips are unchanged. The launcher's
+                   Options > Moving has the same control.
                    SWING ASSIST (off until you switch it on): flying at
                    a wall on a web, or just after, you slow down in time
                    instead of slamming into it; nothing turns you or
@@ -857,7 +858,8 @@ VR settings
                    so the existing momentum wall-running gait and camera
                    placement take over. The normal momentum wall clearance
                    is retained; no new body lean or close-view pose is added.
-                   On restores the old wall-floor camera transition.
+                   On restores the old wall-floor camera transition; the
+                   launcher has it under Options > Walls too.
                    WALL RUN CAMERA TILT controls the momentum camera bank.
   HALF PUNCH DAMAGE ... off by default. On halves VR punch and web-strike
                    health damage, including uppercuts, smashes, counters and
