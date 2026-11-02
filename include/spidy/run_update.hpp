@@ -154,4 +154,46 @@ class RunLog {
     float measured_{}, top_{}, lastAirH_{}, lastAirV_{}, landing_{-1};
     char line_[lineBytes]{};
 };
+// RUNNING LEAP (vr_settings::Values::momentumLeap, off by default;
+// Swing::allowMomentumLeap): a charged leap from the ground that keeps the
+// run's speed. The leap's way is the stick's (or, with the stick at rest, the
+// run's); of the body's speed across the ground, `carry` of what goes that way
+// is kept and the charge's own push (leapForward, from half to all of it with
+// the charge, times the stick's tilt) is added, `addScale` of it, together at
+// most `horizontalMax`. `sideKeep` of the speed across that way is kept too.
+// A leap charged to longCharge or more from a run faster than longMinSpeed is
+// a long jump: longForward more ahead, longUp of the height. Up as before.
+// Leap{} reproduces the leap as it was: nothing kept, the charge's push alone.
+struct Leap {
+    float carry = 0, sideKeep = 0, addScale = 1, horizontalMax = INFINITY;
+    float longCharge = INFINITY, longMinSpeed = INFINITY, longUp = 1, longForward = 1;
+};
+constexpr Leap momentumLeap{1, .5f, .6f, 30, .6f, 6, .8f, 1.3f};
+// velocity: the body's as the leap goes (the game's run, measured); move: the
+// stick in the world (Input::move); charge: 0 to 1. Returns the leap's
+// velocity, at most maxSpeed.
+inline Vec3 leapVelocity(const Leap& k, Vec3 velocity, Vec3 move, float charge, float leapUp,
+                         float leapUpFull, float leapForward, float maxSpeed) {
+    charge = std::isfinite(charge) ? std::clamp(charge, 0.f, 1.f) : 0.f;
+    const Vec3 stick = finite(move) ? Vec3{move.x, 0, move.z} : Vec3{};
+    const Vec3 run = finite(velocity) ? Vec3{velocity.x, 0, velocity.z} : Vec3{};
+    const float tilt = std::min(length(stick), 1.f);
+    Vec3 way{};
+    if (tilt > .1f)
+        way = stick / length(stick);
+    else if (length(run) > .5f)
+        way = run / length(run);
+    const float push = tilt > .1f ? leapForward * (.5f + .5f * charge) * tilt : 0.f;
+    const float along = dot(run, way);
+    const float carried = std::max(along, 0.f) * k.carry;
+    float ahead = carried + push * k.addScale;
+    float up = leapUp + (leapUpFull - leapUp) * charge;
+    if (charge >= k.longCharge && along > k.longMinSpeed) {
+        ahead *= k.longForward;
+        up *= k.longUp;
+    }
+    const Vec3 side = (run - way * along) * k.sideKeep;
+    const Vec3 out = way * std::min(ahead, k.horizontalMax) + side + Vec3{0, up, 0};
+    return finite(out) ? limited(out, maxSpeed) : Vec3{0, up, 0};
+}
 } // namespace spidy::run_update

@@ -223,18 +223,27 @@ class ChargeJump {
   public:
     static constexpr float tapSeconds = .18f, pulseSeconds = .09f, fullSeconds = .8f, leastCharge = .15f,
                            leapSeconds = .15f;
+    // EARLY JUMP (vr_settings::Values::earlyJump): 0 as above; 1 a tap is
+    // one let go within quickTapSeconds; 2 that, and a press while the
+    // player runs (update's `running`: NATIVE RUN holds RT) is the game's A
+    // as it is held, at once, with no charge.
+    static constexpr float quickTapSeconds = .1f;
+    void earlyJump(int mode) {
+        early_ = std::clamp(mode, 0, 2);
+        tap_ = early_ ? quickTapSeconds : tapSeconds;
+    }
     struct Keys {
         bool jump{};  // the game's A
         float leap{}; // a leap let go of: its charge, above 0 up to 1 (Input::leap)
     };
     // seconds: since the previous update. held: the player's A as the game
     // would get it. ground: he stands on the ground in VR play, free to jump.
-    Keys update(float seconds, bool held, bool ground) {
+    Keys update(float seconds, bool held, bool ground, bool running = false) {
         const float dt = std::isfinite(seconds) ? std::clamp(seconds, 0.f, .1f) : 0.f;
         const bool pressed = held && !down_;
         down_ = held;
         if (pressed)
-            phase_ = ground ? Phase::waiting : Phase::plain, time_ = 0;
+            phase_ = ground && !(early_ == 2 && running) ? Phase::waiting : Phase::plain, time_ = 0;
         else
             time_ += dt;
         switch (phase_) {
@@ -253,7 +262,7 @@ class ChargeJump {
                 time_ = 0;
                 return {true, 0};
             }
-            if (time_ < tapSeconds)
+            if (time_ < tap_)
                 return {};
             phase_ = Phase::charging;
             ++charges_;
@@ -295,7 +304,7 @@ class ChargeJump {
     }
     // How far: 0 to 1.
     float charge() const {
-        return phase_ == Phase::charging ? std::clamp((time_ - tapSeconds) / fullSeconds, 0.f, 1.f) : 0.f;
+        return phase_ == Phase::charging ? std::clamp((time_ - tap_) / fullSeconds, 0.f, 1.f) : 0.f;
     }
     // Charges begun so far, and leaps let go of.
     uint32_t charges() const {
@@ -309,7 +318,8 @@ class ChargeJump {
     enum class Phase { idle, plain, waiting, pulse, charging, leaping, spent };
     Phase phase_{};
     bool down_{};
-    float time_{}, leap_{};
+    int early_{};
+    float time_{}, leap_{}, tap_{tapSeconds};
     uint32_t charges_{}, leaps_{};
 };
 // A hand at the temple with its trigger pulled: the game's R3, its scan of

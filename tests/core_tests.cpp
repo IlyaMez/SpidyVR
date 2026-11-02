@@ -1591,7 +1591,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 25 && s.bytes == 120 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 26 && s.bytes == 124 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -2254,7 +2254,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 25 && s.bytes == 120 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 26 && s.bytes == 124 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -3610,7 +3610,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 25 && s.bytes == 120, "updated settings did not append the climbing field");
+        check(s.version == 26 && s.bytes == 124, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -9252,6 +9252,123 @@ int main() {
         c.leap=0;c.look={0,3,0};check(!game_swing::valid(c),"a look that is no direction accepted");
         game_swing::Command old;old.serial=1;old.version=3;old.bytes=game_swing::commandBytesV3;
         check(game_swing::valid(old)&&game_swing::input(old).leap==0,"a version 3 command refused");
+    });
+    test("RUNNING LEAP: Leap{} is the leap as before; on, a run's speed kept along the leap, a long jump", [] {
+        using namespace run_update;
+        const SwingConfig c;
+        // The leap as it was, for any charge, stick and run: the run plays no part.
+        for (float charge : {.15f, .5f, 1.f})
+            for (Vec3 stick : {Vec3{}, Vec3{0, 0, -1}, Vec3{.3f, 0, .4f}, Vec3{.05f, 0, 0}})
+                for (Vec3 run : {Vec3{}, Vec3{0, 0, -9}, Vec3{6, 0, 0}}) {
+                    const float tilt = std::min(length(stick), 1.f);
+                    const Vec3 along = tilt > .1f ? stick * (c.leapForward * (.5f + .5f * charge) / length(stick) * tilt)
+                                                  : Vec3{};
+                    const Vec3 was =
+                        limited(along + Vec3{0, c.leapUp + (c.leapUpFull - c.leapUp) * charge, 0}, c.maxSpeed);
+                    const Vec3 now =
+                        leapVelocity(Leap{}, run, stick, charge, c.leapUp, c.leapUpFull, c.leapForward, c.maxSpeed);
+                    check(length(now - was) < 1e-4f, "Leap{} is not the leap as before");
+                }
+        // A 9 m/s run ahead, half a charge, the stick ahead: the run kept, the charge's push on top.
+        const Vec3 run{0, 0, -9};
+        Vec3 v = leapVelocity(momentumLeap, run, {0, 0, -1}, .5f, c.leapUp, c.leapUpFull, c.leapForward, c.maxSpeed);
+        near(-v.z, 9 + 12 * .75f * .6f, .01f);
+        near(v.x, 0);
+        near(v.y, c.leapUp + (c.leapUpFull - c.leapUp) * .5f, .01f);
+        check(-v.z > 12, "a running leap no further than a standing one");
+        // No stick: along the run. Backwards: nothing of the run kept, the push alone.
+        v = leapVelocity(momentumLeap, run, {}, .5f, c.leapUp, c.leapUpFull, c.leapForward, c.maxSpeed);
+        near(-v.z, 9, .01f);
+        v = leapVelocity(momentumLeap, run, {0, 0, 1}, .5f, c.leapUp, c.leapUpFull, c.leapForward, c.maxSpeed);
+        near(v.z, 12 * .75f * .6f, .01f);
+        // Across the run: half of it kept sideways.
+        v = leapVelocity(momentumLeap, {8, 0, 0}, {0, 0, -1}, .5f, c.leapUp, c.leapUpFull, c.leapForward, c.maxSpeed);
+        near(v.x, 4, .01f);
+        // A long jump: charged past .6 from a run past 6 m/s, further and flatter, at most 30 across.
+        const Vec3 full =
+            leapVelocity(momentumLeap, run, {0, 0, -1}, 1, c.leapUp, c.leapUpFull, c.leapForward, c.maxSpeed);
+        near(-full.z, (9 + 12 * .6f) * 1.3f, .01f);
+        near(full.y, c.leapUpFull * .8f, .01f);
+        const Vec3 slow =
+            leapVelocity(momentumLeap, {0, 0, -4}, {0, 0, -1}, 1, c.leapUp, c.leapUpFull, c.leapForward, c.maxSpeed);
+        near(slow.y, c.leapUpFull, .01f);
+        const Vec3 fast =
+            leapVelocity(momentumLeap, {0, 0, -40}, {0, 0, -1}, 1, c.leapUp, c.leapUpFull, c.leapForward, c.maxSpeed);
+        near(-fast.z, 30, .01f);
+        check(length(leapVelocity(momentumLeap, {0, 0, -200}, {0, 0, -1}, 1, c.leapUp, c.leapUpFull, c.leapForward,
+                                  20)) <= 20.001f,
+              "a leap past the speed limit");
+        check(finite(leapVelocity(momentumLeap, {NAN, 0, 0}, {NAN, 0, 0}, NAN, c.leapUp, c.leapUpFull,
+                                  c.leapForward, c.maxSpeed)),
+              "a leap that is no number");
+        // The swing: off, the leap as before whatever the run; on, it keeps the run.
+        TestWorld w;
+        w.enabled = false;
+        const Body running{{0, 0, 0}, {0, 0, -9}, true};
+        const auto leap = [&](bool on) {
+            Swing sw(inert());
+            sw.allowMomentumLeap(on);
+            Input in;
+            in.leap = 1;
+            in.move = {0, 0, -1};
+            return sw.predictNativeStep(1.f / 60, in, w, running).velocity;
+        };
+        near(leap(false).z, -12, .01f);
+        near(leap(false).y, 15, .01f);
+        near(leap(true).z, -(9 + 12 * .6f) * 1.3f, .01f);
+        Swing sw(inert());
+        check(!sw.momentumLeapEnabled(), "momentum leap on by default");
+    });
+    test("EARLY JUMP: OFF waits 0.18 s as before; QUICK TAP 0.1 s; RUNNING, A at once while NATIVE RUN runs", [] {
+        using game_pad::ChargeJump;
+        const float dt = 1.f / 90;
+        const auto waited = [&](int mode, bool running) {
+            ChargeJump j;
+            j.earlyJump(mode);
+            int frames = 0;
+            while (!j.charging() && frames < 100) {
+                const auto k = j.update(dt, true, true, running);
+                if (k.jump)
+                    return -frames - 1;
+                ++frames;
+            }
+            return frames;
+        };
+        const int plain = waited(0, false);
+        check(plain >= 15 && plain <= 18, "OFF did not wait as before");
+        check(waited(0, true) == plain, "OFF changed while running");
+        const int quick = waited(1, false);
+        check(quick >= 8 && quick <= 10, "QUICK TAP did not charge after a tenth of a second");
+        check(waited(1, true) == quick, "QUICK TAP jumped at once while running");
+        check(waited(2, false) == quick, "RUNNING not a quick tap standing");
+        check(waited(2, true) == -1, "RUNNING did not jump on the press while running");
+        // A quick tap: the jump let go of after 0.09 s, under the old window and over nothing.
+        ChargeJump q;
+        q.earlyJump(1);
+        for (int i = 0; i < 8; ++i)
+            q.update(dt, true, true);
+        int pulse = 0;
+        for (int i = 0; i < 30; ++i)
+            pulse += q.update(dt, false, true).jump;
+        check(pulse >= 6 && pulse <= 10 && !q.leaps(), "a quick tap was not the game's jump");
+        // The charge still fills in fullSeconds from the tap's end.
+        ChargeJump c;
+        c.earlyJump(1);
+        for (int i = 0; i < 9 + 72; ++i)
+            c.update(dt, true, true);
+        near(c.charge(), 1, .03f);
+        check(c.update(dt, false, true).leap > .9f, "no leap from a quick charge");
+        // While running, A is held to the game as long as it is down, and never leaps.
+        ChargeJump r;
+        r.earlyJump(2);
+        for (int i = 0; i < 40; ++i) {
+            const auto k = r.update(dt, true, true, true);
+            check(k.jump && k.leap == 0, "a running press not the game's A as it is held");
+        }
+        check(!r.update(dt, false, true, true).jump && !r.charges(), "a running press charged");
+        ChargeJump odd;
+        odd.earlyJump(9);
+        check(waited(9, true) == -1, "an EARLY JUMP past RUNNING not taken as RUNNING");
     });
     test("the game's camera follows the head's pitch as it follows its turn", [] {
         game_pad::CameraPitch pitch;
@@ -21751,7 +21868,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 25 && s.bytes == 120 && s.combatVisuals == 1 &&
+        check(s.version == 26 && s.bytes == 124 && s.combatVisuals == 1 &&
                   offsetof(Settings, combatVisuals) == 56,
               "free combat broke the settings defaults or layout");
         s.combatVisuals = 0;
@@ -21798,7 +21915,7 @@ int main() {
         check(withTabOnly(Values{}, "single_hand_yank_percent=999\n").singleHandYankPercent == 300,
               "saved single-hand yank strength was not clamped");
         game_swing::Settings packet;
-        check(packet.version == 25 && packet.bytes == 120 && !packet.halfPunchDamage &&
+        check(packet.version == 26 && packet.bytes == 124 && !packet.halfPunchDamage &&
                   packet.singleHandYankPercent == 100 &&
                   offsetof(game_swing::Settings, halfPunchDamage) == 96 &&
                   offsetof(game_swing::Settings, singleHandYankPercent) == 100,
@@ -21815,6 +21932,15 @@ int main() {
         packet.version = 24;
         packet.bytes = game_swing::settingsBytesV24;
         check(game_swing::validSettings(packet), "version 24 settings packet refused");
+        packet = {};
+        packet.momentumLeap = 1;
+        check(game_swing::validSettings(packet), "a momentum leap packet refused");
+        packet.momentumLeap = 2;
+        check(!game_swing::validSettings(packet), "an invalid momentum leap switch accepted");
+        packet = {};
+        packet.version = 25;
+        packet.bytes = game_swing::settingsBytesV25;
+        check(game_swing::validSettings(packet), "version 25 settings packet refused");
         packet = {};
         packet.version = 22;
         packet.bytes = game_swing::settingsBytesV22;
@@ -22389,10 +22515,10 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 68 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 70 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[68 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[68].title, "REALISTIC FLIPS") == 0 && all[68].choices.empty(),
+            check(all[70 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[70].title, "REALISTIC FLIPS") == 0 && all[70].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[50].item == Item::controlledFlips && all[53].item == Item::joystickRunCamera &&
                   all[54].item == Item::wallRunCameraTilt && all[55].item == Item::halfPunchDamage,
@@ -22476,6 +22602,21 @@ int main() {
                   std::strcmp(all[67].title, "RUN LOGS") == 0 && all[67].choices.empty() &&
                   all[67].place == Place::tab,
               "RUN CURVE, NATIVE RUN AT and RUN LOGS: in the tab, after DODGE TUMBLE");
+        check(all[68].item == Item::momentumLeap && std::strcmp(all[68].title, "RUNNING LEAP") == 0 &&
+                  all[68].choices.empty() && all[68].place == Place::tab && all[69].item == Item::earlyJump &&
+                  std::strcmp(all[69].title, "EARLY JUMP") == 0 && all[69].choices.size() == 3 &&
+                  std::strcmp(all[69].choices[0], "OFF") == 0 && std::strcmp(all[69].choices[2], "RUNNING") == 0 &&
+                  all[69].place == Place::tab,
+              "RUNNING LEAP and EARLY JUMP (OFF, QUICK TAP, RUNNING): in the tab, after RUN LOGS");
+        {
+            Values v;
+            check(!v.momentumLeap && v.earlyJump == 0 && defaultChoice(Item::momentumLeap) == 0 &&
+                      defaultChoice(Item::earlyJump) == 0,
+                  "momentum leap or early jump on by default");
+            check(withTabOnly({}, "running_leap=1\nearly_jump=7\n").momentumLeap &&
+                      withTabOnly({}, "running_leap=1\nearly_jump=7\n").earlyJump == 2,
+                  "spidy_vr.ini keeps running_leap and early_jump, within range");
+        }
         {
             Values v;
             check(!v.runCurve && !v.runLogs && v.nativeRunPercent == 70 &&
@@ -22553,7 +22694,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 74,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 76,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -22812,7 +22953,7 @@ int main() {
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
                   "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
                   "degrees=0\nwrist_shooters=0\n"
-                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\n",
+                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

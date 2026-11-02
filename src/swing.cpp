@@ -1,4 +1,5 @@
 #include "spidy/swing.hpp"
+#include "spidy/run_update.hpp"
 #include <stdexcept>
 
 namespace spidy {
@@ -1448,6 +1449,7 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
     if (leapQueued_ > 0) {
         // A charged leap: up, and along the stick. From the ground only.
         if (body_.grounded && !wall_.on) {
+            const Vec3 run = body_.velocity;
             const Vec3 stick = finite(in.move) ? Vec3{in.move.x, 0, in.move.z} : Vec3{};
             const float tilt = std::min(length(stick), 1.f);
             const Vec3 along = tilt > .1f ? stick * (config_.leapForward * (.5f + .5f * leapQueued_) / length(stick) * tilt)
@@ -1455,6 +1457,11 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             body_.velocity = limited(
                 along + Vec3{0, config_.leapUp + (config_.leapUpFull - config_.leapUp) * leapQueued_, 0},
                 config_.maxSpeed);
+            // RUNNING LEAP: the run's speed along the leap's way kept, the charge on top.
+            if (momentumLeap_)
+                body_.velocity = run_update::leapVelocity(run_update::momentumLeap, run, in.move, leapQueued_,
+                                                          config_.leapUp, config_.leapUpFull,
+                                                          config_.leapForward, config_.maxSpeed);
             body_.grounded = false;
             events_.push_back({EventKind::Leap, -1, leapQueued_});
             jumpQueued_ = false;

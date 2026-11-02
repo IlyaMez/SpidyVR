@@ -1931,6 +1931,16 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "Writes how fast you run, land and leap to the session's log, for sending back. Changes "
                "nothing in play.",
                S(42), [&] { tabToggle("##runlogs", Item::runLogs); });
+        option("Running leap (experimental)",
+               "A charged leap (hold A on the ground) keeps the speed you run at along its way and adds its "
+               "charge on top; a full one from a fast run is a long jump. Off: the leap starts from rest, as "
+               "before.",
+               S(42), [&] { tabToggle("##runningleap", Item::momentumLeap); });
+        option("Early jump (experimental)",
+               "QUICK TAP: a tap of A jumps if let go within 0.1 s instead of 0.18 s. RUNNING: that, and "
+               "while NATIVE RUN sprints A jumps the moment it is pressed (no charged leap while sprinting). "
+               "OFF: as before.",
+               S(150), [&] { tabCombo("##earlyjump", Item::earlyJump); });
     });
     group(0, "Flips", [&] {
         option("Flips (experimental)",

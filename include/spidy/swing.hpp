@@ -373,6 +373,15 @@ class Swing {
     // AIR SLINGSHOT (off until set): the same draw and release in the air,
     // from two webs both under tension (slingshotTaut), launching along them.
     // Its own switch: the ground's WEB SLINGSHOT stays as it is either way.
+    // RUNNING LEAP (off until set): a charged leap keeps the speed the body
+    // runs at along its way, the charge's push on top (run_update::
+    // momentumLeap). Off: the leap as it was, from rest.
+    void allowMomentumLeap(bool on) {
+        momentumLeap_ = on;
+    }
+    bool momentumLeapEnabled() const {
+        return momentumLeap_;
+    }
     void allowAirSlingshot(bool on) {
         if (airSlingshot_ != on) {
             airSlingshot_ = on;
@@ -660,6 +669,7 @@ class Swing {
     // takeoff while drawing starts over). slingshotTaut: web i is under
     // tension now, pulling the body or stretched to its length.
     bool airSlingshot_{}, slingshotInAir_{};
+    bool momentumLeap_{};
     bool slingshotTaut(int i) const;
     Vec3 slingshotHands_[2]{}, slingshotEnds_[2]{};
     uint64_t slingshotSurfaces_[2]{};

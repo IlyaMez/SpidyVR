@@ -238,6 +238,16 @@ struct Values {
     // session's timeline about running, landing and the mod's ground run, to
     // send back. Off by default. Nothing moves differently either way.
     bool runLogs = false;
+    // RUNNING LEAP (the tab's RUNNING LEAP; Swing::allowMomentumLeap,
+    // run_update::leapVelocity): a charged leap keeps the run's speed along
+    // its way and adds the charge on top; a long one from a fast run goes
+    // further and flatter. Off by default: a leap starts from rest, as before.
+    bool momentumLeap = false;
+    // EARLY JUMP (the tab's EARLY JUMP; game_pad::ChargeJump::earlyJump): 0
+    // OFF, a tap of A jumps as it is let go within 0.18 s, as before; 1 QUICK
+    // TAP, within 0.1 s; 2 RUNNING, as QUICK TAP, and while NATIVE RUN holds
+    // RT the game's A goes out as it is pressed (no charge while running).
+    int earlyJump = 0;
     // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
     // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
     int singleHandYankPercent = 100;
@@ -361,8 +371,10 @@ enum class Item : uint8_t {
     runCurve,
     nativeRunAt,
     runLogs,
+    momentumLeap,
+    earlyJump,
 };
-inline constexpr Item lastItem = Item::runLogs;
+inline constexpr Item lastItem = Item::earlyJump;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -385,7 +397,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 79>& rows();
+const std::array<Row, 81>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

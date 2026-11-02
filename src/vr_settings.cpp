@@ -120,6 +120,9 @@ static_assert(std::size(dodgeTumbleChoices) == std::size(dodgeTumbles));
 constexpr int nativeRunPercents[] = {50, 60, 70, 80, 90};
 constexpr const char* nativeRunPercentChoices[] = {"50%", "60%", "70%", "80%", "90%"};
 static_assert(std::size(nativeRunPercentChoices) == std::size(nativeRunPercents));
+constexpr int earlyJumps[] = {0, 1, 2};
+constexpr const char* earlyJumpChoices[] = {"OFF", "QUICK TAP", "RUNNING"};
+static_assert(std::size(earlyJumpChoices) == std::size(earlyJumps));
 } // namespace
 
 std::span<const int> steps(Item item) {
@@ -160,6 +163,8 @@ std::span<const int> steps(Item item) {
         return webAngles;
     case Item::dodgeTumble:
         return dodgeTumbles;
+    case Item::earlyJump:
+        return earlyJumps;
     case Item::nativeRunAt:
         return nativeRunPercents;
     case Item::nearClip:
@@ -233,6 +238,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.webAngle);
     case Item::dodgeTumble:
         return static_cast<float>(v.dodgeTumble);
+    case Item::earlyJump:
+        return static_cast<float>(v.earlyJump);
     case Item::nativeRunAt:
         return static_cast<float>(v.nativeRunPercent);
     case Item::nearClip:
@@ -336,6 +343,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.airSlingshot;
     case Item::wristShooters:
         return &v.wristShooters;
+    case Item::momentumLeap:
+        return &v.momentumLeap;
     case Item::runLogs:
         return &v.runLogs;
     case Item::runCurve:
@@ -372,6 +381,7 @@ Values sanitized(Values v) {
     v.singleHandYankPercent = std::clamp(v.singleHandYankPercent, 50, 300);
     v.webAngle = std::clamp(v.webAngle, -45, 45);
     v.dodgeTumble = std::clamp(v.dodgeTumble, 0, 2);
+    v.earlyJump = std::clamp(v.earlyJump, 0, 2);
     v.nativeRunPercent = std::clamp(v.nativeRunPercent, 50, 90);
     v.nearClipMm = std::clamp(v.nearClipMm, nearClips[0], std::end(nearClips)[-1]);
     v.recordingFov = recording_fov::sanitized(v.recordingFov);
@@ -389,9 +399,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 79>& rows() {
+const std::array<Row, 81>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 79> all{{
+    static const std::array<Row, 81> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -574,6 +584,12 @@ const std::array<Row, 79>& rows() {
         {Item::nativeRunAt, "NATIVE RUN AT", "The stick's tilt past which NATIVE RUN sprints. 70% as before.",
          nativeRunPercentChoices},
         {Item::runLogs, "RUN LOGS", "Writes run speeds and landings to the session log, to send back.", {}},
+        {Item::momentumLeap,
+         "RUNNING LEAP",
+         "A charged leap keeps your run's speed and adds to it. Off as before.",
+         {}},
+        {Item::earlyJump, "EARLY JUMP",
+         "A jumps sooner: a quicker tap, or at once while running. OFF as before.", earlyJumpChoices},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
          "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
@@ -692,6 +708,9 @@ bool choose(Item item, int index, Values& v) {
     case Item::dodgeTumble:
         v.dodgeTumble = s[index];
         break;
+    case Item::earlyJump:
+        v.earlyJump = s[index];
+        break;
     case Item::nativeRunAt:
         v.nativeRunPercent = s[index];
         break;
@@ -805,6 +824,8 @@ constexpr TabOnly tabOnly[] = {
     {"run_curve", &Values::runCurve, nullptr},
     {"native_run_at_percent", nullptr, &Values::nativeRunPercent},
     {"run_logs", &Values::runLogs, nullptr},
+    {"running_leap", &Values::momentumLeap, nullptr},
+    {"early_jump", nullptr, &Values::earlyJump},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

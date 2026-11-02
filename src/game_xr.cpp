@@ -1409,6 +1409,7 @@ DWORD WINAPI run(void*) {
             s.singleHandYankPercent = static_cast<uint32_t>(values.singleHandYankPercent);
             s.webTie = values.webTie;
             s.airSlingshot = values.airSlingshot;
+            s.momentumLeap = values.momentumLeap;
             s.webAngle = values.webAngle;
             s.wristShooters = values.wristShooters;
             sentSwingSettings = s;
@@ -3201,8 +3202,12 @@ DWORD WINAPI run(void*) {
                                           !swingState.owned && !mounting && !swingState.takeoff &&
                                           !swingState.takeoffPhase && !swingState.webs[0].attached &&
                                           !swingState.webs[1].attached && !calibrationInput;
-                    const auto leap = chargeJump.update(
-                        frame.seconds, (keys & swingJumpKey) && !swingState.takeoff, standing);
+                    // EARLY JUMP (OFF by default): a quicker tap, and while
+                    // NATIVE RUN holds RT the game's A at once.
+                    chargeJump.earlyJump(values.earlyJump);
+                    const auto leap =
+                        chargeJump.update(frame.seconds, (keys & swingJumpKey) && !swingState.takeoff,
+                                          standing, nativeRun.held());
                     if (!swingState.takeoff)
                         keys = (keys & ~swingJumpKey) | (leap.jump ? swingJumpKey : 0u);
                     leapOut = leap.leap;

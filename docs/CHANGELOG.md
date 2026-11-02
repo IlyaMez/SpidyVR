@@ -7,6 +7,34 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
 
 Not in a build yet, newest first. The release adds these to the next build's entry.
 
+**RUNNING LEAP and EARLY JUMP, running jumps that keep the run.**
+
+- **Before.** A charged leap (A held on the ground) set the body's velocity
+  from rest: up by its charge, and at most 12 m/s along the stick whatever
+  the run's speed, so a sprint ended in a slower leap. A tap of A reached the
+  game only as it was let go, up to 0.18 s after the press.
+- **RUNNING LEAP** (EXPERIMENTAL, after RUN LOGS; `running_leap` in
+  `spidy_vr.ini` and profiles; off by default): the leap keeps all of the
+  run's speed along its way (the stick's, or the run's with the stick at
+  rest) and half of the speed across it, and adds 60% of the charge's own
+  push, 30 m/s across at most. Charged past 0.6 from a run faster than
+  6 m/s it is a long jump: 1.3 times further ahead at 0.8 of the height
+  (`run_update::leapVelocity`; `Leap{}` is the leap as before, checked for
+  every charge, stick and run). The run's speed is the game's own, measured
+  (the solver starts each step from the mover's achieved velocity on the
+  ground). Swing settings version 26.
+- **EARLY JUMP** (`early_jump`: OFF, QUICK TAP, RUNNING; OFF by default):
+  QUICK TAP takes a tap let go within 0.1 s for the jump (0.18 s before) and
+  starts the charge there; RUNNING does that, and while NATIVE RUN holds RT
+  the press is the game's A at once, held as long as A is (no charged leap
+  while sprinting; stop or slow under NATIVE RUN's release to charge one).
+  OFF is ChargeJump exactly as before.
+- **Validation.** Core checks cover the old leap reproduced by `Leap{}`, the
+  run kept, no stick, backwards, sideways, the long jump, the caps, a leap
+  through the swing with the setting off and on, every EARLY JUMP mode, the
+  packet and the rows; launcher checks the profile keys. Not played in a
+  headset yet.
+
 **RUN CURVE, NATIVE RUN AT and RUN LOGS, the run update's first part.**
 
 - **Before.** On the ground the stick's tilt went to the game as it was, so
