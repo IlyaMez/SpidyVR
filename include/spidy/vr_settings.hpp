@@ -182,6 +182,9 @@ struct Values {
     // spins and smooth turns as steady as head turns. Off by default, to
     // compare in the headset.
     bool flipReprojection = false;
+    // The reel felt in the hand (the tab's REEL HAPTICS; reel_haptics.hpp):
+    // the reeling hand's controller ticks like a winch. Off by default.
+    bool reelHaptics = false;
     bool operator==(const Values&) const = default;
 };
 inline constexpr int eyeAimShots = 1, eyeAimZips = 2;
@@ -288,8 +291,9 @@ enum class Item : uint8_t {
     flipReprojection,
     joystickRunCamera,
     halfPunchDamage,
+    reelHaptics,
 };
-inline constexpr Item lastItem = Item::halfPunchDamage;
+inline constexpr Item lastItem = Item::reelHaptics;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -312,7 +316,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 65>& rows();
+const std::array<Row, 66>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

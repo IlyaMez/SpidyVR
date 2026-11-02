@@ -162,7 +162,8 @@ struct Command {
 constexpr uint32_t commandBytesV2 = 168, commandBytesV3 = 184, commandBytesV4 = 200, commandBytesV5 = 240;
 // attached: 0 none, else bits: 1 a web; 2 both hands hold it (Swing::shared:
 // the other hand's web is the same one); 4 this hand took hold of it and did
-// not shoot it (Web::taken; it stays when the other hand lets go).
+// not shoot it (Web::taken; it stays when the other hand lets go); 8 this
+// hand reels it in now (Swing::reeling; its trigger, reel_haptics.hpp).
 struct WebState {
     uint32_t attached{}, bodyId{};
     Vec3 anchor{};

@@ -149,7 +149,9 @@ Swinging
                           where your hand points: along it, past the knuckles
   Squeeze a grip ........ shoot that hand's web; hold to swing
   Release the grip ...... let go
-  Trigger ............... reel in while the web is attached
+  Trigger ............... reel in while the web is attached; with REEL
+                          HAPTICS on, the hand ticks like a winch for each
+                          bit of rope taken in
   Pull a hand sharply ... zip toward the web's anchor
   Pull a hand in ........ the web is a rope in your hand: hanging from it,
                           you go where you pull it, as fast as you pull
@@ -796,7 +798,10 @@ VR settings
                    lifts you, and a late or very fast approach can
                    still hit.
   COMFORT ........ snap turn and smooth turn.
-  HAPTICS ........ controller vibration; BLOW SOUNDS (GAME: your blows
+  HAPTICS ........ controller vibration; REEL HAPTICS (off until you switch
+                   it on): reeling a web in ticks in that hand like a winch,
+                   once for every 0.75 m of rope, denser the faster it reels;
+                   BLOW SOUNDS (GAME: your blows
                    sound as the game's own do, its hits on the one you
                    struck; SPIDY: Spidy's own tones, as before October 22;
                    OFF: none, nor a web strike's rush); BODY HAPTICS (a bHaptics vest, sleeves and

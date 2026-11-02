@@ -1965,6 +1965,8 @@ void App::options(ImVec2 origin, ImVec2 size) {
         option("Controller vibration", "How strongly webs and punches buzz.", S(150), [&] {
             stepCombo("##haptics", kHaptics, kHapticValues, static_cast<int>(std::size(kHapticValues)), &o.haptics);
         });
+        option("Reel haptics", "Reeling a web in ticks in that hand like a winch.", S(42),
+               [&] { tabToggle("##reelhaptics", Item::reelHaptics); });
         option("Body haptics", "A bHaptics vest, sleeves and visor feel webs, blows, wind and Spider-Sense; the "
                                "bHaptics Player has to be running.",
                S(150), [&] {

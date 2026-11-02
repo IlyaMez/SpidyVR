@@ -3,7 +3,28 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 30, on 0.7.0): FLIP REPROJECTION - flips, spins
+**Latest build (October 31, on 0.7.0): the reel felt in the hand.** GolexPrime:
+"There's no vibration when you reel the web in with the trigger while hanging
+somewhere."
+
+- **Before.** A web vibrated as it took hold and as it let go; a reel was not
+  felt at all.
+- **The change.** While a hand's web reels in, that controller ticks like a
+  winch, once for every 0.75 m of rope taken in (`reel_haptics::Ticks`): 16 m/s
+  of reel is about 21 ticks a second, a slower one fewer, and a reel at the
+  web's shortest is still. The reel's start is a firmer pulse. The swing tells
+  the XR loop which hand reels (`game_swing::WebState::attached` bit 8, from
+  `Swing::reeling(hand)`). HAPTICS scales it as the rest; a web's own pulses
+  (arriving, a grab) go first.
+- **REEL HAPTICS**, under HAPTICS after CONTROLLER VIBRATION (and the
+  launcher's haptics card, `reel_haptics` in `spidy_vr.ini` and in settings
+  profiles): off by default, so nothing changes for players who leave it.
+- **Tests.** Core 736/736: the ticks for the rope taken in, none paid out or at
+  the shortest, a jump of metres no rope, a new reel afresh; the switch, off by
+  default and kept as `reel_haptics`. Launcher 38/38 (profiles), the Python
+  suites.
+
+**Earlier build (October 30, on 0.7.0): FLIP REPROJECTION - flips, spins
 and smooth turns shown as steadily as head turns.** You: head turns are
 smooth in the headset; flips, the swing's spin and smooth turns judder
 (Quest 3 over Virtual Desktop).

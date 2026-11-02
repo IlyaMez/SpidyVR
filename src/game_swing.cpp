@@ -324,7 +324,9 @@ void idleRopeInput(const Command& c, const Input& in, const native_rays::QueryCo
     d.takeoffTimeouts += transition.timedOut;
     for (unsigned i = 0; i < 2; ++i) {
         const auto& w = solver.webs()[i];
-        d.webs[i] = {!w.attached ? 0u : 1u | (solver.shared() ? 2u : 0u) | (w.taken ? 4u : 0u),
+        d.webs[i] = {!w.attached ? 0u
+                                 : 1u | (solver.shared() ? 2u : 0u) | (w.taken ? 4u : 0u) |
+                                       (solver.reeling(static_cast<int>(i)) ? 8u : 0u),
                      static_cast<uint32_t>(w.surface), w.anchor, w.length, w.tension};
     }
     if (elapsed > 0)
@@ -1037,7 +1039,9 @@ void visit(const native_rays::QueryContext& world) {
     }
     for (unsigned i = 0; i < 2; ++i) {
         const auto& w = solver.webs()[i];
-        d.webs[i] = {!w.attached ? 0u : 1u | (solver.shared() ? 2u : 0u) | (w.taken ? 4u : 0u),
+        d.webs[i] = {!w.attached ? 0u
+                                 : 1u | (solver.shared() ? 2u : 0u) | (w.taken ? 4u : 0u) |
+                                       (solver.reeling(static_cast<int>(i)) ? 8u : 0u),
                      static_cast<uint32_t>(w.surface), w.anchor, w.length, w.tension};
     }
     InterlockedIncrement64(&d.sequence);
