@@ -964,9 +964,17 @@ VR settings
                    never slower than you were going that way. A release
                    without the draw only lets go, as before. Its own
                    switch: WEB SLINGSHOT on the ground is as it was.
+  WEB ANGLE        (0 until you change it) tilts the line your webs leave
+                   your hands along, up or down from the controller's, 15
+                   to 45 degrees. The aim markers follow it. Your punches
+                   keep the controller's own line.
+  WRIST SHOOTERS   (off until you switch it on) webs leave square to your
+                   hand, out of the palm side, as Spider-Man's shooters
+                   on the inside of his wrists do: turn your palm toward
+                   where the web should go. WEB ANGLE tilts that line too.
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches

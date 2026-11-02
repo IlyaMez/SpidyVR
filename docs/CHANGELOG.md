@@ -7,6 +7,26 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
 
 Not in a build yet, newest first. The release adds these to the next build's entry.
 
+**WEB ANGLE and WRIST SHOOTERS, which way the webs
+leave the hands.**
+
+- **Before.** A web always left along the controller's aim line.
+- **WEB ANGLE** (EXPERIMENTAL, after AIR SLINGSHOT; DOWN 45 to UP 45 in
+  15-degree steps; `web_angle_degrees` in `spidy_vr.ini` and profiles; 0 by
+  default, as before) tilts that line up or down. **WRIST SHOOTERS** (next;
+  `wrist_shooters`; off by default) turns it a quarter turn onto the palm
+  side, square to the hand and forearm, as the comics' wrist shooters fire;
+  WEB ANGLE then tilts that line. `web_aim::shooterAim` turns only the line,
+  never where a web starts. The native module (`game_swing.cpp`) gives the
+  turned aim to all that shoots a web: the swing, the web grab, web balls and
+  the aim previews, and the headset's aim markers follow it; the fists, the
+  palms on walls and the vents keep the controller's own aim, as they had it.
+  Swing settings version 25.
+- **Validation.** Core checks cover the default leaving the aim unchanged,
+  up and down, the 45-degree limit, each palm's side, the turn following the
+  controller, the settings packet, the rows and their `spidy_vr.ini` keys;
+  launcher checks the profile keys. Not played in a headset yet.
+
 **AIR SLINGSHOT, the web slingshot in the air.**
 
 - **Before.** The web slingshot (WEB SLINGSHOT: two webs, both grips held,

@@ -111,6 +111,9 @@ constexpr int singleHandYankStrengths[] = {50, 75, 100, 125, 150, 200, 250, 300}
 constexpr const char* singleHandYankStrengthChoices[] = {"50%",  "75%",  "100%", "125%",
                                                          "150%", "200%", "250%", "300%"};
 static_assert(std::size(singleHandYankStrengthChoices) == std::size(singleHandYankStrengths));
+constexpr int webAngles[] = {-45, -30, -15, 0, 15, 30, 45};
+constexpr const char* webAngleChoices[] = {"DOWN 45", "DOWN 30", "DOWN 15", "0", "UP 15", "UP 30", "UP 45"};
+static_assert(std::size(webAngleChoices) == std::size(webAngles));
 } // namespace
 
 std::span<const int> steps(Item item) {
@@ -147,6 +150,8 @@ std::span<const int> steps(Item item) {
         return webSpeeds;
     case Item::singleHandYankStrength:
         return singleHandYankStrengths;
+    case Item::webAngle:
+        return webAngles;
     case Item::nearClip:
         return nearClips;
     case Item::recordingFov:
@@ -214,6 +219,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.webSpeed);
     case Item::singleHandYankStrength:
         return static_cast<float>(v.singleHandYankPercent);
+    case Item::webAngle:
+        return static_cast<float>(v.webAngle);
     case Item::nearClip:
         return static_cast<float>(v.nearClipMm);
     case Item::recordingFov:
@@ -313,6 +320,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.nativeRun;
     case Item::airSlingshot:
         return &v.airSlingshot;
+    case Item::wristShooters:
+        return &v.wristShooters;
     case Item::seated:
         return &v.seated;
     case Item::flipReprojection:
@@ -343,6 +352,7 @@ Values sanitized(Values v) {
     v.webRange = std::clamp(v.webRange, 10, 1000);
     v.webSpeed = std::clamp(v.webSpeed, 0, 3);
     v.singleHandYankPercent = std::clamp(v.singleHandYankPercent, 50, 300);
+    v.webAngle = std::clamp(v.webAngle, -45, 45);
     v.nearClipMm = std::clamp(v.nearClipMm, nearClips[0], std::end(nearClips)[-1]);
     v.recordingFov = recording_fov::sanitized(v.recordingFov);
     v.uiStyle = std::clamp(v.uiStyle, uiStyles[0], std::end(uiStyles)[-1]);
@@ -359,9 +369,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 73>& rows() {
+const std::array<Row, 75>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 73> all{{
+    static const std::array<Row, 75> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -529,6 +539,12 @@ const std::array<Row, 73>& rows() {
          "AIR SLINGSHOT",
          "In the air: two taut webs, draw both arms until the buzz, let go to launch.",
          {}},
+        {Item::webAngle, "WEB ANGLE", "Tilts the webs up or down from the controller's line. 0 as before.",
+         webAngleChoices},
+        {Item::wristShooters,
+         "WRIST SHOOTERS",
+         "Webs leave square to the hand, out of the palm side, as Spider-Man's do.",
+         {}},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
          "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
@@ -641,6 +657,9 @@ bool choose(Item item, int index, Values& v) {
     case Item::singleHandYankStrength:
         v.singleHandYankPercent = s[index];
         break;
+    case Item::webAngle:
+        v.webAngle = s[index];
+        break;
     case Item::nearClip:
         v.nearClipMm = s[index];
         break;
@@ -745,6 +764,8 @@ constexpr TabOnly tabOnly[] = {
     {"web_tie", &Values::webTie, nullptr},
     {"native_run", &Values::nativeRun, nullptr},
     {"air_slingshot", &Values::airSlingshot, nullptr},
+    {"web_angle_degrees", nullptr, &Values::webAngle},
+    {"wrist_shooters", &Values::wristShooters, nullptr},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

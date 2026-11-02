@@ -15,6 +15,7 @@
 #include "spidy/native_movement.hpp"
 #include "spidy/native_query_context.hpp"
 #include "spidy/native_rays.hpp"
+#include "spidy/web_aim.hpp"
 #include <atomic>
 #include <cstring>
 #include <windows.h>
@@ -118,6 +119,10 @@ std::atomic<bool> combatVisuals{true};
 std::atomic<bool> halfPunchDamage{};
 // WEB TIE (Settings version 23): the web tie's gesture runs only with it on.
 std::atomic<bool> webTie{};
+// WEB ANGLE and WRIST SHOOTERS (web_aim.hpp): the line a hand's webs leave it
+// along; 0 and off as before.
+std::atomic<int> webAngle{};
+std::atomic<bool> wristShooters{};
 bool copy(void* destination, const void* source, size_t bytes) {
     __try {
         if (reinterpret_cast<uintptr_t>(source) < 0x10000 ||
@@ -417,6 +422,23 @@ void visit(const native_rays::QueryContext& world) {
         copy(feet, reinterpret_cast<const void*>(transform), sizeof(feet)) && finite({feet[12], feet[13], feet[14]}))
         at = {feet[12], feet[13], feet[14]};
     auto in = focused ? input(c) : Input{};
+    // WEB ANGLE and WRIST SHOOTERS turn the line each hand's webs leave along
+    // (web_aim.hpp), for all that shoots one: the swing, the grab, the web
+    // balls and the aim previews. The fists, the walls and the vents keep the
+    // controller's own aim (controllerAims), as they had it. As before, with
+    // the angle 0 and the shooters off, the two are the same.
+    Pose controllerAim[2]{in.hands[0].aim, in.hands[1].aim};
+    if (focused) {
+        const web_aim::Shooters shooters{webAngle.load(std::memory_order_relaxed),
+                                         wristShooters.load(std::memory_order_relaxed)};
+        for (int i = 0; i < 2; ++i)
+            in.hands[i].aim = web_aim::shooterAim(in.hands[i].aim, i, shooters);
+    }
+    const auto controllerAims = [&](Input with) {
+        for (int i = 0; i < 2; ++i)
+            with.hands[i].aim = controllerAim[i];
+        return with;
+    };
     const float sampleSeconds = focused ? grabInputClock.consume(c) : 0.f;
     const Vec3 currentUp = normalized({feet[4], feet[5], feet[6]});
     const bool supported = focused && !owned && motion.grounded &&
@@ -462,8 +484,8 @@ void visit(const native_rays::QueryContext& world) {
     }
     if (handCrawl) ventMode = true;
     const unsigned webHands = (solver.webs()[0].attached ? 1u : 0u) | (solver.webs()[1].attached ? 2u : 0u);
-    crawlHands.update(handCrawl, sampleSeconds, in, crawlNormal, crawlPoint + crawlNormal * .4f,
-                      world, webHands, crawlPoint);
+    crawlHands.update(handCrawl, sampleSeconds, controllerAims(in), crawlNormal,
+                      crawlPoint + crawlNormal * .4f, world, webHands, crawlPoint);
     if (handCrawl) solver.leaveWall(); // native crawl retains collision and scripted turns
     AcquireSRWLockExclusive(&output);
     if (handCrawl) {
@@ -490,8 +512,8 @@ void visit(const native_rays::QueryContext& world) {
     ReleaseSRWLockExclusive(&output);
     unsigned wallHands{};
     for (unsigned i = 0; i < 2; ++i)
-        if (focused && (in.wallRotate ||
-                        (handCrawl ? (crawlHands.hands() & (1u << i)) : solver.wallHand(i, in, world)))) {
+        if (focused && (in.wallRotate || (handCrawl ? (crawlHands.hands() & (1u << i))
+                                                    : solver.wallHand(i, controllerAims(in), world)))) {
             wallHands |= 1u << i;
             in.hands[i].grip = in.hands[i].trigger = 0;
         }
@@ -619,7 +641,7 @@ void visit(const native_rays::QueryContext& world) {
             }
             // A web strike is the player's whole motion: the webs let go, and
             // the web that held the one struck with them.
-            const auto opened = game_punch::update(sampleSeconds, in, fighter, world);
+            const auto opened = game_punch::update(sampleSeconds, controllerAims(in), fighter, world);
             if (opened.strike) {
                 solver.releaseAll();
                 takeoffTransition.reset();
@@ -1182,6 +1204,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStart(void* input) {
         combatVisuals = true;
         halfPunchDamage = false;
         webTie = false;
+        webAngle = 0;
+        wristShooters = false;
         started = true;
         solver = Swing(physicsConfig(config));
         QueryPerformanceFrequency(&frequency);
@@ -1285,7 +1309,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
          header[2] != settingsBytesV12 && header[2] != settingsBytesV13 && header[2] != settingsBytesV14 &&
          header[2] != settingsBytesV15 && header[2] != settingsBytesV16 && header[2] != settingsBytesV17 &&
          header[2] != settingsBytesV18 && header[2] != settingsBytesV19 && header[2] != settingsBytesV20 &&
-         header[2] != settingsBytesV21 && header[2] != settingsBytesV22 && header[2] != settingsBytesV23 && header[2] != sizeof(s)) ||
+         header[2] != settingsBytesV21 && header[2] != settingsBytesV22 && header[2] != settingsBytesV23 && header[2] != settingsBytesV24 &&
+         header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || !validSettings(s))
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
@@ -1330,6 +1355,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         }
         game_grab::allowTies(tiesOn);
         solver.allowAirSlingshot(s.version >= 24 && s.airSlingshot != 0);
+        webAngle = s.version >= 25 ? s.webAngle : 0;
+        wristShooters = s.version >= 25 && s.wristShooters != 0;
         if (s.version >= 7)
             solver.allowArcade(s.arcade != 0);
         if (s.version >= 8)

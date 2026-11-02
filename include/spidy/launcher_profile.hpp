@@ -124,6 +124,8 @@ inline constexpr ProfileSetting profileSettings[] = {
     tabOnly("web_tie", Item::webTie, &Values::webTie),
     tabOnly("native_run", Item::nativeRun, &Values::nativeRun),
     tabOnly("air_slingshot", Item::airSlingshot, &Values::airSlingshot),
+    tabOnly("web_angle_degrees", Item::webAngle, -45, 45, &Values::webAngle),
+    tabOnly("wrist_shooters", Item::wristShooters, &Values::wristShooters),
     retired("wall_distance_cm", vr_settings::fixedWallDistance),
     tabOnly("realistic_flips", Item::realisticFlips, &Values::realisticFlips),
     tabOnly("rotation_strength", Item::automaticStrength, 25, 100, &Values::automaticStrength),

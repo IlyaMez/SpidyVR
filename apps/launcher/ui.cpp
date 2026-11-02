@@ -1871,6 +1871,14 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "In the air with two taut webs: hold both grips, draw both arms back until the hands buzz, "
                "then let go to launch along the webs. Off: letting go in the air only releases, as before.",
                S(42), [&] { tabToggle("##airslingshot", Item::airSlingshot); });
+        option("Web angle",
+               "Tilts the line your webs leave your hands along, up or down from the controller's, 15 to 45 "
+               "degrees. 0: along the controller, as before. Punches keep the controller's own.",
+               S(150), [&] { tabCombo("##webangle", Item::webAngle); });
+        option("Wrist shooters",
+               "Webs leave square to the hand, out of the palm side, as Spider-Man's shooters do: turn the "
+               "palm to where the web should go. Off: along the controller, as before.",
+               S(42), [&] { tabToggle("##wristshooters", Item::wristShooters); });
         option("Better climbing", "Take one web in both hands, then pull hand over hand to keep climbing it.",
                S(42), [&] { tabToggle("##betterclimbing", Item::betterClimbing); });
         option("Single hand yank strength",

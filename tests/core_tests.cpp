@@ -59,6 +59,7 @@
 #include "spidy/tech_marks.hpp"
 #include "spidy/throw_aim.hpp"
 #include "spidy/vd_eyes.hpp"
+#include "spidy/web_aim.hpp"
 #include <algorithm>
 #include <bitset>
 #include <cstring>
@@ -1502,6 +1503,70 @@ int main() {
             }
         }
     });
+    test("WEB ANGLE and WRIST SHOOTERS turn only the webs' line; as before by default", [] {
+        using namespace web_aim;
+        const Quat held = Quat::around({0, 1, 0}, .7f) * Quat::around({1, 0, 0}, -.3f);
+        const Pose aim{{1, 2, 3}, held};
+        auto same = [](Vec3 a, Vec3 b) { return a.x == b.x && a.y == b.y && a.z == b.z; };
+        for (int hand = 0; hand < 2; ++hand) {
+            const Pose kept = shooterAim(aim, hand, {});
+            check(same(kept.position, aim.position) && kept.orientation.x == held.x &&
+                      kept.orientation.y == held.y && kept.orientation.z == held.z &&
+                      kept.orientation.w == held.w,
+                  "the default changed a hand's aim");
+        }
+        auto line = [](Pose p) { return p.orientation.rotate({0, 0, -1}); };
+        auto close = [](Vec3 a, Vec3 b) { return length(a - b) < 1e-4f; };
+        const Pose level{{0, 1, 0}, {}};
+        // Up is toward the controller's top, down away from it.
+        const float c30 = std::cos(.5235988f), s30 = std::sin(.5235988f);
+        check(close(line(shooterAim(level, 0, {30, false})), {0, s30, -c30}), "UP 30 did not lift the line");
+        check(close(line(shooterAim(level, 1, {-30, false})), {0, -s30, -c30}), "DOWN 30 did not lower it");
+        check(close(line(shooterAim(level, 0, {90, false})), line(shooterAim(level, 0, {45, false}))),
+              "the angle not held to 45 degrees");
+        // Wrist shooters: out of the palm side, the left palm +X, the right -X.
+        check(close(line(shooterAim(level, 0, {0, true})), {1, 0, 0}),
+              "the left shooter not out of its palm");
+        check(close(line(shooterAim(level, 1, {0, true})), {-1, 0, 0}),
+              "the right shooter not out of its palm");
+        check(close(line(shooterAim(level, 1, {30, true})), {-c30, s30, 0}),
+              "the wrist's line not tilted up");
+        // The place stays, and the turn goes with the controller.
+        const Pose turned = shooterAim(aim, 0, {15, true});
+        check(same(turned.position, aim.position), "the shooter moved its web's start");
+        check(close(line(turned), held.rotate(line(shooterAim(level, 0, {15, true})))),
+              "the shooter did not turn with the hand");
+        check(std::abs(length(line(turned)) - 1) < 1e-4f, "the line not a unit");
+    });
+    test("WEB ANGLE and WRIST SHOOTERS' settings: version 25, the rows, spidy_vr.ini", [] {
+        using namespace vr_settings;
+        game_swing::Settings s;
+        check(s.webAngle == 0 && !s.wristShooters &&
+                  offsetof(game_swing::Settings, webAngle) == game_swing::settingsBytesV24,
+              "web angle not appended, or not as before by default");
+        s.webAngle = -45;
+        s.wristShooters = 1;
+        check(game_swing::validSettings(s), "a valid web angle refused");
+        s.webAngle = 46;
+        check(!game_swing::validSettings(s), "a web angle over 45 accepted");
+        s.webAngle = 0;
+        s.wristShooters = 2;
+        check(!game_swing::validSettings(s), "an invalid wrist shooters switch accepted");
+        Values v;
+        check(v.webAngle == 0 && !v.wristShooters && defaultChoice(Item::webAngle) == 3 &&
+                  defaultChoice(Item::wristShooters) == 0,
+              "web angle or wrist shooters changed by default");
+        check(choose(Item::webAngle, 6, v) && v.webAngle == 45 && choose(Item::webAngle, 0, v) &&
+                  v.webAngle == -45,
+              "web angle's choices");
+        check(choose(Item::wristShooters, 1, v) && v.wristShooters, "the wrist shooters switch");
+        const Values kept = withTabOnly({}, tabOnlyText(v));
+        check(kept.webAngle == -45 && kept.wristShooters, "web angle or wrist shooters not kept");
+        check(withTabOnly({}, "web_angle_degrees=-90\n").webAngle == -45 &&
+                  withTabOnly({}, "web_angle_degrees=30\n").webAngle == 30 &&
+                  !withTabOnly({}, "").wristShooters,
+              "spidy_vr.ini's web_angle_degrees not clamped, or wrist_shooters on when absent");
+    });
     test("AIR SLINGSHOT's settings: version 24, off by default, kept as air_slingshot", [] {
         game_swing::Settings s;
         check(!s.airSlingshot && offsetof(game_swing::Settings, airSlingshot) == game_swing::settingsBytesV23,
@@ -1523,7 +1588,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 24 && s.bytes == 112 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 25 && s.bytes == 120 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -2071,7 +2136,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 24 && s.bytes == 112 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 25 && s.bytes == 120 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -3427,7 +3492,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 24 && s.bytes == 112, "updated settings did not append the climbing field");
+        check(s.version == 25 && s.bytes == 120, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -21482,7 +21547,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 24 && s.bytes == 112 && s.combatVisuals == 1 &&
+        check(s.version == 25 && s.bytes == 120 && s.combatVisuals == 1 &&
                   offsetof(Settings, combatVisuals) == 56,
               "free combat broke the settings defaults or layout");
         s.combatVisuals = 0;
@@ -21529,7 +21594,7 @@ int main() {
         check(withTabOnly(Values{}, "single_hand_yank_percent=999\n").singleHandYankPercent == 300,
               "saved single-hand yank strength was not clamped");
         game_swing::Settings packet;
-        check(packet.version == 24 && packet.bytes == 112 && !packet.halfPunchDamage &&
+        check(packet.version == 25 && packet.bytes == 120 && !packet.halfPunchDamage &&
                   packet.singleHandYankPercent == 100 &&
                   offsetof(game_swing::Settings, halfPunchDamage) == 96 &&
                   offsetof(game_swing::Settings, singleHandYankPercent) == 100,
@@ -21542,6 +21607,10 @@ int main() {
         check(game_swing::validSettings(packet),"maximum yank strength refused");
         packet.singleHandYankPercent=301;
         check(!game_swing::validSettings(packet),"out-of-range yank strength accepted");
+        packet = {};
+        packet.version = 24;
+        packet.bytes = game_swing::settingsBytesV24;
+        check(game_swing::validSettings(packet), "version 24 settings packet refused");
         packet = {};
         packet.version = 22;
         packet.bytes = game_swing::settingsBytesV22;
@@ -22116,10 +22185,10 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 62 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 64 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[62 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[62].title, "REALISTIC FLIPS") == 0 && all[62].choices.empty(),
+            check(all[64 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[64].title, "REALISTIC FLIPS") == 0 && all[64].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[50].item == Item::controlledFlips && all[53].item == Item::joystickRunCamera &&
                   all[54].item == Item::wallRunCameraTilt && all[55].item == Item::halfPunchDamage,
@@ -22183,6 +22252,12 @@ int main() {
         check(all[61].item == Item::airSlingshot && std::strcmp(all[61].title, "AIR SLINGSHOT") == 0 &&
                   all[61].choices.empty() && all[61].place == Place::tab,
               "AIR SLINGSHOT: a switch in the tab, after NATIVE RUN");
+        check(all[62].item == Item::webAngle && std::strcmp(all[62].title, "WEB ANGLE") == 0 &&
+                  all[62].choices.size() == 7 && std::strcmp(all[62].choices[3], "0") == 0 &&
+                  all[62].place == Place::tab && all[63].item == Item::wristShooters &&
+                  std::strcmp(all[63].title, "WRIST SHOOTERS") == 0 && all[63].choices.empty() &&
+                  all[63].place == Place::tab,
+              "WEB ANGLE and WRIST SHOOTERS: in the tab, after AIR SLINGSHOT");
         {
             Values v;
             check(!v.nativeRun && defaultChoice(Item::nativeRun) == 0, "native run on by default");
@@ -22246,7 +22321,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 68,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 70,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -22503,7 +22578,8 @@ int main() {
                   "slingshot_speed=0\nrecording_smoothing=0\n"
                   "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\n"
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
-                  "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\n",
+                  "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
+                  "degrees=0\nwrist_shooters=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

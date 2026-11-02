@@ -215,6 +215,13 @@ struct Values {
     // held and both arms drawn until the hands buzz, then let go: a launch
     // along the two webs. Off by default: in the air a release only lets go.
     bool airSlingshot = false;
+    // WEB ANGLE, degrees (the tab's WEB ANGLE; web_aim.hpp): a hand's webs
+    // tilt up (positive) or down from the controller's line, -45 to 45. And
+    // WRIST SHOOTERS (the tab's WRIST SHOOTERS): they leave square to the
+    // hand, out of the palm side, as the comics' shooters do. 0 and off by
+    // default: along the controller, as before. The fists keep the controller's.
+    int webAngle = 0;
+    bool wristShooters = false;
     // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
     // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
     int singleHandYankPercent = 100;
@@ -332,8 +339,10 @@ enum class Item : uint8_t {
     webTie,
     nativeRun,
     airSlingshot,
+    webAngle,
+    wristShooters,
 };
-inline constexpr Item lastItem = Item::airSlingshot;
+inline constexpr Item lastItem = Item::wristShooters;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -356,7 +365,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 73>& rows();
+const std::array<Row, 75>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;
