@@ -4,6 +4,7 @@
 #include "spidy/native_eye_frame.hpp"
 #include "spidy/native_hud.hpp"
 #include "spidy/native_eye_history.hpp"
+#include "spidy/flip_reprojection.hpp"
 #include "spidy/eye_job_table.hpp"
 #include "spidy/eye_pair_state.hpp"
 #include "spidy/native_rays.hpp"
@@ -25,6 +26,7 @@
 #include "spidy/vr_settings.hpp"
 #include "spidy/recording_fov.hpp"
 #include "spidy/native_stream.hpp"
+#include "spidy/native_pace.hpp"
 #include "spidy/body_haptics.hpp"
 #include "spidy/web_visual.hpp"
 #include "spidy/web_pull.hpp"
@@ -44,6 +46,8 @@
 #include "spidy/slow_motion.hpp"
 #include "spidy/spectator_smoothing.hpp"
 #include "spidy/hand_pose.hpp"
+#include "spidy/hud_capture.hpp"
+#include "spidy/steady_hud.hpp"
 #include "spidy/impact_sound.hpp"
 #include "spidy/web_strike.hpp"
 #include "spidy/spider_sense.hpp"
@@ -1414,7 +1418,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 20 && s.bytes == 96 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 21 && s.bytes == 100 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -1561,11 +1565,46 @@ int main() {
         near(native_stream::poolMargin(10001, 10000, 30), 0);
         near(native_stream::poolMargin(100, 10000, 0), 0);
     });
-    test("the texture budget doubles where the card has room and leaves an eighth of it free", [] {
+    test("the scene's slot pool grows by a percent of the game's, 100 to 400", [] {
+        check(native_render_memory::scenePool(409600, 200) == 819200, "doubled");
+        check(native_render_memory::scenePool(409600, 400) == 1638400, "four times");
+        // The game's own for 100, a percent out of range, or a setting that reads as no pool.
+        check(native_render_memory::scenePool(409600, 100) == 409600 &&
+                  native_render_memory::scenePool(409600, 401) == 409600 &&
+                  native_render_memory::scenePool(409600, 0) == 409600,
+              "raised by a percent out of range");
+        check(native_render_memory::scenePool(0, 200) == 0 && native_render_memory::scenePool(-1, 200) == -1 &&
+                  native_render_memory::scenePool(1 << 23, 200) == 1 << 23,
+              "raised a pool that does not read as one");
+    });
+    test("frame pacing measures the headset's period and waits at most a period and a half", [] {
+        // 10 MHz ticks: a 90 Hz headset's 111,111-tick frames.
+        constexpr int64_t frequency = 10000000;
+        double average = native_pace::period(0, 111111, frequency);
+        near(static_cast<float>(average), 111111);
+        // A late command moves the average a sixteenth of the way; a menu's gap does not count.
+        average = native_pace::period(average, 111111 + 16000, frequency);
+        near(static_cast<float>(average), 112111);
+        near(static_cast<float>(native_pace::period(average, 600000, frequency)), 112111);
+        near(static_cast<float>(native_pace::period(average, 0, frequency)), 112111);
+        // A period and a half, to the nearest ms: 17 at 90 Hz, 12 at 120 (12.49995); never under 4 or over
+        // 20, 20 with no period yet.
+        check(native_pace::waitMs(111111, frequency) == 17, "90 Hz wait");
+        check(native_pace::waitMs(83333, frequency) == 12, "120 Hz wait");
+        check(native_pace::waitMs(10000, frequency) == 4 && native_pace::waitMs(400000, frequency) == 20,
+              "wait outside 4-20 ms");
+        check(native_pace::waitMs(0, frequency) == 20 && native_pace::waitMs(111111, 0) == 20, "no period");
+    });
+    test("the texture budget grows up to four times where the card has room and leaves an eighth free", [] {
         constexpr uint64_t mb = 1ull << 20;
         const uint64_t veryHigh = 3874 * mb;
         // The October 26 session: a 32 GB card, 31,418 MB for the game, 9,448 used.
-        check(native_stream::textureBudget(veryHigh, 31418 * mb, 9448 * mb) == 2 * veryHigh, "not doubled");
+        check(native_stream::textureBudget(veryHigh, 31418 * mb, 9448 * mb) == 4 * veryHigh, "not four times");
+        check(native_stream::textureBudget(veryHigh, 31418 * mb, 9448 * mb, 2) == 2 * veryHigh, "not doubled");
+        // The same card with less room: what is left over an eighth of it (3,927.25 MB), in whole MB.
+        check(native_stream::textureBudget(veryHigh, 31418 * mb, 20000 * mb) == veryHigh + 7490 * mb,
+              "not raised by the room left over an eighth");
+        check(native_stream::textureBudget(veryHigh, 31418 * mb, 9448 * mb, 0) == veryHigh, "raised by no times");
         // A 16 GB card in VR: what is left over 2 GB (more than an eighth of 15,000 MB).
         check(native_stream::textureBudget(veryHigh, 15000 * mb, 10000 * mb) == veryHigh + (5000 - 2048) * mb,
               "not raised by the room left over 2 GB");
@@ -1927,7 +1966,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 20 && s.bytes == 96 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 21 && s.bytes == 100 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -3263,10 +3302,10 @@ int main() {
     });
     test("grip climbing settings keep old packets and reject invalid versions, sizes and switches", [] {
         using namespace game_swing;
-        for (uint32_t version = 3; version <= 20; ++version) {
+        for (uint32_t version = 3; version <= 21; ++version) {
             Settings s;
             s.version = version;
-            s.bytes = 16 + 4 * version; // official v3=28 through custom v20=96
+            s.bytes = 16 + 4 * version; // official v3=28 through custom v21=100
             check(validSettings(s), "compatible settings packet was refused");
             ++s.bytes;
             check(!validSettings(s), "wrong settings length was accepted");
@@ -3283,7 +3322,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 20 && s.bytes == 96, "updated settings did not append the climbing field");
+        check(s.version == 21 && s.bytes == 100, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -19338,7 +19377,8 @@ int main() {
         check(withTabOnly(Values{}, tabOnlyText(values)) == values, "controlled mode did not persist");
         for (const auto& row : rows())
             check(std::string(row.title).find("MOMENTUM ") == std::string::npos &&
-                  std::string(row.title).find("JOYSTICK ") == std::string::npos,
+                  (row.item == Item::joystickRunCamera ||
+                  std::string(row.title).find("JOYSTICK ") == std::string::npos),
                   "retired tuning still has a menu row");
     });
     test("body protocol separates official dive kicks from new and legacy wall runs", [] {
@@ -19498,6 +19538,106 @@ int main() {
             const auto normalGround = holdFor(originalAngle, control, feet, {}, 2);
             near(length(ground.headPose.position - normalGround.headPose.position), 0, .005f);
         }
+    });
+    test("joystick momentum mode uses the unchanged momentum camera and gait from actual velocity", [] {
+        for (Vec3 travel : {Vec3{6,0,0},Vec3{0,6,0},normalized(Vec3{1,1,0})*6.f}) {
+            GameTrackingRig joystick,momentum;
+            joystick.handClimb(true); momentum.handClimb(true);
+            joystick.joystickWallRunCamera(false);
+            joystick.wallRunCameraTilt(true); momentum.wallRunCameraTilt(true);
+            joystick.wallRunBody(true,0,travel); momentum.wallRunBody(true,0,travel);
+            auto f=trackedFrame(), neutral=f; f.seconds=neutral.seconds=1.f/90;
+            for (auto& h:f.hands) h.squeeze=0;
+            for (auto& h:neutral.hands) h.squeeze=0;
+            f.hands[0].stickY=1;
+            const Vec3 feet{0,10,-.1f};
+            const SurfaceHold wall{{0,0,1},{0,10,-1},6,false};
+            const auto driven=holdFor(joystick,f,feet,wall,2);
+            const auto coast=holdFor(momentum,neutral,feet,wall,2);
+            check(driven.joystickWallRun && !driven.standing,"stick selected the old wall-floor view");
+            near(length(driven.headPose.position-coast.headPose.position),0,.003f);
+            for (Vec3 axis : {Vec3{0,1,0},Vec3{0,0,-1}})
+                near(length(driven.headPose.orientation.rotate(axis)-coast.headPose.orientation.rotate(axis)),0,.003f);
+            near(dot(driven.headPose.position-wall.anchor,wall.normal),
+                 .95f-.20f*std::abs(normalized(travel).y),.015f);
+            check(length(driven.swing.move)>.9f,"neutral-view routing discarded the movement input");
+            WallRunBody a,b;
+            for(int i=0;i<90;++i) {
+                check(a.update(driven,wall,travel,true,false,0,1.f/90) &&
+                      b.update(coast,wall,travel,true,false,0,1.f/90),"actual momentum did not start the existing gait");
+                near(a.phase(),b.phase()); near(length(a.ahead()-b.ahead()),0);
+            }
+            joystick.reset(); joystick.wallRunBody(true,0,travel);
+            const auto recentered=holdFor(joystick,f,feet,wall,2);
+            check(!recentered.standing,"recenter lost momentum mode");
+            joystick.joystickWallRunCamera(true);
+            const auto legacy=holdFor(joystick,f,feet,wall,2);
+            check(legacy.standing && legacy.viewTilt>1.5f,"legacy camera option stopped working");
+            joystick.joystickWallRunCamera(false);
+            const auto restored=holdFor(joystick,f,feet,wall,2);
+            check(!restored.standing && restored.viewTilt<.005f,"legacy floor turn remained in momentum mode");
+        }
+    });
+    test("joystick camera choice leaves ground vents and momentum view unchanged", [] {
+        for (const SurfaceHold hold : {SurfaceHold{},SurfaceHold{{0,1,0},{0,0,0},0,true,true},
+                                      SurfaceHold{{0,0,1},{0,10,-1},8,false}}) {
+            GameTrackingRig on,off;
+            on.handClimb(true); off.handClimb(true); off.joystickWallRunCamera(false);
+            on.wallRunBody(true,0,{8,0,0}); off.wallRunBody(true,0,{8,0,0});
+            auto f=trackedFrame(); f.seconds=1.f/90;
+            if (length(hold.normal)<.5f || hold.vent) f.hands[0].stickY=1;
+            const Vec3 feet=hold.vent ? Vec3{} : Vec3{0,10,-.1f};
+            const auto a=holdFor(on,f,feet,hold,2), b=holdFor(off,f,feet,hold,2);
+            check(!b.joystickWallRun,"non-wall movement became a joystick wall run");
+            near(length(a.headPose.position-b.headPose.position),0,.003f);
+            near(length(a.headPose.orientation.rotate({0,1,0})-b.headPose.orientation.rotate({0,1,0})),0,.003f);
+        }
+    });
+    test("joystick and momentum running use the same body gait regardless of camera tilt", [] {
+        const auto b=splitPelvisBody();
+        for (Vec3 direction : {Vec3{1,0,0},Vec3{0,1,0},normalized(Vec3{1,1,0})}) {
+            for (int phase=0;phase<12;++phase) {
+                auto t=lookingAhead({0,0,.95f-.20f*std::abs(direction.y)}); t.wallRun=true;
+                t.runNormal={0,0,1}; t.runAhead=direction; t.runSpeed=6;
+                t.runPhase=phase*6.2831853f/12;
+                t.facing=body::between({0,0,-1},{0,1,0},direction,t.runNormal);
+                body::State baselineState; body::Result baseResult;
+                body::Config config; config.hideHead=false;
+                const auto expected=solved(b,t,baselineState,config,1,&baseResult);
+                for (float angle : {0.f,.7f,1.5707963f}) {
+                    GameMotionFrame frame; frame.standing=angle>0;
+                    frame.swing.tilt=Quat::around({1,0,0},angle);
+                    frame.flipTilt=Quat::around({0,0,1},.2f);
+                    t.tilt=frame.bodyTilt(true);
+                    body::State state; body::Result result;
+                    const auto actual=solved(b,t,state,config,1,&result);
+                    check(actual==expected,"camera transition selected a different running body pose");
+                    check(result.headError<.005f,"shared run pose lost the tracked head");
+                    body::Pose pose(const_cast<float*>(actual.data()),static_cast<int>(b.rig.parent.size()));
+                    for (int joint : {b.rig.pelvis,b.rig.hipRoot,2,3,4,21,22,23,25,26,27})
+                        check(pose.position(joint).z>-.015f,"original momentum camera put the body through the wall");
+                }
+            }
+        }
+        GameMotionFrame run; run.active=true; run.joystickWallRun=true;
+        const SurfaceHold slow{{0,0,1},{0,0,0},.5f,false};
+        WallRunBody gait;
+        check(!gait.update(run,slow,{0,.5f,0},true,false,0,.01f),
+              "joystick flag fabricated momentum before the player moved fast enough");
+        const SurfaceHold moving{{0,0,1},{0,0,0},6,false};
+        check(gait.update(run,moving,{0,6,0},true,false,0,.01f),"real joystick-generated velocity did not trigger momentum");
+    });
+    test("joystick wall-run camera switch persists and defaults to the wall-floor view, as before", [] {
+        using namespace vr_settings;
+        Values v;
+        check(v.joystickRunCamera && defaultChoice(Item::joystickRunCamera)==1,"default camera changed");
+        check(choose(Item::joystickRunCamera,0,v) && !v.joystickRunCamera,"momentum choice failed");
+        check(!withTabOnly(Values{},tabOnlyText(v)).joystickRunCamera,"camera choice was not saved");
+        check(withTabOnly(Values{},"hand_climb=1\n").joystickRunCamera,"old settings lost the transition");
+        check(choose(Item::joystickRunCamera,1,v) && v.joystickRunCamera,"ON choice failed");
+        choose(Item::joystickRunCamera,0,v);
+        check(choose(Item::joystickRunCamera,defaultChoice(Item::joystickRunCamera),v) && v.joystickRunCamera,
+              "reset did not restore the camera transition");
     });
     test("joystick camera distance changes live across directions and survives recentering", [] {
         for (Vec3 travel : {Vec3{6, 0, 0}, Vec3{0, 6, 0}, normalized(Vec3{1, 1, 0}) * 6.f}) {
@@ -21004,7 +21144,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 20 && s.bytes == 96 && s.combatVisuals == 1 &&
+        check(s.version == 21 && s.bytes == 100 && s.combatVisuals == 1 &&
                   offsetof(Settings, combatVisuals) == 56,
               "free combat broke the settings defaults or layout");
         s.combatVisuals = 0;
@@ -21015,6 +21155,57 @@ int main() {
         old.version = 10;
         old.bytes = settingsBytesV10;
         check(validSettings(old) && old.combatVisuals == 1, "old settings changed combat semantics");
+    });
+    test("half punch damage scales every move after combo bonuses without changing its reaction", [] {
+        const Punches fists;
+        const Flow flow;
+        const DeliveryConfig half{.halfDamage=true};
+        for (bool free : {false,true}) for (bool air : {false,true})
+            for (int count=1;count<=10;++count) for (auto cue : {CueWay::None,CueWay::Up,CueWay::Down,CueWay::Left})
+                for (Vec3 way : {Vec3{0,0,-1},Vec3{0,.9f,-.44f},Vec3{0,-.9f,-.44f}})
+                    for (float speed : {3.f,5.f,8.f}) {
+                        const auto blow=fists.blow(way,speed);
+                        const auto full=deliver(blow,air,count,flow,{},cue,1.5f,free);
+                        const auto reduced=deliver(blow,air,count,flow,half,cue,1.5f,free);
+                        near(reduced.damage,full.damage*.5f,.0001f);
+                        check(reduced.kind==full.kind && reduced.kinetic==full.kinetic && reduced.fly==full.fly &&
+                              reduced.knockback==full.knockback,"reduced damage changed the move or hit reaction");
+                        near(length(reduced.velocity-full.velocity),0);
+                        // The counter multiplier applied after delivery still halves exactly once.
+                        near(reduced.damage*1.25f,full.damage*1.25f*.5f,.0001f);
+                    }
+    });
+    test("half punch damage persists and older settings keep full damage", [] {
+        using namespace vr_settings;
+        Values v;
+        check(!v.halfPunchDamage && defaultChoice(Item::halfPunchDamage)==0,"damage changed by default");
+        check(choose(Item::halfPunchDamage,1,v) && v.halfPunchDamage,"damage switch did not enable");
+        check(withTabOnly(Values{},tabOnlyText(v)).halfPunchDamage,"damage switch did not persist");
+        check(!withTabOnly(Values{},"combat_visuals=0\n").halfPunchDamage,"old settings reduced damage");
+        check(choose(Item::halfPunchDamage,0,v) && !v.halfPunchDamage,"full damage did not restore");
+        game_swing::Settings packet;
+        check(packet.version==21 && packet.bytes==100 && !packet.halfPunchDamage &&
+              offsetof(game_swing::Settings,halfPunchDamage)==96,"damage protocol shifted older fields");
+        packet.halfPunchDamage=1;
+        check(game_swing::validSettings(packet),"half-damage packet refused");
+        packet.halfPunchDamage=2;
+        check(!game_swing::validSettings(packet),"invalid damage switch accepted");
+        packet={}; packet.version=20; packet.bytes=game_swing::settingsBytesV20;
+        check(game_swing::validSettings(packet) && !packet.halfPunchDamage,"old packet lost full damage");
+    });
+    test("joystick momentum only suppresses the stock stick while custom outdoor wall motion owns the player", [] {
+        using namespace game_swing;
+        Data d; d.status=1; d.owned=1; d.wall=static_cast<uint32_t>(Surface::wall);
+        check(momentumWallDrive(true,true,d),"custom momentum wall motion still forwards the stock stick");
+        check(!momentumWallDrive(false,true,d) && !momentumWallDrive(true,false,d),"legacy or stale motion lost input");
+        d.owned=0; check(!momentumWallDrive(true,true,d),"native crawl lost its stick");
+        d.owned=1;
+        for (Surface surface : {Surface::none,Surface::floor,Surface::game}) {
+            d.wall=static_cast<uint32_t>(surface);
+            check(!momentumWallDrive(true,true,d),"ground, vent or ceiling controls were suppressed");
+        }
+        d.wall=static_cast<uint32_t>(Surface::wall); d.status=0;
+        check(!momentumWallDrive(true,true,d),"an inactive module consumed movement");
     });
     test("hit stop: the game's time stops for a blow and eases back, longer for a finisher", [] {
         HitStop stop;
@@ -21563,18 +21754,20 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 53 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 57 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[53 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[53].title, "REALISTIC FLIPS") == 0 && all[53].choices.empty(),
+            check(all[57 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[57].title, "REALISTIC FLIPS") == 0 && all[57].choices.empty(),
               "realistic flips: a switch, first of its rows");
-        check(all[48].item == Item::controlledFlips && all[51].item == Item::wallRunCameraTilt, "custom switches misplaced");
+        check(all[48].item == Item::controlledFlips && all[51].item == Item::joystickRunCamera &&
+                  all[52].item == Item::wallRunCameraTilt && all[53].item == Item::halfPunchDamage,
+              "custom switches misplaced");
         // EYE AIM, before the realistic flips: what the eyes aim, off by default (only a headset that tracks
         // the eyes can).
-        check(all[52].item == Item::eyeAim && std::strcmp(all[52].title, "EYE AIM") == 0 &&
-                  all[52].choices.size() == 4 && std::strcmp(all[52].choices[0], "OFF") == 0 &&
-                  std::strcmp(all[52].choices[1], "WEB BALLS") == 0 && std::strcmp(all[52].choices[2], "ZIPS") == 0 &&
-                  std::strcmp(all[52].choices[3], "BOTH") == 0 && all[52].place == Place::tab,
+        check(all[54].item == Item::eyeAim && std::strcmp(all[54].title, "EYE AIM") == 0 &&
+                  all[54].choices.size() == 4 && std::strcmp(all[54].choices[0], "OFF") == 0 &&
+                  std::strcmp(all[54].choices[1], "WEB BALLS") == 0 && std::strcmp(all[54].choices[2], "ZIPS") == 0 &&
+                  std::strcmp(all[54].choices[3], "BOTH") == 0 && all[54].place == Place::tab,
               "EYE AIM: OFF, WEB BALLS, ZIPS, BOTH, in the tab before the realistic flips");
         {
             Values v;
@@ -21587,6 +21780,35 @@ int main() {
             check(tabOnlyText({}).find("eye_aim=0\n") != std::string::npos &&
                       withTabOnly({}, "eye_aim=2\n").eyeAim == eyeAimZips && withTabOnly({}, "eye_aim=9\n").eyeAim == 3,
                   "spidy_vr.ini keeps EYE AIM as eye_aim, within its range");
+        }
+        // FLIP REPROJECTION, after EYE AIM: a switch in the tab, off by default so the headset can compare
+        // (the user, October 29), kept in spidy_vr.ini.
+        check(all[55].item == Item::flipReprojection && std::strcmp(all[55].title, "FLIP REPROJECTION") == 0 &&
+                  all[55].choices.empty() && all[55].place == Place::tab,
+              "FLIP REPROJECTION: a switch in the tab, after EYE AIM");
+        {
+            Values v;
+            check(!v.flipReprojection && defaultChoice(Item::flipReprojection) == 0, "flip reprojection on by default");
+            check(choose(Item::flipReprojection, 1, v) && v.flipReprojection && choice(Item::flipReprojection, v) == 1,
+                  "the switch did not turn it on");
+            check(tabOnlyText(v).find("flip_reprojection=1\n") != std::string::npos &&
+                      withTabOnly({}, "flip_reprojection=1\n").flipReprojection &&
+                      !withTabOnly({}, "flip_reprojection=0\n").flipReprojection,
+                  "spidy_vr.ini keeps FLIP REPROJECTION as flip_reprojection");
+        }
+        // STEADY HUD, after EYE AIM: a switch in the tab, off by default to compare, kept in
+        // spidy_vr.ini.
+        check(all[56].item == Item::steadyHud && std::strcmp(all[56].title, "STEADY HUD") == 0 &&
+                  all[56].choices.empty() && all[56].place == Place::tab,
+              "STEADY HUD: a switch in the tab, after EYE AIM");
+        {
+            Values v;
+            check(!v.steadyHud && defaultChoice(Item::steadyHud) == 0, "steady HUD on by default");
+            check(choose(Item::steadyHud, 1, v) && v.steadyHud && choice(Item::steadyHud, v) == 1,
+                  "the switch did not turn it on");
+            check(tabOnlyText(v).find("steady_hud=1\n") != std::string::npos &&
+                      withTabOnly({}, "steady_hud=1\n").steadyHud && !withTabOnly({}, "steady_hud=0\n").steadyHud,
+                  "spidy_vr.ini keeps STEADY HUD as steady_hud");
         }
 
         // The wall view has no row of its own (the player, October 14: "i dont
@@ -21641,7 +21863,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 59,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 63,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -21659,11 +21881,13 @@ int main() {
                   std::strcmp(all[26].choices[2], "OFF") == 0,
               "BLOW SOUNDS under the vibration: GAME, SPIDY or OFF");
         check(all[23].item == Item::haptics && all[24].item == Item::reelHaptics && all[24].choices.empty() &&
+                  all[25].item == Item::swingHaptics && all[25].choices.empty() &&
                   all[27].item == Item::bodyHaptics &&
                   std::strcmp(all[27].title, "BODY HAPTICS") == 0 && all[28].item == Item::hapticWebs &&
                   all[29].item == Item::hapticWind && all[30].item == Item::hapticCombat &&
                   all[31].item == Item::hapticMovement && all[28].choices.empty() && all[31].choices.empty(),
-              "HAPTICS: the vibration, its reel, body haptics, then the web, wind, combat and movement switches");
+              "HAPTICS: the vibration, the reel and the swing, body haptics, then the web, wind, combat and "
+              "movement switches");
         check(all[43].item == Item::calibrate && all[43].choices.size() == 2 &&
                   std::strcmp(all[43].choices[1], "ON RESUME") == 0,
               "the body's calibration: NO, or ON RESUME");
@@ -21803,7 +22027,7 @@ int main() {
         using namespace vr_settings;
         const Values defaults;
         check(tabOnlyText(defaults) == "controlled_flips=0\nnear_clip_mm=20\nhand_climb=0\n"
-                                       "wall_run_camera_tilt=1\n"
+                                       "joystick_wall_run_camera=1\nwall_run_camera_tilt=1\nhalf_punch_damage=0\n"
                                        "realistic_flips=0\n"
                                        "rotation_strength=50\nrotation_speed=240\nflight_speed_min=3\n"
                                        "swing_momentum=1\nrotation_response_ms=500\nhand_momentum=100\n"
@@ -21813,7 +22037,8 @@ int main() {
                                        "web_slingshot=0\nbetter_climbing=0\nheight_cm=0\nseated=0\neye_aim=0\n"
                                        "smart_anchor=0\nelastic_web=0\nsoft_release=0\nswing_assist=0\n"
                                        "slingshot_speed=0\nrecording_smoothing=0\n"
-                                       "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\nreel_haptics=0\nswing_haptics=0\n",
+                                       "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\n"
+                                       "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;
@@ -21842,6 +22067,7 @@ int main() {
         changed.heightCm = 178;
         changed.seated = true;
         changed.eyeAim = 3;
+        changed.flipReprojection = true;
         check(withTabOnly(defaults, tabOnlyText(changed)) == sanitized(changed),
               "the settings did not come back");
         check(withTabOnly(defaults, "height_cm=40\n").heightCm == 120 &&
@@ -23955,6 +24181,162 @@ int main() {
               "another class was read as a body");
     });
 #endif
+    // FLIP REPROJECTION (flip_reprojection.hpp). The user, October 29: head turns are smooth in the headset,
+    // flips, spins and smooth turns judder; each pair went to OpenXR with the tracking pose it was rendered
+    // from, and the runtime turns a pair only to the newer head.
+    test("flip reprojection: a pair shows the world where the player's own turn has taken it since", [] {
+        namespace fr = flip_reprojection;
+        // Tracked eyes looking a little right and down, 64 mm apart.
+        const Quat look = Quat::around({0, 1, 0}, -.3f) * Quat::around({1, 0, 0}, -.2f);
+        const std::array<Pose, 2> eyes{Pose{{-.032f, 1.6f, .1f}, look}, Pose{{.032f, 1.6f, .1f}, look}};
+        // The tracking space in a backflip under a smooth turn when the pair was asked for, and two frames on.
+        const Quat rendered = Quat::yaw(.7f) * Quat::around({1, 0, 0}, 1.1f);
+        const Quat now = Quat::yaw(.75f) * Quat::around({1, 0, 0}, 1.25f);
+        const auto c = fr::correction({rendered, true}, {now, true});
+        check(c.applied && c.angle > .1f && c.angle < fr::maxTurn, "a 9 degree turn not applied");
+        near(c.angle, fr::angle(now.conjugate() * rendered), 1e-4f);
+        const auto layer = fr::layerEyes(eyes, c.layer);
+        for (unsigned e = 0; e < 2; ++e)
+            for (const Vec3 world : {Vec3{0, 0, -1}, Vec3{.6f, .3f, -.74f}, Vec3{-.2f, -.9f, .38f}}) {
+                const Vec3 d = normalized(world);
+                // The pixel that saw `d`, in the rendered eye's own axes, shows in the tracking space where
+                // the world is now.
+                const Vec3 pixel = (rendered * eyes[e].orientation).conjugate().rotate(d);
+                check(length(layer[e].orientation.rotate(pixel) - now.conjugate().rotate(d)) < 5e-4f,
+                      "the world is not where the turn has taken it");
+            }
+        // About the head: the eyes keep their distance and their middle.
+        near(length(layer[1].position - layer[0].position), .064f, 1e-5f);
+        check(length(layer[0].position + layer[1].position - eyes[0].position - eyes[1].position) < 1e-5f,
+              "the head moved");
+        // No turn since: the eyes as tracked.
+        const auto none = fr::correction({rendered, true}, {rendered, true});
+        check(none.applied && none.angle < 1e-3f, "no turn, yet turned");
+        const auto same = fr::layerEyes(eyes, none.layer);
+        check(length(same[0].position - eyes[0].position) < 1e-5f &&
+                  length(same[1].orientation.rotate({0, 0, -1}) - look.rotate({0, 0, -1})) < 1e-5f,
+              "eyes moved without a turn");
+    });
+    test("flip reprojection: snap turns, recenters and unknown turns show the pair as rendered", [] {
+        namespace fr = flip_reprojection;
+        // A 30 degree snap turn between render and display: past the limit, its angle still reported.
+        const auto snap = fr::correction({Quat::yaw(.2f), true}, {Quat::yaw(.2f + .5235988f), true});
+        check(!snap.applied, "a snap turn was reprojected");
+        near(snap.angle, .5235988f, 1e-4f);
+        check(!fr::correction({}, {Quat::yaw(.1f), true}).applied && !fr::correction({Quat::yaw(.1f), true}, {}).applied,
+              "turned with a turn not known");
+        // The tracking space's turn from the world's head and the tracked one.
+        const Quat space = Quat::yaw(1.2f) * Quat::around({0, 0, 1}, .4f);
+        const Quat tracked = Quat::around({1, 0, 0}, -.3f);
+        const auto t = fr::trackingTurn(space * tracked, tracked);
+        check(t.valid && length(t.turn.rotate({0, 0, -1}) - space.rotate({0, 0, -1})) < 1e-5f &&
+                  length(t.turn.rotate({0, 1, 0}) - space.rotate({0, 1, 0})) < 1e-5f,
+              "the tracking space's turn");
+        check(!fr::trackingTurn({0, 0, 0, 0}, tracked).valid &&
+                  !fr::trackingTurn(space, {std::numeric_limits<float>::quiet_NaN(), 0, 0, 1}).valid,
+              "a turn from a broken head");
+    });
+    test("flip reprojection: what the player holds stays with the head, the eyes' views as rendered", [] {
+        namespace fr = flip_reprojection;
+        const Quat rendered = Quat::yaw(-.4f) * Quat::around({1, 0, 0}, -.9f);
+        const Quat now = Quat::yaw(-.45f) * Quat::around({1, 0, 0}, -1.1f);
+        const auto c = fr::correction({rendered, true}, {now, true});
+        // The rendered frame: the tracking space at `rendered`, 1 km out in the city.
+        const Vec3 origin{1200, 85, -640};
+        const auto toWorld = [&](Pose p) { return Pose{origin + rendered.rotate(p.position), rendered * p.orientation}; };
+        const std::array<Pose, 2> eyes{Pose{{-.032f, 1.6f, 0}, {}}, Pose{{.032f, 1.6f, 0}, {}}};
+        GameMotionFrame f;
+        for (unsigned i = 0; i < 2; ++i) {
+            const Vec3 at = toWorld(eyes[i]).position;
+            f.eyes[i][12] = at.x;
+            f.eyes[i][13] = at.y;
+            f.eyes[i][14] = at.z;
+        }
+        const Pose hand{{.25f, 1.2f, -.4f}, Quat::around({0, 1, 0}, .5f)};
+        f.grips[1] = f.hands[1] = f.swing.hands[1].aim = toWorld(hand);
+        f.headPose = toWorld({{0, 1.6f, 0}, {}});
+        f.swing.trackingYaw = -.4f;
+        f.swing.tilt = Quat::around({1, 0, 0}, -.9f);
+        const auto shown = fr::held(f, c.world);
+        // Where the turned layer shows the drawn grip, in the tracking space: where the hand is.
+        const Vec3 middle = fr::eyesMiddle(f), trackedMiddle{0, 1.6f, 0};
+        const Vec3 seen = trackedMiddle + c.layer.rotate(rendered.conjugate().rotate(shown.grips[1].position - middle));
+        check(length(seen - hand.position) < 5e-4f, "the hand left the head");
+        const Quat seenTurn = c.layer * rendered.conjugate() * shown.grips[1].orientation;
+        check(length(seenTurn.rotate({0, 0, -1}) - hand.orientation.rotate({0, 0, -1})) < 1e-4f,
+              "the hand turned away");
+        check(length(shown.swing.hands[1].aim.position - shown.grips[1].position) < 1e-4f &&
+                  length(shown.hands[1].position - shown.grips[1].position) < 1e-4f,
+              "the aim or the glove left the grip");
+        // The aims are steadied in the tracking space's turn: it turns with them.
+        check(length(trackingTurn(shown.swing).rotate({0, 0, -1}) - (c.world * rendered).rotate({0, 0, -1})) < 1e-4f,
+              "the aims' turn");
+        // The eyes stay as rendered: the overlay's views must match the image.
+        check(shown.eyes == f.eyes && length(fr::eyesMiddle(shown) - middle) < 1e-3f, "the eyes were turned");
+    });
+    test("the steadier-HUD probe snapshots now and then and reads back only 8-bit colour", [] {
+        using namespace spidy::hud_capture;
+        check(snapshotDue(100, 0, false), "no first snapshot");
+        check(!snapshotDue(100 + snapshotMs - 1, 100, true) && snapshotDue(100 + snapshotMs, 100, true),
+              "snapshots not every few seconds");
+        bool swap{};
+        check(readableBytes(DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, swap) == 4 && !swap, "RGBA not read");
+        check(readableBytes(DXGI_FORMAT_B8G8R8A8_UNORM, swap) == 4 && swap, "BGRA not swapped");
+        check(readableBytes(DXGI_FORMAT_R16G16B16A16_FLOAT, swap) == 0 &&
+                  readableBytes(DXGI_FORMAT_R10G10B10A2_UNORM, swap) == 0,
+              "a format the picture cannot show was read");
+    });
+    // STEADY HUD (steady_hud.hpp): the panel as a quad layer of its own. The user, October 30: the arms and the
+    // HUD judder when the headset shows a pair again.
+    test("steady HUD: the layer spans what the panel did, where Follow holds it, as the markers see it", [] {
+        const Vec3 head{.1f, 1.6f, .2f};
+        const Quat facing = Quat::yaw(.5f) * Quat::around({1, 0, 0}, -.2f);
+        const float halfWidth = native_hud::halfWidth(2), distance = native_hud::Shape{}.distance;
+        const auto q = steady_hud::quad(head, facing, halfWidth, distance, 1920, 1080);
+        check(q.valid, "a medium HUD gave no layer");
+        // Two metres ahead the way the panel faces, facing back at the head.
+        check(length(q.pose.position - (head + facing.rotate({0, 0, -distance}))) < 1e-5f, "not ahead of the head");
+        check(length(q.pose.orientation.rotate({0, 0, 1}) - facing.rotate({0, 0, 1})) < 1e-5f, "not facing the head");
+        // 60 degrees across at medium, as high as the texture's shape.
+        near(q.width, 2 * std::tan(30.f * 3.14159265f / 180) * distance, 1e-4f);
+        near(q.height, q.width * 1080 / 1920, 1e-4f);
+        // The game projects its world markers onto the panel from the head (native_hud::project): a point
+        // on the layer's corner or edge shows at that place on the texture.
+        const Vec3 right = facing.rotate({1, 0, 0}), up = facing.rotate({0, 1, 0}), ahead = facing.rotate({0, 0, -1});
+        const Mat4 view{right.x, right.y, right.z, 0, -up.x, -up.y, -up.z, 0, ahead.x, ahead.y, ahead.z, 0,
+                        head.x,  head.y,  head.z,  1};
+        const struct {
+            float u, v;
+        } spots[] = {{0, 0}, {1, 1}, {.25f, .8f}, {.5f, .5f}};
+        for (const auto s : spots) {
+            const Vec3 at = q.pose.position + right * ((s.u - .5f) * q.width) + up * ((.5f - s.v) * q.height);
+            float x{}, y{};
+            bool front{};
+            check(native_hud::project(view, halfWidth, 1920.f / 1080, at, .1f, x, y, front) && front,
+                  "a point on the layer not projected");
+            near(x, s.u, 1e-4f);
+            near(y, s.v, 1e-4f);
+        }
+        // A facing not quite of unit length still faces that way.
+        const Quat scaled{facing.x * 1.5f, facing.y * 1.5f, facing.z * 1.5f, facing.w * 1.5f};
+        const auto again = steady_hud::quad(head, scaled, halfWidth, distance, 1920, 1080);
+        check(again.valid && length(again.pose.position - q.pose.position) < 1e-5f, "a scaled facing moved it");
+        // The HUD off, no texture, a broken head: no layer.
+        check(!steady_hud::quad(head, facing, 0, distance, 1920, 1080).valid &&
+                  !steady_hud::quad(head, facing, halfWidth, distance, 0, 1080).valid &&
+                  !steady_hud::quad(head, {0, 0, 0, 0}, halfWidth, distance, 1920, 1080).valid &&
+                  !steady_hud::quad({std::numeric_limits<float>::quiet_NaN(), 0, 0}, facing, halfWidth, distance,
+                                    1920, 1080)
+                       .valid,
+              "a layer without a panel");
+    });
+    test("steady HUD: a copy shows only while the game's pairs keep coming", [] {
+        using steady_hud::holdMs;
+        check(steady_hud::fresh(1000, 1000, true) && steady_hud::fresh(1000 + holdMs, 1000, true),
+              "a new copy not shown");
+        check(!steady_hud::fresh(1001 + holdMs, 1000, true), "a stale copy shown: the eyes would lack the panel");
+        check(!steady_hud::fresh(1000, 0, false) && !steady_hud::fresh(1000, 1200, true), "no copy, yet shown");
+    });
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;
 }

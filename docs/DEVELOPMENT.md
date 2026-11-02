@@ -1167,6 +1167,7 @@ reattaching after a stopped session or a rebuilt DLL.
 | `-OwnShadows` | Each eye renders its own sun shadow maps, as before October 11; without it both use one set fitted to a lens covering both |
 | `-NoEyeReflections` | The eyes without the game's screen-space reflections, whatever its Screen Space Reflections setting (they follow it otherwise) |
 | `-EyeLensDistances` | The eyes judge detail, draw and texture distances by their own wide lenses, as before October 19: about half the flat game's distances (see [Graphics settings in VR](#graphics-settings-in-vr)) |
+| `-NoEyePacing` | The game draws eye pairs as fast as it can, as before November 1; without it one pair a headset frame, each begun at the same point of the frame (`native_pace.hpp`) |
 | `-NoEyeOcclusion` | Turn off the eyes' occlusion culling, for comparison |
 | `-XrRuntime <manifest>` | Use this OpenXR runtime manifest instead of the one the headset is connected to |
 | `-AttachOnly` | Attach to a game that is already running instead of starting it |
@@ -1225,10 +1226,14 @@ session and writes them back after the game closes; see
 [Start Spider-Man in VR](#start-spider-man-in-vr).
 
 The two eyes are extra native scene views. They inherit the game's own quality
-settings, including textures, shadows, the Level of Detail setting, crowds,
-ambient occlusion, and motion blur strength; not its ray-traced reflections,
-its anti-aliasing and upscaling, nor the distances it judges detail by, which
-Spidy sets for them. For each eye, Spidy sets only:
+settings, including textures, shadows, the Level of Detail setting, crowds
+and ambient occlusion; not its ray-traced reflections, its motion blur (an
+eye's buffers have no motion blur targets, so MotionBlurApply returns at
+once), its speed blur (the radial blur its visual effects ask of every view,
+which Spidy leaves out of the eyes since November 1: `radialBlur` in
+`src/stereo_probe.cpp`), its anti-aliasing and upscaling, nor the distances
+it judges detail by, which Spidy sets for them. For each eye, Spidy sets
+only:
 
 - the runtime-recommended resolution (3072 x 3264 in the latest session) times
   the render scale for the eye's image, and private scene buffers at the
@@ -1372,10 +1377,24 @@ frames it did. Only one view may: the registration applies a view's wanted
 states over the previous ones. How far away a building draws its full model
 is what the view's queries carry in their result (`+88`): 145 m in the game
 (`7a89170`, which region changes rewrite), more for a lens narrower than 65
-degrees. While the left eye stands in, both eyes' results get 150% of it,
-218 m (`impostorQueries`, a hook on `16faf10`; `SpidyImpostorReach`, and
-`--building-reach` for a session, set 50-400%); on October 19 that cost
-nothing measurable at 3072 x 3264 eyes, and 200% about 1%.
+degrees. While the left eye stands in, both eyes' results get 200% of it,
+290 m (150%, 218 m, before November 1; `impostorQueries`, a hook on
+`16faf10`; `SpidyImpostorReach`, and `--building-reach` for a session, set
+50-400%); on October 19 150% cost nothing measurable at 3072 x 3264 eyes, and
+200% about 1%; on November 1 neither moved the frame rate at 2688 x 2880.
+
+The full models take their slots from the scene's slot pool, which the props
+and details near the head (hibernate zones) share; a full pool refuses either
+until slots free up (`190cb80`, counted by who asked: `building_refusals`,
+`zone_refusals` in the report's `streaming`). The game's pool has 409,600
+slots, the first of its Scene settings (`7a89780`), which only the scene
+registry's setup reads (`19116c0`, once, as the world is made), to size the
+pool's free-slot bitset (`+1b0`) and its share of the Scene Gpu Registry
+buffer (`+140`, 0x80 bytes a slot). In a swing the far buildings filled it to
+95% and it refused some; the render memory module, loaded as the game
+starts, raises that setting as the setup begins (`SpidyScenePool`, 200% by
+default: 819,200 slots, 52 MB more video memory), and the report's
+`scene_pool` says whether it came in time.
 
 Which impostors are asked about is the deciding view's frustum, and nothing
 outside it keeps its full model: each frame's wanted states start at none
@@ -1507,9 +1526,10 @@ and 77 at 50% ([VALIDATION.md](VALIDATION.md)). Each view still renders its
 own shadow maps. Ray-traced
 reflections are computed for each eye. On this PC, motion blur, film grain, and
 sharpening are at their lowest stored value (1), and depth of field, vignette,
-chromatic aberration, and lens flares are off. The game also has a traversal
-motion blur bonus while swinging; whether that low setting suppresses it in the
-eyes is not verified. When frames arrive slower than the refresh rate, Virtual
+chromatic aberration, and lens flares are off. Neither the game's motion blur
+(its swing bonus included) nor its speed blur reaches the eyes, whatever the
+setting (see above); the game's own view keeps both. When frames arrive slower
+than the refresh rate, Virtual
 Desktop repeats or synthesizes frames (Synchronous Spacewarp), which can double
 fast-moving edges. A refresh rate the frame rate divides evenly, such as 72 or
 90 Hz, gives a steadier cadence than 120 Hz. With SSW on, Virtual Desktop renders
@@ -1892,6 +1912,9 @@ still requires a running game or headset.
 | `src/game_offers.cpp`, `src/game_warp.cpp`, `include/spidy/offer_pointing.hpp`, `tools/research_warp.py` | The game's interactions on Spidy's wall: the hero's offer processor, each offer's check and a vent's own check answered as the game's crawl would where the swing holds the player, and the offers it gathered near him; a hand pointing at one and the interact's use of it - the game's own crawl entry under him (`game_warp`), its pick, then its Y; the in-game check (`research_warp.py --use`) |
 | `src/game_xr.cpp`, `src/game_tracking.cpp` | Native eye presentation and Quest controls |
 | `include/spidy/wall_roll.hpp`, `src/swing.cpp` (`climbInputs`) | Hand wall climbing: palms that hold the wall and pull, the two-grip roll of the view |
+| `include/spidy/flip_reprojection.hpp` | FLIP REPROJECTION: each eye pair's layer poses turned by the tracking space's turn in the world since it was rendered (`NativeEyeFrame::rigTurn` against this frame's), about the head, and the overlay's held things (hands, aims, phone, gadget wheel, calibration panel) turned back so they stay with it; `SpidyReprojectData` for the report's `flip_reprojection` |
+| `include/spidy/steady_hud.hpp` | STEADY HUD: the HUD panel as an OpenXR quad layer of its own (`XrRuntime::fillHud`/`hudQuad`), placed in the tracking space where `native_hud::Follow` holds it, as wide as the panel showed; the panel's texture copied with each eye pair (`native_gpu::wantHudLayer`/`latestHud`/`fillHudLayer`) and left out of the eyes while the layer shows (`native_hud::layered`) |
+| `include/spidy/hud_capture.hpp` | `SpidyHudCapture`, with STEADY HUD on (off, none of it runs): the panel texture's D3D12 resource as `native_hud` finds it, its state through the game's barriers, a snapshot every five seconds (the report's `<report>-hud` pictures) and STEADY HUD's copies and layer frames |
 | `include/spidy/realistic_flip.hpp`, `tests/realistic_flip_tests.cpp` | Realistic flips: spin from the webs' pull, a let-go swing and arm swings, drag, and the way back upright |
 | `src/native_hud.cpp`, `include/spidy/native_hud.hpp`, `tools/probe_hud.py` | The game's HUD in VR: its panel in front of the head, the second movie (markers, subtitles, prompts) on it, and its check in the game |
 | `src/native_rays.cpp`, `src/native_movement.cpp`, `src/game_swing.cpp` | Native world queries and collision-controlled swing requests; the rays that stand in for the player's body pass what it passes (`native_rays::meets`, his mover's collision profile) |

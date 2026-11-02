@@ -284,7 +284,7 @@ void breakAttack(const SpiderSense::Counter& c, Vec3 head) {
     way.y = 0;
     request.direction = length(way) > 1e-3f ? normalized(way) : Vec3{0, 0, -1};
     request.normal = request.direction * -1.f;
-    request.amount = 1;
+    request.amount = fighter.halfPunchDamage ? .5f : 1.f;
     request.type = 1; // kMelee
     request.knockback = static_cast<int32_t>(Knockback::Knockback);
     request.knockbackAmount = 3;
@@ -421,8 +421,8 @@ void land(PunchEvent e, bool byStrike) {
     if (uncalled)
         flow.keep();
     const int count = uncalled ? flow.count() : flow.hit();
-    auto d = deliver(e, airborne, count, flow, {}, called ? before.way : CueWay::None, cues.config().damage,
-                     !fighter.combatVisuals);
+    auto d = deliver(e, airborne, count, flow, DeliveryConfig{.halfDamage = fighter.halfPunchDamage},
+                     called ? before.way : CueWay::None, cues.config().damage, !fighter.combatVisuals);
     if (uncalled && (d.fly || d.knockback >= Knockback::Knockdown)) {
         d.kind = BlowKind::Hit;
         d.kinetic = d.fly = false;

@@ -83,6 +83,11 @@ struct Values {
     bool standOnWalls = true;
     // Experimental physical hand pulls, solid palms and crawling body poses.
     bool handClimb = false;
+    bool halfPunchDamage = false; // half health damage, unchanged punch reactions
+    // The wall-floor camera transition during HAND WALL CLIMBING's joystick
+    // runs (the tab's JOYSTICK WALL RUN CAMERA), as before pull request #38;
+    // off, the left stick drives the momentum wall run's view and gait.
+    bool joystickRunCamera = true;
     bool wallRunCameraTilt = true; // optional horizontal momentum-run camera bank
     // Scenes the game plays on the game screen (cutscenes, finishers) have
     // depth there (the tab's GAME SCREEN 3D): 0 off, the game's flat frame; 1
@@ -175,6 +180,16 @@ struct Values {
     // once it has arrived and catches softly (Swing::webTravel; pull
     // request #48).
     int webRange = 100, webSpeed = 0;
+    // The pair the headset shows turned by the player's own turn since it was
+    // rendered (the tab's FLIP REPROJECTION; flip_reprojection.hpp): flips,
+    // spins and smooth turns as steady as head turns. Off by default, to
+    // compare in the headset.
+    bool flipReprojection = false;
+    // The HUD as a layer of its own that the headset shows at its own rate
+    // (the tab's STEADY HUD; steady_hud.hpp), instead of drawn into each eye
+    // pair by the game: it holds still when the headset repeats a pair. Off
+    // by default, to compare in the headset.
+    bool steadyHud = false;
     // The reel felt in the hand (the tab's REEL HAPTICS; reel_haptics.hpp):
     // the reeling hand's controller ticks like a winch. Off by default.
     bool reelHaptics = false;
@@ -285,6 +300,10 @@ enum class Item : uint8_t {
     ropeSteering,
     webRange,
     webSpeed,
+    joystickRunCamera,
+    halfPunchDamage,
+    flipReprojection,
+    steadyHud,
     reelHaptics,
     swingHaptics,
 };
@@ -311,7 +330,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 64>& rows();
+const std::array<Row, 68>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;
@@ -328,10 +347,10 @@ bool choose(Item, int choice, Values&);
 int defaultChoice(Item);
 // The settings no launcher.ini key or XrConfig field carries: NEAR CLIP,
 // RECORDING FOV, UI STYLE, BLOW SOUNDS, HEIGHT, SEATED, WEB SLINGSHOT, BETTER CLIMBING, HAND WALL
-// CLIMBING, EYE AIM, the realistic flips' eleven rows and the body haptics' four groups. The game
-// module keeps them as these key=value lines in a file of their own, beside
-// the launcher's settings (game_xr.cpp, tabOnlyPath), and reads them back
-// when VR starts; the launcher's options read and write the same file.
+// CLIMBING, EYE AIM, FLIP REPROJECTION, STEADY HUD, REEL HAPTICS, SWING HAPTICS, the realistic flips'
+// eleven rows and the body haptics' four groups. The game module keeps them as these key=value lines in a
+// file of their own, beside the launcher's settings (game_xr.cpp, tabOnlyPath), and reads them back when
+// VR starts; the launcher's options read and write the same file.
 std::string tabOnlyText(const Values&);
 // The values with what such text holds, sanitized. A line with an unknown
 // key, or whose value is no whole number, is passed over.
