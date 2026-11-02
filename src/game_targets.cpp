@@ -45,6 +45,11 @@ constexpr uint32_t trait(Trait t) {
 // machine that has him out of the fight, and one in which something else
 // moves him (bit 0: no kind is 0).
 constexpr uint32_t heldState = 1u << 0, downState = 1u << 5, healthClass = 1u << 6, botHealthClass = 1u << 7;
+// The game's webbed-up state (game_targets::cocooned). No kind or trait has
+// the top bit: the traits end at bit 14.
+constexpr uint32_t webbedState = 1u << 31;
+// The game's own stuck-to-a-surface state (game_targets::wallStuck), a down one.
+constexpr uint32_t wallStuckState = 1u << 30, stateBits = webbedState | wallStuckState;
 constexpr Rule rules[] = {
     {".?AVThrowableHelper@@", marker(Kind::throwable)},
     {".?AVBotMoverManager@@", marker(Kind::bot)},
@@ -63,7 +68,8 @@ constexpr Rule rules[] = {
     {".?AVBotHealth@@", botHealthClass},
     {".?AVBotStateDeathAnim@@", downState},
     {".?AVBotStateRagdoll@@", downState},
-    {".?AVBotStateWallStuck@@", downState},
+    {".?AVBotStateWallStuck@@", downState | wallStuckState},
+    {".?AVBotStateWebStruggle@@", webbedState},
     // Held (game_targets::held): attached to an actor (a car's seat), carried,
     // played by a cinematic, in BotStateNull, the guest of another's synced
     // animation, in a slotted interaction, frozen, or waiting for the game's
@@ -202,8 +208,8 @@ bool game_targets::scan(uintptr_t base, uint32_t kinds, std::vector<Candidate>& 
             healths[head.record] = entry.address;
         else if (bits & healthClass)
             healths.emplace(head.record, entry.address);
-        if (bits >> 8)
-            traits[head.record] |= bits >> 8;
+        if ((bits & ~stateBits) >> 8)
+            traits[head.record] |= (bits & ~stateBits) >> 8;
         if (bits & trait(webbable))
             trackers.emplace(head.record, Tracker{entry.address, head.vtable, head.handle});
         if (bits & marker(Kind::bot))
@@ -244,6 +250,14 @@ bool game_targets::up(uintptr_t base, const Candidate& c) {
 bool game_targets::held(uintptr_t base, const Candidate& c) {
     return c.kind == Kind::bot && c.machine && inPlay(c) &&
            (classOf(base, pointer(pointer(c.machine + 0x70))) & heldState);
+}
+bool game_targets::cocooned(uintptr_t base, const Candidate& c) {
+    return c.kind == Kind::bot && c.machine && inPlay(c) &&
+           (classOf(base, pointer(pointer(c.machine + 0x70))) & webbedState);
+}
+bool game_targets::wallStuck(uintptr_t base, const Candidate& c) {
+    return c.kind == Kind::bot && c.machine && inPlay(c) &&
+           (classOf(base, pointer(pointer(c.machine + 0x70))) & wallStuckState);
 }
 bool game_targets::standing(const Candidate& c) {
     float points{};

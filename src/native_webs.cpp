@@ -72,6 +72,16 @@ struct Owned {
     bool trailing{};
 };
 Owned owned[2]; // hero rope manager update only
+// The web tie's ropes (submitTies): each made on a hand whose own web is not
+// drawn, `hand`; hero rope manager update only.
+struct TieOwned {
+    uint32_t handle{}, hand{};
+};
+TieOwned tieOwned[native_webs::maxTieRopes];
+native_webs::TieRope tieRequest[native_webs::maxTieRopes]{};
+uint32_t tieRequestCount{};
+uint64_t tieDeadline{};
+std::atomic<uint32_t> tieMask{};
 // The rope manager the handles above belong to. A new player brings a new
 // one, and an old handle there would name one of the game's own ropes.
 uintptr_t ownedManager{};
@@ -149,6 +159,8 @@ void update(void* manager, float dt) {
     }
     if (mgr != ownedManager) {
         owned[0] = owned[1] = {};
+        for (auto& t : tieOwned)
+            t = {};
         ownedManager = mgr;
     }
     lastHeroUpdate = GetTickCount64();
@@ -159,6 +171,10 @@ void update(void* manager, float dt) {
     wantedBends[0] = requestBends[0];
     wantedBends[1] = requestBends[1];
     const bool live = !stopping && GetTickCount64() < requestDeadline;
+    native_webs::TieRope tiesWanted[native_webs::maxTieRopes]{};
+    const uint32_t tiesCount =
+        live && GetTickCount64() < tieDeadline ? std::min(tieRequestCount, native_webs::maxTieRopes) : 0u;
+    std::copy(tieRequest, tieRequest + native_webs::maxTieRopes, tiesWanted);
     ReleaseSRWLockShared(&requestLock);
     // Tracked wrists were placed from the player position sampled for that
     // pose. Move them with the player to the frame being updated. The eyes are
@@ -230,6 +246,49 @@ void update(void* manager, float dt) {
         }
         failed |= rope.failed ? 1u << hand : 0;
     }
+    // The tie's ropes: each on a hand whose own web is not drawn (a web let
+    // go of drifts from its hand: it is not). Made after the hands' own, so a
+    // web a hand shoots now takes its hand back in this same update.
+    uint32_t tieDrawn{};
+    bool tieHand[2]{};
+    Vec3 tieAnchor[2]{};
+    {
+        const auto handBusy = [&](uint32_t h) { return owned[h].handle && !owned[h].trailing; };
+        for (uint32_t k = 0; k < native_webs::maxTieRopes; ++k) {
+            auto& rope = tieOwned[k];
+            const auto& want = tiesWanted[k];
+            const bool tieWanted = k < tiesCount && finite(want.anchor) && finite(want.end);
+            if (rope.handle && !get(manager, rope.handle))
+                rope.handle = 0;
+            if (rope.handle && (!tieWanted || handBusy(rope.hand) || tieHand[rope.hand])) {
+                release(manager, &rope.handle, false, false);
+                rope.handle = 0;
+                ++released;
+            }
+            if (tieWanted && !rope.handle)
+                for (uint32_t h = 0; h < 2 && !rope.handle; ++h) {
+                    if (handBusy(h) || tieHand[h])
+                        continue;
+                    uint32_t handle{};
+                    if (ensure(manager, &handle, swingRope, h, nullptr, 0, 0) && get(manager, handle)) {
+                        rope = {handle, h};
+                        ++created;
+                    } else {
+                        ++failures;
+                    }
+                }
+            if (!rope.handle)
+                continue;
+            target(manager, rope.handle, &want.end.x);
+            if (const auto slot = get(manager, rope.handle))
+                std::memcpy(reinterpret_cast<void*>(slot + 0x6c0), &leaseSeconds, sizeof(leaseSeconds));
+            tieHand[rope.hand] = true;
+            tieAnchor[rope.hand] = want.anchor;
+            tieDrawn |= 1u << k;
+            ++count;
+        }
+    }
+    tieMask = tieDrawn;
     if (live) {
         // 676dd0 rewrites Start/Grip/Grip2/End (7d60/7d78/7d90/7da8, +12 per
         // hand) from skeleton joints whose hashes (7d40..7d5f) are non-zero.
@@ -258,6 +317,21 @@ void update(void* manager, float dt) {
                 std::memcpy(reinterpret_cast<void*>(mgr + offset + hand * 12), &point, sizeof(point));
             starts[hand] = start;
             wrote[hand] = true;
+        }
+        // A hand that draws a tie's rope starts it where the tie's web sticks,
+        // for this update; its points as they were again after it.
+        Vec3 handPointsBefore[2][4]{};
+        for (unsigned hand = 0; hand < 2; ++hand) {
+            if (!tieHand[hand])
+                continue;
+            for (int p = 0; p < 4; ++p)
+                std::memcpy(&handPointsBefore[hand][p], reinterpret_cast<void*>(mgr + 0x7d60 + p * 0x18 + hand * 12),
+                            sizeof(Vec3));
+            const Vec3 none{};
+            const Vec3 at = tieAnchor[hand];
+            for (const auto [offset, point] : {std::pair{0x7d60, at}, std::pair{0x7d78, none},
+                                               std::pair{0x7d90, at}, std::pair{0x7da8, at}})
+                std::memcpy(reinterpret_cast<void*>(mgr + offset + hand * 12), &point, sizeof(point));
         }
         // What each rope is laid with at its start (handPoints, which the
         // update calls): one web in both hands comes to the upper wrist from
@@ -307,6 +381,11 @@ void update(void* manager, float dt) {
         const auto laid = laying;
         laying = {};
         std::memcpy(reinterpret_cast<void*>(mgr + 0x7d40), hashes, sizeof(hashes));
+        for (unsigned hand = 0; hand < 2; ++hand)
+            if (tieHand[hand])
+                for (int p = 0; p < 4; ++p)
+                    std::memcpy(reinterpret_cast<void*>(mgr + 0x7d60 + p * 0x18 + hand * 12),
+                                &handPointsBefore[hand][p], sizeof(Vec3));
         // Start is the wrist again between updates: the hero's own update
         // (95f6c0) takes the hand's velocity from how it moves.
         for (unsigned hand = 0; hand < 2; ++hand)
@@ -445,6 +524,17 @@ void native_webs::submit(const Request& next, uint32_t leaseMs, const Bent* bend
     requestBends[1] = bends ? bends[1] : Bent{};
     requestDeadline = GetTickCount64() + leaseMs;
     ReleaseSRWLockExclusive(&requestLock);
+}
+void native_webs::submitTies(const TieRope* ropes, uint32_t count, uint32_t leaseMs) {
+    AcquireSRWLockExclusive(&requestLock);
+    tieRequestCount = ropes ? std::min(count, maxTieRopes) : 0u;
+    for (uint32_t k = 0; k < maxTieRopes; ++k)
+        tieRequest[k] = k < tieRequestCount ? ropes[k] : TieRope{};
+    tieDeadline = GetTickCount64() + leaseMs;
+    ReleaseSRWLockExclusive(&requestLock);
+}
+uint32_t native_webs::tiesDrawn() {
+    return enabled && !stopping && GetTickCount64() - lastHeroUpdate.load() < 500 ? tieMask.load() : 0u;
 }
 native_webs::Status native_webs::status() {
     AcquireSRWLockShared(&statusLock);

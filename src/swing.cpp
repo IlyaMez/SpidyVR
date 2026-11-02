@@ -940,6 +940,16 @@ WebShot Swing::shot(Pose aim, Vec3 from, const WorldQueries& world) const {
     }
     return out;
 }
+void Swing::handOver(int i) {
+    if (i < 0 || i > 1)
+        return;
+    const int soft = softRelease_;
+    softRelease_ = 0;
+    release(i);
+    softRelease_ = soft;
+    hands_[i].sample = false;
+    hands_[i].held = true; // a grip already held is not a new shot
+}
 void Swing::releaseAll() {
     assistFlight_ = 0;
     climbTakeoff_ = false;

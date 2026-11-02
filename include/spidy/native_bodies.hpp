@@ -147,4 +147,65 @@ uint64_t physicsSteps(float& dt);
 // the game steps its physics at the frame rate, more when it steps 1/30 s
 // faster.
 float timeScale();
+
+// The state log (November 2, research for the web tie on ceilings): every
+// state request the game makes for a watched bot (watchStates), through
+// RequestState (the state machine's vtable slot 13, 20e51c0), hooked while
+// bodies run: the type it asks for (image offset, its class's name), the
+// caller, the result, and the parameters' first stateParamBytes bytes. Then
+// the request the game makes as it sticks a webbed thug to a wall
+// (BotStateWallStuck) can be read off a session report, to make it under a
+// ceiling. A mark records what the tie knew when the game stuck one: where
+// his web stuck, the surface's normal, where he was.
+constexpr unsigned stateLogEntries = 192, stateParamBytes = 0x180, stateMarks = 64;
+struct StateRequest {
+    uint64_t sequence{}, machine{};
+    uint32_t typeOffset{}, typeClassOffset{}, callerOffset{}, result{};
+    char typeName[64]{};
+    uint32_t paramsRead{}, reserved{};
+    uint8_t params[stateParamBytes]{};
+};
+struct StateMark {
+    uint64_t sequence{}, machine{};
+    Vec3 anchor{}, normal{}, position{};
+    // 1: the game stuck him (BotStateWallStuck); 0: the tie arrived, no stick;
+    // 2: Spidy asked the stick; 3: the finishing blow went out (stuck, his
+    // hit points then in `normal.x`); 4: a second after it he was still
+    // stuck; 5: he was not (Spidy asked the stick again); 6: down and stuck
+    // two seconds after the blow (defeated where he hangs).
+    uint32_t stuck{};
+    uint32_t surface{}; // the body Spidy's ray met there (0: none)
+    uint32_t ms{};      // when (GetTickCount64's low 32 bits), to time a stick against its ask
+};
+struct StateLog {
+    uint32_t magic = 0x534c4f47, version = 1, bytes = sizeof(StateLog), status{};
+    int64_t sequence{};
+    // stickRefused: sticks Spidy could not ask (no such type yet, or a bot no longer the game's).
+    uint64_t stickRefused{}, watchedRequests{}, marks{};
+    StateRequest entries[stateLogEntries]{};
+    StateMark markEntries[stateMarks]{};
+};
+static_assert(sizeof(StateRequest) == 488 && sizeof(StateMark) == 64 && sizeof(StateLog) == 97840);
+// The machines whose requests are logged (at most 8; the rest ignored).
+void watchStates(const uint64_t* machines, unsigned count);
+void markState(uint64_t machine, Vec3 anchor, Vec3 normal, Vec3 position, uint32_t stuck, uint32_t surface = 0);
+// The game's own stick (BotStateWallStuck), asked of a bot at the next
+// physics step, as the game asks it when a webbed thug flies into a wall.
+// Read off November 2's state log (09:44): its type is the static at
+// wallStuckType (its vtable wallStuckTypeClass), its parameters 0x68 bytes -
+// a header (0x9349bd43, 0x68), the surface's body at +0x30 (the hknp body
+// a ray meets), the point on it at +0x34, its normal at +0x40 (out of it),
+// a direction along it at +0x4c (up a wall), then ff ff 01 01, a pose at
+// +0x5c (5 a tilted wall, 6 a wall, 7 the underside of a beam), an index at
+// +0x60 and 1.5 at +0x64. The game stuck a thug under a beam that way (its
+// normal straight down) and never under a ceiling. False when the type is
+// not (yet) the one seen there, or there is no room.
+bool stick(uint64_t machine, uint64_t record, uint32_t surface, Vec3 point, Vec3 normal, Vec3 along,
+           uint32_t pose);
+// Sticks asked, made (the game took the request), and refused (no type, or
+// the game refused it).
+struct StickCounters {
+    uint64_t asked{}, made{}, refused{}, noType{};
+};
+StickCounters stickCounters();
 } // namespace spidy::native_bodies

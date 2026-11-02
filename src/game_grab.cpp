@@ -8,9 +8,11 @@
 #include "spidy/game_grab.hpp"
 #include "spidy/game_focus.hpp"
 #include "spidy/game_punch.hpp"
+#include "spidy/game_shooter.hpp"
 #include "spidy/native_bodies.hpp"
 #include "spidy/native_movement.hpp"
 #include <algorithm>
+#include <unordered_map>
 #include <cstring>
 #include <windows.h>
 using namespace spidy;
@@ -18,6 +20,7 @@ using namespace spidy::game_grab;
 // Read by probes like SpidySwingData: odd `sequence` while it changes.
 extern "C" {
 __declspec(dllexport) Data SpidyGrabData;
+__declspec(dllexport) TieData SpidyTieData;
 }
 namespace {
 using game_targets::Candidate;
@@ -106,6 +109,20 @@ struct Tracked {
     // the game took a flight the web let go of (negative: none), since a prop
     // was let go of (negative: held, or never).
     float knocked = -1, free = -1, thrown = -1;
+    // The web tie (hold()): since he arrived at his place (-1: not yet),
+    // since the tie's last webbing hit him, and how many did.
+    float tieContact = -1, tieWebbed = -1;
+    uint32_t tieWebs{};
+    // Once arrived: the nearest he came to his place, and how long he has
+    // come no nearer (he is against his surface: settled there).
+    float tieNearest = 1e9f, tieStill{};
+    bool tieMarked{};
+    // The game's stick asked of him (native_bodies::stick): how many times,
+    // and since the last (-1: never).
+    uint32_t tieSticks{};
+    float tieAsked = -1;
+    // Webbed on his way, out of his cocoon's state (hold).
+    bool tiePrewebbed{};
     // What it struck. `expected`: the velocity it was given for this step (by
     // the web, or its flight under gravity). The web's velocity reaches the
     // game a frame later, and the game draws a bot a frame late or early now
@@ -132,6 +149,17 @@ std::vector<Tracked> tracked;
 std::vector<TargetCommand> commands;
 std::vector<Shield> shields;
 WebGrab core{GrabConfig{}};
+WebTies ties{TieConfig{}};
+bool tieReady{};
+// Bots seen webbed up, and when (GetTickCount64), for game_grab::cocooned.
+std::unordered_map<uint64_t, uint64_t> cocoonSeen;
+// The bot each hand's web held lately (game_grab::heldLately).
+struct Lately {
+    uint64_t target{};
+    float since = 1e9f;
+};
+Lately lately[2];
+uint64_t tiesDown{}, tiesStuck{};
 const StrikeConfig strikes{};
 uint64_t driveSerial{}, stepped{}, botsLanded{};
 // The player's actor record at the latest step: the one who deals the web's
@@ -409,14 +437,14 @@ bool blow(uint64_t victim, uint64_t damager, Vec3 point, Vec3 direction, const S
     return true;
 }
 // An enemy off his feet into the game's own flight, which the web then steers.
-void knock(Tracked& t, Vec3 pull) {
+void knock(Tracked& t, Vec3 pull, float amount = knockDamage) {
     native_bodies::Damage d;
     d.victim = t.who.record;
     d.damager = hero;
     d.point = t.position;
     d.direction = length(pull) > .1f ? normalized(pull) : Vec3{0, 0, 1};
     d.normal = d.direction * -1.f;
-    d.amount = knockDamage;
+    d.amount = amount;
     d.type = 7;      // kKinetic
     d.knockback = 5; // kFlyBack
     d.knockbackAmount = knockAmount;
@@ -510,6 +538,275 @@ void pull(Tracked& t, const TargetCommand& c, float dt, const WorldQueries& worl
     steer(t, true, v);
     t.steering = true;
     t.falling = false;
+}
+// A tied enemy (web_tie): carried to his place and stuck there in his
+// cocoon. Carried in the game's own flight, as the web pulls a thug: a blow
+// of tieKnockDamage knocks him into it at tieLaunch (a yank), and the tie's
+// law steers it in an arc to his place. Until October 31 he was held on his
+// mover (09:44: "it pulls very slowly", "it does not stick to walls").
+//
+// Stuck by the game itself, at once, where he arrives: in November 2's
+// session (08:13) 24 of 29 ties ended as their thug came to the wall and the
+// game took him down; he stuck only once the player's web balls finished
+// him. The user wants him stuck every time he arrives - on a wall, a ceiling,
+// anything - with no delay; not webbed on the way (a first build that day
+// webbed him on any touch: a bump, a lamp, a ledge on the way). So as he
+// comes within tieStickReach of his place (or tieStickLead seconds of it at
+// his speed: the webbing lands as he touches, not after), or the game takes
+// him down there, the tie webs him as a web ball would, with all the
+// webbing his cocoon needs in one hit (tieWebbing: a street thug's threshold
+// is 30), and again every tieWebEvery while the game has not stuck him
+// (BotStateWallStuck; tieWebsMost at most). Then no more blows near his
+// place: knocks again and again at a place he could not reach made him
+// twitch (one tie that day: 14 of them); his mover holds him there.
+constexpr float tieKnockDamage = .25f, tieReknockSeconds = .8f;
+constexpr float tieStickReach = 1.2f, tieStickLead = .12f, tieWebDamage = .1f, tieWebbing = 40, tieWebEvery = .25f;
+constexpr uint32_t tieWebsMost = 6;
+// Down without being stuck this long after he arrived: the game has him
+// (knocked out); the tie lets go.
+constexpr float tieDownSeconds = 3;
+// Off his place this far once arrived and on his feet: carried back.
+constexpr float tieCarryBack = 1.5f;
+// Under a ceiling or a crane's arm: in November 2's sessions (08:36, 08:58)
+// walls stuck every time, while thugs tied up there hung 1 m under the
+// surface and stuck only now and then - when a web hit came as he was
+// pressed close to it. The game sticks a webbed thug hit by a web near a
+// surface (it has BotWallStuckEvent and BotGroundStuckEvent); from his
+// centre a ceiling is a metre away, a wall half that. So up there the tie's
+// webbing hits him where his head meets the surface, along the line to
+// where the web stuck (encase), every tieOverheadEvery up to tieOverheadWebs
+// times while the game has not stuck him; the first build that day hit him
+// once from his centre, and the user: "the ceiling still practically does
+// not work". Walls keep their hits as they were.
+constexpr uint32_t tieOverheadWebs = 2;
+constexpr float tieOverheadEvery = .5f, tieOverheadHead = .85f;
+// The game's own stick, asked by Spidy (native_bodies::stick), as the state
+// log of November 2 (09:44) showed the game asking it: the moment he is at
+// his surface (within tieAskReach of his place, or settled against it), or
+// tieAskLate after he arrived at the latest, on any surface but a floor;
+// again every tieAskEvery, tieAsksMost times. Until November 2 (13:30) a
+// surface not facing down waited a second for the game to stick him itself:
+// on a crane's beams it did not, and he hung there that second ("it sticks,
+// but late", with a video).
+constexpr float tieAskReach = .4f, tieAskLate = .3f, tieAskEvery = .2f, tieAskGiveUp = 3;
+constexpr uint32_t tieAsksMost = 8;
+// A thug tied in the air (yanked first) is out of his cocoon's state, in the
+// game's flight, his webbing worn off; at a wall he waited for the tie's
+// first webbing hit at his touch and stuck 0.5-0.9 s after arriving, while
+// one tied off the floor stuck within 0.1 s (November 2, 13:46, with a
+// video: "only those pulled in the air stick late"). So one tied out of his
+// cocoon's state is webbed at once, on his way (prewebbed), and the stick is
+// asked again every 0.2 s (it waited 0.6 s, and a ray that met nothing cost
+// that wait too).
+constexpr float tieSettleSeconds = .2f, tieSettleGain = .03f, tieSettleReach = 1.5f;
+uint64_t tieKnocks{}, tieWebHits{};
+// Overhead: a surface facing down (a ceiling, a crane's arm), where his head,
+// not his side, meets it.
+bool overhead(const Tie& tie) {
+    const Vec3 out = tie.place - tie.anchor;
+    return length(out) > .01f && normalized(out).y < -.5f;
+}
+void encase(Tracked& t, const Tie& tie) {
+    const Vec3 out = tie.place - tie.anchor;
+    const Vec3 normal = length(out) > .01f ? normalized(out) : Vec3{0, 1, 0};
+    native_bodies::Damage d;
+    d.victim = t.who.record;
+    d.damager = hero;
+    d.point = t.position;
+    d.direction = normal * -1.f; // onto the surface
+    d.normal = normal;
+    if (overhead(tie)) {
+        // Where his head meets it, toward where the web stuck.
+        const Vec3 up = tie.anchor - t.position;
+        const float reach = length(up);
+        if (reach > .05f) {
+            d.direction = up / reach;
+            d.point = t.position + d.direction * std::min(tieOverheadHead, std::max(reach - .05f, 0.f));
+        }
+    }
+    d.amount = tieWebDamage;
+    d.type = 20;     // kWebImpact
+    d.knockback = 1; // kTwitch, as the web shooter's ball
+    d.knockbackAmount = 1;
+    d.statusType = 19; // kWebEncase
+    d.statusAmount = tieWebbing;
+    t.tieWebbed = 0;
+    if (native_bodies::damage(d)) {
+        ++t.tieWebs;
+        ++tieWebHits;
+    }
+}
+// A thug the game (or Spidy) stuck, to be finished where he hangs: stuck
+// is only a state of his body, his hit points stay full, so the game and
+// its scanner still count him in the fight (November 2, 12:35: "stuck, they
+// are not defeated: the sensor still lights them red"). finishAfter after he
+// was stuck a blow of all his hit points (kWebImpact, no knockback, no
+// status) defeats him the game's own way, its events and counts with it;
+// finishCheck after it, if the blow took him off his surface, the stick is
+// asked again (finishResticks times), and the state log is told how it went.
+struct Finish {
+    uint64_t record{}, machine{};
+    Vec3 anchor{}, normal{};
+    float age{};
+    bool struck{}, checked{};
+    uint32_t resticks{};
+};
+std::vector<Finish> finishing;
+constexpr float finishAfter = .35f, finishCheck = 1, finishEnd = 2.5f, finishExtra = 5;
+constexpr uint32_t finishResticks = 2;
+uint64_t finishes{};
+// The stick asked of a bot at `position` toward a surface whose web stuck at
+// `anchor` (normal out of it): the body and point a ray meets, its normal
+// facing him, a direction along it (up a wall; under a ceiling away from the
+// player). False when no surface was met, or it is a floor.
+bool askStickAt(uint64_t machine, uint64_t record, Vec3 position, Vec3 anchor, Vec3 normal,
+                const WorldQueries& world, uint32_t& surface) {
+    std::optional<RayHit> hit;
+    const Vec3 to = anchor - position;
+    if (const float reach = length(to); reach > .05f)
+        hit = world.raycast(position, to / reach, reach + .6f);
+    if (!hit || !hit->fixed)
+        hit = world.raycast(position, normal * -1.f, 2.f);
+    if (!hit || !hit->fixed || !finite(hit->point) || !finite(hit->normal) || length(hit->normal) < .5f)
+        return false;
+    Vec3 n = normalized(hit->normal);
+    if (dot(n, position - hit->point) < 0)
+        n = n * -1.f;
+    if (n.y > .5f)
+        return false; // a floor
+    const Vec3 up{0, 1, 0};
+    Vec3 along = up - n * dot(up, n);
+    if (length(along) < .3f) {
+        const Vec3 away = position - heroBody.position;
+        along = finite(away) ? away - n * dot(away, n) : Vec3{};
+    }
+    if (length(along) < .3f)
+        along = cross(n, Vec3{1, 0, 0});
+    const uint32_t pose = n.y < -.5f ? 7u : std::abs(n.y) < .2f ? 6u : 5u;
+    surface = static_cast<uint32_t>(hit->surface);
+    return native_bodies::stick(machine, record, surface, hit->point, n, normalized(along), pose);
+}
+// Asks the game to stick him to his surface: the point and body a ray from
+// his centre meets toward where the web stuck (or against the surface's
+// normal), its normal facing him, and a direction along it - up a wall;
+// under a ceiling away from the player, his head away from him.
+// Asks the stick; counted, and timed for the next ask, only once it is
+// made (a ray that met nothing is tried again at the next step, not 0.6 s on).
+bool askStick(Tracked& t, const Tie& tie, const WorldQueries& world) {
+    const Vec3 out = tie.place - tie.anchor;
+    const Vec3 normal = length(out) > .01f ? normalized(out) : Vec3{0, 1, 0};
+    uint32_t surface{};
+    if (!askStickAt(t.who.machine, t.who.record, t.position, tie.anchor, normal, world, surface))
+        return false;
+    t.tieAsked = 0;
+    ++t.tieSticks;
+    native_bodies::markState(t.who.machine, tie.anchor, normal, t.position, 2, surface);
+    return true;
+}
+void hold(Tracked& t, const TargetCommand& c, const Tie& tie, float dt, const WorldQueries& world, bool flung,
+          bool down, Vec3 gravity) {
+    t.free = -1;
+    t.snatched = false;
+    t.falling = false;
+    const float left = length(tie.place - t.position);
+    if (t.tieWebbed >= 0)
+        t.tieWebbed += dt;
+    if (t.tieContact >= 0) {
+        t.tieContact += dt;
+    } else {
+        // Arriving: within reach of his place, or about to touch it at the
+        // speed he comes; or taken down there by the game.
+        const float speed = length(t.flying ? t.expected : t.velocity);
+        if (left < std::max(tieStickReach, speed * tieStickLead) || (down && left < tieCarryBack))
+            t.tieContact = 0;
+    }
+    // Arrived and against his surface short of his place: held where he is.
+    if (t.tieContact >= 0 && !tie.arrived && left < tieSettleReach) {
+        if (left < t.tieNearest - tieSettleGain) {
+            t.tieNearest = left;
+            t.tieStill = 0;
+        } else if ((t.tieStill += dt) >= tieSettleSeconds) {
+            ties.settle(t.who.record, t.position);
+        }
+    }
+    // Arrived: webbed as a web ball webs him, his whole cocoon in the first
+    // hit, until the game sticks him; under a ceiling at his head, slower.
+    const bool up = overhead(tie);
+    // The state log: an overhead tie that arrived and was webbed, not stuck.
+    if (up && t.tieContact >= 2 && !t.tieMarked) {
+        const Vec3 out = tie.place - tie.anchor;
+        native_bodies::markState(t.who.machine, tie.anchor, length(out) > .01f ? normalized(out) : Vec3{},
+                                 t.position, 0);
+        t.tieMarked = true;
+    }
+    // Out of his cocoon's state (yanked into the air first): webbed at once,
+    // so his cocoon is whole when he comes to the surface.
+    if (!t.tiePrewebbed && t.tieContact < 0) {
+        t.tiePrewebbed = true;
+        if (!game_targets::cocooned(base, t.who)) {
+            encase(t, tie);
+            t.tieWebs = 0; // the hits at his touch still go out
+        }
+    }
+    const uint32_t most = up ? tieOverheadWebs : tieWebsMost;
+    const float every = up ? tieOverheadEvery : tieWebEvery;
+    if (t.tieContact >= 0 && t.tieWebs < most && (t.tieWebbed < 0 || t.tieWebbed >= every))
+        encase(t, tie);
+    if (t.tieAsked >= 0)
+        t.tieAsked += dt;
+    const bool atSurface = tie.arrived || left < tieAskReach || t.tieContact >= tieAskLate;
+    if (t.tieContact >= 0 && t.tieContact < tieAskGiveUp && atSurface && left < tieSettleReach &&
+        t.tieSticks < tieAsksMost && (t.tieAsked < 0 || t.tieAsked >= tieAskEvery))
+        askStick(t, tie, world);
+    if (down) {
+        // The game has him (a flop, a wall stick to come): nothing steers him.
+        if (t.steering)
+            steer(t, false, {});
+        t.steering = t.flying = t.launching = false;
+        return;
+    }
+    if (flung) {
+        if (t.steering) {
+            steer(t, false, {});
+            t.steering = false;
+        }
+        // The flight's first step takes the launch; then the tie's law from
+        // the velocity it gave him, which the flight keeps.
+        const Vec3 from = t.launching ? t.launch : t.flying ? t.expected : t.paced;
+        fly(t, advance(c, t.position, from, dt, gravity), t.launching);
+        t.launching = false;
+        t.flying = t.flew = true;
+        return;
+    }
+    t.flying = false;
+    // Touched and near his place, the flight over: no more blows (they made
+    // him twitch); his mover holds him there while the webbing sticks him.
+    const bool carry = t.tieContact < 0 || left > tieCarryBack;
+    if (carry && (t.knocked < 0 || t.knocked > tieReknockSeconds)) {
+        if (t.steering) {
+            steer(t, false, {});
+            t.steering = false;
+        }
+        t.launch = limited(tieLaunch(described(t.who, t.position, t.velocity), tie, ties.config()), maxDriveSpeed);
+        knock(t, t.launch, tieKnockDamage);
+        t.launching = true;
+        t.launchAge = 0;
+        t.flingAsked = false;
+        ++tieKnocks;
+        return;
+    }
+    // The blow lands within a step or two.
+    if (carry && t.knocked < knockWait)
+        return;
+    // Not flung (a heavy, a scripted scene), or held at the surface: his mover.
+    if (carry && !t.flingAsked) {
+        native_bodies::fling(t.who.machine, t.who.record, limited(c.velocity, maxDriveSpeed));
+        t.flingAsked = true;
+    }
+    Vec3 v = advance(c, t.position, t.velocity, dt, gravity);
+    t.grounded = guard(t, v, dt, world);
+    steer(t, true, v);
+    t.steering = true;
 }
 void release(Tracked& t, bool thrown, Vec3 velocity, bool flung);
 // An enemy yanked by a player in the air comes to the player, wherever the
@@ -778,6 +1075,13 @@ uint32_t game_grab::start(uintptr_t gameBase, Call drive, Call driven, uint32_t 
     if (offered && (result = native_bodies::start(base)))
         offered = 0;
     core = WebGrab(GrabConfig{});
+    ties = WebTies(TieConfig{});
+    tieReady = false;
+    tiesDown = tiesStuck = tieKnocks = tieWebHits = 0;
+    finishing.clear();
+    finishes = 0;
+    cocoonSeen.clear();
+    lately[0] = lately[1] = {};
     if (offered)
         watch.start(base, offered);
     stepped = botsLanded = 0;
@@ -790,6 +1094,9 @@ uint32_t game_grab::start(uintptr_t gameBase, Call drive, Call driven, uint32_t 
     return result;
 }
 uint32_t game_grab::stop() {
+    // The ties go with the grab: their targets are handed to the game below.
+    ties.clear();
+    finishing.clear();
     cancel();
     watch.stop();
     const auto result = offered ? native_bodies::stop() : 0u;
@@ -805,6 +1112,10 @@ void game_grab::cancel() {
     core.releaseAll();
     trails[0] = trails[1] = {};
     for (auto& t : tracked) {
+        // A tied enemy stays tied (a pause, a menu): he is held again once
+        // play steps on.
+        if (ties.tied(t.who.record))
+            continue;
         if (t.who.kind == Kind::throwable)
             native_bodies::release(t.actor);
         else if (t.steering && t.grounded)
@@ -813,7 +1124,9 @@ void game_grab::cancel() {
             handOff(t, t.velocity); // the game's flight brings it down now
         // A flight the web steered goes on as the game flies it.
     }
-    tracked.clear();
+    tracked.erase(std::remove_if(tracked.begin(), tracked.end(),
+                                 [](const Tracked& t) { return !ties.tied(t.who.record); }),
+                  tracked.end());
     commands.clear();
     AcquireSRWLockExclusive(&output);
     for (auto& hand : SpidyGrabData.hands)
@@ -841,6 +1154,7 @@ Input game_grab::claim(float inputSeconds, const Input& in, const WorldQueries& 
         return in;
     if (!allowed) {
         // Switched off: what the webs hold or still trail goes back to the game.
+        ties.clear();
         if (holds(0) || holds(1) || !tracked.empty())
             cancel();
         return in;
@@ -886,9 +1200,133 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
     observe(dt);
     commands.clear();
     core.step(dt, world, targets, commands);
+    for (unsigned i = 0; i < 2; ++i) {
+        const auto& g = core.grabs()[i];
+        if (g.phase != GrabPhase::None && g.kind == TargetKind::Character)
+            lately[i] = {g.target, 0};
+        else
+            lately[i].since += dt;
+    }
     count(counted);
     counted = 0;
     const Vec3 gravity{0, -core.config().gravity, 0};
+    // The ties: a target knocked out is the game's again; the fight goes on
+    // while an enemy who is not tied is in it near the player.
+    {
+        std::vector<uint64_t> taken, down, stuck;
+        for (const auto& g : core.grabs())
+            if (g.phase != GrabPhase::None)
+                taken.push_back(g.target);
+        for (const auto& tie : ties.ties()) {
+            auto* t = track(tie.target);
+            if (!t)
+                continue;
+            // Stuck by the game in his cocoon: done. Down otherwise: the tie
+            // webs him on (hold) until the game sticks him, or lets go once
+            // he stays down (knocked out).
+            if (game_targets::wallStuck(base, t->who))
+                stuck.push_back(tie.target);
+            else if (!game_targets::up(base, t->who) && t->tieContact >= tieDownSeconds)
+                down.push_back(tie.target);
+        }
+        // The state log (native_bodies.hpp): what the game asks for tied
+        // bots, and what the tie knew as the game stuck one.
+        for (const auto record : stuck)
+            if (const auto* t = track(record))
+                for (const auto& tie : ties.ties())
+                    if (tie.target == record) {
+                        const Vec3 out = tie.place - tie.anchor;
+                        const Vec3 normal = length(out) > .01f ? normalized(out) : Vec3{};
+                        native_bodies::markState(t->who.machine, tie.anchor, normal, t->position, 1);
+                        if (finishing.size() < 32)
+                            finishing.push_back({record, t->who.machine, tie.anchor, normal});
+                    }
+        for (int list = 0; list < 2; ++list)
+            for (const auto record : list ? down : stuck) {
+                // The game has him where he is. Let go without handing him to
+                // a flight, which would pull him off the wall.
+                if (auto* t = track(record)) {
+                    if (t->steering)
+                        steer(*t, false, {});
+                    t->steering = t->flying = t->launching = t->falling = false;
+                }
+                ties.drop(record);
+                ++(list ? tiesDown : tiesStuck);
+            }
+        bool fightOn{};
+        for (const auto& c : candidates) {
+            Vec3 at{};
+            if (!fightOn && !ties.tied(c.record) && game_targets::fighting(base, c) && game_targets::position(c, at))
+                fightOn = !finite(heroBody.position) || length(at - heroBody.position) <= fightReach;
+        }
+        ties.step(dt, targets, fightOn, taken, commands);
+        // The stuck, finished where they hang (Finish).
+        finishing.erase(
+            std::remove_if(finishing.begin(), finishing.end(),
+                           [&](Finish& f) {
+                               const game_targets::Candidate* c{};
+                               for (const auto& each : candidates)
+                                   if (each.record == f.record)
+                                       c = &each;
+                               if (!c || f.age > finishEnd + finishCheck)
+                                   return true;
+                               f.age += dt;
+                               Vec3 at{};
+                               game_targets::position(*c, at);
+                               const bool stuckNow = game_targets::wallStuck(base, *c);
+                               if (!f.struck) {
+                                   if (f.age < finishAfter)
+                                       return false;
+                                   if (!stuckNow)
+                                       return f.age > finishEnd; // off his surface: not ours to finish
+                                   float points{};
+                                   game_targets::health(*c, points);
+                                   native_bodies::Damage d;
+                                   d.victim = f.record;
+                                   d.damager = hero;
+                                   d.point = at;
+                                   d.direction = f.normal * -1.f;
+                                   d.normal = f.normal;
+                                   d.amount = std::max(points, 1.f) + finishExtra;
+                                   d.type = 20;     // kWebImpact: the web finished him
+                                   d.knockback = 0; // kNone: he stays where he hangs
+                                   d.knockbackAmount = 0;
+                                   d.impulse = 0;
+                                   f.struck = native_bodies::damage(d) != 0;
+                                   if (f.struck) {
+                                       ++finishes;
+                                       f.age = 0;
+                                       native_bodies::markState(f.machine, f.anchor, Vec3{points, 0, 0}, at, 3);
+                                   }
+                                   return false;
+                               }
+                               if (!f.checked && f.age >= finishCheck) {
+                                   f.checked = true;
+                                   native_bodies::markState(f.machine, f.anchor, f.normal, at, stuckNow ? 4 : 5);
+                               }
+                               if (f.checked && !stuckNow && f.resticks < finishResticks &&
+                                   f.age >= finishCheck + .4f * f.resticks) {
+                                   ++f.resticks;
+                                   uint32_t surface{};
+                                   askStickAt(f.machine, f.record, at, f.anchor, f.normal, world, surface);
+                               }
+                               if (f.age >= finishEnd) {
+                                   if (stuckNow && !game_targets::up(base, *c))
+                                       native_bodies::markState(f.machine, f.anchor, f.normal, at, 6);
+                                   return true;
+                               }
+                               return false;
+                           }),
+            finishing.end());
+        {
+            uint64_t machines[8]{};
+            unsigned watching{};
+            for (const auto& tie : ties.ties())
+                if (const auto* t = track(tie.target); t && t->who.machine && watching < 8)
+                    machines[watching++] = t->who.machine;
+            native_bodies::watchStates(machines, watching);
+        }
+    }
     for (auto& t : tracked) {
         if (t.gone)
             continue;
@@ -938,8 +1376,11 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
         if (!finite(t.paced))
             t.paced = {};
         t.cruise = std::max({t.speeds[0], t.speeds[1], t.speeds[2]});
-        // What it struck since the step before, under what it was given then.
-        strike(t, dt, flung, gravity);
+        const bool tiedNow = ties.tied(t.who.record);
+        // What it struck since the step before, under what it was given then
+        // (a tied enemy is brought onto his surface, not struck against it).
+        if (!tiedNow)
+            strike(t, dt, flung, gravity);
         t.speeds[2] = t.speeds[1];
         t.speeds[1] = t.speeds[0];
         t.speeds[0] = length(t.paced);
@@ -947,6 +1388,16 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
         t.back1 = t.position;
         t.dt1 = dt;
         ++t.seenSteps;
+        if (tiedNow && command) {
+            const Tie* tie{};
+            for (const auto& each : ties.ties())
+                if (each.target == t.who.record)
+                    tie = &each;
+            if (tie) {
+                hold(t, *command, *tie, dt, world, flung, !game_targets::up(base, t.who), gravity);
+                continue;
+            }
+        }
         if (t.snatched) {
             snatch(t, dt, flung);
             continue;
@@ -1011,7 +1462,7 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
                                                          (t.thrown >= 0 && t.thrown < thrownSeconds &&
                                                           length(t.velocity) > 1);
                                      return t.gone || (!held && !t.steering && !t.falling && !flying &&
-                                                       !trailing(t.who.record));
+                                                       !trailing(t.who.record) && !ties.tied(t.who.record));
                                  }),
                   tracked.end());
     const auto bodies = native_bodies::counters();
@@ -1057,7 +1508,104 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
                              : game_grab::Hand{};
     }
     InterlockedIncrement64(&SpidyGrabData.sequence);
+    InterlockedIncrement64(&SpidyTieData.sequence);
+    SpidyTieData.status = 2;
+    SpidyTieData.made = ties.made();
+    SpidyTieData.ended = ties.ended();
+    SpidyTieData.taken = ties.taken();
+    SpidyTieData.gone = ties.gone();
+    SpidyTieData.down = tiesDown;
+    SpidyTieData.knocks = tieKnocks;
+    SpidyTieData.stuck = tiesStuck;
+    SpidyTieData.webs = tieWebHits;
+    SpidyTieData.armed = tieReady ? 1u : 0u;
+    SpidyTieData.count = 0;
+    for (const auto& tie : ties.ties()) {
+        const auto* t = track(tie.target);
+        if (!t || t->gone || SpidyTieData.count >= std::size(SpidyTieData.lines))
+            continue;
+        SpidyTieData.lines[SpidyTieData.count++] = {
+            tie.anchor, t->position, length(tie.place - t->position),
+            (t->flying ? 1u : 0u) | (t->steering ? 2u : 0u) | (tie.arrived ? 4u : 0u) |
+                (t->tieContact >= 0 ? 8u : 0u) | (game_targets::up(base, t->who) ? 0u : 16u)};
+    }
+    InterlockedIncrement64(&SpidyTieData.sequence);
     ReleaseSRWLockExclusive(&output);
+}
+bool game_grab::cocooned(uint64_t record) {
+    if (!offered || !allowed || !record)
+        return false;
+    for (const auto& c : candidates) {
+        if (c.record != record)
+            continue;
+        if (c.kind != Kind::bot)
+            return false;
+        const auto now = GetTickCount64();
+        if (game_targets::cocooned(base, c) || game_shooter::webbedUp(record)) {
+            if (cocoonSeen.size() > 256)
+                cocoonSeen.clear();
+            cocoonSeen[record] = now;
+            return true;
+        }
+        const auto seen = cocoonSeen.find(record);
+        return seen != cocoonSeen.end() && now - seen->second <= static_cast<uint64_t>(cocoonMemory * 1000) &&
+               game_targets::up(base, c);
+    }
+    return false;
+}
+uint64_t game_grab::heldLately(unsigned hand) {
+    if (!offered || !allowed || hand > 1)
+        return 0;
+    const auto& g = core.grabs()[hand];
+    if (g.phase != GrabPhase::None)
+        return g.kind == TargetKind::Character ? g.target : 0;
+    return lately[hand].since <= heldGrace ? lately[hand].target : 0;
+}
+bool game_grab::tie(unsigned hand, Vec3 anchor, Vec3 normal) {
+    if (!offered || !allowed || hand > 1 || !finite(anchor))
+        return false;
+    // Its web's target now, or the one it held lately (a yanked thug at the hand).
+    const auto record = heldLately(hand);
+    auto* t = record ? track(record) : nullptr;
+    if (!t && record)
+        for (const auto& c : candidates) {
+            Vec3 at{};
+            if (c.record == record && c.kind == Kind::bot && game_targets::live(base, c) &&
+                game_targets::position(c, at)) {
+                t = follow(c, at + Vec3{0, shape(c).lift, 0});
+                break;
+            }
+        }
+    if (!t || t->gone || t->who.kind != Kind::bot)
+        return false;
+    if (!ties.add(described(t->who, t->position, t->velocity), anchor, normal))
+        return false;
+    core.handOver(static_cast<int>(hand));
+    trails[hand] = {};
+    lately[hand] = {};
+    t->snatched = false;
+    t->tieContact = t->tieWebbed = -1;
+    t->tieWebs = 0;
+    t->tieNearest = 1e9f;
+    t->tieStill = 0;
+    t->tieMarked = false;
+    t->tieSticks = 0;
+    t->tieAsked = -1;
+    t->tiePrewebbed = false;
+    t->knocked = -1;
+    return true;
+}
+void game_grab::tieArmed(bool on) {
+    tieReady = on;
+    AcquireSRWLockExclusive(&output);
+    SpidyTieData.armed = on ? 1u : 0u;
+    ReleaseSRWLockExclusive(&output);
+}
+TieData game_grab::tieData() {
+    AcquireSRWLockShared(&output);
+    auto out = SpidyTieData;
+    ReleaseSRWLockShared(&output);
+    return out;
 }
 Data game_grab::data() {
     AcquireSRWLockShared(&output);

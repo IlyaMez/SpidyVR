@@ -1,6 +1,7 @@
 #pragma once
 #include "game_targets.hpp"
 #include "web_grab.hpp"
+#include "web_tie.hpp"
 #include <cstdint>
 
 // The web grab in the game. The core (web_grab) runs in the swing's world
@@ -108,6 +109,61 @@ void cancel();
 // (an air yank) is the blow's from here.
 void struck(uint64_t record);
 Data data();
+// The web tie (web_tie.hpp, docs/WEB-TIE.md): webbed-up enemies stuck by a
+// web to a surface until the fight is over. Each is held at his place
+// through his own mover (native movement Drive), as a thug on his feet is
+// steered: upright in his cocoon, no blow, no damage; one already in the
+// game's flight when tied has that flight steered there instead. A tie lets
+// go when no other enemy has been in the fight within fightReach of the
+// player for TieConfig::fightOverSeconds, when its target is gone or down
+// (knocked out), when a hand's web takes him again, or when the grab stops.
+// A pause or a menu keeps the ties: their targets are held again once play
+// steps on.
+constexpr float fightReach = 60;
+struct TieLine {
+    Vec3 anchor{}, end{}; // where the web sticks to the surface, the target's centre
+    float distance{};     // from his centre to his place
+    // 1 in the game's flight, 2 on his mover, 4 he came to his place, 8 he
+    // arrived (the tie webs him), 16 down (not up: a flop, a stick to come)
+    uint32_t flags{};
+};
+// SpidyTieSample. armed: the gesture is ready now (the hands together on the
+// right webs). made: ties made; ended, taken, gone, down: ties the end of a
+// fight let go of, a hand's web took over, whose target was gone, whose
+// target stayed down tieDownSeconds after he arrived without being stuck. knocks: blows
+// that knocked a tied enemy into the game's flight. stuck: ties that ended
+// with the game sticking him to a surface (BotStateWallStuck); webs: the
+// tie's webbing hits as he arrived.
+// Version 2 (October 31): the counters of how ties ended and the lines'
+// distances and flags. Version 3 (November 2): stuck and webs.
+struct TieData {
+    uint32_t magic = 0x53544945, version = 3, bytes = sizeof(TieData), status{};
+    int64_t sequence{};
+    uint64_t made{}, ended{}, taken{}, gone{}, down{}, knocks{}, stuck{}, webs{};
+    uint32_t count{}, armed{};
+    TieLine lines[8]{};
+};
+static_assert(sizeof(TieLine) == 32 && sizeof(TieData) == 352);
+// Whether the bot this record names is an enemy the game has webbed up
+// (game_targets::cocooned), or Spidy's web balls lately did (game_shooter::webbedUp),
+// or was seen so within cocoonMemory and is still up: a yank flings him out
+// of his cocoon's state into the game's flight, and he is still webbed
+// (November 2, 13:08: 20 yanks, no tie of a thug in the air - "you should
+// be able to pull one and tie him to a wall in the air").
+constexpr float cocoonMemory = 15;
+bool cocooned(uint64_t record);
+// The bot this hand's web holds now, or held within heldGrace: a yank ends
+// its grab as the thug comes to the hand, and the tie's gesture comes after.
+// 0 for none.
+constexpr float heldGrace = 2;
+uint64_t heldLately(unsigned hand);
+// Ties the enemy this hand's web holds to the surface at `anchor` (its normal
+// `normal`, out of it): the hand's web is handed over to the tie. False when
+// it holds no bot.
+bool tie(unsigned hand, Vec3 anchor, Vec3 normal);
+// The gesture is ready now (TieGesture::armed), for the telemetry.
+void tieArmed(bool);
+TieData tieData();
 // The kinds this build can move.
 constexpr uint32_t movableKinds = 1u << static_cast<unsigned>(game_targets::Kind::throwable) |
                                   1u << static_cast<unsigned>(game_targets::Kind::bot);

@@ -65,6 +65,10 @@ one **START VR** button.
 - **Grab and throw.** Web a prop or an enemy, reel or yank it in, swing it on
   the web and let go to throw it. Heavy things feel heavy. Pulled enemies fly
   flailing, and get hurt when they slam into walls, the ground or each other.
+- **Web them to the wall.** Web an enemy up, put one web on a wall (the floor,
+  a lamp post, a crate) and the other on him, bring your hands together and
+  click the right stick: he is pulled onto it and stays stuck there until the
+  fight is over ([web tie](docs/WEB-TIE.md)).
 - **Punch across the room.** A fast fist into an enemy lands the game's own
   melee hit, harder the faster you swing. Throw one at an enemy up to 10 m
   away and you fly in and strike. Uppercut an enemy into the air and keep

@@ -128,6 +128,35 @@ constexpr unsigned flyingSize = 16;
 Flying flying[flyingSize];
 unsigned flyingNext{};
 SRWLOCK flyingLock = SRWLOCK_INIT;
+// Spidy's webbing on each actor his balls struck lately (webbedUp()).
+struct Webbing {
+    uint64_t record{}, at{}, upAt{}; // GetTickCount64 of the latest hit, and when it webbed him up
+    float amount{};
+};
+constexpr size_t webbingSlots = 32;
+Webbing webbings[webbingSlots]{};
+SRWLOCK webbingLock = SRWLOCK_INIT;
+void addWebbing(uint64_t record) {
+    const auto now = GetTickCount64();
+    AcquireSRWLockExclusive(&webbingLock);
+    Webbing* slot{};
+    for (auto& w : webbings)
+        if (w.record == record)
+            slot = &w;
+    if (!slot) {
+        slot = &webbings[0];
+        for (auto& w : webbings)
+            if (w.at < slot->at)
+                slot = &w; // the oldest, or a free one
+        *slot = {record};
+    }
+    const float since = slot->at ? static_cast<float>(now - slot->at) / 1000.f : 0.f;
+    slot->amount = std::max(0.f, slot->amount - since * game_shooter::webbingDecay) + game_shooter::webbingPerHit;
+    slot->at = now;
+    if (slot->amount >= game_shooter::webbedThreshold)
+        slot->upAt = now;
+    ReleaseSRWLockExclusive(&webbingLock);
+}
 // The gadget wheel: whether the hand fires the equipped gadget, a weapon id
 // to equip at the next frame, and whether this game's code for it is the
 // build Spidy reads (checked at start; without it the web shooter fires as
@@ -787,6 +816,8 @@ void collided(uintptr_t shot, uintptr_t event) {
                 d.statusType = 19; // kWebEncase
                 d.statusAmount = webbingPerHit;
                 webbed = native_bodies::damage(d) != 0;
+                if (webbed && c.kind == game_targets::Kind::bot)
+                    addWebbing(record);
             } else if (c.kind == game_targets::Kind::throwable && c.physics &&
                        !(c.traits & game_targets::breakable)) {
                 // As a throw launches it: once, along the shot, tumbling.
@@ -1164,6 +1195,17 @@ void game_shooter::gadgetWheel(bool fire, uint16_t equip) {
     gadgetFire = fire;
     if (equip)
         equipWanted = equip;
+}
+bool game_shooter::webbedUp(uint64_t record) {
+    if (!record)
+        return false;
+    const auto now = GetTickCount64();
+    AcquireSRWLockShared(&webbingLock);
+    bool up{};
+    for (const auto& w : webbings)
+        up |= w.record == record && w.upAt && now - w.upAt <= static_cast<uint64_t>(webbedSeconds * 1000);
+    ReleaseSRWLockShared(&webbingLock);
+    return up;
 }
 void game_shooter::cancel() {
     if (!enabled.load(std::memory_order_relaxed) || !TryAcquireSRWLockShared(&updating))

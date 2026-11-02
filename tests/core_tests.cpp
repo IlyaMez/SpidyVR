@@ -31,6 +31,7 @@
 #include "spidy/web_visual.hpp"
 #include "spidy/web_pull.hpp"
 #include "spidy/web_grab.hpp"
+#include "spidy/web_tie.hpp"
 #include "spidy/lab_props.hpp"
 #include "spidy/body_ik.hpp"
 #include "spidy/native_body.hpp"
@@ -12522,6 +12523,46 @@ int main() {
         check(fastest>8,"the reel did not drag the can in");
         check(behind<.6f,"the can slid past the hand toward the player");
     });
+    test("a webbed enemy far off comes only on the pull gesture: no reel, no pull as the hand moves away", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-20},80,.45f,TargetKind::Character);
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[0].trigger=0;
+        grab.claim(1.f/90,in,world,targets,player);
+        check(grab.grabs()[0].phase==GrabPhase::Tethered,"the enemy was not webbed");
+        // The trigger held, the hand drawn slowly back 0.6 m and the player
+        // walking away 3 m: nothing brings him.
+        in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
+        in.hands[0].trigger=1;
+        std::vector<TargetCommand> out;
+        bool pulled{};
+        for(int frame=1;frame<=270;++frame) {
+            in.hands[0].gripRelativeToHead={0,0,std::min(.6f,frame*.003f)};
+            player.position.z=std::min(3.f,frame*.02f);
+            grab.claim(1.f/90,in,world,targets,player);
+            if(frame%3)continue;
+            out.clear();grab.step(1.f/30,world,targets,out);targets.apply(1.f/30,out);
+            for(const auto& c:out)pulled|=c.id==7&&(c.mode!=TargetCommand::Mode::Rope||c.ropes[0].length<length(targets.find(7)->position-c.ropes[0].anchor));
+        }
+        check(grab.grabs()[0].phase==GrabPhase::Tethered,"the enemy's web was lost or he was caught");
+        check(!pulled&&targets.find(7)->position.z<-19.9f,"the enemy was pulled without the pull gesture");
+        // The pull gesture yanks him.
+        in.hands[0].trigger=0;
+        for(int i=1;i<=9;++i){in.hands[0].gripRelativeToHead={0,0,.6f-.033f*i};grab.claim(1.f/90,in,world,targets,player);}
+        for(int i=1;i<=9;++i){in.hands[0].gripRelativeToHead={0,0,.3f+.033f*i};grab.claim(1.f/90,in,world,targets,player);if(events(grab,GrabEventKind::Yank))break;}
+        check(grab.grabs()[0].phase==GrabPhase::Yanked,"the pull gesture did not yank the enemy");
+    });
+    test("a webbed prop still winds in on the trigger", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-12},30,.45f);
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[0].trigger=0;
+        grab.claim(1.f/90,in,world,targets,player);
+        in.hands[0].trigger=1;
+        std::vector<TargetCommand> out;
+        for(int frame=1;frame<=90;++frame){grab.claim(1.f/90,in,world,targets,player);if(frame%3)continue;out.clear();grab.step(1.f/30,world,targets,out);targets.apply(1.f/30,out);}
+        check(targets.find(7)->position.z>-10,"the prop did not wind in");
+    });
     test("the zip gesture yanks a target to the hand without overshooting it", [] {
         TestWorld world;world.enabled=false;
         GrabTargets targets;targets.add(7,{0,1,-20});
@@ -24446,6 +24487,223 @@ int main() {
               "a new copy not shown");
         check(!steady_hud::fresh(1001 + holdMs, 1000, true), "a stale copy shown: the eyes would lack the panel");
         check(!steady_hud::fresh(1000, 0, false) && !steady_hud::fresh(1000, 1200, true), "no copy, yet shown");
+    });
+    // The web tie (web_tie.hpp): one hand's web on a wall, the other's on a
+    // webbed-up enemy, hands together, the right stick's click.
+    auto tieHands = [](bool cocooned, float apart) {
+        std::array<TieHand, 2> h{};
+        h[0] = {true, {-apart / 2, -.4f, -.3f}, true, {5, 2, -10}, false, 0, false, false};
+        h[1] = {true, {apart / 2, -.4f, -.3f}, false, {}, true, 42, true, cocooned};
+        return h;
+    };
+    test("web tie: a swing command carrying the right stick's click (asks bit 1) is valid", [&] {
+        game_swing::Command c;
+        c.serial = 1;
+        c.focused = 1;
+        c.tilt = Quat{};
+        for (const uint32_t asks : {0u, 1u, 2u, 3u}) {
+            c.asks = asks;
+            check(game_swing::valid(c), "a command with the tie's click was refused (2001)");
+        }
+        c.asks = 4;
+        check(!game_swing::valid(c), "an unknown ask was accepted");
+    });
+    test("web tie: hands together on a wall web and a webbed-up enemy, a click ties him", [&] {
+        TieGesture g;
+        const auto h = tieHands(true, .1f);
+        check(!g.update(1 / 90.f, false, h), "nothing tied without a click");
+        check(g.armed(), "the gesture was not armed");
+        const auto r = g.update(1 / 90.f, true, h);
+        check(r && r->anchorHand == 0 && r->targetHand == 1 && r->target == 42, "the click tied nothing");
+        near(r->anchor.z, -10);
+        check(!g.update(1 / 90.f, true, h), "a click held tied twice");
+        check(!g.update(1 / 90.f, false, h) && g.update(1 / 90.f, true, h), "a second click tied nothing");
+    });
+    test("web tie: either hand may hold the wall", [&] {
+        TieGesture g;
+        auto h = tieHands(true, .1f);
+        std::swap(h[0], h[1]);
+        const auto r = g.update(1 / 90.f, true, h);
+        check(r && r->anchorHand == 1 && r->targetHand == 0, "the swapped hands tied nothing");
+    });
+    test("web tie: no tie for an enemy not webbed up, hands apart, a prop, or a web in the air", [&] {
+        TieGesture g;
+        check(!g.update(1 / 90.f, true, tieHands(false, .1f)) && !g.armed(), "an enemy not webbed up was tied");
+        g.update(1 / 90.f, false, tieHands(false, .1f));
+        check(!g.update(1 / 90.f, true, tieHands(true, .6f)) && !g.armed(), "hands apart tied");
+        g.update(1 / 90.f, false, tieHands(true, .6f));
+        auto prop = tieHands(true, .1f);
+        prop[1].character = false;
+        check(!g.update(1 / 90.f, true, prop), "a prop was tied");
+        g.update(1 / 90.f, false, prop);
+        auto air = tieHands(true, .1f);
+        air[0].wallWeb = false;
+        check(!g.update(1 / 90.f, true, air), "a hand without a web on a surface tied");
+        g.update(1 / 90.f, false, air);
+        auto lost = tieHands(true, .1f);
+        lost[1].tracked = false;
+        check(!g.update(1 / 90.f, true, lost), "an untracked hand tied");
+    });
+    test("web tie: the click may come just after the hands part, not long after", [&] {
+        TieGesture g;
+        g.update(1 / 90.f, false, tieHands(true, .1f));
+        for (int i = 0; i < 18; ++i) // 0.2 s apart
+            g.update(1 / 90.f, false, tieHands(true, .6f));
+        check(g.update(1 / 90.f, true, tieHands(true, .6f)).has_value(), "a click 0.2 s after tied nothing");
+        TieGesture late;
+        late.update(1 / 90.f, false, tieHands(true, .1f));
+        for (int i = 0; i < 60; ++i) // 0.67 s apart
+            late.update(1 / 90.f, false, tieHands(true, .6f));
+        check(!late.update(1 / 90.f, true, tieHands(true, .6f)), "a click long after tied");
+    });
+    test("web tie: the place is off the surface by the target's radius", [&] {
+        const Vec3 p = tiePlace({0, 3, -5}, {0, 0, 2}, .45f);
+        near(p.x, 0);
+        near(p.y, 3);
+        near(p.z, -4.5f);
+        const Vec3 floor = tiePlace({1, 0, 1}, {}, .4f);
+        near(floor.y, .45f);
+        // Under a ceiling his head touches it: his centre 1 m below, not his radius.
+        near(tiePlace({0, 5, 0}, {0, -1, 0}, .45f).y, 5 - 1.05f);
+        // A surface tilted half down: between the two.
+        const Vec3 tilted = tiePlace({0, 5, 0}, normalized(Vec3{1, -1, 0}), .45f);
+        check(length(tilted - Vec3{0, 5, 0}) > .5f && length(tilted - Vec3{0, 5, 0}) < 1.05f, "a tilted place off its surface");
+    });
+    // A thug 8 m from a wall, drawn to a place on it 2.5 m up, at 30 physics steps a second.
+    auto tieRun = [&](GrabTargets& world, WebTies& ties, float seconds, bool fightOn, float& fastest,
+                      std::vector<std::uint64_t> taken = {}) {
+        const float dt = 1 / 30.f;
+        for (float t = 0; t < seconds; t += dt) {
+            std::vector<TargetCommand> commands;
+            ties.step(dt, world, fightOn, taken, commands);
+            world.apply(dt, commands);
+            for (const auto& item : world.items)
+                fastest = std::max(fastest, length(item.velocity));
+        }
+    };
+    test("web tie: a tied thug comes onto the wall gently and stays there", [&] {
+        GrabTargets world;
+        world.add(7, {0, .95f, 0}, 80, .45f, TargetKind::Character);
+        WebTies ties;
+        check(ties.add(*world.find(7), {0, 2.5f, -8}, {0, 0, 1}), "the tie was not made");
+        float fastest = 0;
+        tieRun(world, ties, 1.5f, true, fastest);
+        const Vec3 place{0, 2.5f, -8 + .45f + .05f};
+        check(length(world.items[0].position - place) < .1f, "the thug did not reach the wall within 1.5 s");
+        check(ties.ties()[0].arrived, "the tie did not see him arrive");
+        check(fastest <= 16.5f, "the thug flew faster than the tie draws");
+        // On it, he hangs still: no sag under gravity, for as long as the fight goes on.
+        float still = 0;
+        tieRun(world, ties, 60, true, still);
+        check(length(world.items[0].position - place) < .05f, "the thug sagged off the wall");
+        check(length(world.items[0].velocity) < .05f, "the thug was not held still");
+        check(ties.tied(7) && ties.ended() == 0, "the tie let go during the fight");
+    });
+    test("web tie: a thug far off comes in an arc, lifted off the ground, and a yank starts him", [&] {
+        GrabTargets world;
+        world.add(7, {0, .95f, 0}, 80, .45f, TargetKind::Character);
+        WebTies ties;
+        ties.add(*world.find(7), {0, 1.5f, -14}, {0, 0, 1});
+        const Vec3 place = ties.ties()[0].place;
+        const Vec3 launch = tieLaunch(*world.find(7), ties.ties()[0]);
+        check(length(launch) > 4 && length(launch) < 10, "the first pull was no yank");
+        world.items[0].velocity = launch;
+        float highest = 0, fastest = 0;
+        const float dt = 1 / 30.f;
+        for (float t = 0; t < 2.5f; t += dt) {
+            std::vector<TargetCommand> commands;
+            ties.step(dt, world, true, {}, commands);
+            world.apply(dt, commands);
+            const auto& p = world.items[0].position;
+            // Above the straight line from where he started to his place.
+            const float along = std::clamp((0 - p.z) / 13.5f, 0.f, 1.f);
+            highest = std::max(highest, p.y - (.95f + along * (1.5f - .95f)));
+            fastest = std::max(fastest, length(world.items[0].velocity));
+        }
+        check(highest > .5f, "he came along the straight line, not an arc");
+        check(length(world.items[0].position - place) < .1f, "he did not come to his place");
+        check(fastest <= 16.5f, "he flew faster than the tie draws");
+        near(tieAim({0, 1, -13}, place, {0, 0, 1}).y, place.y);
+        // Under a ceiling, no arc up into it.
+        near(tieAim({0, 1, 0}, {0, 4, -12}, {0, -1, 0}).y, 4);
+    });
+    test("web tie: settled short of his place, he is held where he came to", [&] {
+        GrabTargets world;
+        world.add(7, {0, 3.9f, -2}, 80, .45f, TargetKind::Character);
+        WebTies ties;
+        ties.add(*world.find(7), {0, 5, -2}, {0, -1, 0});
+        ties.settle(7, {0, 3.9f, -2});
+        check(ties.ties()[0].arrived, "a settled tie did not arrive");
+        float fastest = 0;
+        const float dt = 1 / 30.f;
+        for (float t = 0; t < 5; t += dt) {
+            std::vector<TargetCommand> commands;
+            ties.step(dt, world, true, {}, commands);
+            world.apply(dt, commands);
+            fastest = std::max(fastest, length(world.items[0].velocity));
+        }
+        check(length(world.items[0].position - Vec3{0, 3.9f, -2}) < .03f && fastest < .2f,
+              "a settled thug did not stay where he came to");
+    });
+    test("web tie: the fight over, every tie lets go; a short lull does not", [&] {
+        GrabTargets world;
+        world.add(7, {0, .95f, 0}, 80, .45f, TargetKind::Character);
+        world.add(8, {3, .95f, 0}, 80, .45f, TargetKind::Character);
+        WebTies ties;
+        ties.add(*world.find(7), {0, 2.5f, -8}, {0, 0, 1});
+        ties.add(*world.find(8), {3, 0, 0}, {0, 1, 0});
+        float fastest = 0;
+        tieRun(world, ties, 3, false, fastest);
+        tieRun(world, ties, .1f, true, fastest);
+        check(ties.ties().size() == 2, "a lull of 3 s ended the ties");
+        tieRun(world, ties, 5.2f, false, fastest);
+        check(ties.ties().empty() && ties.ended() == 2, "the end of the fight kept the ties");
+    });
+    test("web tie: a gone target or one a web takes again ends its tie", [&] {
+        GrabTargets world;
+        world.add(7, {0, .95f, 0}, 80, .45f, TargetKind::Character);
+        world.add(8, {3, .95f, 0}, 80, .45f, TargetKind::Character);
+        WebTies ties;
+        ties.add(*world.find(7), {0, 2.5f, -8}, {0, 0, 1});
+        ties.add(*world.find(8), {3, 2.5f, -8}, {0, 0, 1});
+        float fastest = 0;
+        tieRun(world, ties, .5f, true, fastest, {8});
+        check(ties.tied(7) && !ties.tied(8), "a target the hand took again stayed tied");
+        world.items.erase(world.items.begin());
+        tieRun(world, ties, .1f, true, fastest);
+        check(!ties.tied(7), "a gone target stayed tied");
+        check(ties.made() == 2 && ties.taken() == 1 && ties.gone() == 1, "ties made or ended were miscounted");
+    });
+    test("web tie: tying a tied target again moves its tie; bad configurations throw", [&] {
+        GrabTargets world;
+        world.add(7, {0, .95f, 0}, 80, .45f, TargetKind::Character);
+        WebTies ties;
+        ties.add(*world.find(7), {0, 2.5f, -8}, {0, 0, 1});
+        ties.add(*world.find(7), {4, 0, 0}, {0, 1, 0});
+        check(ties.ties().size() == 1 && ties.ties()[0].anchor.x == 4, "a target was tied twice");
+        TieConfig bad;
+        bad.webForce = 0;
+        bool threw = false;
+        try {
+            WebTies broken(bad);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+        check(threw, "a tie without strength was accepted");
+    });
+    test("web tie: the hands' webs are handed over, a held grip shoots nothing new", [&] {
+        GrabTargets world;
+        world.add(5, {0, 1, -6}, 80, .45f, TargetKind::Character);
+        WebGrab grab;
+        Input in = forward();
+        LabWorld lab{std::vector<Box>{}};
+        grab.claim(1 / 90.f, in, lab, world, Body{{0, 1, 0}, {}, true});
+        check(grab.grabs()[0].phase != GrabPhase::None, "the grab caught nothing");
+        grab.handOver(0);
+        check(grab.grabs()[0].phase == GrabPhase::None, "the grab kept its target");
+        grab.claim(1 / 90.f, in, lab, world, Body{{0, 1, 0}, {}, true});
+        check(grab.grabs()[0].phase == GrabPhase::None, "a held grip caught again");
+        check(grab.forSwing(in).hands[0].grip == 0, "a held grip went to the swing");
     });
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;

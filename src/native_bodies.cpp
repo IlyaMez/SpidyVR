@@ -8,9 +8,13 @@
 #include <cmath>
 #include <cstring>
 #include <initializer_list>
+#include <intrin.h>
 #include <windows.h>
 using namespace spidy;
 using namespace spidy::native_bodies;
+extern "C" {
+__declspec(dllexport) StateLog SpidyStateLog;
+}
 namespace {
 using PreCollide = void (*)(void*, const void*);
 using SetFreebody = void (*)(void*);
@@ -31,6 +35,9 @@ constexpr uintptr_t worldGlobal = 0x78939e8, physicsGlobal = 0x609a570, recordTa
                     physicsComponent = 0x3d0a460, actorTable = 0x7a436e8, actorCount = 0x7a43704,
                     registryTable = 0x7a44320, registryCount = 0x7a44340, stateMachine = 0x4f843d0,
                     flungState = 0x3832fd8, flungDriver = 0x386c448;
+// The game's stick (native_bodies::stick): its state type, a static the game
+// makes, and that type's vtable, as November 2's state log saw them.
+constexpr uintptr_t wallStuckType = 0x6c6dc90, wallStuckTypeClass = 0x3833948;
 // The DamageSystem, its direct request (target, hit direction, point,
 // normal), the request it hands out when its pool is full, and the actor
 // table actor handles index.
@@ -82,6 +89,17 @@ struct Fling {
     bool pending{}, request{};
 };
 Fling flings[slots];
+// Sticks asked for the next step (native_bodies::stick).
+struct Stick {
+    uint64_t machine{}, record{};
+    uint32_t surface{}, pose{};
+    Vec3 point{}, normal{}, along{};
+    bool pending{};
+};
+Stick sticks[slots];
+StickCounters stickTotals;
+// The state log's lock (native_bodies::StateLog).
+SRWLOCK stateLock = SRWLOCK_INIT;
 // Damage to issue at the next step, in order, with its ticket.
 struct PendingDamage {
     Damage damage{};
@@ -403,6 +421,43 @@ void flingNow(const Fling& f) {
     else
         ++totals.rejected;
 }
+void stickNow(const Stick& k) {
+    if (!registered(k.machine, stateMachine, k.record) ||
+        pointer(pointer(k.machine) + 13 * 8) != base + requestStateRva) {
+        ++stickTotals.refused;
+        AcquireSRWLockExclusive(&stateLock);
+        ++SpidyStateLog.stickRefused;
+        ReleaseSRWLockExclusive(&stateLock);
+        return;
+    }
+    const auto type = base + wallStuckType;
+    if (pointer(type) != base + wallStuckTypeClass) {
+        ++stickTotals.noType;
+        AcquireSRWLockExclusive(&stateLock);
+        ++SpidyStateLog.stickRefused;
+        ReleaseSRWLockExclusive(&stateLock);
+        return;
+    }
+    alignas(16) uint8_t params[0x80]{};
+    const uint32_t header[2]{0x9349bd43, 0x68};
+    std::memcpy(params, header, sizeof(header));
+    std::memcpy(params + 0x30, &k.surface, 4);
+    std::memcpy(params + 0x34, &k.point, sizeof(Vec3));
+    std::memcpy(params + 0x40, &k.normal, sizeof(Vec3));
+    std::memcpy(params + 0x4c, &k.along, sizeof(Vec3));
+    const uint8_t flags[4]{0xff, 0xff, 0x01, 0x01};
+    std::memcpy(params + 0x58, flags, 4);
+    const uint32_t index = 0x3d; // as the stick under a beam that day
+    const float last = 1.5f;
+    std::memcpy(params + 0x5c, &k.pose, 4);
+    std::memcpy(params + 0x60, &index, 4);
+    std::memcpy(params + 0x64, &last, 4);
+    const auto request = reinterpret_cast<RequestState>(base + requestStateRva);
+    if (request(reinterpret_cast<void*>(k.machine), reinterpret_cast<void*>(type), params))
+        ++stickTotals.made;
+    else
+        ++stickTotals.refused;
+}
 void apply(uintptr_t world, const void* input) {
     // Damage first: the DamageSystem is gameplay's, not the physics world's,
     // and the game runs its own code in it, so it is issued outside the lock.
@@ -442,10 +497,20 @@ void apply(uintptr_t world, const void* input) {
         flings[i].pending = false;
     }
     ReleaseSRWLockExclusive(&lock);
+    Stick stickDue[slots]{};
+    AcquireSRWLockExclusive(&lock);
+    for (unsigned i = 0; i < slots; ++i) {
+        stickDue[i] = sticks[i];
+        sticks[i].pending = false;
+    }
+    ReleaseSRWLockExclusive(&lock);
     // State requests outside the lock: the game runs its own code in them.
     for (const auto& f : due)
         if (f.pending)
             flingNow(f);
+    for (const auto& k : stickDue)
+        if (k.pending)
+            stickNow(k);
     const auto motions = pointer(world + 0x148);
     const auto motionCount = value<uint32_t>(world + 0x150);
     const auto setVelocity = reinterpret_cast<SetVelocity>(base + setVelocityRva);
@@ -624,6 +689,63 @@ void preCollide(void* world, const void* input) {
         apply(address, input);
     original(world, input);
 }
+// The state log (native_bodies.hpp). Optional: without its hook the rest runs.
+RequestState originalRequest{};
+void* requestHook{};
+bool requestHooked{};
+std::atomic<uint64_t> watchedMachines[8]{};
+bool watched(uint64_t machine) {
+    for (const auto& w : watchedMachines)
+        if (machine && w.load(std::memory_order_relaxed) == machine)
+            return true;
+    return false;
+}
+// An object's class name from MSVC RTTI (its vtable's complete object locator),
+// and the vtable's image offset; none for an object without one.
+uint32_t className(uintptr_t object, char (&name)[64]) {
+    name[0] = 0;
+    const auto vtable = pointer(object);
+    if (!vtable || vtable < base)
+        return 0;
+    struct Locator {
+        uint32_t signature, offset, constructorOffset, type, hierarchy, self;
+    } locator{};
+    const auto at = pointer(vtable - 8);
+    if (at && read(at, &locator, sizeof(locator)) && locator.signature == 1 && base + locator.self == at)
+        for (size_t n = sizeof(name) - 1; n >= 16; n /= 2)
+            if (read(base + locator.type + 0x10, name, n)) {
+                name[n] = 0;
+                break;
+            }
+    return static_cast<uint32_t>(vtable - base);
+}
+bool __fastcall loggedRequest(void* machine, void* type, void* params) {
+    const auto m = reinterpret_cast<uint64_t>(machine);
+    if (!watched(m))
+        return originalRequest(machine, type, params);
+    StateRequest e;
+    e.machine = m;
+    const auto t = reinterpret_cast<uintptr_t>(type);
+    e.typeOffset = t > base ? static_cast<uint32_t>(t - base) : 0;
+    e.typeClassOffset = t ? className(t, e.typeName) : 0;
+    const auto caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    e.callerOffset = caller > base ? static_cast<uint32_t>(caller - base) : 0;
+    // As much of the parameters as can be read (they may end before a page does).
+    for (size_t n = stateParamBytes; n >= 0x20 && !e.paramsRead; n /= 2)
+        if (params && read(reinterpret_cast<uintptr_t>(params), e.params, n))
+            e.paramsRead = static_cast<uint32_t>(n);
+    const bool out = originalRequest(machine, type, params);
+    e.result = out ? 1 : 0;
+    AcquireSRWLockExclusive(&stateLock);
+    auto& log = SpidyStateLog;
+    InterlockedIncrement64(&log.sequence);
+    e.sequence = ++log.watchedRequests;
+    log.entries[(e.sequence - 1) % stateLogEntries] = e;
+    log.status = 2;
+    InterlockedIncrement64(&log.sequence);
+    ReleaseSRWLockExclusive(&stateLock);
+    return out;
+}
 bool entry(uintptr_t rva, std::initializer_list<uint8_t> expected) {
     uint8_t bytes[16]{};
     return expected.size() <= sizeof(bytes) && read(base + rva, bytes, expected.size()) &&
@@ -690,11 +812,19 @@ uint32_t native_bodies::start(uintptr_t gameBase) {
             }
             hooked = true;
         }
+        if (!requestHooked) {
+            requestHook = reinterpret_cast<void*>(base + requestStateRva);
+            requestHooked = MH_CreateHook(requestHook, reinterpret_cast<void*>(loggedRequest),
+                                          reinterpret_cast<void**>(&originalRequest)) == MH_OK;
+        }
         AcquireSRWLockExclusive(&lock);
         for (auto& s : table)
             s = {};
         for (auto& f : flings)
             f = {};
+        for (auto& k : sticks)
+            k = {};
+        stickTotals = {};
         for (auto& f : followed)
             f = {};
         pendingDamages = 0;
@@ -710,6 +840,10 @@ uint32_t native_bodies::start(uintptr_t gameBase) {
             enabled = false;
             result = 8300 + s;
         }
+        // The state log's hook: optional, its failure costs nothing else.
+        if (requestHooked && MH_EnableHook(requestHook) != MH_OK)
+            requestHooked = false;
+        SpidyStateLog.status = requestHooked ? 1u : 3u;
     } while (false);
     ReleaseSRWLockExclusive(&lifecycle);
     return result;
@@ -721,6 +855,10 @@ uint32_t native_bodies::stop() {
     if (hooked)
         if (const auto s = MH_DisableHook(hook); s != MH_OK && s != MH_ERROR_DISABLED)
             result = 8400 + s;
+    if (requestHooked)
+        MH_DisableHook(requestHook);
+    for (auto& w : watchedMachines)
+        w.store(0, std::memory_order_relaxed);
     const auto until = GetTickCount64() + 2000;
     while (active && GetTickCount64() < until)
         Sleep(1);
@@ -818,6 +956,29 @@ bool native_bodies::fling(uint64_t machine, uint64_t record, Vec3 velocity, bool
     ReleaseSRWLockExclusive(&lock);
     return slot != nullptr;
 }
+bool native_bodies::stick(uint64_t machine, uint64_t record, uint32_t surface, Vec3 point, Vec3 normal, Vec3 along,
+                          uint32_t pose) {
+    if (!enabled || !machine || !record || !finite(point) || !finite(normal) || !finite(along) ||
+        length(normal) < .5f || length(along) < .5f)
+        return false;
+    AcquireSRWLockExclusive(&lock);
+    Stick* slot{};
+    for (auto& k : sticks)
+        if (!slot && (k.machine == machine || !k.pending))
+            slot = &k;
+    if (slot) {
+        *slot = {machine, record, surface, pose, point, normalized(normal), normalized(along), true};
+        ++stickTotals.asked;
+    }
+    ReleaseSRWLockExclusive(&lock);
+    return slot != nullptr;
+}
+StickCounters native_bodies::stickCounters() {
+    AcquireSRWLockShared(&lock);
+    const auto out = stickTotals;
+    ReleaseSRWLockShared(&lock);
+    return out;
+}
 uint64_t native_bodies::damage(const Damage& d) {
     if (!enabled || !d.victim || !finite(d.point) || !finite(d.direction) || !std::isfinite(d.amount) ||
         d.amount < 0 || d.knockback > 9)
@@ -859,4 +1020,20 @@ float native_bodies::timeScale() {
     const auto out = scale;
     ReleaseSRWLockShared(&lock);
     return out;
+}
+void native_bodies::watchStates(const uint64_t* machines, unsigned count) {
+    for (unsigned i = 0; i < 8; ++i)
+        watchedMachines[i].store(machines && i < count ? machines[i] : 0, std::memory_order_relaxed);
+}
+void native_bodies::markState(uint64_t machine, Vec3 anchor, Vec3 normal, Vec3 position, uint32_t stuck,
+                              uint32_t surface) {
+    AcquireSRWLockExclusive(&stateLock);
+    auto& log = SpidyStateLog;
+    InterlockedIncrement64(&log.sequence);
+    auto& m = log.markEntries[log.marks % stateMarks];
+    m = {log.watchedRequests, machine, anchor, normal, position, stuck, surface,
+         static_cast<uint32_t>(GetTickCount64())};
+    ++log.marks;
+    InterlockedIncrement64(&log.sequence);
+    ReleaseSRWLockExclusive(&stateLock);
 }

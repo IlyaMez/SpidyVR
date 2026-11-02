@@ -513,6 +513,8 @@ const game_dodge::Data* dodgeResults{};
 // The tab's BLOW SOUNDS to the ray module (SpidySoundMode; optional).
 DWORD(WINAPI* soundMode)(void*){};
 BridgeCall startSwing{}, submitSwing{}, sampleSwing{}, stopSwing{}, retargetSwing{}, sampleGrab{}, sampleAim{};
+// Optional: the web tie's telemetry (game_grab::TieData; an older ray module has none).
+BridgeCall sampleTie{};
 // Each web's edges (game_swing::Bends): optional, without it a web round an
 // edge is drawn to that edge.
 BridgeCall sampleBends{}, sampleWebFlight{};
@@ -1055,6 +1057,11 @@ DWORD WINAPI run(void*) {
         // What each hand's web holds, when it caught a thug instead of a wall.
         game_grab::Data grabState;
         uint32_t grabPhases[2]{};
+        // The web tie: its webs, and the gesture's state and ties made before
+        // this frame (a tick in both hands when it is ready, a pulse on a tie).
+        game_grab::TieData tieState;
+        bool tieArmedBefore{};
+        uint64_t tiesMadeBefore{};
         // A grab's event pulse plays this long before the web's tension
         // takes the hand's haptics again (predicted display time, ns).
         int64_t pulseUntil[2]{};
@@ -2352,6 +2359,12 @@ DWORD WINAPI run(void*) {
                         input.tilt = motion.swing.tilt;
                         input.leap = input.focused ? leapOut : 0.f;
                         input.asks = input.focused && askingGame ? 1u : 0u;
+                        // The web tie's click: the right stick alone, not half of
+                        // clicking both (the pad layer, the pause), not an R3 the
+                        // game asks for.
+                        if (input.focused && frame.hands[1].stickClick && !frame.hands[0].stickClick &&
+                            !padLayer.latched() && !(namedPress.claimed() & game_pad::NamedPress::rightClick))
+                            input.asks |= 2u;
                         if (const Vec3 look = motion.headPose.orientation.rotate({0, 0, -1});
                             input.focused && finite(look) && length(look) > .5f)
                             input.look = normalized(look);
@@ -2421,6 +2434,27 @@ DWORD WINAPI run(void*) {
                         check(swingState.error, "Native swinging");
                         if (!sampleGrab || sampleGrab(&grabState))
                             grabState = {};
+                        {
+                            game_grab::TieData sample;
+                            const game_grab::TieData expected;
+                            if (sampleTie && !sampleTie(&sample) && sample.magic == expected.magic &&
+                                sample.version == expected.version && sample.bytes == expected.bytes)
+                                tieState = sample;
+                            else
+                                tieState = {};
+                            const bool armedNow = input.focused && tieState.armed != 0;
+                            if (armedNow && !tieArmedBefore) {
+                                runtime.haptic(0, .25f);
+                                runtime.haptic(1, .25f);
+                            }
+                            if (tieState.made > tiesMadeBefore && tiesMadeBefore) {
+                                runtime.haptic(0, .9f);
+                                runtime.haptic(1, .9f);
+                            }
+                            tieArmedBefore = armedNow;
+                            if (tieState.made)
+                                tiesMadeBefore = tieState.made;
+                        }
                         // What each free hand's web button would do: the aim markers.
                         aims = aimed = {};
                         if (sampleAim && input.focused) {
@@ -2932,6 +2966,12 @@ DWORD WINAPI run(void*) {
                                 }
                             }
                             native_webs::submit(webs, 200, bent);
+                            // The web tie's webs, in the game's own rope material.
+                            native_webs::TieRope tieRopes[native_webs::maxTieRopes]{};
+                            uint32_t tieRopeCount{};
+                            for (uint32_t k = 0; k < tieState.count && tieRopeCount < native_webs::maxTieRopes; ++k)
+                                tieRopes[tieRopeCount++] = {tieState.lines[k].anchor, tieState.lines[k].end};
+                            native_webs::submitTies(tieRopes, tieRopeCount, 200);
                         }
                     }
                     const bool steering = motion.active && !flatScreen && controlsVisible;
@@ -4191,6 +4231,10 @@ DWORD WINAPI run(void*) {
                     }
                     saved.webSlots = {webRopes.slot(0), webRopes.slot(1)};
                     saved.strandUpper = webRopes.upper();
+                    saved.tiesByGame = native_webs::tiesDrawn();
+                    saved.tieCount = std::min<uint32_t>(tieState.count, static_cast<uint32_t>(saved.ties.size()));
+                    for (uint32_t i = 0; i < saved.tieCount; ++i)
+                        saved.ties[i] = {tieState.lines[i].anchor, tieState.lines[i].end};
                     saved.webFlight = webFlight;
                     for (unsigned i = 0; i < 2; ++i)
                         saved.flightVisual[i] = flightVisual[i];
@@ -4475,6 +4519,28 @@ DWORD WINAPI run(void*) {
                                                               timing.anchor, line)) {
                                 appendWeb(vertices, line, viewer, pixelAngle);
                             }
+                        }
+                        // The web tie's webs: from the surface to the enemy held on it,
+                        // taut, with the splat where they stick.
+                        // Only those the game does not draw itself (both hands have webs of
+                        // their own, or a tie beyond the game's ropes for them): as thin as
+                        // a game web, not the overlay's swing strand.
+                        WebLook tieLook;
+                        tieLook.radius = .0018f;
+                        tieLook.minPixels = 1.f;
+                        for (uint32_t i = 0; !saved->flatScreen && i < saved->tieCount; ++i) {
+                            const auto& strand = saved->ties[i];
+                            if ((saved->tiesByGame >> i) & 1u)
+                                continue;
+                            if (!finite(strand.anchor) || !finite(strand.end))
+                                continue;
+                            WebLine line;
+                            line.start = strand.end;
+                            line.end = strand.anchor;
+                            line.slack = 0;
+                            line.extended = 1;
+                            line.seed = 3.1f + static_cast<float>(i) * .9f + strand.anchor.x * .23f;
+                            appendWeb(vertices, line, viewer, pixelAngle, tieLook);
                         }
                         // Aim markers: where each free hand's web button would send its
                         // web, on the line that hand points along in this image, that
@@ -4961,6 +5027,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     retargetSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingRetarget"));
     // Optional: an older ray module has no web grab, nor punching, nor aim previews.
     sampleGrab = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyGrabSample"));
+    sampleTie = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyTieSample"));
     sampleAim = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyAimSample"));
     startPunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchStart"));
     samplePunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchSample"));
