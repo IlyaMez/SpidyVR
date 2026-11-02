@@ -950,9 +950,16 @@ VR settings
                    when the headset shows a picture twice. It lies
                    over everything, your hands too. Needs the HUD on.
                    Off by default, to compare.
+  NATIVE RUN       (off until you switch it on) on the ground, the left
+                   stick pushed past 70% holds the game's RT, its
+                   parkour run: you sprint, vault cars and rails and run
+                   up walls as on a pad. Under 50% you jog again. Never
+                   in the air, on a web or on a wall, and not while a
+                   grip or trigger is held: swinging and the webs are as
+                   they were.
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches

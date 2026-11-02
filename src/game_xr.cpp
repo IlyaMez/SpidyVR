@@ -946,6 +946,7 @@ DWORD WINAPI run(void*) {
         // its hand at the temple is the game's R3, its scan. leapOut: the
         // leap let go of, for the swing's next commands.
         game_pad::ChargeJump chargeJump;
+        game_pad::NativeRun nativeRun; // NATIVE RUN's RT on the ground
         game_pad::TemplePress templePress;
         uint32_t chargesBefore{}, leapsBefore{}, scansBefore{};
         // Both hands at the chest with both triggers pulled: the game's suit
@@ -3565,6 +3566,28 @@ DWORD WINAPI run(void*) {
                                                  swingState.wall == static_cast<uint32_t>(game_swing::Surface::game);
                             const bool webbed = swingState.webs[0].attached || swingState.webs[1].attached;
                             walk.parkour = onCrawl && (walk.jump || (!motion.ventCrawl && webbed));
+                            // NATIVE RUN (off by default): on the ground, the game's
+                            // own, RT is held too while the stick runs, its sprint,
+                            // vaults and wall runs (game_pad::NativeRun). Never with
+                            // the crawl's RT above (gameOwnsGround is on no wall),
+                            // never in the air, on a web, mounting or taking off
+                            // (there RT is the game's web swing), and not while a
+                            // grip or trigger is in use (webs, web balls, grabs) nor
+                            // with the game's A, Y, zip, aim, pull or a prompt's
+                            // buttons, which RT would turn into something else.
+                            const bool handsIdle =
+                                frame.hands[0].squeeze < .3f && frame.hands[0].trigger < .3f &&
+                                frame.hands[1].squeeze < .3f && frame.hands[1].trigger < .3f &&
+                                !grabPhases[0] && !grabPhases[1];
+                            const bool runAllowed =
+                                values.nativeRun && playing && !calibrationInput && !layerOn && !mounting &&
+                                !motion.ventCrawl && !motion.onSurface && handsIdle &&
+                                game_swing::gameOwnsGround(swingFresh, swingState) && !walk.jump &&
+                                !walk.interact && !walk.zip && !walk.aim && !walk.pull && !walk.heal &&
+                                !walk.demand.any() && !onCrawl;
+                            nativeRun.update(runAllowed, walk.right, walk.forward);
+                            if (nativeRun.held())
+                                walk.parkour = true;
                         }
                         walk.scan = templePress.held() && steering;
                         walk.suit = suitPress.held() && steering;

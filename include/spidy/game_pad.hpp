@@ -132,6 +132,52 @@ struct Walk {
     // controls of their own names (NamedPress).
     prompt_buttons::Demand demand{};
 };
+// NATIVE RUN (vr_settings::Values::nativeRun, off by default): the game's
+// RT, its parkour run, held while the player runs on the ground, so the game
+// sprints, vaults and runs up walls as it does on a pad. Without it the left
+// stick only jogs: the game's RT went out on its wall crawl alone (Walk::
+// parkour). The stick past onAbove of its full tilt holds RT; it stays held
+// until the stick falls under offBelow, so walking stays a walk and a run
+// does not stutter at the edge. Anything but the ground drops it at once and
+// it starts over (allowed false): game_xr allows it only where
+// game_swing::gameOwnsGround holds, no web, grip or trigger is in use and no
+// other of the game's buttons that RT would change goes out.
+class NativeRun {
+  public:
+    static constexpr float defaultOnAbove = .7f, defaultOffBelow = .5f;
+    NativeRun(float onAbove = defaultOnAbove, float offBelow = defaultOffBelow) {
+        thresholds(onAbove, offBelow);
+    }
+    // onAbove within .2..1; offBelow within 0..onAbove.
+    void thresholds(float onAbove, float offBelow) {
+        on_ = std::isfinite(onAbove) ? std::clamp(onAbove, .2f, 1.f) : defaultOnAbove;
+        off_ = std::isfinite(offBelow) ? std::clamp(offBelow, 0.f, on_) : std::min(defaultOffBelow, on_);
+    }
+    float onAbove() const {
+        return on_;
+    }
+    float offBelow() const {
+        return off_;
+    }
+    // allowed: the setting is on and the player runs on the ground (above).
+    // right, forward: the stick the game gets (Walk). Returns RT.
+    bool update(bool allowed, float right, float forward) {
+        const float tilt = std::hypot(right, forward);
+        if (!allowed || !std::isfinite(tilt)) {
+            held_ = false;
+            return false;
+        }
+        held_ = held_ ? tilt >= off_ : tilt > on_;
+        return held_;
+    }
+    bool held() const {
+        return held_;
+    }
+
+  private:
+    float on_{defaultOnAbove}, off_{defaultOffBelow};
+    bool held_{};
+};
 // A held on the ground: a charged leap, Spidy's own. The game has one, its
 // Charge Jump ("Hold RT + A while running or standing to build up charge,
 // then release A for a huge leap"), but as a Webslinger skill: a hero

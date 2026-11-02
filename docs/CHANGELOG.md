@@ -3,6 +3,33 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
+## Unreleased
+
+Not in a build yet, newest first. The release adds these to the next build's entry.
+
+**NATIVE RUN, the game's own sprint, vaults and
+wall runs on foot.**
+
+- **Before.** On the ground the left stick only jogged: the game's RT, its
+  parkour run, went out on the game's wall crawl alone, so on foot there was
+  no sprint, no automatic vault over a car or a rail, no wall run and no
+  running leap.
+- **NATIVE RUN** (EXPERIMENTAL, after STEADY HUD; the launcher's Moving
+  card; `native_run` in `spidy_vr.ini` and profiles; off by default, the
+  stick jogs as before): on the ground the left stick past 70% holds the
+  game's RT (`game_pad::NativeRun`) until it falls under 50%, so a walk
+  stays a walk. Only where the game, not the swing, has the player on his
+  feet (`game_swing::gameOwnsGround`: fresh, grounded, not owned, no web, no
+  wall or crawl, no mount or takeoff, not in the game's air state), with no
+  grip or trigger in use and none of the game's A, Y, zip, aim, pull, heal or
+  a prompt's buttons going out. RT is never held in the air, where it would be
+  the game's own web swing; swinging, the webs, web balls, the charged leap
+  and the crawl's RT + A are as they were.
+- **Validation.** Core checks cover the hysteresis, the thresholds, RT alone
+  on the pad, every state `gameOwnsGround` refuses, the row, its default and
+  its `spidy_vr.ini` key; launcher checks the profile key. Not played in a
+  headset yet.
+
 **Latest build (November 3): pull request #58 by vrfloop-lab (vrfloopy) and
 HaNToP - first-person cutscenes.** vrfloopy: "I want to see the cutscenes
 from Spider-Man's eyes", with the head moving as the character's does.

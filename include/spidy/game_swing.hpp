@@ -214,6 +214,19 @@ static_assert(sizeof(Config) == 64 && sizeof(Hand) == 52 && sizeof(Command) == 2
 inline bool momentumWallDrive(bool requested, bool fresh, const Data& d) {
     return requested && fresh && d.status && d.owned && d.wall == static_cast<uint32_t>(Surface::wall);
 }
+// NATIVE RUN (game_pad::NativeRun): the game, not the swing, has the player
+// on his feet on the ground. A fresh sample (the caller's `fresh`: under 100
+// ms old), the swing not owning the body, grounded, on no wall of either kind
+// (the game's crawl keeps its own RT, game_xr), no web held by either hand, no
+// mount onto a wall, none of the swing's takeoffs, and the mover not in its
+// airborne mode (collision flags 0x10). The same states the swing drives in
+// (game_swing.cpp's `drive`: owned, attached, airborne) are all excluded: RT
+// held off the ground is the game's own web swing.
+inline bool gameOwnsGround(bool fresh, const Data& d) {
+    return fresh && d.status && !d.owned && d.grounded && d.wall == static_cast<uint32_t>(Surface::none) &&
+           !d.webs[0].attached && !d.webs[1].attached && !d.mount && !d.takeoff && !d.takeoffPhase &&
+           !(d.collisionFlags & 0x10u);
+}
 // SpidySwingSettings: what the VR settings (the SPIDY VR tab in the game's
 // Settings) change during play.
 // grab: webs catch props and thugs (a swing started without them starts

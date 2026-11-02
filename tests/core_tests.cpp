@@ -10060,6 +10060,57 @@ int main() {
         // Nowhere but play: the menus get nothing of it.
         check(fromControllers(f,Mapping::menus,jump).rightTrigger==0,"the menus got the parkour trigger");
     });
+    test("NATIVE RUN holds RT past 70% of the stick on the ground, lets go under 50%, and never elsewhere", [] {
+        using namespace game_pad;
+        NativeRun run;
+        check(!run.update(true, 0, .6f), "a walk held RT");
+        check(!run.update(true, 0, .7f), "RT at exactly the threshold");
+        check(run.update(true, .6f, .6f), "a full diagonal run did not hold RT");
+        check(run.update(true, 0, .55f), "RT let go above the release");
+        check(run.update(true, 0, .5f), "RT let go at the release");
+        check(!run.update(true, 0, .49f), "RT held under the release");
+        check(!run.update(true, 0, .6f), "RT came back between the two thresholds");
+        check(run.update(true, 0, 1), "RT did not come back at full stick");
+        // Anything but the ground: dropped at once, and it starts over.
+        check(!run.update(false, 0, 1), "RT held where it was not allowed");
+        check(!run.update(true, 0, .6f), "RT resumed below the threshold after a drop");
+        check(!run.update(true, NAN, 1), "a stick that is not a number held RT");
+        NativeRun odd(5, 9);
+        check(odd.onAbove() == 1 && odd.offBelow() == 1, "thresholds not clamped");
+        NativeRun custom(.9f, .8f);
+        check(!custom.update(true, 0, .85f) && custom.update(true, 0, .95f) && custom.update(true, 0, .85f) &&
+                  !custom.update(true, 0, .7f),
+              "configured thresholds not used");
+        // RT reaches the game as RT alone, only in play.
+        XrFrame f;f.hands[0].valid=f.hands[1].valid=true;
+        Walk w{};w.forward=1;w.parkour=true;
+        const auto s=fromControllers(f,Mapping::gameplay,w);
+        check(s.rightTrigger==255&&s.leftTrigger==0&&(s.buttons&a)==0,"native run was not RT alone");
+        check(fromControllers(f,Mapping::menus,w).rightTrigger==0,"the menus got native run's RT");
+    });
+    test("NATIVE RUN's ground: only where the game, not the swing, has the player on his feet", [] {
+        using game_swing::Data;
+        using game_swing::Surface;
+        using game_swing::gameOwnsGround;
+        Data ground;
+        ground.status = 1;
+        ground.grounded = 1;
+        check(gameOwnsGround(true, ground), "the ground itself was not the game's");
+        check(!gameOwnsGround(false, ground), "a stale sample counted");
+        auto with = [&](auto change) { Data d = ground; change(d); return gameOwnsGround(true, d); };
+        check(!with([](Data& d) { d.status = 0; }), "no swing data counted");
+        check(!with([](Data& d) { d.owned = 1; }), "the swing's body counted (swinging, flying, released)");
+        check(!with([](Data& d) { d.grounded = 0; }), "the air counted");
+        check(!with([](Data& d) { d.webs[0].attached = 1; }), "a left web counted");
+        check(!with([](Data& d) { d.webs[1].attached = 9; }), "a right web counted");
+        check(!with([](Data& d) { d.wall = static_cast<uint32_t>(Surface::wall); }), "the swing's wall counted");
+        check(!with([](Data& d) { d.wall = static_cast<uint32_t>(Surface::game); }), "the game's crawl counted");
+        check(!with([](Data& d) { d.wall = static_cast<uint32_t>(Surface::floor); }), "a vent counted");
+        check(!with([](Data& d) { d.mount = 1; }), "a mount counted");
+        check(!with([](Data& d) { d.takeoff = 1; }), "a takeoff counted");
+        check(!with([](Data& d) { d.takeoffPhase = 2; }), "a takeoff's phase counted");
+        check(!with([](Data& d) { d.collisionFlags = 0x10; }), "the game's air state counted");
+    });
     test("every control of the pad can be sent in VR play, by gameplay or the pad layer", [] {
         using namespace game_pad;
         using prompt_buttons::Demand;
@@ -21918,10 +21969,10 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 60 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 61 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[60 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[60].title, "REALISTIC FLIPS") == 0 && all[60].choices.empty(),
+            check(all[61 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[61].title, "REALISTIC FLIPS") == 0 && all[61].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[50].item == Item::controlledFlips && all[53].item == Item::joystickRunCamera &&
                   all[54].item == Item::wallRunCameraTilt && all[55].item == Item::halfPunchDamage,
@@ -21977,6 +22028,21 @@ int main() {
                       withTabOnly({}, "steady_hud=1\n").steadyHud && !withTabOnly({}, "steady_hud=0\n").steadyHud,
                   "spidy_vr.ini keeps STEADY HUD as steady_hud");
         }
+        // NATIVE RUN, after STEADY HUD and before the realistic flips: a switch in the tab, off by
+        // default (the stick jogs as before), kept in spidy_vr.ini as native_run.
+        check(all[60].item == Item::nativeRun && std::strcmp(all[60].title, "NATIVE RUN") == 0 &&
+                  all[60].choices.empty() && all[60].place == Place::tab,
+              "NATIVE RUN: a switch in the tab, after STEADY HUD");
+        {
+            Values v;
+            check(!v.nativeRun && defaultChoice(Item::nativeRun) == 0, "native run on by default");
+            check(choose(Item::nativeRun, 1, v) && v.nativeRun && choice(Item::nativeRun, v) == 1,
+                  "the switch did not turn native run on");
+            check(tabOnlyText(v).find("native_run=1\n") != std::string::npos &&
+                      withTabOnly({}, "native_run=1\n").nativeRun && !withTabOnly({}, "native_run=0\n").nativeRun &&
+                      !withTabOnly({}, "").nativeRun,
+                  "spidy_vr.ini keeps NATIVE RUN as native_run, off when absent");
+        }
 
         // The wall view has no row of its own (the player, October 14: "i dont
         // get why we have a wall run and a wall stand options where wall run
@@ -22030,7 +22096,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 66,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 67,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -22286,7 +22352,7 @@ int main() {
                                        "slingshot_speed=0\nrecording_smoothing=0\n"
                                        "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\n"
                                        "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
-                                       "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\n",
+                                       "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

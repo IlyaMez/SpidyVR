@@ -1896,6 +1896,11 @@ void App::options(ImVec2 origin, ImVec2 size) {
                S(42), [&] { tabToggle("##joystickruncamera", Item::joystickRunCamera); });
         option("Wall Run Camera Tilt", "Gently bank with the body on horizontal momentum wall runs.", S(42),
                [&] { tabToggle("##wallruncameratilt", Item::wallRunCameraTilt); });
+        option(
+            "Native run (experimental)",
+            "On the ground, the left stick past 70% holds the game's RT: its sprint, vaults and wall runs. "
+            "Under 50% it jogs again. Never in the air, on webs or on walls. Off: the stick jogs, as before.",
+            S(42), [&] { tabToggle("##nativerun", Item::nativeRun); });
     });
     group(0, "Flips", [&] {
         option("Flips (experimental)",

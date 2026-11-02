@@ -205,6 +205,11 @@ struct Values {
     // The phone's MUSIC plays what the PC plays (the tab's PC MEDIA;
     // phone_pc_media.hpp): Spotify, a browser. Off by default: the Music folder.
     bool pcMedia = false;
+    // NATIVE RUN (the tab's NATIVE RUN; game_pad::NativeRun): on the ground,
+    // the left stick past 70% holds the game's RT, its parkour run - sprint,
+    // vaults, wall runs - until it falls under 50%. Off by default: the stick
+    // jogs as before. Never in the air, on a web or on a wall.
+    bool nativeRun = false;
     // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
     // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
     int singleHandYankPercent = 100;
@@ -320,8 +325,9 @@ enum class Item : uint8_t {
     pcMedia,
     singleHandYankStrength,
     webTie,
+    nativeRun,
 };
-inline constexpr Item lastItem = Item::webTie;
+inline constexpr Item lastItem = Item::nativeRun;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -344,7 +350,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 71>& rows();
+const std::array<Row, 72>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;
