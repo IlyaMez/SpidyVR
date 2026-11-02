@@ -553,10 +553,33 @@ class InputSampleClock {
   private:
     uint64_t serial_{}, time_{};
 };
+// The game's running time, ms: the time from one of the swing's visits (a
+// game frame) to the next, each gap counted up to maxGapMs. A load hitch
+// stops the game's whole frame, visits too, and counts as one long frame:
+// timed by the wall clock, a hitch over half a second let go of every web
+// (the input held for controlHoldMs ran out, or the mover had not stepped
+// for that long), the player, November 2: "with load stutters while swinging
+// I very often lose the web, as if it were cut or I let go".
+class RunClock {
+  public:
+    static constexpr uint64_t maxGapMs = 100;
+    uint64_t update(uint64_t nowMs) {
+        if (started_ && nowMs >= lastMs_)
+            runMs_ += std::min(nowMs - lastMs_, maxGapMs);
+        lastMs_ = nowMs;
+        started_ = true;
+        return runMs_;
+    }
+
+  private:
+    uint64_t lastMs_{}, runMs_{};
+    bool started_{};
+};
 // The input the swing acts on. A focused sample stays in use for
 // controlHoldMs after input stops coming or turns unfocused, as if no new
 // sample had arrived: a game frame of over 100 ms closes the XR worker's
-// gameplay gate. Letting go there handed a swinging player to the game's own
+// gameplay gate. The time is the game's running time (RunClock), so a load
+// hitch of any length is a stutter here. Letting go there handed a swinging player to the game's own
 // fall, which counts the time airborne through Spidy's flight and starts at
 // 36-48 m/s down (October 6-7 headset reports).
 class InputHold {

@@ -49,6 +49,10 @@ CrawlHands crawlHands;
 VentCrawlMode ventCrawlMode;
 InputSampleClock inputClock, grabInputClock;
 InputHold inputHold;
+// The game's running time (RunClock), and what it was at the mover's last
+// step seen.
+RunClock runClock;
+uint64_t stepRunMs{};
 // The game's own move out of the swing's flight, asked for (Command::asks).
 AirYield airYield;
 InFlightStep inFlight;
@@ -365,7 +369,8 @@ void visit(const native_rays::QueryContext& world) {
     c = command;
     const bool live = c.focused && GetTickCount64() < inputDeadline;
     ReleaseSRWLockShared(&control);
-    const bool focused = inputHold.update(c, live, GetTickCount64());
+    const uint64_t runMs = runClock.update(GetTickCount64());
+    const bool focused = inputHold.update(c, live, runMs);
     native_movement::Data motion;
     if (sampleMotion(&motion)) {
         fault(3001);
@@ -378,6 +383,8 @@ void visit(const native_rays::QueryContext& world) {
                             ? static_cast<double>(now.QuadPart - motion.qpc) / frequency.QuadPart
                             : std::numeric_limits<double>::infinity();
     const bool fresh = idle < .05;
+    if (fresh)
+        stepRunMs = runMs;
     if (worldIdentity && worldIdentity != world.identity()) {
         cancel();
         worldIdentity = world.identity();
@@ -589,11 +596,12 @@ void visit(const native_rays::QueryContext& world) {
     }
     // No step for 50 ms: a long frame, or a paused game. The next step goes on
     // from here; letting go dropped the player into the game's fall (InputHold).
-    // With live input and no step for longer than a stutter, the game moves
-    // the player some other way (a perch), or is paused: the swing lets go. A
-    // player on a wall is on it still when the steps come back.
+    // With live input and no step for longer than a stutter of the game's
+    // running time (a load hitch is one long frame of it: RunClock), the game
+    // moves the player some other way (a perch), or is paused: the swing lets
+    // go. A player on a wall is on it still when the steps come back.
     if (!fresh) {
-        if (live && idle * 1000 > controlHoldMs)
+        if (live && runMs - stepRunMs > controlHoldMs)
             cancelSwing(true);
         return;
     }
