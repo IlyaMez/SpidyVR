@@ -84,6 +84,30 @@ def render_memory_snapshot(game, address):
     return None
 
 
+SCENE_POOL_STATUS = {0: 'not_asked', 1: 'waiting', 2: 'raised', 3: 'game_set_up_already', 4: 'refused'}
+
+
+def scene_pool_snapshot(game, address):
+    """The scene's slot pool as the render memory module left it (native_render_memory::ScenePoolData): the far
+    buildings' full models and the props near the head share it. `slots` is what the game's setup made it,
+    `game_slots` the game's own size, `status` whether the larger pool came in time (a game started before
+    the launcher's sets its pool up before Spidy is there)."""
+    for _ in range(8):
+        raw = game.read(address, 40)
+        seq = game.read(address+16, 8)
+        if len(raw) != 40 or len(seq) != 8:
+            return None
+        if struct.unpack_from('<3I', raw) != (0x53435050, 1, 40):
+            raise RuntimeError('Scene pool protocol mismatch')
+        if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != seq:
+            continue
+        status, = struct.unpack_from('<I', raw, 12)
+        percent, game_slots, slots, setups = struct.unpack_from('<I2iI', raw, 24)
+        return dict(status=SCENE_POOL_STATUS.get(status, status), percent=percent, game_slots=game_slots,
+                    slots=slots, setups=setups)
+    return None
+
+
 def motion_command(main,serial,seconds,travel=0.):
     # Exercise the same paired world-pose command used by tracked eyes. This is
     # a deterministic diagnostic motion, not a substitute for headset tracking.

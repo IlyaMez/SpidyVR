@@ -62,17 +62,21 @@ inline float poolMargin(int32_t used, int32_t capacity, float margin, float ease
 // more of the city at once than the monitor, and in VR the budget was full in
 // every minute of play (3,858 to 3,872 MB of 3,874 on October 26, a 32 GB card
 // with 22 GB of it unused), so a texture came in sharp only once another went.
-// Where the card has room, the eyes get up to twice the game's budget, leaving
-// `keep` free: an eighth of the card's budget for the game (DXGI's), at least
-// 2 GB. `game`, `videoBudget` and `videoUsage` in bytes; the game's own where
-// there is no room.
-inline uint64_t textureBudget(uint64_t game, uint64_t videoBudget, uint64_t videoUsage) {
+// Twice the budget was full as well from the fourth minute on (7,741 to 7,747
+// MB of 7,748 on October 30, 18 GB of the card unused). Where the card has
+// room, the eyes get up to `most` times the game's budget, leaving `keep`
+// free: an eighth of the card's budget for the game (DXGI's), at least 2 GB.
+// `game`, `videoBudget` and `videoUsage` in bytes; the game's own where there
+// is no room.
+inline constexpr uint64_t textureMost = 4;
+inline uint64_t textureBudget(uint64_t game, uint64_t videoBudget, uint64_t videoUsage,
+                              uint64_t most = textureMost) {
     constexpr uint64_t mb = 1ull << 20;
-    if (!game || !videoBudget || videoUsage >= videoBudget)
+    if (!game || !videoBudget || videoUsage >= videoBudget || most < 1)
         return game;
     const uint64_t keep = std::max<uint64_t>(2048 * mb, videoBudget / 8);
     const uint64_t room = videoBudget - videoUsage;
-    return room > keep ? game + std::min(game, (room - keep) / mb * mb) : game;
+    return room > keep ? game + std::min(game * (most - 1), (room - keep) / mb * mb) : game;
 }
 // The card running short with the raised budget: less than 1 GB of DXGI's
 // budget left. The game's own budget then comes back for the session.
@@ -81,9 +85,9 @@ inline bool textureShort(uint64_t videoBudget, uint64_t videoUsage) {
 }
 // SpidyStreamData: what stereo_probe.cpp did about both, for the session report.
 struct Data {
-    // features: 1 the cone, 2 the texture budget, where the game's code read
-    // as stereo_probe.cpp expects it.
-    uint32_t magic = 0x53545244, version = 1, bytes = sizeof(Data), features{};
+    // features: 1 the cone, 2 the texture budget, 4 the pool's room checks
+    // counted, where the game's code read as stereo_probe.cpp expects it.
+    uint32_t magic = 0x53545244, version = 2, bytes = sizeof(Data), features{};
     int64_t sequence{};
     // Frames the left eye's impostor query took the head's cone, and frames
     // it kept the eye's own lens while standing in (no cone placed that frame).
@@ -99,6 +103,13 @@ struct Data {
     // the game and the game's use of it when it was raised (MB), and how many
     // times the game's own came back because the card ran short.
     uint32_t textureGame{}, textureBudget{}, videoBudget{}, videoUsage{}, textureDrops{};
+    // The pool's room checks (190cb80) by who asked: a far building's full
+    // model (16f7f30) and a hibernate zone's props and details (1a22530);
+    // the refused ones left that building a card, or those props unshown,
+    // until a later frame found room. The most slots one check asked for.
+    uint64_t buildingChecks{}, buildingRefusals{}, zoneChecks{}, zoneRefusals{};
+    int32_t mostAsked{};
+    uint32_t reserved{};
 };
-static_assert(sizeof(Data) == 88);
+static_assert(sizeof(Data) == 128);
 } // namespace spidy::native_stream

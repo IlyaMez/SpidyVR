@@ -23,6 +23,7 @@
 #include "spidy/vr_settings.hpp"
 #include "spidy/recording_fov.hpp"
 #include "spidy/native_stream.hpp"
+#include "spidy/native_pace.hpp"
 #include "spidy/body_haptics.hpp"
 #include "spidy/web_visual.hpp"
 #include "spidy/web_pull.hpp"
@@ -1559,11 +1560,46 @@ int main() {
         near(native_stream::poolMargin(10001, 10000, 30), 0);
         near(native_stream::poolMargin(100, 10000, 0), 0);
     });
-    test("the texture budget doubles where the card has room and leaves an eighth of it free", [] {
+    test("the scene's slot pool grows by a percent of the game's, 100 to 400", [] {
+        check(native_render_memory::scenePool(409600, 200) == 819200, "doubled");
+        check(native_render_memory::scenePool(409600, 400) == 1638400, "four times");
+        // The game's own for 100, a percent out of range, or a setting that reads as no pool.
+        check(native_render_memory::scenePool(409600, 100) == 409600 &&
+                  native_render_memory::scenePool(409600, 401) == 409600 &&
+                  native_render_memory::scenePool(409600, 0) == 409600,
+              "raised by a percent out of range");
+        check(native_render_memory::scenePool(0, 200) == 0 && native_render_memory::scenePool(-1, 200) == -1 &&
+                  native_render_memory::scenePool(1 << 23, 200) == 1 << 23,
+              "raised a pool that does not read as one");
+    });
+    test("frame pacing measures the headset's period and waits at most a period and a half", [] {
+        // 10 MHz ticks: a 90 Hz headset's 111,111-tick frames.
+        constexpr int64_t frequency = 10000000;
+        double average = native_pace::period(0, 111111, frequency);
+        near(static_cast<float>(average), 111111);
+        // A late command moves the average a sixteenth of the way; a menu's gap does not count.
+        average = native_pace::period(average, 111111 + 16000, frequency);
+        near(static_cast<float>(average), 112111);
+        near(static_cast<float>(native_pace::period(average, 600000, frequency)), 112111);
+        near(static_cast<float>(native_pace::period(average, 0, frequency)), 112111);
+        // A period and a half, to the nearest ms: 17 at 90 Hz, 12 at 120 (12.49995); never under 4 or over
+        // 20, 20 with no period yet.
+        check(native_pace::waitMs(111111, frequency) == 17, "90 Hz wait");
+        check(native_pace::waitMs(83333, frequency) == 12, "120 Hz wait");
+        check(native_pace::waitMs(10000, frequency) == 4 && native_pace::waitMs(400000, frequency) == 20,
+              "wait outside 4-20 ms");
+        check(native_pace::waitMs(0, frequency) == 20 && native_pace::waitMs(111111, 0) == 20, "no period");
+    });
+    test("the texture budget grows up to four times where the card has room and leaves an eighth free", [] {
         constexpr uint64_t mb = 1ull << 20;
         const uint64_t veryHigh = 3874 * mb;
         // The October 26 session: a 32 GB card, 31,418 MB for the game, 9,448 used.
-        check(native_stream::textureBudget(veryHigh, 31418 * mb, 9448 * mb) == 2 * veryHigh, "not doubled");
+        check(native_stream::textureBudget(veryHigh, 31418 * mb, 9448 * mb) == 4 * veryHigh, "not four times");
+        check(native_stream::textureBudget(veryHigh, 31418 * mb, 9448 * mb, 2) == 2 * veryHigh, "not doubled");
+        // The same card with less room: what is left over an eighth of it (3,927.25 MB), in whole MB.
+        check(native_stream::textureBudget(veryHigh, 31418 * mb, 20000 * mb) == veryHigh + 7490 * mb,
+              "not raised by the room left over an eighth");
+        check(native_stream::textureBudget(veryHigh, 31418 * mb, 9448 * mb, 0) == veryHigh, "raised by no times");
         // A 16 GB card in VR: what is left over 2 GB (more than an eighth of 15,000 MB).
         check(native_stream::textureBudget(veryHigh, 15000 * mb, 10000 * mb) == veryHigh + (5000 - 2048) * mb,
               "not raised by the room left over 2 GB");
