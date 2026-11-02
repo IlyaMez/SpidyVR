@@ -670,6 +670,7 @@ int main() {
         t.uiStyle = 1;
         t.combatVisuals = false;
         t.blowSounds = 1;
+        t.pcMedia = true;
         t.webSlingshot = true;
         t.betterClimbing = true;
         t.smartAnchor = true;
@@ -700,7 +701,7 @@ int main() {
                   "weight=100\nelastic_web=0\n"
                   "soft_release=0\nswing_assist=0\nweb_slingshot=0\nslingshot_speed=0\n"
                   "better_climbing=0\ntwo_hand_zip=0\nrope_steering=0\nwall_run=1\nsnap_turn=30\n"
-                  "smooth_turn=0\nhaptics=100\nreel_haptics=0\nswing_haptics=0\nblow_sounds=0\n"
+                  "smooth_turn=0\nhaptics=100\nreel_haptics=0\nswing_haptics=0\nblow_sounds=0\npc_media=0\n"
                   "body_haptics=100\nbody_haptics_webs=1\nbody_haptics_wind=1\n"
                   "body_haptics_combat=1\nbody_haptics_movement=1\nscreen_size=1\nscreen_depth=2\nhud=2\n"
                   "ui_style=0\ncombat_visuals=1\nnear_clip_mm=20\nseated=0\nflips=0\ncontrolled_flips=0\nflip_speed=180\nhand_climb=0\n"

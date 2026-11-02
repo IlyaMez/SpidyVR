@@ -3,7 +3,32 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (November 2): pull request #53 by GolexPrime, built on 0.7.0
+**Latest build (November 2): pull request #54 by GolexPrime, built on 0.7.0
+on November 1 - the phone plays what the PC plays.**
+GolexPrime: "is it possible to get a Spotify integration, so that we play the
+Spotify app in the phone?"
+
+- **Before.** The phone's MUSIC played the songs in the Music folder beside
+  the launcher, nothing else.
+- **The change.** With PC MEDIA on, MUSIC is the PC's own player: Windows'
+  media controls (`GlobalSystemMediaTransportControls`, the volume flyout's
+  player) name the song and its app, and the phone's PREVIOUS, PLAY and NEXT
+  are theirs. The triggers set that app's volume in Windows' mixer (its audio
+  sessions on the default speakers, matched by process name). It works for
+  Spotify's desktop and Store app, a browser's tab, any player the media
+  keys work: no Spotify sign-in, API key or Premium. Not the Spotify app's
+  own screens: a playlist is picked on the PC. The controls answer on a
+  thread of their own (`PcMedia`, `src/phone_pc_media.cpp`), polled twice a
+  second, so the headset's frames never wait on them.
+- **PC MEDIA**, under HAPTICS after BLOW SOUNDS (the launcher's haptics card,
+  `pc_media` in `spidy_vr.ini` and in settings profiles): off by default, so
+  nothing changes for players who leave it.
+- **Tests.** Core: the song's and app's names as the phone shows them
+  (`phoneMediaSong`, `phoneMediaSource`), which process is the app's
+  (`phoneMediaAppMatches`), the MUSIC screen with PC MEDIA, the switch off by
+  default and kept as `pc_media`. Launcher (profiles), the Python suites.
+
+**Earlier build (November 2): pull request #53 by GolexPrime, built on 0.7.0
 on October 31 - the phone drawn seated.** GolexPrime:
 "I'm supposed to reach behind me for my phone, but it doesn't work at all."
 

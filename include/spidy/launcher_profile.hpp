@@ -99,6 +99,7 @@ inline constexpr ProfileSetting profileSettings[] = {
     tabOnly("reel_haptics", Item::reelHaptics, &Values::reelHaptics),
     tabOnly("swing_haptics", Item::swingHaptics, &Values::swingHaptics),
     tabOnly("blow_sounds", Item::blowSounds, 0, 2, &Values::blowSounds),
+    tabOnly("pc_media", Item::pcMedia, &Values::pcMedia),
     launcherOption("body_haptics", Item::bodyHaptics, 0, 100, &SessionOptions::bodyHaptics),
     tabOnly("body_haptics_webs", Item::hapticWebs, &Values::hapticWebs),
     tabOnly("body_haptics_wind", Item::hapticWind, &Values::hapticWind),

@@ -470,6 +470,8 @@ Moving
                          Still nothing? The session's report says why
                          (`pocket`). The stick picks an app, A
                          opens it, B goes back or puts the phone away.
+                         MUSIC plays the Music folder's songs, or with
+                         PC MEDIA on what the PC plays (Spotify...).
                          MENU puts it away and opens the game menu (map,
                          suits, skills; B closes it). CAMERA puts it away
                          and takes the game's camera out (THE GAME'S
@@ -810,7 +812,14 @@ VR settings
                    BLOW SOUNDS (GAME: your blows
                    sound as the game's own do, its hits on the one you
                    struck; SPIDY: Spidy's own tones, as before October 22;
-                   OFF: none, nor a web strike's rush); BODY HAPTICS (a bHaptics vest, sleeves and
+                   OFF: none, nor a web strike's rush); PC MEDIA (off
+                   until you switch it on): the phone's MUSIC plays what
+                   the PC plays instead of the Music folder - Spotify's
+                   app, a browser, any player Windows' media keys work.
+                   It shows the song and its app; play, previous, next
+                   and the triggers (that app's volume in Windows' mixer)
+                   are the PC player's. Start a playlist on the PC; no
+                   sign-in or Premium needed; BODY HAPTICS (a bHaptics vest, sleeves and
                    visor, below) and its four switches: WEB, WIND, COMBAT
                    and MOVEMENT HAPTICS.
   DISPLAY ........ the game screen's size, its 3D depth and the HUD's size
@@ -919,7 +928,7 @@ VR settings
                    Off by default, to compare.
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches

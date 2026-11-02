@@ -27,6 +27,7 @@
 #include "spidy/reel_haptics.hpp"
 #include "spidy/swing_haptics.hpp"
 #include "spidy/phone_music.hpp"
+#include "spidy/phone_pc_media.hpp"
 #include "spidy/game_shooter.hpp"
 #include "spidy/game_sound.hpp"
 #include "spidy/game_steam.hpp"
@@ -863,6 +864,9 @@ DWORD WINAPI run(void*) {
         Phone phone;
         PocketDraw pocketDraw;
         PhoneMusic phoneMusic;
+        // PC MEDIA's: what the PC plays (phone_pc_media.hpp), from the first
+        // draw with it on.
+        std::unique_ptr<PcMedia> pcMedia;
         PhoneView phoneShown;
         bool phoneBlows{};
         // The phone's MENU: the game's Back, which opens its menu (the map,
@@ -1517,22 +1521,39 @@ DWORD WINAPI run(void*) {
                         const auto& e = use.controls;
                         if (e.x || e.y)
                             runtime.haptic(use.stick, .08f);
+                        // PC MEDIA on: the buttons and the volume are the PC's player's.
+                        PcMedia* const pc = values.pcMedia ? pcMedia.get() : nullptr;
                         if (e.volume) {
-                            phoneMusic.setVolume(phoneMusic.status().volume + e.volume * phoneVolumeStep);
+                            if (pc)
+                                pc->setVolume(pc->status().volume + e.volume * phoneVolumeStep);
+                            else if (!values.pcMedia)
+                                phoneMusic.setVolume(phoneMusic.status().volume + e.volume * phoneVolumeStep);
                             runtime.haptic(e.volume < 0 ? 0 : 1, .1f);
                         }
                         switch (use.action) {
                         case PhoneAction::previous:
-                            phoneMusic.previous();
+                            if (pc)
+                                pc->previous();
+                            else if (!values.pcMedia)
+                                phoneMusic.previous();
                             break;
                         case PhoneAction::play:
-                            phoneMusic.toggle();
+                            if (pc)
+                                pc->toggle();
+                            else if (!values.pcMedia)
+                                phoneMusic.toggle();
                             break;
                         case PhoneAction::next:
-                            phoneMusic.next();
+                            if (pc)
+                                pc->next();
+                            else if (!values.pcMedia)
+                                phoneMusic.next();
                             break;
                         case PhoneAction::autoplay:
-                            phoneMusic.setAutoplay(!phoneMusic.status().autoplay);
+                            // PC MEDIA's button only names it: the PC's player
+                            // plays on as it is set.
+                            if (!values.pcMedia)
+                                phoneMusic.setAutoplay(!phoneMusic.status().autoplay);
                             break;
                         case PhoneAction::camera:
                             cameraTap = cameraTapSeconds;
@@ -2180,7 +2201,10 @@ DWORD WINAPI run(void*) {
                         const bool phonePlay = immersive && calibration.phase() == CalibrationPhase::idle;
                         if (phone.update(frame.seconds, phonePlay, frame.head, grips, gripsTracked,
                                          phoneDrawnWith, pocketDraw.hand())) {
-                            phoneMusic.load();
+                            if (!values.pcMedia)
+                                phoneMusic.load();
+                            else if (!pcMedia)
+                                pcMedia = std::make_unique<PcMedia>();
                             runtime.haptic(0, .2f);
                             runtime.haptic(1, .2f);
                             feel(body_haptics::Kind::phone, pocketDraw.drewWith());
@@ -4134,14 +4158,29 @@ DWORD WINAPI run(void*) {
                             row.equipped = wheel.equipped == p;
                         }
                         view.gearTop = phone.ui().gearTop();
-                        const auto music = phoneMusic.status();
-                        view.playing = music.playing;
-                        view.autoplay = music.autoplay;
-                        view.failed = music.failed;
-                        view.track = music.track;
-                        view.tracks = music.tracks;
-                        view.volume = music.volume;
-                        strncpy_s(view.song, music.song, _TRUNCATE);
+                        view.pcMedia = values.pcMedia;
+                        if (values.pcMedia) {
+                            // What the PC plays: one song or none, its app, its volume.
+                            const auto media = pcMedia ? pcMedia->status() : PcMedia::Status{};
+                            view.playing = media.playing;
+                            view.failed = false;
+                            view.track = 0;
+                            view.tracks = media.session ? 1 : 0;
+                            view.volume = media.volume;
+                            view.noVolume = !media.volumeKnown;
+                            strncpy_s(view.song, media.song, _TRUNCATE);
+                            strncpy_s(view.source, media.source, _TRUNCATE);
+                        } else {
+                            const auto music = phoneMusic.status();
+                            view.playing = music.playing;
+                            view.autoplay = music.autoplay;
+                            view.failed = music.failed;
+                            view.track = music.track;
+                            view.tracks = music.tracks;
+                            view.volume = music.volume;
+                            view.noVolume = false;
+                            strncpy_s(view.song, music.song, _TRUNCATE);
+                        }
                     }
                     for (unsigned i = 0; i < 2; ++i) {
                         saved.webs[i] = swingState.webs[i];

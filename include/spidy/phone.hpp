@@ -117,6 +117,11 @@ struct PhoneView {
     int track{}, tracks{}; // track counts from 0; tracks 0: no songs
     int volume = phoneVolume; // percent
     char song[64]{};
+    // PC MEDIA (phone_pc_media.hpp): MUSIC is what the PC plays, `source` the
+    // app it plays in; tracks 1 while it plays anything, 0 with nothing.
+    // noVolume: no volume of the app's to show.
+    bool pcMedia{}, noVolume{};
+    char source[24]{};
 };
 // The phone as an eye image has it (NativeEyeFrame): open as the game rendered
 // it, and the image's own way from tracking space into its world. Where the
@@ -361,4 +366,17 @@ void placePhoneScreen(std::vector<Vertex>& picture, const PhoneView& view);
 // the overlay's font draws. A name with nothing of that (a Hebrew, Cyrillic or
 // Japanese one) is TRACK and its number: `track`, from 0.
 std::string phoneSongName(const std::string& fileName, int track);
+// PC MEDIA's song (UTF-8): ARTIST - TITLE as phoneSongName shows a name, its
+// dots kept ("MR. BRIGHTSIDE"); the title alone without an artist, and
+// SONG with neither drawable.
+std::string phoneMediaSong(const std::string& artist, const std::string& title);
+// The app a song plays in, from the name Windows' media controls give it (its
+// AppUserModelID): "Spotify.exe" and Spotify's Store package as SPOTIFY,
+// "MSEdge" as EDGE, an unreadable one (Firefox names itself by a hash) as PC.
+std::string phoneMediaSource(const std::string& appId);
+// That app's audio session in Windows' mixer: a process (its file, with or
+// without the folder) whose name, without .exe, is in the app's ID
+// ("Spotify.exe" in "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify",
+// "msedge.exe" in "MSEdge"), ignoring case.
+bool phoneMediaAppMatches(const std::string& appId, const std::string& process);
 } // namespace spidy
