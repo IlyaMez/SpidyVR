@@ -1414,7 +1414,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 21 && s.bytes == 100 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 22 && s.bytes == 104 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -1927,7 +1927,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 21 && s.bytes == 100 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 22 && s.bytes == 104 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -3283,7 +3283,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 21 && s.bytes == 100, "updated settings did not append the half-damage field");
+        check(s.version == 22 && s.bytes == 104, "updated settings did not append the single-hand yank field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -7004,6 +7004,26 @@ int main() {
         }
         check(zips == 1, "zip must fire once per attachment");
         check(s.body().velocity.y > 0 && s.body().velocity.y <= 12, "zip strength");
+    });
+    test("single-hand yank strength scales the speed boost", [] {
+        const auto impulse = [](float strength) {
+            TestWorld world;
+            Swing swing(inert());
+            swing.singleHandYankStrength(strength);
+            auto input = aimed();
+            swing.update(.01f, input, world);
+            for (int i = 0; i < 20; ++i) {
+                input.hands[0].gripRelativeToHead.y -= .03f;
+                swing.update(.01f, input, world);
+                for (const auto& event : swing.events())
+                    if (event.kind == EventKind::Zip)
+                        return length(swing.body().velocity);
+            }
+            return 0.f;
+        };
+        const float normal = impulse(1.f), boosted = impulse(2.f);
+        check(normal > 0 && boosted > normal * 1.8f,
+              "doubling one-hand yank strength did not substantially increase player speed");
     });
     test("slow hand movement does not zip", [] {
         TestWorld w;
@@ -21055,7 +21075,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 21 && s.bytes == 100 && s.combatVisuals == 1 &&
+        check(s.version == 22 && s.bytes == 104 && s.combatVisuals == 1 &&
                   offsetof(Settings, combatVisuals) == 56,
               "free combat broke the settings defaults or layout");
         s.combatVisuals = 0;
@@ -21119,7 +21139,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version==21 && s.bytes==100 && s.combatVisuals==1 &&
+        check(s.version==22 && s.bytes==104 && s.combatVisuals==1 &&
               offsetof(Settings,combatVisuals)==56,"free combat broke the settings defaults or layout");
         s.combatVisuals=0;
         check(validSettings(s),"free combat setting refused");
@@ -21156,13 +21176,27 @@ int main() {
         check(withTabOnly(Values{},tabOnlyText(v)).halfPunchDamage,"damage switch did not persist");
         check(!withTabOnly(Values{},"combat_visuals=0\n").halfPunchDamage,"old settings reduced damage");
         check(choose(Item::halfPunchDamage,0,v) && !v.halfPunchDamage,"full damage did not restore");
+        check(v.singleHandYankPercent == 100 && defaultChoice(Item::singleHandYankStrength) == 2,
+              "single-hand yank strength changed by default");
+        check(choose(Item::singleHandYankStrength, 5, v) && v.singleHandYankPercent == 200 &&
+                  withTabOnly(Values{}, tabOnlyText(v)).singleHandYankPercent == 200,
+              "single-hand yank strength did not select and persist 200 percent");
+        check(withTabOnly(Values{}, "single_hand_yank_percent=999\n").singleHandYankPercent == 300,
+              "saved single-hand yank strength was not clamped");
         game_swing::Settings packet;
-        check(packet.version==21 && packet.bytes==100 && !packet.halfPunchDamage &&
-              offsetof(game_swing::Settings,halfPunchDamage)==96,"damage protocol shifted older fields");
+        check(packet.version==22 && packet.bytes==104 && !packet.halfPunchDamage &&
+              packet.singleHandYankPercent==100 && offsetof(game_swing::Settings,halfPunchDamage)==96 &&
+              offsetof(game_swing::Settings,singleHandYankPercent)==100,"yank protocol shifted older fields");
         packet.halfPunchDamage=1;
         check(game_swing::validSettings(packet),"half-damage packet refused");
         packet.halfPunchDamage=2;
         check(!game_swing::validSettings(packet),"invalid damage switch accepted");
+        packet={}; packet.singleHandYankPercent=300;
+        check(game_swing::validSettings(packet),"maximum yank strength refused");
+        packet.singleHandYankPercent=301;
+        check(!game_swing::validSettings(packet),"out-of-range yank strength accepted");
+        packet={}; packet.version=21; packet.bytes=game_swing::settingsBytesV21;
+        check(game_swing::validSettings(packet),"version 21 settings packet refused");
         packet={}; packet.version=11; packet.bytes=game_swing::settingsBytesV11;
         check(game_swing::validSettings(packet) && !packet.halfPunchDamage,"old packet lost full damage");
     });
@@ -21727,20 +21761,21 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 55 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 56 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[55 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[55].title, "REALISTIC FLIPS") == 0 && all[55].choices.empty(),
+            check(all[56 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[56].title, "REALISTIC FLIPS") == 0 && all[56].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[47].item == Item::controlledFlips && all[50].item == Item::joystickRunCamera &&
-              all[51].item == Item::wallRunCameraTilt && all[52].item == Item::halfPunchDamage,
+              all[51].item == Item::wallRunCameraTilt && all[52].item == Item::halfPunchDamage &&
+              all[53].item == Item::singleHandYankStrength && all[53].choices.size() == 8,
               "custom switches misplaced");
         // EYE AIM, before the realistic flips: what the eyes aim, off by default (only a headset that tracks
         // the eyes can).
-        check(all[53].item == Item::eyeAim && std::strcmp(all[53].title, "EYE AIM") == 0 &&
-                  all[53].choices.size() == 4 && std::strcmp(all[53].choices[0], "OFF") == 0 &&
-                  std::strcmp(all[53].choices[1], "WEB BALLS") == 0 && std::strcmp(all[53].choices[2], "ZIPS") == 0 &&
-                  std::strcmp(all[53].choices[3], "BOTH") == 0 && all[53].place == Place::tab,
+        check(all[54].item == Item::eyeAim && std::strcmp(all[54].title, "EYE AIM") == 0 &&
+                  all[54].choices.size() == 4 && std::strcmp(all[54].choices[0], "OFF") == 0 &&
+                  std::strcmp(all[54].choices[1], "WEB BALLS") == 0 && std::strcmp(all[54].choices[2], "ZIPS") == 0 &&
+                  std::strcmp(all[54].choices[3], "BOTH") == 0 && all[54].place == Place::tab,
               "EYE AIM: OFF, WEB BALLS, ZIPS, BOTH, in the tab before the realistic flips");
         {
             Values v;
@@ -21756,9 +21791,10 @@ int main() {
         }
         // FLIP REPROJECTION, after EYE AIM: a switch in the tab, off by default so the headset can compare
         // (the user, October 29), kept in spidy_vr.ini.
-        check(all[54].item == Item::flipReprojection && std::strcmp(all[54].title, "FLIP REPROJECTION") == 0 &&
-                  all[54].choices.empty() && all[54].place == Place::tab,
-              "FLIP REPROJECTION: a switch in the tab, after EYE AIM");
+        check(all[55].item == Item::flipReprojection, "FLIP REPROJECTION is after the new yank strength row");
+        check(std::strcmp(all[55].title, "FLIP REPROJECTION") == 0, "FLIP REPROJECTION title");
+        check(all[55].choices.empty(), "FLIP REPROJECTION is a switch");
+        check(all[55].place == Place::tab, "FLIP REPROJECTION is a tab row after EYE AIM");
         {
             Values v;
             check(!v.flipReprojection && defaultChoice(Item::flipReprojection) == 0, "flip reprojection on by default");
@@ -21822,8 +21858,8 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 61,
-              "the tab's own rows");
+        const auto tabRowCount = std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; });
+        check(tabRowCount == 62, ("the tab's own rows: " + std::to_string(tabRowCount)).c_str());
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
                   std::strcmp(all[1].choices[1], "ARCADE") == 0,
@@ -21995,7 +22031,7 @@ int main() {
                                        "smart_anchor=0\nelastic_web=0\nsoft_release=0\nswing_assist=0\n"
                                        "slingshot_speed=0\nrecording_smoothing=0\n"
                                        "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\n"
-                                        "flip_reprojection=0\nreel_haptics=0\n",
+                                        "flip_reprojection=0\nreel_haptics=0\nsingle_hand_yank_percent=100\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

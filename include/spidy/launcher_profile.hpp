@@ -117,6 +117,7 @@ inline constexpr ProfileSetting profileSettings[] = {
     tabOnly("joystick_wall_run_camera", Item::joystickRunCamera, &Values::joystickRunCamera),
     tabOnly("wall_run_camera_tilt", Item::wallRunCameraTilt, &Values::wallRunCameraTilt),
     tabOnly("half_punch_damage", Item::halfPunchDamage, &Values::halfPunchDamage),
+    tabOnly("single_hand_yank_percent", Item::singleHandYankStrength, 50, 300, &Values::singleHandYankPercent),
     retired("wall_distance_cm", vr_settings::fixedWallDistance),
     tabOnly("realistic_flips", Item::realisticFlips, &Values::realisticFlips),
     tabOnly("rotation_strength", Item::automaticStrength, 25, 100, &Values::automaticStrength),
