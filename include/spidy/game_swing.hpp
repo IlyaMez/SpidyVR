@@ -237,6 +237,10 @@ inline bool momentumWallDrive(bool requested, bool fresh, const Data& d) {
 // arcade: arcade webs (the VR settings' WEB STYLE: ARCADE; SwingConfig::
 // arcade). Version 6 (settingsBytesV6) ends before it and leaves the webs'
 // style as it is.
+// Version 22 appends singleHandYankPercent: 50 to 300, how much speed a fast
+// one-hand yank adds (Swing::singleHandYankStrength); 100 as before.
+// Version 21 appends halfPunchDamage (off by default): punches and web
+// strikes deal half their health damage (HALF PUNCH DAMAGE).
 // Version 20 appends webSpeed (0 off, a web sticks at once; 1 to 3 it flies
 // there) and version 19 webRange, m (100 as before): Swing::webTravel.
 // Version 18 appends ropeSteering and version 17 twoHandZip, both off by
@@ -251,9 +255,7 @@ inline bool momentumWallDrive(bool requested, bool fresh, const Data& d) {
 // stretch under load, softer and softer (Swing::elasticWeb).
 // Version 12 appends smartAnchor (off by default): with airWebs off, a shot
 // that just misses catches a nearby real surface (Swing::allowSmartAnchor).
-// Version 21 appends halfPunchDamage (off by default).
-// Version 22 appends singleHandYankPercent (100% keeps the existing impulse).
-// Version 20 appends webSpeed; older official settings keep their original layout.
+// Version 11 appends combatVisuals: off allows freely directed combat blows.
 // Version 10 appends betterClimbing (off by default).
 // Version 9 appends webSlingshot (off by default).
 // Version 8 appends handClimb without changing the upstream phone or arcade
@@ -287,8 +289,8 @@ constexpr uint32_t settingsBytesV3 = 28, settingsBytesV4 = 32, settingsBytesV5 =
                    settingsBytesV7 = 44, settingsBytesV8 = 48, settingsBytesV9 = 52, settingsBytesV10 = 56,
                    settingsBytesV11 = 60, settingsBytesV12 = 64, settingsBytesV13 = 68,
                    settingsBytesV14 = 72, settingsBytesV15 = 76, settingsBytesV16 = 80, settingsBytesV17 = 84,
-                   settingsBytesV18 = 88, settingsBytesV19 = 92, settingsBytesV20 = 96, settingsBytesV21 = 100,
-                   settingsBytesV22 = 104;
+                   settingsBytesV18 = 88, settingsBytesV19 = 92, settingsBytesV20 = 96,
+                   settingsBytesV21 = 100;
 static_assert(sizeof(Settings) == 104 && offsetof(Settings, walls) == settingsBytesV3 &&
               offsetof(Settings, physical) == settingsBytesV4 &&
               offsetof(Settings, noBlows) == settingsBytesV5 &&
@@ -447,7 +449,7 @@ inline bool validSettings(const Settings& s) {
          (s.version == 19 && s.bytes == settingsBytesV19) ||
          (s.version == 20 && s.bytes == settingsBytesV20) ||
          (s.version == 21 && s.bytes == settingsBytesV21) ||
-         (s.version == 22 && s.bytes == settingsBytesV22)) &&
+         (s.version == 22 && s.bytes == sizeof(Settings))) &&
         s.grab <= 1 && std::isfinite(s.maxSpeed) && s.maxSpeed > 0 && s.maxSpeed <= motionSpeedLimit &&
         s.airWebs <= 1 && std::isfinite(s.gravity) && s.gravity >= 0 && s.gravity <= maxGravity &&
         s.walls <= 4 && s.physical <= 1 && s.noBlows <= 3 && s.arcade <= 1 && s.handClimb <= 1 &&
@@ -455,8 +457,8 @@ inline bool validSettings(const Settings& s) {
         s.elasticWeb <= 3 && s.softRelease <= 3 && s.swingAssist <= 1 && std::isfinite(s.slingshotSpeed) &&
         (s.slingshotSpeed == 0 || (s.slingshotSpeed >= 20 && s.slingshotSpeed <= 300)) && s.twoHandZip <= 1 &&
         s.ropeSteering <= 1 && std::isfinite(s.webRange) && s.webRange >= 10 && s.webRange <= 1000 &&
-         s.webSpeed <= 3 && s.halfPunchDamage <= 1 &&
-         (s.version < 22 || (s.singleHandYankPercent >= 50 && s.singleHandYankPercent <= 300));
+        s.webSpeed <= 3 && s.halfPunchDamage <= 1 &&
+        (s.version < 22 || (s.singleHandYankPercent >= 50 && s.singleHandYankPercent <= 300));
 }
 static_assert(sizeof(WebState) == 28 && sizeof(Data) == 272 && offsetof(Data, wall) == 240);
 // The player is in the air: Spidy's own flight, or the game's jump or fall,

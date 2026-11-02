@@ -25,7 +25,9 @@
 #include "spidy/gadget_wheel.hpp"
 #include "spidy/phone.hpp"
 #include "spidy/reel_haptics.hpp"
+#include "spidy/swing_haptics.hpp"
 #include "spidy/phone_music.hpp"
+#include "spidy/phone_pc_media.hpp"
 #include "spidy/game_shooter.hpp"
 #include "spidy/game_sound.hpp"
 #include "spidy/game_steam.hpp"
@@ -46,6 +48,7 @@
 #include "spidy/recording_fov.hpp"
 #include "spidy/seated.hpp"
 #include "spidy/slow_motion.hpp"
+#include "spidy/steady_hud.hpp"
 #include "spidy/throw_aim.hpp"
 #include "spidy/vr_settings.hpp"
 #include "spidy/web_pull.hpp"
@@ -861,6 +864,9 @@ DWORD WINAPI run(void*) {
         Phone phone;
         PocketDraw pocketDraw;
         PhoneMusic phoneMusic;
+        // PC MEDIA's: what the PC plays (phone_pc_media.hpp), from the first
+        // draw with it on.
+        std::unique_ptr<PcMedia> pcMedia;
         PhoneView phoneShown;
         bool phoneBlows{};
         // The phone's MENU: the game's Back, which opens its menu (the map,
@@ -1006,6 +1012,14 @@ DWORD WINAPI run(void*) {
         // (native_hud::Follow), and starts in front of it again with play,
         // the immersive view and a recentred room.
         native_hud::Follow hudFollow;
+        // STEADY HUD: where the panel goes this headset frame (the tracked
+        // head, and the way Follow turned it), and the panel copy the layer's
+        // image last got.
+        Vec3 hudHead{};
+        Quat hudFacing{};
+        bool hudPlaced{};
+        uint64_t hudLayerCopies{};
+        bool hudLayerFilled{};
         GameScreen gameScreen;
         // Whether the game is playing a scene on the screen (its time runs),
         // and whether that scene's stereo eyes have the HUD's panel.
@@ -1047,6 +1061,8 @@ DWORD WINAPI run(void*) {
         WebTimeline webTimes;
         // The reel's ticks in each hand (reel_haptics.hpp).
         reel_haptics::Ticks reelTicks[2];
+        // The swing's ticks in each hand (swing_haptics.hpp).
+        swing_haptics::Ticks swingTicks[2];
         bool attachedBefore[2]{};
         // Which of the game's two ropes draws which hand's web (one web in
         // both hands has one rope), and when a free hand last came onto the
@@ -1324,8 +1340,6 @@ DWORD WINAPI run(void*) {
             s.webSlingshot = values.webSlingshot;
             s.betterClimbing = values.betterClimbing;
             s.combatVisuals = values.combatVisuals;
-            s.halfPunchDamage = values.halfPunchDamage;
-            s.singleHandYankPercent = static_cast<uint32_t>(values.singleHandYankPercent);
             s.smartAnchor = values.smartAnchor;
             s.elasticWeb = static_cast<uint32_t>(values.elasticWeb);
             s.softRelease = static_cast<uint32_t>(values.softRelease);
@@ -1335,6 +1349,8 @@ DWORD WINAPI run(void*) {
             s.ropeSteering = values.ropeSteering;
             s.webRange = static_cast<float>(values.webRange);
             s.webSpeed = static_cast<uint32_t>(values.webSpeed);
+            s.halfPunchDamage = values.halfPunchDamage;
+            s.singleHandYankPercent = static_cast<uint32_t>(values.singleHandYankPercent);
             sentSwingSettings = s;
             swingSettingsSent = true;
             // A hand-over owns the walls while it lasts; the player's own
@@ -1382,6 +1398,7 @@ DWORD WINAPI run(void*) {
             rig.wallDistance(static_cast<float>(vr_settings::fixedWallDistance) / 100.f);
             rig.automaticFlips(realisticFlips(values));
             native_hud::setSize(values.hud);
+            native_gpu::wantHudLayer(values.steadyHud && values.hud > 0);
             near_clip::set(values.nearClipMm);
             recording_fov::set(values.recordingFov);
             recording_fov::smoothing(values.recordingSmoothing);
@@ -1505,22 +1522,39 @@ DWORD WINAPI run(void*) {
                         const auto& e = use.controls;
                         if (e.x || e.y)
                             runtime.haptic(use.stick, .08f);
+                        // PC MEDIA on: the buttons and the volume are the PC's player's.
+                        PcMedia* const pc = values.pcMedia ? pcMedia.get() : nullptr;
                         if (e.volume) {
-                            phoneMusic.setVolume(phoneMusic.status().volume + e.volume * phoneVolumeStep);
+                            if (pc)
+                                pc->setVolume(pc->status().volume + e.volume * phoneVolumeStep);
+                            else if (!values.pcMedia)
+                                phoneMusic.setVolume(phoneMusic.status().volume + e.volume * phoneVolumeStep);
                             runtime.haptic(e.volume < 0 ? 0 : 1, .1f);
                         }
                         switch (use.action) {
                         case PhoneAction::previous:
-                            phoneMusic.previous();
+                            if (pc)
+                                pc->previous();
+                            else if (!values.pcMedia)
+                                phoneMusic.previous();
                             break;
                         case PhoneAction::play:
-                            phoneMusic.toggle();
+                            if (pc)
+                                pc->toggle();
+                            else if (!values.pcMedia)
+                                phoneMusic.toggle();
                             break;
                         case PhoneAction::next:
-                            phoneMusic.next();
+                            if (pc)
+                                pc->next();
+                            else if (!values.pcMedia)
+                                phoneMusic.next();
                             break;
                         case PhoneAction::autoplay:
-                            phoneMusic.setAutoplay(!phoneMusic.status().autoplay);
+                            // PC MEDIA's button only names it: the PC's player
+                            // plays on as it is set.
+                            if (!values.pcMedia)
+                                phoneMusic.setAutoplay(!phoneMusic.status().autoplay);
                             break;
                         case PhoneAction::camera:
                             cameraTap = cameraTapSeconds;
@@ -1672,6 +1706,7 @@ DWORD WINAPI run(void*) {
                     {
                         const float squeezes[2]{frame.hands[0].squeeze, frame.hands[1].squeeze};
                         const bool drawPlay = gesturesPlay && !phone.open();
+                        pocketDraw.seated(values.seated);
                         if (pocketDraw.update(frame.seconds, drawPlay, frame.head, grips, gripsTracked,
                                               squeezes))
                             phoneDrawnWith = pocketDraw.drewWith();
@@ -2167,7 +2202,10 @@ DWORD WINAPI run(void*) {
                         const bool phonePlay = immersive && calibration.phase() == CalibrationPhase::idle;
                         if (phone.update(frame.seconds, phonePlay, frame.head, grips, gripsTracked,
                                          phoneDrawnWith, pocketDraw.hand())) {
-                            phoneMusic.load();
+                            if (!values.pcMedia)
+                                phoneMusic.load();
+                            else if (!pcMedia)
+                                pcMedia = std::make_unique<PcMedia>();
                             runtime.haptic(0, .2f);
                             runtime.haptic(1, .2f);
                             feel(body_haptics::Kind::phone, pocketDraw.drewWith());
@@ -2477,11 +2515,21 @@ DWORD WINAPI run(void*) {
                                 zipHands |= 1u << i;
                             }
                             // Reeling in, the hand ticks like a winch (REEL HAPTICS, reel_haptics.hpp).
-                            if (const auto reel = reelTicks[i].update(
-                                    values.reelHaptics && attached && !grabbing && (swingState.webs[i].attached & 8),
-                                    swingState.webs[i].length);
+                            if (const auto reel =
+                                    reelTicks[i].update(values.reelHaptics && attached && !grabbing &&
+                                                            (swingState.webs[i].attached & 8),
+                                                        swingState.webs[i].length);
                                 reel && displayAt >= pulseUntil[i])
                                 runtime.haptic(i, reel.strength, reel.seconds);
+                            // Swinging on it taut, the hand ticks with the body's travel
+                            // (SWING HAPTICS, swing_haptics.hpp); a reel's ticks go instead.
+                            if (const auto swing = swingTicks[i].update(
+                                    values.swingHaptics && attached && !grabbing &&
+                                        !(swingState.webs[i].attached & 8) && !swingState.grounded &&
+                                        swingState.webs[i].tension > .5f,
+                                    length(swingState.velocity), frame.seconds);
+                                swing && displayAt >= pulseUntil[i])
+                                runtime.haptic(i, swing.strength, swing.seconds);
                             attachedBefore[i] = attached;
                             webTaken[i] = taken;
                             webTimes.update(i, attached, swingState.webs[i].anchor,
@@ -4021,9 +4069,13 @@ DWORD WINAPI run(void*) {
                         // A flip's tilt in world axes: the body turns with the player.
                         // Standing on a surface, the body already stands along it:
                         // only a flip turns its planted pose further (none on a wall).
-                        // Both joystick and momentum runs use the travel-driven
-                        // pose, independent of the optional camera transition.
-                        const Quat bodyTilt = motion.bodyTilt(runningPose);
+                        // JOYSTICK WALL RUN CAMERA on (the default): the running body
+                        // follows the wall-standing view about its eyes, residual
+                        // surface rotation too. Off, joystick and momentum runs both
+                        // take the travel-driven pose.
+                        const Quat bodyTilt = runningPose && values.joystickRunCamera
+                                                  ? (motion.viewTilt > .0001f ? motion.swing.tilt : Quat{})
+                                                  : motion.bodyTilt(runningPose);
                         if (const Quat tilt = bodyTilt;
                             tilt.x != 0 || tilt.y != 0 || tilt.z != 0) {
                             const Quat yaw = Quat::yaw(motion.swing.trackingYaw);
@@ -4050,7 +4102,9 @@ DWORD WINAPI run(void*) {
                     // The HUD panel for this command's frame, as the head sees it:
                     // fixed in the room, so a reused image the headset turns to a
                     // newer head shows it where it was.
-                    const Quat hudFacing = hudFollow.update(frame.head.orientation, frame.seconds);
+                    hudFacing = hudFollow.update(frame.head.orientation, frame.seconds);
+                    hudHead = frame.head.position;
+                    hudPlaced = true;
                     native_hud::follow(eyes.serial, frame.head.orientation.conjugate() * hudFacing);
                     NativeEyeFrame saved;
                     saved.serial = eyes.serial;
@@ -4105,14 +4159,29 @@ DWORD WINAPI run(void*) {
                             row.equipped = wheel.equipped == p;
                         }
                         view.gearTop = phone.ui().gearTop();
-                        const auto music = phoneMusic.status();
-                        view.playing = music.playing;
-                        view.autoplay = music.autoplay;
-                        view.failed = music.failed;
-                        view.track = music.track;
-                        view.tracks = music.tracks;
-                        view.volume = music.volume;
-                        strncpy_s(view.song, music.song, _TRUNCATE);
+                        view.pcMedia = values.pcMedia;
+                        if (values.pcMedia) {
+                            // What the PC plays: one song or none, its app, its volume.
+                            const auto media = pcMedia ? pcMedia->status() : PcMedia::Status{};
+                            view.playing = media.playing;
+                            view.failed = false;
+                            view.track = 0;
+                            view.tracks = media.session ? 1 : 0;
+                            view.volume = media.volume;
+                            view.noVolume = !media.volumeKnown;
+                            strncpy_s(view.song, media.song, _TRUNCATE);
+                            strncpy_s(view.source, media.source, _TRUNCATE);
+                        } else {
+                            const auto music = phoneMusic.status();
+                            view.playing = music.playing;
+                            view.autoplay = music.autoplay;
+                            view.failed = music.failed;
+                            view.track = music.track;
+                            view.tracks = music.tracks;
+                            view.volume = music.volume;
+                            view.noVolume = false;
+                            strncpy_s(view.song, music.song, _TRUNCATE);
+                        }
                     }
                     for (unsigned i = 0; i < 2; ++i) {
                         saved.webs[i] = swingState.webs[i];
@@ -4231,6 +4300,29 @@ DWORD WINAPI run(void*) {
                                                     : Presentation::immersive;
                         runtime.presentation(saved->flatScreen, saved->screenPose, saved->screenAspect,
                                              vr_settings::screenWidth(values.screenSize), saved->stereoScreen);
+                        // STEADY HUD: the panel as a layer of its own, placed for this headset frame; the
+                        // eyes leave it out while it shows (native_hud::layered).
+                        uint32_t hudWidth{}, hudHeight{};
+                        uint64_t hudCopies{}, hudCopiedMs{};
+                        if (drawn == Presentation::immersive && values.steadyHud && values.hud > 0 &&
+                            hudPlaced && native_gpu::latestHud(hudWidth, hudHeight, hudCopies, hudCopiedMs) &&
+                            steady_hud::fresh(GetTickCount64(), hudCopiedMs, true)) {
+                            if (hudCopies != hudLayerCopies) {
+                                hudLayerFilled =
+                                    runtime.fillHud(hudWidth, hudHeight, [](ID3D12Resource* image) {
+                                        return native_gpu::fillHudLayer(image);
+                                    });
+                                hudLayerCopies = hudCopies;
+                            }
+                            const auto quad =
+                                steady_hud::quad(hudHead, hudFacing, native_hud::halfWidth(values.hud),
+                                                 native_hud::Shape{}.distance, hudWidth, hudHeight);
+                            if (hudLayerFilled && quad.valid) {
+                                runtime.hudQuad(quad.pose, quad.width, quad.height);
+                                native_hud::layered();
+                                native_gpu::hudLayerShown();
+                            }
+                        }
                         // FLIP REPROJECTION: the pair turned by the player's own turn
                         // since it was rendered, about the head (flip_reprojection.hpp).
                         const bool reproject =

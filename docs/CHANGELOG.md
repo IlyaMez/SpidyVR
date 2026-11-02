@@ -3,18 +3,85 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**0.7.1 local build: choose how much speed a single-hand web yank adds.**
+**Latest build (November 2): pull request #55 by ImStillDead - SINGLE HAND
+YANK STRENGTH, how much speed a one-hand web yank adds.**
 
-- **SINGLE HAND YANK STRENGTH** offers 50% through 300%, with 100% preserving
-  the previous yank impulse. It affects one-hand yanks only; two-hand zips keep
-  their existing strength. The choice is saved in `spidy_vr.ini` and older
-  settings packets retain the original 100% behavior.
-- The launcher exposes SINGLE HAND YANK STRENGTH under Moving and JOYSTICK
-  WALL RUN CAMERA under Walls.
-- **Validation.** The feature builds with the Windows compiler. Core and
-  launcher checks cover the setting, persistence, and settings packet layout.
+- **SINGLE HAND YANK STRENGTH** (SWINGING, before TWO HAND WEB ZIP; the
+  launcher's Moving card; `single_hand_yank_percent` in `spidy_vr.ini` and
+  profiles) offers 50% through 300%, with 100% keeping the yank as it was.
+  It scales a fast one-hand yank's impulse (`Swing::singleHandYankStrength`);
+  two-hand zips keep their strength, and the swing speed limit still holds.
+  Swing settings version 22; older packets keep 100%.
+- **Validation.** Core and launcher checks cover the setting, its saving,
+  the settings packet's layout and a doubled yank's speed.
 
-**Latest build (October 31, on 0.7.0): the reel felt in the hand.** GolexPrime:
+**Earlier build (November 2): pull request #54 by GolexPrime, built on 0.7.0
+on November 1 - the phone plays what the PC plays.**
+GolexPrime: "is it possible to get a Spotify integration, so that we play the
+Spotify app in the phone?"
+
+- **Before.** The phone's MUSIC played the songs in the Music folder beside
+  the launcher, nothing else.
+- **The change.** With PC MEDIA on, MUSIC is the PC's own player: Windows'
+  media controls (`GlobalSystemMediaTransportControls`, the volume flyout's
+  player) name the song and its app, and the phone's PREVIOUS, PLAY and NEXT
+  are theirs. The triggers set that app's volume in Windows' mixer (its audio
+  sessions on the default speakers, matched by process name). It works for
+  Spotify's desktop and Store app, a browser's tab, any player the media
+  keys work: no Spotify sign-in, API key or Premium. Not the Spotify app's
+  own screens: a playlist is picked on the PC. The controls answer on a
+  thread of their own (`PcMedia`, `src/phone_pc_media.cpp`), polled twice a
+  second, so the headset's frames never wait on them.
+- **PC MEDIA**, under HAPTICS after BLOW SOUNDS (the launcher's haptics card,
+  `pc_media` in `spidy_vr.ini` and in settings profiles): off by default, so
+  nothing changes for players who leave it.
+- **Tests.** Core: the song's and app's names as the phone shows them
+  (`phoneMediaSong`, `phoneMediaSource`), which process is the app's
+  (`phoneMediaAppMatches`), the MUSIC screen with PC MEDIA, the switch off by
+  default and kept as `pc_media`. Launcher (profiles), the Python suites.
+
+**Earlier build (November 2): pull request #53 by GolexPrime, built on 0.7.0
+on October 31 - the phone drawn seated.** GolexPrime:
+"I'm supposed to reach behind me for my phone, but it doesn't work at all."
+
+- **The cause.** The back pocket was a standing player's: at least 45 cm under
+  the neck. Seated, that is the chair. Session `game-vr-20261031-164612`
+  (SEATED on): 18 squeezes for the phone, 17 missed as too high, the last with
+  the hand 35 cm under the neck and 16 cm behind it; one began and was let go
+  of on the way.
+- **The change.** With SEATED on, the pocket begins 25 cm under the neck
+  (`PocketDraw::pocketAboveSeated`, set each frame from SEATED), beside or
+  behind the hip on the seat; the report counts squeezes from 20 cm under the
+  neck. Standing, nothing changes. Still behind the neck and out to the side:
+  a hand hanging at the side or in front of the hip shoots its web.
+- **Tests.** Core: the seat's pocket draws seated and misses as too high
+  standing, the lower back still too high seated, the side and the front of
+  the hip no pocket.
+
+**Earlier build (November 2): pull request #52 by GolexPrime, built on the reel
+on November 1 - the swing felt in the hand.**
+GolexPrime: something like the reel's ticks, "only weaker", "correlated with
+the speed on the rope": at the end of a pendulum swing "bup, bup, bup",
+slower and slower, until you stand still.
+
+- **Before.** A web was felt as it took hold, let go and (REEL HAPTICS) reeled;
+  the swing itself not at all.
+- **The change.** While a hand's web holds the body taut in the air (its
+  tension), that controller ticks once for every 2 m the body travels
+  (`swing_haptics::Ticks`): 20 m/s is 10 ticks a second, the swing's turning
+  point a few slow ones, below 1 m/s none. Fainter than the reel's ticks
+  (0.12, up to 0.22 at 25 m/s; the reel's 0.3), which go instead while the hand
+  reels. HAPTICS scales it as the rest; a web's own pulses go first.
+- **SWING HAPTICS**, under HAPTICS after REEL HAPTICS (the launcher's haptics
+  card, `swing_haptics` in `spidy_vr.ini` and in settings profiles): off by
+  default, so nothing changes for players who leave it.
+- **Tests.** Core: a tick every 2 m, faint at a slow swing and stronger at
+  speed, slow ticks at the turning point, none hanging still, slack or let
+  go; the switch, off by default and kept as `swing_haptics`. Launcher
+  (profiles), the Python suites.
+
+**Earlier build (November 2): pull request #52 by GolexPrime, built on 0.7.0
+on October 31 - the reel felt in the hand.** GolexPrime:
 "There's no vibration when you reel the web in with the trigger while hanging
 somewhere."
 
@@ -35,10 +102,63 @@ somewhere."
   default and kept as `reel_haptics`. Launcher 38/38 (profiles), the Python
   suites.
 
-**Earlier build (October 30, on 0.7.0): FLIP REPROJECTION - flips, spins
-and smooth turns shown as steadily as head turns.** You: head turns are
-smooth in the headset; flips, the swing's spin and smooth turns judder
-(Quest 3 over Virtual Desktop).
+**Earlier build (November 2): pull request #51 by GolexPrime, built on 0.7.0
+on October 31 - STEADY HUD, the HUD shown by the headset itself.**
+GolexPrime: the arms, the HUD and things close by judder when the headset
+shows a pair again (the game slower than the display rate).
+
+- **Merged with the probe behind the switch.** Looking up the panel's
+  texture, following the game's barriers on it and the five-second
+  snapshots now run only while STEADY HUD is on (and the HUD with it). Off,
+  the panel's texture is neither held nor copied, as before this build.
+
+- **The cause.** The HUD panel is drawn by the game into each eye pair, so
+  it is part of the picture: a pair shown again is turned to the newer head,
+  and the panel with it.
+- **First a probe, nothing changed in the headset** (session
+  `game-vr-20261031-124941`). The panel's colour texture is found from the
+  stream `native_hud` resizes, by the eye views' path (a wrapper whose +40 is
+  the game's texture object, its +38 the D3D12 resource): 1920 x 1080,
+  `R8G8B8A8_UNORM`, one mip, render target and unordered access. Its state
+  followed through the game's barriers: 41,680 executed, all on the game's
+  queue, none with flags or one subresource, none whose state before was not
+  the one followed; known from the panel's first frame to the menu. 43
+  copies back to memory, one every five seconds, none skipped: the whole HUD
+  (minimap, markers, the hint box, the button prompts) on a clear
+  background, its colour already multiplied by its cover (no pixel's colour
+  above its alpha).
+- **The change.** STEADY HUD (SPIDY VR > EXPERIMENTAL, after EYE AIM, and
+  the launcher's Flips card; off by default, not saved in profiles). While on
+  and immersive, each new eye pair's copy also copies the panel's texture,
+  as the pair's frame left it, on the game's queue (`native_eye_gpu.cpp`);
+  each headset frame shows it as an OpenXR quad layer over the eye views
+  (`xr_session.cpp`), in the tracking space, where Follow holds the panel,
+  as wide as the panel showed (`steady_hud.hpp`). The eyes leave the panel
+  out while the layer shows, as with the HUD off; when the copies stop for a
+  quarter second (a load, a menu), the panel is back in the eyes. The world
+  markers and prompts the game draws onto the panel come with it. The layer
+  lies over everything in the eye views, the overlay's hands too.
+- **Report.** `hud_capture` (version 2) adds `staged` (copies with the
+  pairs), `layer_copies`, `layer_frames` and `stage_skip`; each sample also
+  has `executed`, the game's barriers on the panel.
+- **In the headset** (Quest 3 over Virtual Desktop, 36 minutes,
+  `game-vr-20261031-140604`, with FLIP REPROJECTION, a pull request of its
+  own, on too): the HUD held still and kept updating. The layer showed in
+  122,104 headset frames; the panel was copied with 145,862 pairs and into
+  the layer 116,989 times, none skipped; 95 of 156,430 frames dropped, no
+  error. With the eyes no longer reading the panel the game's barriers on it
+  fell from about 190 a second to a few a minute; its state stayed known.
+- **Checks.** `spidy_tests` (new: the layer's place and size against the
+  markers' projection, the copy's hold, the switch, its `spidy_vr.ini` key),
+  the launcher's checks (the profile leaves it out), the six Python suites
+  (new: `SpidyHudCapture` decoded, torn and of another version, its picture
+  saved), ctest 3/3.
+
+**Earlier build (November 2): pull request #49 by GolexPrime, built on 0.7.0
+on October 30 - FLIP REPROJECTION, flips, spins and smooth turns shown as
+steadily as head turns.** GolexPrime: head turns are smooth in the
+headset; flips, the swing's spin and smooth turns judder (Quest 3 over
+Virtual Desktop).
 
 - **The cause, in the code.** Each eye pair goes to OpenXR with the tracking
   pose it was rendered from (`game_xr.cpp`, `xr_session.cpp`'s projection
@@ -106,6 +226,89 @@ smooth in the headset; flips, the swing's spin and smooth turns judder
   version), ctest 3/3; in the headset as above. On 0.7.0 the row is the
   tab's 63rd, after EYE AIM, and `flip_reprojection` the last line of
   spidy_vr.ini.
+
+**Earlier build (November 1): one eye pair a headset frame, room for the
+city's detail, and no speed blur in the eyes.** You: "there are still
+imposters or lod or textures or shaders not loading in time or in range
+causing frequent very visible ugly buildings and props ... also preformance is
+not stellar. could we be hogging the resourses with our logs? anyway fix
+both.", then "Fix the speed blur too".
+
+- **What your October 30 sessions showed.** The game drew 78 to 157 eye pairs
+  a second against the headset's 90, unsynced with it: below 90 the headset
+  repeated pairs (up to 14 a second), above it the pairs it never showed cost
+  the card, and the newest pair was a different time old at each headset
+  frame, so what moves stepped unevenly (Discord players: judder at over 100
+  frames a second). Both limits the October 27 build raised were full: the
+  texture budget (7,741 to 7,748 MB of 7,748 from the fourth minute on, 18 GB
+  of the card unused; a player found the blur gone with Texture Quality up),
+  and the scene's slot pool the far buildings' full models share with the
+  props near you (96% at most), which shrank the head cone to 0-15 degrees.
+- **Not the logs.** The launcher reads the game's counters 20 times a second
+  from its own process, about 3 ms a pass (5% of one core), and writes the
+  report after the game closes. Reports now say so (`launcher`).
+- **Pacing (native_pace.hpp).** Each game frame now takes its head from a
+  newer command of the XR worker's than the last frame's, waiting for the
+  next headset frame if none has come: one pair a headset frame, each begun
+  at the same point of it. A game slower than the headset never waits.
+  `--no-eye-pacing` draws as fast as the game can, as before.
+- **The slot pool twice the game's (SpidyScenePool, 819,200 slots).** The
+  render memory module, there from the game's start, raises the one Scene
+  setting the pool is made from, as the scene registry's setup reads it
+  (19116c0): its free-slot bitset and its share of the Scene Gpu Registry
+  (52 MB more video memory) are sized together. A game started before the
+  launcher keeps its own (`scene_pool` says which).
+- **The texture budget up to four times the game's** (it was twice), still
+  leaving an eighth of the card free; **far buildings' full models out to
+  200% of the game's 145 m** (it was 150%).
+- **The game's speed blur left out of the eyes.** Your eye snapshots of
+  October 30 show it mid-swing (0385, 0386): buildings and clouds streaked
+  outward from the middle of the lens. It is the game's radial blur, a kind
+  of visual effect the game plays, like its lens flares and trails. Each
+  frame one plays, the game asks it of every view it has, the eyes among
+  them, weaker the farther the view is from the effect; the eyes sit on the
+  hero. One function queues it for a view (RadialBlur::Schedule, 1841bf0),
+  and nothing else does: Spidy now takes that call and returns for the two
+  eyes. The game's own view (the monitor's normal camera, RECORDING FOV)
+  keeps it. The swing's motion blur bonus (HeroSlideConfig's
+  MotionBlurBonus*) never reached the eyes, whatever this entry said before:
+  the game's motion blur needs three render targets an eye's buffers do not
+  have, and returns at once there.
+- **A session that never showed a frame no longer resets your VR settings.**
+  On November 1 Virtual Desktop refused the eye images five times (a PC
+  restart cleared it). The XR worker reports its settings with its first
+  frame and zeros before it, and the launcher saved those zeros as settings
+  changed in the headset: the next session started at every setting's least
+  (swing speed 10, weight 40%), which floated the hero and slowed the swing.
+  `settings_line` now hands nothing over from a session without frames.
+- **New in reports:** `pacing` (frames that waited, how long),
+  `streaming`'s room checks the pool refused far buildings
+  (`building_refusals`) and nearby props (`zone_refusals`), `scene_pool`,
+  `launcher`, `speed_blur` (how often the game asked its blur of its own view
+  and of an eye; `eyes_left_out`, the times an eye went without).
+- **Measured** with a new probe (`tools/probe_vr_swing.py`: both eyes at 2688
+  x 2880 as your Quest 3 has them, 77% upscaling, eye commands 90 a second,
+  the game's own swing carrying the hero from your save's street; 6 km in
+  four games). Paced: 89.6-90.0 pairs a second, the newest pair's age within
+  0.65 ms (11.6 ms unpaced in a swing), GPU 54-63% and 264-279 W against
+  90-97% and 375-401 W unpaced (157-169 pairs a second), hitches 0.8-1.8% of
+  the time against 6%.
+  The game's pool refused 90 far buildings at 95% full; the doubled one
+  peaked at 50% (411,484 slots, more than the game's whole pool) with the
+  cone at its full 30 degrees and nothing refused, at 150% and 200% reach and
+  with a 60-degree cone. 200% reach cost no measurable frames (155.9-159.0 a
+  second unpaced, both reaches). Texture budget 15,496 MB, in use growing.
+  The speed blur: in the game, the blur function called for the left eye went
+  to Spidy and was left out (`blur_hook_check` in
+  `reports/vr-swing-blur-8.json`), and the eyes ran on at 90 pairs a second.
+- **Not run in the headset:** Virtual Desktop had no headset (asleep). Your
+  next session's report has every number above for the real thing. The game
+  never asked for its speed blur in nine probe games: not in its own swing
+  (17-30 m/s), web zips, point launches, 50 m/s dives or 46 m/s pushes
+  through the movement bridge, or falls from about 100 m. So there is no
+  before-and-after picture, and which effects carry the blur is not known;
+  `speed_blur` in your next report counts the times the eyes went without.
+- **Checked:** 736 core tests, the six Python protocol suites.
 
 **Earlier build (October 30): Spidy 0.7.0, the community patch - twelve pull
 requests.** You: "review open prs and fix what needs fixes, merge whats

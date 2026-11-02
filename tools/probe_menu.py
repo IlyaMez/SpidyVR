@@ -166,16 +166,16 @@ def main():
         press('right', wait=.8)
         step('weight_100', dict(weight=100, swing_speed=40.0), changes=7)
         # Down past ELASTIC WEB, SOFT RELEASE, SWING ASSIST, WEB SLINGSHOT, SLINGSHOT SPEED, BETTER CLIMBING,
-        # TWO HAND WEB ZIP, HAND ROPE STEERING and the COMFORT heading.
-        press('down', 'down', 'down', 'down', 'down', 'down', 'down', 'down', 'down')
+        # SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING and the COMFORT heading.
+        press('down', 'down', 'down', 'down', 'down', 'down', 'down', 'down', 'down', 'down')
         press('right', wait=.8)
         step('snap_turn_45', dict(snap_turn=45, weight=100), changes=8)
         press('down')
         press('right', wait=.8)
         step('smooth_turn_60', dict(smooth_turn=60, snap_turn=45), changes=9)
-        # Down past the HAPTICS heading, the vibration, REEL HAPTICS and BLOW SOUNDS: BODY HAPTICS, 100% until
-        # stepped down to 75%.
-        press('down', 'down', 'down', 'down')
+        # Down past the HAPTICS heading, the vibration, REEL and SWING HAPTICS, BLOW SOUNDS and PC MEDIA:
+        # BODY HAPTICS, 100% until stepped down to 75%.
+        press('down', 'down', 'down', 'down', 'down', 'down')
         press('left', wait=.8)
         step('body_haptics_75', dict(body_haptics=75, smooth_turn=60), changes=10)
         # Down past the web, wind, combat and movement switches, the DISPLAY heading, the screen size and its depth:

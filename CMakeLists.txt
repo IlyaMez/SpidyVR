@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(Spidy VERSION 0.7.1 LANGUAGES C CXX)
+project(Spidy VERSION 0.7.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -216,8 +216,8 @@ if(SPIDY_BUILD_XR)
   if(SPIDY_BUILD_OBSERVER)
     target_sources(spidy_stereo_probe PRIVATE src/game_xr.cpp src/game_player.cpp src/game_pad.cpp
                    src/game_menu.cpp src/game_time.cpp src/game_prompts.cpp src/game_steam.cpp
-                   src/phone_music.cpp)
-    target_link_libraries(spidy_stereo_probe PRIVATE spidy_openxr spidy_bhaptics shell32 ole32 uuid)
+                   src/phone_music.cpp src/phone_pc_media.cpp)
+    target_link_libraries(spidy_stereo_probe PRIVATE spidy_openxr spidy_bhaptics shell32 ole32 uuid runtimeobject)
   endif()
   add_executable(spidy_xr_lab apps/xr_lab.cpp)
   target_link_libraries(spidy_xr_lab PRIVATE spidy_openxr)

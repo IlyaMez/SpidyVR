@@ -117,6 +117,11 @@ struct PhoneView {
     int track{}, tracks{}; // track counts from 0; tracks 0: no songs
     int volume = phoneVolume; // percent
     char song[64]{};
+    // PC MEDIA (phone_pc_media.hpp): MUSIC is what the PC plays, `source` the
+    // app it plays in; tracks 1 while it plays anything, 0 with nothing.
+    // noVolume: no volume of the app's to show.
+    bool pcMedia{}, noVolume{};
+    char source[24]{};
 };
 // The phone as an eye image has it (NativeEyeFrame): open as the game rendered
 // it, and the image's own way from tracking space into its world. Where the
@@ -257,9 +262,14 @@ class PocketDraw {
     // and 8 behind the eyes, as measured until October 27). The hand is out
     // in front once it is `front` ahead of the eyes and no lower than `raised`
     // under them.
-    static constexpr float pocketBelow = 1.f, pocketAbove = .45f, pocketSide = .05f, pocketOut = .4f,
-                           behind = .06f, front = .15f, raised = .65f, drawSeconds = 1.5f, pressed = .6f,
-                           released = .3f, yawDeadZone = 1.2f, yawSpeed = 6, yawDrift = .2f, lostSeconds = .5f;
+    // Seated (SEATED), the back pocket is in the chair: the pocket begins
+    // `pocketAboveSeated` under the neck, beside or behind the hip on the
+    // seat (GolexPrime, October 31: 17 of 18 squeezes seated missed it as too
+    // high, the hand 35 cm under the neck and 16 cm behind it).
+    static constexpr float pocketBelow = 1.f, pocketAbove = .45f, pocketAboveSeated = .25f, pocketSide = .05f,
+                           pocketOut = .4f, behind = .06f, front = .15f, raised = .65f, drawSeconds = 1.5f,
+                           pressed = .6f, released = .3f, yawDeadZone = 1.2f, yawSpeed = 6, yawDrift = .2f,
+                           lostSeconds = .5f;
     // A lost hand's way: its last velocity, measured over about `smoothing`,
     // no faster than carrySpeed, for carrySeconds at most.
     static constexpr float carrySeconds = .3f, carrySpeed = 2.5f, smoothing = .05f;
@@ -271,7 +281,7 @@ class PocketDraw {
     // 27: why can so many not draw it?). A press counts where it may have been
     // one for the phone: in play, the hand lower than `reachBelow` under the
     // neck and no more than `reachAhead` in front of it, or lost.
-    static constexpr float reachBelow = .3f, reachAhead = .1f;
+    static constexpr float reachBelow = .3f, reachBelowSeated = .2f, reachAhead = .1f;
     struct Stats {
         // Such presses; draws begun at a pocket; phones out; draws that ended
         // without one, too slow or let go of on the way; presses that began
@@ -293,6 +303,13 @@ class PocketDraw {
     // hand's. True as the phone comes out: hand() says where.
     bool update(float seconds, bool play, const Pose& head, const Pose grips[2], const bool tracked[2],
                 const float squeezes[2]);
+    // SEATED on: the pocket is the seated one (pocketAboveSeated).
+    void seated(bool on) {
+        seated_ = on;
+    }
+    bool seated() const {
+        return seated_;
+    }
     // A bit per hand whose grip is the draw's.
     unsigned hands() const {
         return hands_;
@@ -314,7 +331,7 @@ class PocketDraw {
     }
 
   private:
-    bool down_[2]{}, yawSet_{};
+    bool down_[2]{}, yawSet_{}, seated_{};
     unsigned hands_{}, draws_{};
     int drawing_ = -1, drewWith_{};
     float time_{}, yaw_{}, lost_[2]{lostSeconds + 1, lostSeconds + 1};
@@ -349,4 +366,17 @@ void placePhoneScreen(std::vector<Vertex>& picture, const PhoneView& view);
 // the overlay's font draws. A name with nothing of that (a Hebrew, Cyrillic or
 // Japanese one) is TRACK and its number: `track`, from 0.
 std::string phoneSongName(const std::string& fileName, int track);
+// PC MEDIA's song (UTF-8): ARTIST - TITLE as phoneSongName shows a name, its
+// dots kept ("MR. BRIGHTSIDE"); the title alone without an artist, and
+// SONG with neither drawable.
+std::string phoneMediaSong(const std::string& artist, const std::string& title);
+// The app a song plays in, from the name Windows' media controls give it (its
+// AppUserModelID): "Spotify.exe" and Spotify's Store package as SPOTIFY,
+// "MSEdge" as EDGE, an unreadable one (Firefox names itself by a hash) as PC.
+std::string phoneMediaSource(const std::string& appId);
+// That app's audio session in Windows' mixer: a process (its file, with or
+// without the folder) whose name, without .exe, is in the app's ID
+// ("Spotify.exe" in "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify",
+// "msedge.exe" in "MSEdge"), ignoring case.
+bool phoneMediaAppMatches(const std::string& appId, const std::string& process);
 } // namespace spidy

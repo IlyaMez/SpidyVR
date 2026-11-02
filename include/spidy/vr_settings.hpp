@@ -84,8 +84,10 @@ struct Values {
     // Experimental physical hand pulls, solid palms and crawling body poses.
     bool handClimb = false;
     bool halfPunchDamage = false; // half health damage, unchanged punch reactions
-    int singleHandYankPercent = 100; // scales the impulse from a one-hand web yank
-    bool joystickRunCamera = false; // wall-floor camera transition during joystick runs
+    // The wall-floor camera transition during HAND WALL CLIMBING's joystick
+    // runs (the tab's JOYSTICK WALL RUN CAMERA), as before pull request #38;
+    // off, the left stick drives the momentum wall run's view and gait.
+    bool joystickRunCamera = true;
     bool wallRunCameraTilt = true; // optional horizontal momentum-run camera bank
     // Scenes the game plays on the game screen (cutscenes, finishers) have
     // depth there (the tab's GAME SCREEN 3D): 0 off, the game's flat frame; 1
@@ -183,9 +185,24 @@ struct Values {
     // spins and smooth turns as steady as head turns. Off by default, to
     // compare in the headset.
     bool flipReprojection = false;
+    // The HUD as a layer of its own that the headset shows at its own rate
+    // (the tab's STEADY HUD; steady_hud.hpp), instead of drawn into each eye
+    // pair by the game: it holds still when the headset repeats a pair. Off
+    // by default, to compare in the headset.
+    bool steadyHud = false;
     // The reel felt in the hand (the tab's REEL HAPTICS; reel_haptics.hpp):
     // the reeling hand's controller ticks like a winch. Off by default.
     bool reelHaptics = false;
+    // The swing felt in the hand (the tab's SWING HAPTICS; swing_haptics.hpp):
+    // a taut web's hand ticks with the body's travel, fainter than the reel.
+    // Off by default.
+    bool swingHaptics = false;
+    // The phone's MUSIC plays what the PC plays (the tab's PC MEDIA;
+    // phone_pc_media.hpp): Spotify, a browser. Off by default: the Music folder.
+    bool pcMedia = false;
+    // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
+    // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
+    int singleHandYankPercent = 100;
     bool operator==(const Values&) const = default;
 };
 inline constexpr int eyeAimShots = 1, eyeAimZips = 2;
@@ -289,10 +306,13 @@ enum class Item : uint8_t {
     ropeSteering,
     webRange,
     webSpeed,
-    flipReprojection,
     joystickRunCamera,
     halfPunchDamage,
+    flipReprojection,
+    steadyHud,
     reelHaptics,
+    swingHaptics,
+    pcMedia,
     singleHandYankStrength,
 };
 inline constexpr Item lastItem = Item::singleHandYankStrength;
@@ -318,7 +338,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 67>& rows();
+const std::array<Row, 70>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;
@@ -335,10 +355,10 @@ bool choose(Item, int choice, Values&);
 int defaultChoice(Item);
 // The settings no launcher.ini key or XrConfig field carries: NEAR CLIP,
 // RECORDING FOV, UI STYLE, BLOW SOUNDS, HEIGHT, SEATED, WEB SLINGSHOT, BETTER CLIMBING, HAND WALL
-// CLIMBING, EYE AIM, FLIP REPROJECTION, the realistic flips' eleven rows and the body haptics' four groups. The game
-// module keeps them as these key=value lines in a file of their own, beside
-// the launcher's settings (game_xr.cpp, tabOnlyPath), and reads them back
-// when VR starts; the launcher's options read and write the same file.
+// CLIMBING, EYE AIM, FLIP REPROJECTION, STEADY HUD, REEL HAPTICS, SWING HAPTICS, the realistic flips'
+// eleven rows and the body haptics' four groups. The game module keeps them as these key=value lines in a
+// file of their own, beside the launcher's settings (game_xr.cpp, tabOnlyPath), and reads them back when
+// VR starts; the launcher's options read and write the same file.
 std::string tabOnlyText(const Values&);
 // The values with what such text holds, sanitized. A line with an unknown
 // key, or whose value is no whole number, is passed over.

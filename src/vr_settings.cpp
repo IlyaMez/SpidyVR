@@ -108,7 +108,8 @@ constexpr int webSpeeds[] = {0, 1, 2, 3};
 constexpr const char* webSpeedChoices[] = {"OFF", "SLOW", "MEDIUM", "FAST"};
 static_assert(std::size(webSpeedChoices) == std::size(webSpeeds));
 constexpr int singleHandYankStrengths[] = {50, 75, 100, 125, 150, 200, 250, 300};
-constexpr const char* singleHandYankStrengthChoices[] = {"50%", "75%", "100%", "125%", "150%", "200%", "250%", "300%"};
+constexpr const char* singleHandYankStrengthChoices[] = {"50%",  "75%",  "100%", "125%",
+                                                         "150%", "200%", "250%", "300%"};
 static_assert(std::size(singleHandYankStrengthChoices) == std::size(singleHandYankStrengths));
 } // namespace
 
@@ -302,10 +303,16 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.hapticMovement;
     case Item::reelHaptics:
         return &v.reelHaptics;
+    case Item::swingHaptics:
+        return &v.swingHaptics;
+    case Item::pcMedia:
+        return &v.pcMedia;
     case Item::seated:
         return &v.seated;
     case Item::flipReprojection:
         return &v.flipReprojection;
+    case Item::steadyHud:
+        return &v.steadyHud;
     default:
         return nullptr;
     }
@@ -346,9 +353,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 67>& rows() {
+const std::array<Row, 70>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 67> all{{
+    static const std::array<Row, 70> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -375,8 +382,10 @@ const std::array<Row, 67>& rows() {
          levelChoices},
         {Item::softRelease, "SOFT RELEASE",
          "A web's last pull fades briefly as you let go. Higher lasts longer.", levelChoices},
-        {Item::swingAssist, "SWING ASSIST",
-         "Swinging at a wall, you slow down before it. Your line stays yours.", {}},
+        {Item::swingAssist,
+         "SWING ASSIST",
+         "Swinging at a wall, you slow down before it. Your line stays yours.",
+         {}},
         {Item::webSlingshot,
          "WEB SLINGSHOT",
          "No auto jump. Draw two fixed webs, hold for vibration, release both to launch.",
@@ -387,10 +396,17 @@ const std::array<Row, 67>& rows() {
          "BETTER CLIMBING",
          "Take one web in both hands, then pull hand over hand to keep climbing it.",
          {}},
-        {Item::twoHandZip, "TWO HAND WEB ZIP",
-         "Both webs on one spot: pull both arms back fast to launch at it.", {}},
-        {Item::ropeSteering, "HAND ROPE STEERING",
-         "Hold your web with the free hand too and pull sideways to turn your swing.", {}},
+        {Item::singleHandYankStrength, "SINGLE HAND YANK STRENGTH",
+         "How much speed a fast one-hand yank adds. 100% as before; two-hand zips stay.",
+         singleHandYankStrengthChoices},
+        {Item::twoHandZip,
+         "TWO HAND WEB ZIP",
+         "Both webs on one spot: pull both arms back fast to launch at it.",
+         {}},
+        {Item::ropeSteering,
+         "HAND ROPE STEERING",
+         "Hold your web with the free hand too and pull sideways to turn your swing.",
+         {}},
         {Item::none, "COMFORT", nullptr, {}},
         {Item::snapTurn, "SNAP TURN", "How far a flick of the right stick turns you. Off: no snap turning.",
          snapChoices},
@@ -400,8 +416,16 @@ const std::array<Row, 67>& rows() {
         {Item::haptics, "CONTROLLER VIBRATION", "How strongly webs, grabs and punches buzz in your hands.",
          hapticChoices},
         {Item::reelHaptics, "REEL HAPTICS", "Reeling a web in ticks in that hand like a winch.", {}},
+        {Item::swingHaptics,
+         "SWING HAPTICS",
+         "Swinging on a taut web ticks softly in that hand, faster as you speed up.",
+         {}},
         {Item::blowSounds, "BLOW SOUNDS",
          "What your blows sound like: the game's own hits, Spidy's tones, or none.", blowSoundChoices},
+        {Item::pcMedia,
+         "PC MEDIA",
+         "The phone plays what the PC plays (Spotify, a browser). Off: the Music folder.",
+         {}},
         {Item::bodyHaptics, "BODY HAPTICS",
          "How strongly bHaptics vest, sleeves and visor play webs, hits and Spider-Sense.", hapticChoices},
         {Item::hapticWebs,
@@ -437,8 +461,7 @@ const std::array<Row, 67>& rows() {
         {Item::nearClip, "NEAR CLIP",
          "How near your eyes things still show. Nearer keeps your hands in view.", nearClipChoices},
         {Item::recordingFov, "RECORDING FOV",
-         "A view this wide on the monitor to record. Costs frame rate; no Spidy marks.",
-         recordingFovChoices},
+         "A view this wide on the monitor to record. Costs frame rate; no Spidy marks.", recordingFovChoices},
         {Item::recordingSmoothing, "RECORDING SMOOTHING",
          "Softens how the recording view turns, not the headset's. Higher is softer.",
          recordingSmoothingChoices},
@@ -462,23 +485,36 @@ const std::array<Row, 67>& rows() {
          {}},
         {Item::flipSpeed, "FLIP SPEED", "How fast a flip turns you over at full stick tilt.",
          flipSpeedChoices},
-        {Item::handClimb, "HAND WALL CLIMBING",
-         "Grip and pull. Reach back near the wall to turn. Left stick: run. A: jump.", {}},
-        {Item::joystickRunCamera, "JOYSTICK WALL RUN CAMERA",
-         "On: old wall-floor view. Off: joystick drives the existing momentum wall run.", {}},
-        {Item::wallRunCameraTilt, "WALL RUN CAMERA TILT",
-         "Gently bank the view with the body on horizontal momentum wall runs.", {}},
-        {Item::halfPunchDamage, "HALF PUNCH DAMAGE",
-         "Punches and web strikes deal 50% damage. Launches and smash force stay the same.", {}},
-        {Item::singleHandYankStrength, "SINGLE HAND YANK STRENGTH",
-         "Scales one-hand yank speed gain. 100% keeps today's force; zips are unchanged.",
-         singleHandYankStrengthChoices},
-        {Item::eyeAim, "EYE AIM", "Web balls and zips go where your eyes look. Needs a headset with eye tracking.",
-         eyeAimChoices},
-        {Item::flipReprojection, "FLIP REPROJECTION",
-         "Flips, spins and smooth turns shown as steadily as head turns.", {}},
-        {Item::realisticFlips, "REALISTIC FLIPS",
-         "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.", {}},
+        {Item::handClimb,
+         "HAND WALL CLIMBING",
+         "Grip and pull. Reach back near the wall to turn. Left stick: run. A: jump.",
+         {}},
+        {Item::joystickRunCamera,
+         "JOYSTICK WALL RUN CAMERA",
+         "On: old wall-floor view. Off: joystick drives the existing momentum wall run.",
+         {}},
+        {Item::wallRunCameraTilt,
+         "WALL RUN CAMERA TILT",
+         "Gently bank the view with the body on horizontal momentum wall runs.",
+         {}},
+        {Item::halfPunchDamage,
+         "HALF PUNCH DAMAGE",
+         "Punches and web strikes deal 50% damage. Launches and smash force stay the same.",
+         {}},
+        {Item::eyeAim, "EYE AIM",
+         "Web balls and zips go where your eyes look. Needs a headset with eye tracking.", eyeAimChoices},
+        {Item::flipReprojection,
+         "FLIP REPROJECTION",
+         "Flips, spins and smooth turns shown as steadily as head turns.",
+         {}},
+        {Item::steadyHud,
+         "STEADY HUD",
+         "The HUD shown by the headset itself: it holds still when the game falls behind.",
+         {}},
+        {Item::realisticFlips,
+         "REALISTIC FLIPS",
+         "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
+         {}},
         {Item::automaticStrength, "ROTATION STRENGTH",
          "How strongly the body follows the web direction. Heading stays free.", automaticStrengthChoices},
         {Item::automaticSpeed, "MAX ROTATION SPEED",
@@ -683,7 +719,10 @@ constexpr TabOnly tabOnly[] = {
     {"web_range_m", nullptr, &Values::webRange},
     {"web_speed", nullptr, &Values::webSpeed},
     {"flip_reprojection", &Values::flipReprojection, nullptr},
+    {"steady_hud", &Values::steadyHud, nullptr},
     {"reel_haptics", &Values::reelHaptics, nullptr},
+    {"swing_haptics", &Values::swingHaptics, nullptr},
+    {"pc_media", &Values::pcMedia, nullptr},
     {"single_hand_yank_percent", nullptr, &Values::singleHandYankPercent},
 };
 } // namespace

@@ -167,8 +167,8 @@ const char* musicState(const PhoneView& view) {
 // The home screen: a card for each app, the picked one red; under them what plays.
 void homeScreen(std::vector<Vertex>& v, const Plane& p, const PhoneView& view) {
     const char* const names[phoneApps] = {"MUSIC", "MENU", "GEAR", "CAMERA"};
-    const char* const notes[phoneApps] = {"YOUR SONGS", "MAP, SUITS, SKILLS", "GADGETS AND XP",
-                                          "THE GAME'S CAMERA"};
+    const char* const notes[phoneApps] = {view.pcMedia ? "WHAT THE PC PLAYS" : "YOUR SONGS",
+                                          "MAP, SUITS, SKILLS", "GADGETS AND XP", "THE GAME'S CAMERA"};
     for (int i = 0; i < phoneApps; ++i) {
         const float y = .045f - i * .0235f;
         const bool lit = view.app == i;
@@ -196,14 +196,22 @@ void homeScreen(std::vector<Vertex>& v, const Plane& p, const PhoneView& view) {
 void musicScreen(std::vector<Vertex>& v, const Plane& p, const PhoneView& view) {
     p.rounded(v, 0, .037f, .034f, .034f, .004f, .002f, deepRed);
     noteIcon(v, p, 0, .037f, .026f, white);
-    if (view.tracks <= 0) {
+    if (view.tracks <= 0 && view.pcMedia) {
+        p.text(v, "NOTHING PLAYING", 0, .008f, .0055f, .066f, white);
+        p.text(v, "START MUSIC ON THE PC", 0, -.002f, .003f, .066f, soft);
+    } else if (view.tracks <= 0) {
         p.text(v, "NO SONGS YET", 0, .008f, .0055f, .066f, white);
         p.text(v, "ADD SONGS TO THE MUSIC FOLDER", 0, -.002f, .003f, .066f, soft);
     } else {
         p.text(v, view.song, 0, .008f, .006f, .066f, white);
-        char line[48];
-        std::snprintf(line, sizeof line, "%d/%d  %s", view.track + 1, view.tracks, musicState(view));
+        char line[64];
+        if (view.pcMedia)
+            std::snprintf(line, sizeof line, "%s  %s", view.source, musicState(view));
+        else
+            std::snprintf(line, sizeof line, "%d/%d  %s", view.track + 1, view.tracks, musicState(view));
         p.text(v, line, 0, -.0025f, .0034f, .06f, view.failed ? red : soft);
+    }
+    if (view.tracks > 0 && !view.noVolume) {
         // The volume: a bar filling to it, VOL before it.
         const float barLeft = -.019f, barWidth = .05f, barY = -.012f;
         const float filled = barWidth * std::clamp(view.volume, 0, 100) / 100.f;
@@ -226,7 +234,11 @@ void musicScreen(std::vector<Vertex>& v, const Plane& p, const PhoneView& view) 
     }
     const bool litAuto = view.lit == PhoneButton::autoplay;
     p.rounded(v, 0, -.055f, .056f, .01f, .005f, .002f, litAuto ? red : dim);
-    p.text(v, view.autoplay ? "AUTOPLAY ON" : "AUTOPLAY OFF", 0, -.0569f, .0038f, .046f, white);
+    p.text(v,
+           view.pcMedia    ? "PC MEDIA"
+           : view.autoplay ? "AUTOPLAY ON"
+                           : "AUTOPLAY OFF",
+           0, -.0569f, .0038f, .046f, white);
 }
 // GEAR: each gadget, the equipped one marked red, its charges; the level under them.
 void gearScreen(std::vector<Vertex>& v, const Plane& p, const PhoneView& view) {
@@ -577,8 +589,9 @@ bool PocketDraw::update(float seconds, bool play, const Pose& head, const Pose g
         const Vec3 n = at - neck;
         const float x = dot(n, right), y = n.y, z = dot(n, forward);
         if (press && drawing_ < 0) {
+            const float above = seated_ ? pocketAboveSeated : pocketAbove;
             const Miss miss = lostLong                   ? lost
-                              : -y < pocketAbove         ? high
+                              : -y < above               ? high
                               : -y > pocketBelow         ? low
                               : std::abs(x) < pocketSide ? central
                               : std::abs(x) > pocketOut  ? wide
@@ -590,7 +603,7 @@ bool PocketDraw::update(float seconds, bool play, const Pose& head, const Pose g
                 hands_ |= bit;
                 ++stats_.presses;
                 ++stats_.begun;
-            } else if (lostLong || (-y >= reachBelow && z <= reachAhead)) {
+            } else if (lostLong || (-y >= (seated_ ? reachBelowSeated : reachBelow) && z <= reachAhead)) {
                 ++stats_.presses;
                 ++stats_.missed[miss];
                 stats_.lastMiss = miss;
@@ -616,12 +629,9 @@ bool PocketDraw::update(float seconds, bool play, const Pose& head, const Pose g
     return out;
 }
 
-std::string phoneSongName(const std::string& fileName, int track) {
-    std::string name = fileName;
-    if (const auto slash = name.find_last_of("\\/"); slash != std::string::npos)
-        name.erase(0, slash + 1);
-    if (const auto dot = name.find_last_of('.'); dot != std::string::npos && dot > 0)
-        name.erase(dot);
+namespace {
+// A name as the phone draws it (phoneSongName), empty with nothing drawable.
+std::string phoneText(const std::string& name) {
     std::string letters;
     for (size_t i = 0; i < name.size();) {
         const uint32_t c = nextCodePoint(name, i);
@@ -641,9 +651,66 @@ std::string phoneSongName(const std::string& fileName, int track) {
             out += c;
     while (!out.empty() && out.back() == ' ')
         out.pop_back();
-    if (!out.empty())
+    return out;
+}
+std::string lower(std::string s) {
+    for (auto& c : s)
+        if (c >= 'A' && c <= 'Z')
+            c = static_cast<char>(c - 'A' + 'a');
+    return s;
+}
+} // namespace
+
+std::string phoneSongName(const std::string& fileName, int track) {
+    std::string name = fileName;
+    if (const auto slash = name.find_last_of("\\/"); slash != std::string::npos)
+        name.erase(0, slash + 1);
+    if (const auto dot = name.find_last_of('.'); dot != std::string::npos && dot > 0)
+        name.erase(dot);
+    if (auto out = phoneText(name); !out.empty())
         return out;
     return track >= 0 ? "TRACK " + std::to_string(track + 1) : "SONG";
+}
+
+std::string phoneMediaSong(const std::string& artist, const std::string& title) {
+    const std::string a = phoneText(artist), t = phoneText(title);
+    if (!a.empty() && !t.empty())
+        return a + " - " + t;
+    return !t.empty() ? t : !a.empty() ? a : "SONG";
+}
+
+std::string phoneMediaSource(const std::string& appId) {
+    std::string name = appId;
+    // A Store app's ID is its package and then its app: Spotify's
+    // "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify".
+    if (const auto bang = name.find_last_of('!'); bang != std::string::npos)
+        name.erase(0, bang + 1);
+    if (const auto slash = name.find_last_of("\\/"); slash != std::string::npos)
+        name.erase(0, slash + 1);
+    if (name.size() > 4 && lower(name.substr(name.size() - 4)) == ".exe")
+        name.erase(name.size() - 4);
+    const std::string id = lower(name);
+    if (id == "msedge")
+        return "EDGE";
+    // A hash for a name (Firefox's, from its folder): no app to say.
+    const bool hash = id.size() >= 12 && id.find_first_not_of("0123456789abcdef") == std::string::npos;
+    std::string out = hash ? std::string{} : phoneText(name);
+    for (auto& c : out)
+        if (c >= 'a' && c <= 'z')
+            c = static_cast<char>(c - 'a' + 'A');
+    if (out.empty())
+        return "PC";
+    return out.substr(0, 23);
+}
+
+bool phoneMediaAppMatches(const std::string& appId, const std::string& process) {
+    std::string name = process;
+    if (const auto slash = name.find_last_of("\\/"); slash != std::string::npos)
+        name.erase(0, slash + 1);
+    name = lower(name);
+    if (name.size() > 4 && name.substr(name.size() - 4) == ".exe")
+        name.erase(name.size() - 4);
+    return name.size() >= 3 && lower(appId).find(name) != std::string::npos;
 }
 
 namespace {
