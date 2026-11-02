@@ -83,6 +83,11 @@ struct Values {
     bool standOnWalls = true;
     // Experimental physical hand pulls, solid palms and crawling body poses.
     bool handClimb = false;
+    bool halfPunchDamage = false; // half health damage, unchanged punch reactions
+    // The wall-floor camera transition during HAND WALL CLIMBING's joystick
+    // runs (the tab's JOYSTICK WALL RUN CAMERA), as before pull request #38;
+    // off, the left stick drives the momentum wall run's view and gait.
+    bool joystickRunCamera = true;
     bool wallRunCameraTilt = true; // optional horizontal momentum-run camera bank
     // Scenes the game plays on the game screen (cutscenes, finishers) have
     // depth there (the tab's GAME SCREEN 3D): 0 off, the game's flat frame; 1
@@ -278,8 +283,10 @@ enum class Item : uint8_t {
     ropeSteering,
     webRange,
     webSpeed,
+    joystickRunCamera,
+    halfPunchDamage,
 };
-inline constexpr Item lastItem = Item::webSpeed;
+inline constexpr Item lastItem = Item::halfPunchDamage;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -302,7 +309,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 62>& rows();
+const std::array<Row, 64>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

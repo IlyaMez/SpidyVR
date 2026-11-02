@@ -1882,6 +1882,10 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "On a wall with the left stick at rest, squeeze a grip near the wall to hold on and pull to "
                "climb; both grips held roll your view along it.",
                S(42), [&] { tabToggle("##handclimb", Item::handClimb); });
+        option("Joystick wall run camera",
+               "On: a joystick run turns your view onto the wall, as before. Off: the left stick drives the "
+               "momentum wall run's view and gait.",
+               S(42), [&] { tabToggle("##joystickruncamera", Item::joystickRunCamera); });
         option("Wall Run Camera Tilt", "Gently bank with the body on horizontal momentum wall runs.", S(42),
                [&] { tabToggle("##wallruncameratilt", Item::wallRunCameraTilt); });
     });
@@ -2050,6 +2054,10 @@ void App::options(ImVec2 origin, ImVec2 size) {
         option("Combat visuals",
                "Show punch arrows, target rings, hit effects and KO text. Spider-Sense stays on.",
                S(42), [&] { tabToggle("##combatvisuals", Item::combatVisuals); });
+        option(
+            "Half punch damage",
+            "Punches and web strikes deal half their damage; launches, smashes and knockback stay the same.",
+            S(42), [&] { tabToggle("##halfpunchdamage", Item::halfPunchDamage); });
     });
     group(1, "Monitor", [&] {
         option("Small game window", "Saves GPU time while you play in VR.", S(42),
