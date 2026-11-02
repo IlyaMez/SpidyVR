@@ -248,6 +248,11 @@ struct Values {
     // TAP, within 0.1 s; 2 RUNNING, as QUICK TAP, and while NATIVE RUN holds
     // RT the game's A goes out as it is pressed (no charge while running).
     int earlyJump = 0;
+    // SOFT LANDING (the tab's SOFT LANDING; Swing::allowSoftLanding,
+    // run_update::softLandVertical): a fall the swing flies, with no web
+    // holding, eases to 9 m/s down over its last 3 m (or 0.35 s), its speed
+    // across kept. Off by default: it lands at the speed it falls, as before.
+    bool softLanding = false;
     // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
     // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
     int singleHandYankPercent = 100;
@@ -373,8 +378,9 @@ enum class Item : uint8_t {
     runLogs,
     momentumLeap,
     earlyJump,
+    softLanding,
 };
-inline constexpr Item lastItem = Item::earlyJump;
+inline constexpr Item lastItem = Item::softLanding;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -397,7 +403,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 81>& rows();
+const std::array<Row, 82>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

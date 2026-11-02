@@ -1537,6 +1537,8 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             crest_ -= dt;
             body_.velocity -= crestNormal_ * (config_.crestPush * dt);
         }
+        if (softGround_ >= 0 && !supported && !wall_.on)
+            body_.velocity.y = run_update::softLandVertical(body_.velocity.y, softGround_, dt);
         body_.velocity = limited(body_.velocity, speedLimit());
         body_.grounded = supported;
         if (!supported && !wasGrounded)
@@ -1779,6 +1781,15 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     }
     avoidObstacles(seconds, input, world);
     senseWall(seconds, input, world);
+    // SOFT LANDING: the ground under a fall with no web, for its last metres.
+    softGround_ = -1;
+    if (softLanding_ && !actual.grounded && !wall_.on && !webs_[0].attached && !webs_[1].attached &&
+        body_.velocity.y < -run_update::softFall && finite(body_.position)) {
+        const float reach = std::min(run_update::softLandReach(-body_.velocity.y, seconds), config_.maxRange);
+        const auto ground = world.bodyRaycast(body_.position, {0, -1, 0}, reach);
+        if (ground && finite(ground->point) && finite(ground->normal) && normalized(ground->normal).y > .5f)
+            softGround_ = std::max(0.f, body_.position.y - 1 - ground->point.y);
+    }
     const auto count = static_cast<unsigned>(std::ceil(seconds / config_.fixedStep));
     const float dt = seconds / count;
     for (unsigned i = 0; i < count; ++i)

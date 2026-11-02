@@ -1591,7 +1591,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 26 && s.bytes == 124 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 27 && s.bytes == 128 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -2254,7 +2254,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 26 && s.bytes == 124 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 27 && s.bytes == 128 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -3610,7 +3610,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 26 && s.bytes == 124, "updated settings did not append the climbing field");
+        check(s.version == 27 && s.bytes == 128, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -9369,6 +9369,70 @@ int main() {
         ChargeJump odd;
         odd.earlyJump(9);
         check(waited(9, true) == -1, "an EARLY JUMP past RUNNING not taken as RUNNING");
+    });
+    test("SOFT LANDING: a fall with no web eases to 9 m/s over its last metres; off, webs or walls, as before", [] {
+        using namespace run_update;
+        // Far above, or slow: untouched. Near the ground: toward softFall, never past it.
+        check(softLandVertical(-20, 20, 1.f / 120) == -20, "a fall eased far above the ground");
+        check(softLandVertical(-5, 1, 1.f / 120) == -5, "a slow fall touched");
+        check(softLandVertical(-20, -1, 1.f / 120) == -20, "a fall eased with no ground found");
+        const float eased = softLandVertical(-20, 2, 1.f / 120);
+        check(eased > -20 && eased < -softFall, "a fall near the ground not eased, or past softFall");
+        check(softLandVertical(-30, 9, 1.f / 120) > -30, "a fast fall 0.3 s from the ground not eased");
+        float vy = -25;
+        for (int i = 0; i < 120; ++i)
+            vy = softLandVertical(vy, 1, 1.f / 120);
+        near(vy, -softFall, .05f);
+        check(softLandVertical(NAN, 1, .01f) != softLandVertical(NAN, 1, .01f) &&
+                  softLandVertical(-20, NAN, .01f) == -20,
+              "not a number eased");
+        // The swing: a floor at y 0, the body 2 m over it falling at 20 m/s and 6 m/s across.
+        struct Floor : World {
+            std::optional<RayHit> raycast(Vec3 o, Vec3 d, float distance) const override {
+                if (d.y >= -.5f || o.y <= 0)
+                    return {};
+                const float t = o.y / -d.y;
+                if (t > distance)
+                    return {};
+                return RayHit{o + d * t, {0, 1, 0}, 2, true};
+            }
+            MoveResult sweep(Vec3, Vec3 to, float) const override {
+                return {to, {}, false};
+            }
+            bool exists(std::uint64_t) const override {
+                return true;
+            }
+        } floor;
+        const Body falling{{0, 3, 0}, {6, -20, 0}, false};
+        const auto fall = [&](bool on, Body from) {
+            SwingConfig c = inert();
+            c.gravity = 9.81f;
+            Swing sw(c);
+            sw.allowSoftLanding(on);
+            Input in;
+            in.focused = true;
+            return sw.predictNativeStep(1.f / 60, in, floor, from).velocity;
+        };
+        const Vec3 off = fall(false, falling), on = fall(true, falling);
+        check(on.y > off.y + 1, "SOFT LANDING did not ease the fall");
+        near(on.x, off.x, 1e-4f);
+        near(on.z, off.z, 1e-4f);
+        check(on.y < -softFall, "eased past softFall in one step");
+        // High up: as before.
+        const Body high{{0, 40, 0}, {6, -20, 0}, false};
+        check(length(fall(true, high) - fall(false, high)) < 1e-5f, "a fall eased 40 m up");
+        Swing sw(inert());
+        check(!sw.softLandingEnabled(), "soft landing on by default");
+        game_swing::Settings packet;
+        check(packet.version == 27 && packet.bytes == 128 && !packet.softLanding &&
+                  offsetof(game_swing::Settings, softLanding) == game_swing::settingsBytesV26,
+              "soft landing not appended, or on by default");
+        packet.softLanding = 2;
+        check(!game_swing::validSettings(packet), "an invalid soft landing switch accepted");
+        packet = {};
+        packet.version = 26;
+        packet.bytes = game_swing::settingsBytesV26;
+        check(game_swing::validSettings(packet), "version 26 settings packet refused");
     });
     test("the game's camera follows the head's pitch as it follows its turn", [] {
         game_pad::CameraPitch pitch;
@@ -21868,7 +21932,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 26 && s.bytes == 124 && s.combatVisuals == 1 &&
+        check(s.version == 27 && s.bytes == 128 && s.combatVisuals == 1 &&
                   offsetof(Settings, combatVisuals) == 56,
               "free combat broke the settings defaults or layout");
         s.combatVisuals = 0;
@@ -21915,7 +21979,7 @@ int main() {
         check(withTabOnly(Values{}, "single_hand_yank_percent=999\n").singleHandYankPercent == 300,
               "saved single-hand yank strength was not clamped");
         game_swing::Settings packet;
-        check(packet.version == 26 && packet.bytes == 124 && !packet.halfPunchDamage &&
+        check(packet.version == 27 && packet.bytes == 128 && !packet.halfPunchDamage &&
                   packet.singleHandYankPercent == 100 &&
                   offsetof(game_swing::Settings, halfPunchDamage) == 96 &&
                   offsetof(game_swing::Settings, singleHandYankPercent) == 100,
@@ -22515,10 +22579,10 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 70 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 71 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[70 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[70].title, "REALISTIC FLIPS") == 0 && all[70].choices.empty(),
+            check(all[71 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[71].title, "REALISTIC FLIPS") == 0 && all[71].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[50].item == Item::controlledFlips && all[53].item == Item::joystickRunCamera &&
                   all[54].item == Item::wallRunCameraTilt && all[55].item == Item::halfPunchDamage,
@@ -22608,6 +22672,15 @@ int main() {
                   std::strcmp(all[69].choices[0], "OFF") == 0 && std::strcmp(all[69].choices[2], "RUNNING") == 0 &&
                   all[69].place == Place::tab,
               "RUNNING LEAP and EARLY JUMP (OFF, QUICK TAP, RUNNING): in the tab, after RUN LOGS");
+        check(all[70].item == Item::softLanding && std::strcmp(all[70].title, "SOFT LANDING") == 0 &&
+                  all[70].choices.empty() && all[70].place == Place::tab,
+              "SOFT LANDING: a switch in the tab, after EARLY JUMP");
+        {
+            Values v;
+            check(!v.softLanding && defaultChoice(Item::softLanding) == 0, "soft landing on by default");
+            check(withTabOnly({}, "soft_landing=1\n").softLanding && !withTabOnly({}, "").softLanding,
+                  "spidy_vr.ini keeps soft_landing");
+        }
         {
             Values v;
             check(!v.momentumLeap && v.earlyJump == 0 && defaultChoice(Item::momentumLeap) == 0 &&
@@ -22694,7 +22767,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 76,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 77,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -22953,7 +23026,7 @@ int main() {
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
                   "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
                   "degrees=0\nwrist_shooters=0\n"
-                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\n",
+                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

@@ -1941,6 +1941,11 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "while NATIVE RUN sprints A jumps the moment it is pressed (no charged leap while sprinting). "
                "OFF: as before.",
                S(150), [&] { tabCombo("##earlyjump", Item::earlyJump); });
+        option("Soft landing (experimental)",
+               "Falling with no web, your fall eases to 9 m/s over the last 3 m (or 0.35 s) before the "
+               "ground, so the game lands you lightly; your speed across is kept. Off: you land as fast as "
+               "you fall, as before.",
+               S(42), [&] { tabToggle("##softlanding", Item::softLanding); });
     });
     group(0, "Flips", [&] {
         option("Flips (experimental)",

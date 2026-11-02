@@ -196,4 +196,23 @@ inline Vec3 leapVelocity(const Leap& k, Vec3 velocity, Vec3 move, float charge, 
     const Vec3 out = way * std::min(ahead, k.horizontalMax) + side + Vec3{0, up, 0};
     return finite(out) ? limited(out, maxSpeed) : Vec3{0, up, 0};
 }
+// SOFT LANDING (vr_settings::Values::softLanding, off by default; Swing::
+// allowSoftLanding): a fall the swing flies with no web holding eases to
+// softFall down once the ground is within softHeight below the feet, or
+// softSeconds of the fall away, at softRate of the difference a second. The
+// speed across the ground is not touched; nothing slower than softFall is.
+// feetAbove: the feet's height over the ground below, under 0 for none found.
+constexpr float softFall = 9, softHeight = 3, softSeconds = .35f, softRate = 8;
+inline float softLandVertical(float vy, float feetAbove, float dt) {
+    if (!(feetAbove >= 0) || !std::isfinite(vy) || !(vy < -softFall) || !std::isfinite(dt) || !(dt > 0))
+        return vy;
+    if (feetAbove > softHeight && feetAbove / -vy > softSeconds)
+        return vy;
+    return vy + (-softFall - vy) * std::min(1.f, softRate * dt);
+}
+// How far below the body's centre the ground matters for it: the larger of
+// softHeight and what the fall covers in softSeconds, and a step more.
+inline float softLandReach(float falling, float seconds) {
+    return 1 + std::max(softHeight, falling * softSeconds) + falling * std::max(seconds, 0.f) + .5f;
+}
 } // namespace spidy::run_update

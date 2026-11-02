@@ -376,6 +376,16 @@ class Swing {
     // RUNNING LEAP (off until set): a charged leap keeps the speed the body
     // runs at along its way, the charge's push on top (run_update::
     // momentumLeap). Off: the leap as it was, from rest.
+    // SOFT LANDING (off until set): a fall the swing flies with no web
+    // holding and off any wall eases to run_update::softFall down just above
+    // the ground (run_update::softLandVertical). Off: as before.
+    void allowSoftLanding(bool on) {
+        softLanding_ = on;
+        softGround_ = -1;
+    }
+    bool softLandingEnabled() const {
+        return softLanding_;
+    }
     void allowMomentumLeap(bool on) {
         momentumLeap_ = on;
     }
@@ -670,6 +680,10 @@ class Swing {
     // tension now, pulling the body or stretched to its length.
     bool airSlingshot_{}, slingshotInAir_{};
     bool momentumLeap_{};
+    // SOFT LANDING: on; the feet's height over the ground found below this
+    // native step (under 0: none, or no soft landing now).
+    bool softLanding_{};
+    float softGround_{-1};
     bool slingshotTaut(int i) const;
     Vec3 slingshotHands_[2]{}, slingshotEnds_[2]{};
     uint64_t slingshotSurfaces_[2]{};

@@ -257,6 +257,8 @@ inline bool gameOwnsGround(bool fresh, const Data& d) {
 // style as it is.
 // Version 23 appends webTie (off by default): the web tie's gesture, and a
 // webbed enemy who comes only on the yank (WEB TIE; web_tie.hpp).
+// Version 27 appends softLanding (off by default): a fall with no web eases
+// to 9 m/s down over its last metres (Swing::allowSoftLanding, SOFT LANDING).
 // Version 26 appends momentumLeap (off by default): a charged leap keeps the
 // run's speed (Swing::allowMomentumLeap, RUNNING LEAP).
 // Version 25 appends webAngle, degrees -45 to 45 (0 as before), and
@@ -288,7 +290,7 @@ inline bool gameOwnsGround(bool fresh, const Data& d) {
 // Version 8 appends handClimb without changing the upstream phone or arcade
 // fields. Older official settings keep their original layout and meaning.
 struct Settings {
-    uint32_t magic = 0x53575354, version = 26, bytes = sizeof(Settings), grab = 1;
+    uint32_t magic = 0x53575354, version = 27, bytes = sizeof(Settings), grab = 1;
     float maxSpeed = 32;
     uint32_t airWebs = 1;
     float gravity = 6;
@@ -316,6 +318,7 @@ struct Settings {
     int32_t webAngle{};
     uint32_t wristShooters{};
     uint32_t momentumLeap{};
+    uint32_t softLanding{};
 };
 constexpr uint32_t settingsBytesV3 = 28, settingsBytesV4 = 32, settingsBytesV5 = 36, settingsBytesV6 = 40,
                    settingsBytesV7 = 44, settingsBytesV8 = 48, settingsBytesV9 = 52, settingsBytesV10 = 56,
@@ -323,8 +326,8 @@ constexpr uint32_t settingsBytesV3 = 28, settingsBytesV4 = 32, settingsBytesV5 =
                    settingsBytesV14 = 72, settingsBytesV15 = 76, settingsBytesV16 = 80, settingsBytesV17 = 84,
                    settingsBytesV18 = 88, settingsBytesV19 = 92, settingsBytesV20 = 96,
                    settingsBytesV21 = 100, settingsBytesV22 = 104, settingsBytesV23 = 108, settingsBytesV24 = 112,
-                   settingsBytesV25 = 120;
-static_assert(sizeof(Settings) == 124 && offsetof(Settings, walls) == settingsBytesV3 &&
+                   settingsBytesV25 = 120, settingsBytesV26 = 124;
+static_assert(sizeof(Settings) == 128 && offsetof(Settings, walls) == settingsBytesV3 &&
               offsetof(Settings, physical) == settingsBytesV4 &&
               offsetof(Settings, noBlows) == settingsBytesV5 &&
               offsetof(Settings, arcade) == settingsBytesV6 &&
@@ -346,7 +349,8 @@ static_assert(sizeof(Settings) == 124 && offsetof(Settings, walls) == settingsBy
               offsetof(Settings, webTie) == settingsBytesV22 &&
               offsetof(Settings, airSlingshot) == settingsBytesV23 &&
               offsetof(Settings, webAngle) == settingsBytesV24 &&
-              offsetof(Settings, momentumLeap) == settingsBytesV25);
+              offsetof(Settings, momentumLeap) == settingsBytesV25 &&
+              offsetof(Settings, softLanding) == settingsBytesV26);
 // SpidyWebFlightSample: each hand's web in flight (WEB SPEED). phases: 0 no
 // web, 1 flying, 2 just arrived and catching softly, 3 holding.
 struct WebFlightData {
@@ -490,7 +494,8 @@ inline bool validSettings(const Settings& s) {
          (s.version == 23 && s.bytes == settingsBytesV23) ||
          (s.version == 24 && s.bytes == settingsBytesV24) ||
          (s.version == 25 && s.bytes == settingsBytesV25) ||
-         (s.version == 26 && s.bytes == sizeof(Settings))) &&
+         (s.version == 26 && s.bytes == settingsBytesV26) ||
+         (s.version == 27 && s.bytes == sizeof(Settings))) &&
         s.grab <= 1 && std::isfinite(s.maxSpeed) && s.maxSpeed > 0 && s.maxSpeed <= motionSpeedLimit &&
         s.airWebs <= 1 && std::isfinite(s.gravity) && s.gravity >= 0 && s.gravity <= maxGravity &&
         s.walls <= 4 && s.physical <= 1 && s.noBlows <= 3 && s.arcade <= 1 && s.handClimb <= 1 &&
@@ -503,7 +508,7 @@ inline bool validSettings(const Settings& s) {
         s.webTie <= 1 &&
         (s.version < 24 || s.airSlingshot <= 1) &&
         (s.version < 25 || (s.webAngle >= -45 && s.webAngle <= 45 && s.wristShooters <= 1)) &&
-        (s.version < 26 || s.momentumLeap <= 1);
+        (s.version < 26 || s.momentumLeap <= 1) && (s.version < 27 || s.softLanding <= 1);
 }
 static_assert(sizeof(WebState) == 28 && sizeof(Data) == 272 && offsetof(Data, wall) == 240);
 // The player is in the air: Spidy's own flight, or the game's jump or fall,

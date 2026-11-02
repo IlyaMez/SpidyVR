@@ -1410,6 +1410,7 @@ DWORD WINAPI run(void*) {
             s.webTie = values.webTie;
             s.airSlingshot = values.airSlingshot;
             s.momentumLeap = values.momentumLeap;
+            s.softLanding = values.softLanding;
             s.webAngle = values.webAngle;
             s.wristShooters = values.wristShooters;
             sentSwingSettings = s;
@@ -3320,6 +3321,18 @@ DWORD WINAPI run(void*) {
                             // while a web carries the player, nor while B skips the
                             // calibration.
                             walk.dodge = (origins.play() & buttonB) && !calibrationInput;
+                        } else if (steering && !layerOn && !calibrationInput && swingFresh &&
+                                   swingState.owned && values.softLanding && !swingState.grounded &&
+                                   swingState.wall == static_cast<uint32_t>(game_swing::Surface::none) &&
+                                   !swingState.webs[0].attached && !swingState.webs[1].attached &&
+                                   swingState.velocity.y < -4) {
+                            // SOFT LANDING (off by default): falling with no web, the
+                            // game has the stick already, so its first step on the
+                            // ground is the run asked for. Only the stick: the swing
+                            // moves the body until it lands, and RT in the air is the
+                            // game's web swing.
+                            walk.right = motion.walkRight;
+                            walk.forward = motion.walkForward;
                         }
                         // What each hand points at among the game's interactions near
                         // the player, on Spidy's wall only: off it the game offers its
