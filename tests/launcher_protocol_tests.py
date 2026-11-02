@@ -559,12 +559,20 @@ class LauncherTests(unittest.TestCase):
             self.assertTrue(launcher.close_game(42,windows_of=lambda pid: [0x111]))
 
     def test_render_memory_module_retries_a_starting_process_but_not_its_own_refusal(self):
-        exports=dict(SpidyRenderMemoryStart=0x1000,SpidyRenderMemoryStop=0x2000,SpidyRenderMemoryData=0x3000)
+        exports=dict(SpidyRenderMemoryStart=0x1000,SpidyRenderMemoryStop=0x2000,SpidyRenderMemoryData=0x3000,
+                     SpidyScenePool=0x4000,SpidyScenePoolData=0x5000)
         with patch.object(launcher,'open_process',side_effect=[0,5,5,5]), \
              patch.object(launcher,'load_module',side_effect=[StopIteration(),OSError('refused'),(exports,'hash')]), \
              patch.object(launcher,'call_remote',return_value=0) as called,patch.object(launcher,'close') as closed, \
              patch.object(launcher.time,'sleep') as slept:
             self.assertEqual(launcher.enlarge_render_memory(42),exports)
+        # The ring, then the larger slot pool; a pool of the game's own size asks for nothing.
+        self.assertEqual(called.mock_calls,[call(5,0x1000,launcher.RENDER_RING_MB),
+                                            call(5,0x4000,launcher.SCENE_POOL_PERCENT)])
+        with patch.object(launcher,'open_process',return_value=5), \
+             patch.object(launcher,'load_module',return_value=(exports,'hash')), \
+             patch.object(launcher,'call_remote',return_value=0) as called,patch.object(launcher,'close'):
+            launcher.enlarge_render_memory(42,scene_pool=0)
         called.assert_called_once_with(5,0x1000,launcher.RENDER_RING_MB)
         self.assertEqual(slept.mock_calls,[call(.05)]*3)
         self.assertEqual(closed.mock_calls,[call(5)]*3) # every handle that was opened

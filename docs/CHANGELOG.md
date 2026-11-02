@@ -3,7 +3,124 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (October 27, eighth): a floor too high is caught by your
+**Latest build (November 1): one eye pair a headset frame, room for the
+city's detail, and no speed blur in the eyes.** You: "there are still
+imposters or lod or textures or shaders not loading in time or in range
+causing frequent very visible ugly buildings and props ... also preformance is
+not stellar. could we be hogging the resourses with our logs? anyway fix
+both.", then "Fix the speed blur too".
+
+- **What your October 30 sessions showed.** The game drew 78 to 157 eye pairs
+  a second against the headset's 90, unsynced with it: below 90 the headset
+  repeated pairs (up to 14 a second), above it the pairs it never showed cost
+  the card, and the newest pair was a different time old at each headset
+  frame, so what moves stepped unevenly (Discord players: judder at over 100
+  frames a second). Both limits the October 27 build raised were full: the
+  texture budget (7,741 to 7,748 MB of 7,748 from the fourth minute on, 18 GB
+  of the card unused; a player found the blur gone with Texture Quality up),
+  and the scene's slot pool the far buildings' full models share with the
+  props near you (96% at most), which shrank the head cone to 0-15 degrees.
+- **Not the logs.** The launcher reads the game's counters 20 times a second
+  from its own process, about 3 ms a pass (5% of one core), and writes the
+  report after the game closes. Reports now say so (`launcher`).
+- **Pacing (native_pace.hpp).** Each game frame now takes its head from a
+  newer command of the XR worker's than the last frame's, waiting for the
+  next headset frame if none has come: one pair a headset frame, each begun
+  at the same point of it. A game slower than the headset never waits.
+  `--no-eye-pacing` draws as fast as the game can, as before.
+- **The slot pool twice the game's (SpidyScenePool, 819,200 slots).** The
+  render memory module, there from the game's start, raises the one Scene
+  setting the pool is made from, as the scene registry's setup reads it
+  (19116c0): its free-slot bitset and its share of the Scene Gpu Registry
+  (52 MB more video memory) are sized together. A game started before the
+  launcher keeps its own (`scene_pool` says which).
+- **The texture budget up to four times the game's** (it was twice), still
+  leaving an eighth of the card free; **far buildings' full models out to
+  200% of the game's 145 m** (it was 150%).
+- **The game's speed blur left out of the eyes.** Your eye snapshots of
+  October 30 show it mid-swing (0385, 0386): buildings and clouds streaked
+  outward from the middle of the lens. It is the game's radial blur, a kind
+  of visual effect the game plays, like its lens flares and trails. Each
+  frame one plays, the game asks it of every view it has, the eyes among
+  them, weaker the farther the view is from the effect; the eyes sit on the
+  hero. One function queues it for a view (RadialBlur::Schedule, 1841bf0),
+  and nothing else does: Spidy now takes that call and returns for the two
+  eyes. The game's own view (the monitor's normal camera, RECORDING FOV)
+  keeps it. The swing's motion blur bonus (HeroSlideConfig's
+  MotionBlurBonus*) never reached the eyes, whatever this entry said before:
+  the game's motion blur needs three render targets an eye's buffers do not
+  have, and returns at once there.
+- **A session that never showed a frame no longer resets your VR settings.**
+  On November 1 Virtual Desktop refused the eye images five times (a PC
+  restart cleared it). The XR worker reports its settings with its first
+  frame and zeros before it, and the launcher saved those zeros as settings
+  changed in the headset: the next session started at every setting's least
+  (swing speed 10, weight 40%), which floated the hero and slowed the swing.
+  `settings_line` now hands nothing over from a session without frames.
+- **New in reports:** `pacing` (frames that waited, how long),
+  `streaming`'s room checks the pool refused far buildings
+  (`building_refusals`) and nearby props (`zone_refusals`), `scene_pool`,
+  `launcher`, `speed_blur` (how often the game asked its blur of its own view
+  and of an eye; `eyes_left_out`, the times an eye went without).
+- **Measured** with a new probe (`tools/probe_vr_swing.py`: both eyes at 2688
+  x 2880 as your Quest 3 has them, 77% upscaling, eye commands 90 a second,
+  the game's own swing carrying the hero from your save's street; 6 km in
+  four games). Paced: 89.6-90.0 pairs a second, the newest pair's age within
+  0.65 ms (11.6 ms unpaced in a swing), GPU 54-63% and 264-279 W against
+  90-97% and 375-401 W unpaced (157-169 pairs a second), hitches 0.8-1.8% of
+  the time against 6%.
+  The game's pool refused 90 far buildings at 95% full; the doubled one
+  peaked at 50% (411,484 slots, more than the game's whole pool) with the
+  cone at its full 30 degrees and nothing refused, at 150% and 200% reach and
+  with a 60-degree cone. 200% reach cost no measurable frames (155.9-159.0 a
+  second unpaced, both reaches). Texture budget 15,496 MB, in use growing.
+  The speed blur: in the game, the blur function called for the left eye went
+  to Spidy and was left out (`blur_hook_check` in
+  `reports/vr-swing-blur-8.json`), and the eyes ran on at 90 pairs a second.
+- **Not run in the headset:** Virtual Desktop had no headset (asleep). Your
+  next session's report has every number above for the real thing. The game
+  never asked for its speed blur in nine probe games: not in its own swing
+  (17-30 m/s), web zips, point launches, 50 m/s dives or 46 m/s pushes
+  through the movement bridge, or falls from about 100 m. So there is no
+  before-and-after picture, and which effects carry the blur is not known;
+  `speed_blur` in your next report counts the times the eyes went without.
+- **Checked:** 736 core tests, the six Python protocol suites.
+
+**Earlier build (October 30): Spidy 0.7.0, the community patch - twelve pull
+requests.** You: "review open prs and fix what needs fixes, merge whats
+done", then "make a 0.7 release from what you merged - call it community
+patch".
+
+- **tristanlifn (#36): closing a menu no longer ends VR.** Around a menu
+  closing the game can take a few seconds to render a new eye pair while the
+  headset shows the last one, and the watchdog counted only new pairs
+  ("Native eye presentation stalled for 3 seconds"). It ends VR now only
+  when nothing at all reaches the headset for 3 seconds.
+- **AdrianGzzEsc (#37): COMBAT VISUALS off, uppercuts and ground smashes
+  need no hidden call.** Without the arrows there is nothing to follow, so
+  the directional calls are gone with them: an uppercut launches, a blow
+  down knocks a standing enemy down or slams one in the air, finisher count
+  or not.
+- **iplusdvr (#39 to #48), every new setting off or as before until you pick
+  it:** WEB RANGE (10 to 1000 m) and WEB SPEED (a web flies to where it
+  sticks, pulls once it arrives and catches softly), SMART ANCHOR (with
+  open-air webs off, a near miss catches the nearest real surface), ELASTIC
+  WEB, SOFT RELEASE, SWING ASSIST (speed into a wall is cut in time),
+  SLINGSHOT SPEED (up to 300 m/s), BETTER CLIMBING from the ground and on
+  open-air webs, TWO HAND WEB ZIP and HAND ROPE STEERING, HAND MOMENTUM down
+  to 0%, RECORDING FOV from 70 to 160 degrees and RECORDING SMOOTHING.
+- **The review's fixes**, one commit on each branch: the swing settings'
+  versions in sequence (11 to 20; nine pull requests had each taken 11), each
+  new row in its own section with a launcher row, nine choices at most a row,
+  and nothing changed for players who leave the new settings alone (#44's
+  strand check, #48's attach vibration and ray limit). The SPIDY VR tab has
+  62 rows. #38 (JOYSTICK WALL RUN CAMERA, HALF PUNCH DAMAGE) waits for your
+  review: it changes HAND WALL CLIMBING's wall run by default.
+- **Checked:** ctest 3/3 and the six Python protocol suites on the twelve
+  together, built after each step. Not run: the game, a headset (each author
+  played their own feature in their own build).
+
+**Earlier build (October 27, eighth): a floor too high is caught by your
 arms.** You: "height calibration showed very wrong number in one of today's
 sessions - 1.43 or something instead of 1.88".
 

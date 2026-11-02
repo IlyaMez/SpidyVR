@@ -546,7 +546,8 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         runHeadYaw_ = headYaw;
         runNormal_ = held;
         runYaw_ = rig_.yaw;
-        if (joystickRunCamera_) wallRoll_.reset();
+        if (joystickRunCamera_)
+            wallRoll_.reset();
     }
     wallRunning_ = wallRun;
     if (handClimb_ && !ventCrawl && holds && std::abs(held.y) < .5f) {
@@ -723,8 +724,9 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
             normalized(Vec3{0, 1, 0} - held * held.y)));
         // The wall-standing view brings the aligned pelvis closer to the facade.
         // Give joystick runs extra room without changing their viewing angle.
-        const float room = wallRun && joystickRunCamera_ ? runCameraDistance_ :
-            .75f + (momentumView_.distance - .75f) * (1 - vertical);
+        const float room = wallRun && joystickRunCamera_
+                               ? runCameraDistance_
+                               : .75f + (momentumView_.distance - .75f) * (1 - vertical);
         runOffset = held * (room - dot(placed.toWorld(f.head).position - surface.anchor, held));
     }
     runViewOffset_ += (runOffset - runViewOffset_) * (1 - std::exp(-f.seconds / .18f));
@@ -735,7 +737,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     // Keep it out of the stored climb heading and the joystick body-view turn.
     const Pose unbankedHead = placed.toWorld(f.head);
     const bool bankSurface = runView && !(wallRun && joystickRunCamera_) &&
-        (!walks || (wallRun && !joystickRunCamera_)) && !standing_;
+                             (!walks || (wallRun && !joystickRunCamera_)) && !standing_;
     float wantedBank = 0;
     if (bankSurface && runCameraTilt_) {
         const Vec3 travel = runVelocity / runSpeed;

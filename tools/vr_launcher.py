@@ -21,7 +21,11 @@ RENDER_MEMORY_DLL=ROOT/'build/windows-ninja/spidy_render_memory.dll'
 RENDER_RING_MB=512
 # The module's hooks: the ring's creation and its end-of-frame rollover. They are in place from the
 # game's start, so they are no sign of another session's leftovers.
-RENDER_MEMORY_HOOKS=(0x1872d90,0x1872b90)
+RENDER_MEMORY_HOOKS=(0x1872d90,0x1872b90,0x19116c0)
+# The scene's slot pool, in percent of the game's 409,600 slots (native_render_memory.hpp: scenePool): the far
+# buildings' full models and the props near the head share it, and in VR the buildings filled it to 95% in a
+# swing (November 1). Taken only by a game whose world is not made yet, as RENDER_RING_MB is.
+SCENE_POOL_PERCENT=200
 STEAM_APP_ID='1817070'
 # Seconds a new game process may refuse to be opened before the refusal counts as final.
 REFUSAL_PATIENCE=5
@@ -252,12 +256,13 @@ def ready_player(game):
                                  for h in candidates)==1
 
 
-def enlarge_render_memory(pid,megabytes=RENDER_RING_MB,patience=2.5):
+def enlarge_render_memory(pid,megabytes=RENDER_RING_MB,patience=2.5,scene_pool=SCENE_POOL_PERCENT):
     """Load Spidy's render memory module into the game and ask for a larger frame ring.
 
     The game creates its ring about three seconds after its process starts, and the ring cannot
     change afterwards, so this only takes effect in a game that has just started. Later it still
-    reports how much of the game's ring frames use. Returns the module's export addresses.
+    reports how much of the game's ring frames use. The scene's slot pool goes to `scene_pool` percent of the
+    game's the same way (0 keeps the game's). Returns the module's export addresses.
 
     A process that is still being set up refuses module listings and remote calls for a moment;
     those are retried for `patience` seconds. The module's own refusal is final.
@@ -268,8 +273,11 @@ def enlarge_render_memory(pid,megabytes=RENDER_RING_MB,patience=2.5):
         try:
             if not process: raise c.WinError(c.get_last_error())
             exports,_=load_module(pid,process,RENDER_MEMORY_DLL,ROOT/'reports/render-memory-modules',
-                                  ('SpidyRenderMemoryStart','SpidyRenderMemoryStop','SpidyRenderMemoryData'))
+                                  ('SpidyRenderMemoryStart','SpidyRenderMemoryStop','SpidyRenderMemoryData',
+                                   'SpidyScenePool','SpidyScenePoolData'))
             code=call_remote(process,exports['SpidyRenderMemoryStart'],megabytes)
+            # A larger slot pool is no reason to stop a session: SpidyScenePoolData says what came of it.
+            if not code and scene_pool: call_remote(process,exports['SpidyScenePool'],scene_pool)
         except GameNeedsRestart:
             raise  # another build's module in the game: only a new game process changes that
         except (OSError,RuntimeError,StopIteration) as error:

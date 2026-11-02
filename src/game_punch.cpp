@@ -416,13 +416,13 @@ void land(PunchEvent e, bool byStrike) {
     // The flow's finisher must be called: a blow that would be it and
     // answers no such call is a plain one that leaves him standing, to be
     // called on, and the count stays.
-    const bool uncalled = fighter.combatVisuals && flow.finisher(flow.count() + 1) && !(called && before.finisher);
+    const bool uncalled =
+        fighter.combatVisuals && flow.finisher(flow.count() + 1) && !(called && before.finisher);
     if (uncalled)
         flow.keep();
     const int count = uncalled ? flow.count() : flow.hit();
     auto d = deliver(e, airborne, count, flow, DeliveryConfig{.halfDamage = fighter.halfPunchDamage},
-                     called ? before.way : CueWay::None, cues.config().damage,
-                     !fighter.combatVisuals);
+                     called ? before.way : CueWay::None, cues.config().damage, !fighter.combatVisuals);
     if (uncalled && (d.fly || d.knockback >= Knockback::Knockdown)) {
         d.kind = BlowKind::Hit;
         d.kinetic = d.fly = false;
@@ -437,8 +437,7 @@ void land(PunchEvent e, bool byStrike) {
         if (made)
             noteCounter(*made, false);
         ++senseTally.counterBlows;
-        if (d.kind == BlowKind::Hit &&
-            (fighter.combatVisuals || verticalBlow(e, airborne) != CueWay::Down)) {
+        if (d.kind == BlowKind::Hit && (fighter.combatVisuals || verticalBlow(e, airborne) != CueWay::Down)) {
             Vec3 along = e.direction;
             along.y = 0;
             along = length(along) > 1e-3f ? normalized(along) : Vec3{0, 0, -1};
@@ -452,7 +451,7 @@ void land(PunchEvent e, bool byStrike) {
     // The flow's next call: the one that stands, or after an answer another way.
     if (fighter.combatVisuals)
         tally.calls += cues.call(flow.count(), flow.finisher(flow.count() + 1), called,
-                                static_cast<uint32_t>((tally.blows + 1) * 2654435761u >> 13));
+                                 static_cast<uint32_t>((tally.blows + 1) * 2654435761u >> 13));
     native_bodies::Damage request;
     request.victim = e.target;
     request.damager = fighter.record;

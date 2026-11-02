@@ -420,7 +420,9 @@ class GameTrackingRig {
     void wallRunCameraDistance(float metres) {
         runCameraDistance_ = std::isfinite(metres) ? std::clamp(metres, .4f, 1.6f) : .9f;
     }
-    void joystickWallRunCamera(bool enabled) { joystickRunCamera_ = enabled; }
+    void joystickWallRunCamera(bool enabled) {
+        joystickRunCamera_ = enabled;
+    }
     void wallRunCameraTilt(bool enabled) { runCameraTilt_ = enabled; }
     // Actual solved body stance, not the player's momentary look direction.
     void outwardCrawl(float weight) {
