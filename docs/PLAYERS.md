@@ -149,7 +149,9 @@ Swinging
                           where your hand points: along it, past the knuckles
   Squeeze a grip ........ shoot that hand's web; hold to swing
   Release the grip ...... let go
-  Trigger ............... reel in while the web is attached
+  Trigger ............... reel in while the web is attached; with REEL
+                          HAPTICS on, the hand ticks like a winch for each
+                          bit of rope taken in
   Pull a hand sharply ... zip toward the web's anchor
   Pull a hand in ........ the web is a rope in your hand: hanging from it,
                           you go where you pull it, as fast as you pull
@@ -461,8 +463,10 @@ Moving
                          opens in that hand. Reach for your back pocket,
                          not the side of your hip, squeeze once you are
                          there (not on the way), and bring the hand up
-                         within 1.5 s. You can look at the pocket; a look
-                         back past about 70 degrees turns it with you.
+                         within 1.5 s. With SEATED on, the pocket is on
+                         the seat, beside or behind your hip. You can
+                         look at the pocket; a look back past about 70
+                         degrees turns it with you.
                          Still nothing? The session's report says why
                          (`pocket`). The stick picks an app, A
                          opens it, B goes back or puts the phone away.
@@ -798,7 +802,14 @@ VR settings
                    lifts you, and a late or very fast approach can
                    still hit.
   COMFORT ........ snap turn and smooth turn.
-  HAPTICS ........ controller vibration; BLOW SOUNDS (GAME: your blows
+  HAPTICS ........ controller vibration; REEL HAPTICS (off until you switch
+                   it on): reeling a web in ticks in that hand like a winch,
+                   once for every 0.75 m of rope, denser the faster it reels;
+                   SWING HAPTICS (off until you switch it on): swinging on
+                   a taut web ticks softly in that hand, once for every 2 m
+                   you travel - a quick purr at speed, slow ticks at the
+                   swing's turning point, none hanging still;
+                   BLOW SOUNDS (GAME: your blows
                    sound as the game's own do, its hits on the one you
                    struck; SPIDY: Spidy's own tones, as before October 22;
                    OFF: none, nor a web strike's rush); PC MEDIA (off
@@ -853,15 +864,30 @@ VR settings
                    finisher count. Punch speed, contact and free-hand rules
                    still apply. Sound and vibration still work. Web aim markers and the
                    game's own HUD have their existing separate controls.
+  JOYSTICK WALL RUN CAMERA ... in EXPERIMENTAL under HAND WALL CLIMBING, on
+                   by default: a joystick run along a wall turns your view
+                   onto the wall, as before. Off: the left stick supplies
+                   wall velocity while the game sees a neutral movement
+                   stick, so the existing momentum wall-running gait and
+                   camera placement take over. The normal momentum wall
+                   clearance is retained; no new body lean or close-view
+                   pose is added. WALL RUN CAMERA TILT controls the
+                   momentum camera bank.
+  HALF PUNCH DAMAGE ... in EXPERIMENTAL, off by default. On halves VR punch and web-strike
+                   health damage, including uppercuts, smashes, counters and
+                   finishers. Launch and smash velocity, knockback, combo
+                   rules and punch recognition do not change. Off restores
+                   normal damage. This is not a global game damage setting.
   EXPERIMENTAL ... FLIPS (off until you switch it on) uses the right stick
                    in the air; release holds the angle and A returns upright.
                    CONTROLLED FLIPS is a separate A-toggle mode, above.
                    FLIP SPEED sets how fast either steering stick turns you.
                    HAND WALL CLIMBING (off until you switch it on, above)
                    uses a fixed wall-camera clearance. EYE AIM (OFF unless
-                   you pick WEB BALLS, ZIPS or BOTH; below). REALISTIC FLIPS
-                   (off until you switch it on, above) and the ten rows that
-                   tune it.
+                   you pick WEB BALLS, ZIPS or BOTH; below). FLIP
+                   REPROJECTION (off until you switch it on; below).
+                   REALISTIC FLIPS (off until you switch it on, above) and
+                   the ten rows that tune it.
   EYE AIM ........ for a headset whose VR runtime gives games your eyes
                    (OpenXR's eye gaze: Quest Pro, Varjo, Pimax Crystal and
                    the like; a Quest 3 has no eye tracker). The session log
@@ -880,12 +906,33 @@ VR settings
                    or Virtual Desktop sends its eyes to PC games only with
                    that switched on (Quest Link: Settings > Beta; Virtual
                    Desktop: its eye tracking forwarding).
+  FLIP REPROJECTION  turns the picture in the headset by however far a
+                   flip, a swing's spin or a smooth turn has turned you
+                   since the game drew it, as the headset already does for
+                   your head: those turns judder less. Your hands, the
+                   phone and the gadget wheel stay with you; Spider-Man's
+                   own arms and the game's HUD are part of the game's
+                   picture and turn with it by that little. Snap turns are
+                   left as they are. Off by default, to compare. Best
+                   with a headset refresh rate the game keeps up with
+                   (72 Hz on a Quest 3 over Virtual Desktop): when the
+                   headset shows a picture twice, your view stays steady
+                   but those arms, the HUD and things close by judder
+                   instead, since only the turn is made up, not the
+                   ground the swing covers.
+  STEADY HUD       shows the HUD in the headset as a layer of its own,
+                   which the headset places every frame, instead of
+                   drawn by the game into its picture: it holds still
+                   when the headset shows a picture twice. It lies
+                   over everything, your hands too. Needs the HUD on.
+                   Off by default, to compare.
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
   NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
-  SMOOTHING, the four body haptics switches and the
+  SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches
+  and the
   CONTROLLED FLIPS and EXPERIMENTAL rows below FLIP SPEED Spidy keeps in
   %APPDATA%\Spidy\spidy_vr.ini, beside the launcher's own settings; the
   launcher shows realistic flips' ten rows while it is on, and the body

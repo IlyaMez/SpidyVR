@@ -432,6 +432,7 @@ struct DeliveryConfig {
     // One that goes down this steeply (the sine of its pitch) slams him.
     float slamPitch = .5f, slamSpeed = 24, slamCarry = 2, slamDamage = 1.6f;
     float finisherDamage = 2.5f, finisherSpeed = 18, finisherLift = 5;
+    bool halfDamage{}; // health damage only, after every move multiplier
 };
 struct Delivery {
     BlowKind kind{};

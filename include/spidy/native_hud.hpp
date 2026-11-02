@@ -257,6 +257,11 @@ void follow(uint64_t serial, const Quat& relative);
 bool followed(uint64_t serial, Quat& relative);
 // An eye's draw of the panel left out while the HUD is off (stereo_probe).
 void hiddenDraw();
+// STEADY HUD (steady_hud.hpp): the XR worker showed the panel as a layer of
+// its own this headset frame. While it did within `withinMs`, the immersive
+// eyes leave the panel out, as with the HUD off.
+void layered();
+bool layered(uint64_t withinMs);
 // Installs the texture, second-movie and marker hooks; 0 or an error (95xx).
 uint32_t start(uintptr_t base);
 // The game's HUD follower (main thread), whose texture binding a new panel

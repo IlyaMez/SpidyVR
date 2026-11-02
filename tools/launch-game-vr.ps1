@@ -36,6 +36,7 @@ param(
     [switch]$GameMonitorView,
     [switch]$OwnShadows,
     [switch]$EyeLensDistances,
+    [switch]$NoEyePacing,
     [switch]$NoEyeReflections,
     [switch]$StockMonitorView,
     [switch]$FullDesktopView,
@@ -179,6 +180,10 @@ if($OwnShadows) {
 if($EyeLensDistances) {
     $captureArgs+=@('--eye-lens-distances')
     Write-Host "Distances: the eyes' own wide lenses, as before October 19 (detail and textures load at about half the flat game's distance)."
+}
+if($NoEyePacing) {
+    $captureArgs+=@('--no-eye-pacing')
+    Write-Host "Pacing: the game draws eye pairs as fast as it can, as before November 1 (pairs the headset never shows, uneven motion)."
 }
 if($FullDesktopView) {
     $captureArgs+=@('--full-desktop-view')

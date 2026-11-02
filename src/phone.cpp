@@ -234,8 +234,11 @@ void musicScreen(std::vector<Vertex>& v, const Plane& p, const PhoneView& view) 
     }
     const bool litAuto = view.lit == PhoneButton::autoplay;
     p.rounded(v, 0, -.055f, .056f, .01f, .005f, .002f, litAuto ? red : dim);
-    p.text(v, view.pcMedia ? "PC MEDIA" : view.autoplay ? "AUTOPLAY ON" : "AUTOPLAY OFF", 0, -.0569f, .0038f, .046f,
-           white);
+    p.text(v,
+           view.pcMedia    ? "PC MEDIA"
+           : view.autoplay ? "AUTOPLAY ON"
+                           : "AUTOPLAY OFF",
+           0, -.0569f, .0038f, .046f, white);
 }
 // GEAR: each gadget, the equipped one marked red, its charges; the level under them.
 void gearScreen(std::vector<Vertex>& v, const Plane& p, const PhoneView& view) {
@@ -586,8 +589,9 @@ bool PocketDraw::update(float seconds, bool play, const Pose& head, const Pose g
         const Vec3 n = at - neck;
         const float x = dot(n, right), y = n.y, z = dot(n, forward);
         if (press && drawing_ < 0) {
+            const float above = seated_ ? pocketAboveSeated : pocketAbove;
             const Miss miss = lostLong                   ? lost
-                              : -y < pocketAbove         ? high
+                              : -y < above               ? high
                               : -y > pocketBelow         ? low
                               : std::abs(x) < pocketSide ? central
                               : std::abs(x) > pocketOut  ? wide
@@ -599,7 +603,7 @@ bool PocketDraw::update(float seconds, bool play, const Pose& head, const Pose g
                 hands_ |= bit;
                 ++stats_.presses;
                 ++stats_.begun;
-            } else if (lostLong || (-y >= reachBelow && z <= reachAhead)) {
+            } else if (lostLong || (-y >= (seated_ ? reachBelowSeated : reachBelow) && z <= reachAhead)) {
                 ++stats_.presses;
                 ++stats_.missed[miss];
                 stats_.lastMiss = miss;

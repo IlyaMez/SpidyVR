@@ -262,9 +262,14 @@ class PocketDraw {
     // and 8 behind the eyes, as measured until October 27). The hand is out
     // in front once it is `front` ahead of the eyes and no lower than `raised`
     // under them.
-    static constexpr float pocketBelow = 1.f, pocketAbove = .45f, pocketSide = .05f, pocketOut = .4f,
-                           behind = .06f, front = .15f, raised = .65f, drawSeconds = 1.5f, pressed = .6f,
-                           released = .3f, yawDeadZone = 1.2f, yawSpeed = 6, yawDrift = .2f, lostSeconds = .5f;
+    // Seated (SEATED), the back pocket is in the chair: the pocket begins
+    // `pocketAboveSeated` under the neck, beside or behind the hip on the
+    // seat (GolexPrime, October 31: 17 of 18 squeezes seated missed it as too
+    // high, the hand 35 cm under the neck and 16 cm behind it).
+    static constexpr float pocketBelow = 1.f, pocketAbove = .45f, pocketAboveSeated = .25f, pocketSide = .05f,
+                           pocketOut = .4f, behind = .06f, front = .15f, raised = .65f, drawSeconds = 1.5f,
+                           pressed = .6f, released = .3f, yawDeadZone = 1.2f, yawSpeed = 6, yawDrift = .2f,
+                           lostSeconds = .5f;
     // A lost hand's way: its last velocity, measured over about `smoothing`,
     // no faster than carrySpeed, for carrySeconds at most.
     static constexpr float carrySeconds = .3f, carrySpeed = 2.5f, smoothing = .05f;
@@ -276,7 +281,7 @@ class PocketDraw {
     // 27: why can so many not draw it?). A press counts where it may have been
     // one for the phone: in play, the hand lower than `reachBelow` under the
     // neck and no more than `reachAhead` in front of it, or lost.
-    static constexpr float reachBelow = .3f, reachAhead = .1f;
+    static constexpr float reachBelow = .3f, reachBelowSeated = .2f, reachAhead = .1f;
     struct Stats {
         // Such presses; draws begun at a pocket; phones out; draws that ended
         // without one, too slow or let go of on the way; presses that began
@@ -298,6 +303,13 @@ class PocketDraw {
     // hand's. True as the phone comes out: hand() says where.
     bool update(float seconds, bool play, const Pose& head, const Pose grips[2], const bool tracked[2],
                 const float squeezes[2]);
+    // SEATED on: the pocket is the seated one (pocketAboveSeated).
+    void seated(bool on) {
+        seated_ = on;
+    }
+    bool seated() const {
+        return seated_;
+    }
     // A bit per hand whose grip is the draw's.
     unsigned hands() const {
         return hands_;
@@ -319,7 +331,7 @@ class PocketDraw {
     }
 
   private:
-    bool down_[2]{}, yawSet_{};
+    bool down_[2]{}, yawSet_{}, seated_{};
     unsigned hands_{}, draws_{};
     int drawing_ = -1, drewWith_{};
     float time_{}, yaw_{}, lost_[2]{lostSeconds + 1, lostSeconds + 1};

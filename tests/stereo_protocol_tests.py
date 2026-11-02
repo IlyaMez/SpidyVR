@@ -5,7 +5,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'tools'))
-from probe_stereo import snapshot, frame_snapshot, motion_command, render_memory_snapshot
+from probe_stereo import snapshot, frame_snapshot, motion_command, render_memory_snapshot, scene_pool_snapshot
 
 
 def payload(sequence=2, version=4):
@@ -81,6 +81,21 @@ class StereoProtocolTests(unittest.TestCase):
         struct.pack_into('<3I', raw, 0, 0x53524d44, 2, 64)
         with self.assertRaisesRegex(RuntimeError, 'protocol mismatch'):
             render_memory_snapshot(Reader([raw, struct.pack('<q', 8)]), 0)
+
+    def test_scene_pool_reports_the_game_size_and_the_one_its_setup_made(self):
+        # native_render_memory::ScenePoolData: status at 12, sequence at 16, percent and slots from 24.
+        raw = bytearray(40)
+        struct.pack_into('<4Iq3iI', raw, 0, 0x53435050, 1, 40, 2, 4, 200, 409600, 819200, 1)
+        self.assertEqual(scene_pool_snapshot(Reader([raw, struct.pack('<q', 4)]), 0),
+                         dict(status='raised', percent=200, game_slots=409600, slots=819200, setups=1))
+        for status, name in ((0, 'not_asked'), (1, 'waiting'), (3, 'game_set_up_already'), (4, 'refused')):
+            struct.pack_into('<I', raw, 12, status)
+            self.assertEqual(scene_pool_snapshot(Reader([raw, struct.pack('<q', 4)]), 0)['status'], name)
+        struct.pack_into('<q', raw, 16, 5)
+        self.assertIsNone(scene_pool_snapshot(Reader([raw, struct.pack('<q', 5)]*8), 0))
+        struct.pack_into('<3I', raw, 0, 0x53435050, 2, 40)
+        with self.assertRaisesRegex(RuntimeError, 'protocol mismatch'):
+            scene_pool_snapshot(Reader([raw, struct.pack('<q', 4)]), 0)
 
     def test_diagnostic_eye_command_matches_the_tracked_eye_protocol(self):
         main = (1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 10, 20, 30, 1)

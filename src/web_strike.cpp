@@ -458,6 +458,8 @@ Delivery deliver(const PunchEvent& blow, bool targetAirborne, int count, const F
         // knocks down (kMelee kKnockdown: a hit reaction, then BotStateStunned).
         d.knockback = Knockback::Knockdown;
     }
+    if (c.halfDamage)
+        d.damage *= .5f;
     return d;
 }
 

@@ -373,6 +373,10 @@ class Swing {
     bool reeling() const {
         return (webs_[0].attached && hands_[0].reeling) || (webs_[1].attached && hands_[1].reeling);
     }
+    // That hand's web reels in now.
+    bool reeling(int hand) const {
+        return hand >= 0 && hand < 2 && webs_[hand].attached && hands_[hand].reeling;
+    }
     // A shared strand keeps the length taken in by hand-over-hand pulling.
     void allowBetterClimbing(bool on) {
         betterClimbing_ = on;

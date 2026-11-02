@@ -18,8 +18,6 @@
 #include <thread>
 #include <vector>
 
-#pragma comment(lib, "windowsapp")
-
 namespace spidy {
 namespace {
 using namespace winrt::Windows::Media::Control;
@@ -172,8 +170,10 @@ struct PcMedia::Player {
                 now.session = true;
                 now.playing = current.GetPlaybackInfo().PlaybackStatus() == PlaybackStatus::Playing;
                 const auto properties = current.TryGetMediaPropertiesAsync().get();
-                const auto artist = properties.Artist().empty() ? properties.AlbumArtist() : properties.Artist();
-                strncpy_s(now.song, phoneMediaSong(utf8(artist), utf8(properties.Title())).c_str(), _TRUNCATE);
+                const auto artist =
+                    properties.Artist().empty() ? properties.AlbumArtist() : properties.Artist();
+                strncpy_s(now.song, phoneMediaSong(utf8(artist), utf8(properties.Title())).c_str(),
+                          _TRUNCATE);
                 strncpy_s(now.source, phoneMediaSource(app).c_str(), _TRUNCATE);
             } else {
                 app.clear();

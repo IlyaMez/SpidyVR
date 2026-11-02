@@ -20,7 +20,7 @@ class PcMedia {
         // volume this is (a browser that names itself apart from its process,
         // as Firefox does, has none to find).
         bool volumeKnown{};
-        int volume{}; // percent
+        int volume{};      // percent
         char song[64]{};   // ARTIST - TITLE (phoneMediaSong)
         char source[24]{}; // its app (phoneMediaSource)
     };

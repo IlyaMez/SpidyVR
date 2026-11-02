@@ -61,6 +61,35 @@ inline Fields replaced(Fields f, uint64_t ring, uint32_t bytes) {
 inline uint32_t ringStatus(const Fields& f, uint64_t installed) {
     return !f.ring ? 1 : f.ring == installed ? 3 : 2;
 }
+// The scene's slot pool (native_stream.hpp: the far buildings' full models and
+// the props and details of the hibernate zones near the head). Its size is the
+// first of the game's Scene settings (7a89780: 409,600 slots). Only the scene
+// registry's setup reads it (19116c0, called once from 16fdd4a as the game
+// makes its world), and sizes two things by it: the pool's free-slot bitset
+// (+1b0) and its share of the Scene Gpu Registry buffer (+140, 0x80 bytes a
+// slot, for every instance in the scene). In VR the far buildings filled the
+// pool to 95% in a swing, and it refused some (November 1's probe), so a
+// session can ask for a larger pool before that setup runs (SpidyScenePool):
+// the setting is raised once, as the setup starts.
+inline constexpr uint32_t scenePoolMost = 400;
+// The pool for `percent` of the game's `slots`, or the game's own: percent
+// 100-400, slots 1 to 4M.
+inline int32_t scenePool(int32_t slots, uint32_t percent) {
+    if (slots <= 0 || slots > (1 << 22) || percent <= 100 || percent > scenePoolMost)
+        return slots;
+    return static_cast<int32_t>(static_cast<int64_t>(slots) * percent / 100);
+}
+struct ScenePoolData {
+    uint32_t magic = 0x53435050, version = 1, bytes = sizeof(ScenePoolData);
+    // 0 not asked, 1 waiting for the game's setup, 2 raised there, 3 the game
+    // had set its pool up already, 4 the game's code read otherwise.
+    uint32_t status{};
+    volatile int64_t sequence{};
+    uint32_t percent{};
+    int32_t gameSlots{}, slots{};
+    uint32_t setups{};
+};
+static_assert(sizeof(ScenePoolData) == 40);
 // Telemetry, read by the session tools.
 struct Data {
     uint32_t magic = 0x53524d44, version = 1, bytes = sizeof(Data);
