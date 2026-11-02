@@ -10088,6 +10088,42 @@ int main() {
         check(s.rightTrigger==255&&s.leftTrigger==0&&(s.buttons&a)==0,"native run was not RT alone");
         check(fromControllers(f,Mapping::menus,w).rightTrigger==0,"the menus got native run's RT");
     });
+    test("NATIVE RUN's gate: every condition of the ground run, in one place", [] {
+        using namespace game_pad;
+        NativeRunGate open;
+        open.setting = open.playing = open.gameOwnsGround = true;
+        const Walk idle{};
+        check(nativeRunAllowed(open, idle), "an open gate refused");
+        auto with = [&](auto change) {
+            NativeRunGate g = open;
+            Walk w{};
+            change(g, w);
+            return nativeRunAllowed(g, w);
+        };
+        check(!with([](NativeRunGate& g, Walk&) { g.setting = false; }), "the setting off ran");
+        check(!with([](NativeRunGate& g, Walk&) { g.playing = false; }), "out of play ran");
+        check(!with([](NativeRunGate& g, Walk&) { g.calibrating = true; }), "the calibration ran");
+        check(!with([](NativeRunGate& g, Walk&) { g.padLayer = true; }), "the pad layer ran");
+        check(!with([](NativeRunGate& g, Walk&) { g.mounting = true; }), "a mount ran");
+        check(!with([](NativeRunGate& g, Walk&) { g.ventCrawl = true; }), "a vent ran");
+        check(!with([](NativeRunGate& g, Walk&) { g.onSurface = true; }), "a surface ran");
+        check(!with([](NativeRunGate& g, Walk&) { g.onCrawl = true; }), "the game's crawl ran");
+        check(!with([](NativeRunGate& g, Walk&) { g.gameOwnsGround = false; }), "the swing's body ran");
+        check(!with([](NativeRunGate& g, Walk&) { g.grabbing = true; }), "a grab ran");
+        check(!with([](NativeRunGate& g, Walk&) { g.grips[0] = .3f; }), "a left grip ran");
+        check(!with([](NativeRunGate& g, Walk&) { g.triggers[1] = .5f; }), "a right trigger ran");
+        check(!with([](NativeRunGate& g, Walk&) { g.grips[1] = NAN; }), "a grip that is not a number ran");
+        check(with([](NativeRunGate& g, Walk&) { g.grips[0] = g.triggers[1] = .29f; }),
+              "a resting hand stopped it");
+        check(!with([](NativeRunGate&, Walk& w) { w.jump = true; }), "A ran");
+        check(!with([](NativeRunGate&, Walk& w) { w.interact = true; }), "Y ran");
+        check(!with([](NativeRunGate&, Walk& w) { w.zip = true; }), "a zip ran");
+        check(!with([](NativeRunGate&, Walk& w) { w.aim = true; }), "aim ran");
+        check(!with([](NativeRunGate&, Walk& w) { w.pull = true; }), "a pull ran");
+        check(!with([](NativeRunGate&, Walk& w) { w.heal = true; }), "a heal ran");
+        check(!with([](NativeRunGate&, Walk& w) { w.demand.rightTrigger = true; }), "a prompt's demand ran");
+        check(with([](NativeRunGate&, Walk& w) { w.dodge = true; }), "a dodge stopped the run");
+    });
     test("NATIVE RUN's ground: only where the game, not the swing, has the player on his feet", [] {
         using game_swing::Data;
         using game_swing::Surface;

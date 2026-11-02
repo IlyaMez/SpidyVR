@@ -3575,16 +3575,22 @@ DWORD WINAPI run(void*) {
                             // grip or trigger is in use (webs, web balls, grabs) nor
                             // with the game's A, Y, zip, aim, pull or a prompt's
                             // buttons, which RT would turn into something else.
-                            const bool handsIdle =
-                                frame.hands[0].squeeze < .3f && frame.hands[0].trigger < .3f &&
-                                frame.hands[1].squeeze < .3f && frame.hands[1].trigger < .3f &&
-                                !grabPhases[0] && !grabPhases[1];
-                            const bool runAllowed =
-                                values.nativeRun && playing && !calibrationInput && !layerOn && !mounting &&
-                                !motion.ventCrawl && !motion.onSurface && handsIdle &&
-                                game_swing::gameOwnsGround(swingFresh, swingState) && !walk.jump &&
-                                !walk.interact && !walk.zip && !walk.aim && !walk.pull && !walk.heal &&
-                                !walk.demand.any() && !onCrawl;
+                            game_pad::NativeRunGate gate;
+                            gate.setting = values.nativeRun;
+                            gate.playing = playing;
+                            gate.calibrating = calibrationInput;
+                            gate.padLayer = layerOn;
+                            gate.mounting = mounting;
+                            gate.ventCrawl = motion.ventCrawl;
+                            gate.onSurface = motion.onSurface;
+                            gate.onCrawl = onCrawl;
+                            gate.gameOwnsGround = game_swing::gameOwnsGround(swingFresh, swingState);
+                            gate.grabbing = grabPhases[0] || grabPhases[1];
+                            for (unsigned i = 0; i < 2; ++i) {
+                                gate.grips[i] = frame.hands[i].squeeze;
+                                gate.triggers[i] = frame.hands[i].trigger;
+                            }
+                            const bool runAllowed = game_pad::nativeRunAllowed(gate, walk);
                             nativeRun.update(runAllowed, walk.right, walk.forward);
                             if (nativeRun.held())
                                 walk.parkour = true;

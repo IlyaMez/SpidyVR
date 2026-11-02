@@ -178,6 +178,29 @@ class NativeRun {
     float on_{defaultOnAbove}, off_{defaultOffBelow};
     bool held_{};
 };
+// NATIVE RUN's gate, in one place (game_xr builds it each frame): every
+// state in which the game's RT may go out for its run on the ground. The
+// player's own (setting, playing, not calibrating, not in the pad layer), the
+// body's (the game, not the swing, has him on his feet: gameOwnsGround, from
+// game_swing::gameOwnsGround; no mount, vent, surface or game crawl) and his
+// hands' (no grip or trigger past handBusy, no grab). Then none of the
+// game's buttons that RT turns into something else: A, Y, zip, aim, pull,
+// heal or a prompt's demand (nativeRunAllowed).
+struct NativeRunGate {
+    static constexpr float handBusy = .3f;
+    bool setting{}, playing{}, calibrating{}, padLayer{}, mounting{}, ventCrawl{}, onSurface{}, onCrawl{};
+    bool gameOwnsGround{}, grabbing{};
+    float grips[2]{}, triggers[2]{};
+    bool handsIdle() const {
+        return !grabbing && grips[0] < handBusy && triggers[0] < handBusy && grips[1] < handBusy &&
+               triggers[1] < handBusy;
+    }
+};
+inline bool nativeRunAllowed(const NativeRunGate& g, const Walk& w) {
+    return g.setting && g.playing && !g.calibrating && !g.padLayer && !g.mounting && !g.ventCrawl &&
+           !g.onSurface && !g.onCrawl && g.gameOwnsGround && g.handsIdle() && !w.jump && !w.interact &&
+           !w.zip && !w.aim && !w.pull && !w.heal && !w.demand.any();
+}
 // A held on the ground: a charged leap, Spidy's own. The game has one, its
 // Charge Jump ("Hold RT + A while running or standing to build up charge,
 // then release A for a huge leap"), but as a Webslinger skill: a hero
