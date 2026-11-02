@@ -577,8 +577,9 @@ bool PocketDraw::update(float seconds, bool play, const Pose& head, const Pose g
         const Vec3 n = at - neck;
         const float x = dot(n, right), y = n.y, z = dot(n, forward);
         if (press && drawing_ < 0) {
+            const float above = seated_ ? pocketAboveSeated : pocketAbove;
             const Miss miss = lostLong                   ? lost
-                              : -y < pocketAbove         ? high
+                              : -y < above               ? high
                               : -y > pocketBelow         ? low
                               : std::abs(x) < pocketSide ? central
                               : std::abs(x) > pocketOut  ? wide
@@ -590,7 +591,7 @@ bool PocketDraw::update(float seconds, bool play, const Pose& head, const Pose g
                 hands_ |= bit;
                 ++stats_.presses;
                 ++stats_.begun;
-            } else if (lostLong || (-y >= reachBelow && z <= reachAhead)) {
+            } else if (lostLong || (-y >= (seated_ ? reachBelowSeated : reachBelow) && z <= reachAhead)) {
                 ++stats_.presses;
                 ++stats_.missed[miss];
                 stats_.lastMiss = miss;

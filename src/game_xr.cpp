@@ -1684,6 +1684,7 @@ DWORD WINAPI run(void*) {
                     {
                         const float squeezes[2]{frame.hands[0].squeeze, frame.hands[1].squeeze};
                         const bool drawPlay = gesturesPlay && !phone.open();
+                        pocketDraw.seated(values.seated);
                         if (pocketDraw.update(frame.seconds, drawPlay, frame.head, grips, gripsTracked,
                                               squeezes))
                             phoneDrawnWith = pocketDraw.drewWith();

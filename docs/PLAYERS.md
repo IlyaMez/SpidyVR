@@ -463,8 +463,10 @@ Moving
                          opens in that hand. Reach for your back pocket,
                          not the side of your hip, squeeze once you are
                          there (not on the way), and bring the hand up
-                         within 1.5 s. You can look at the pocket; a look
-                         back past about 70 degrees turns it with you.
+                         within 1.5 s. With SEATED on, the pocket is on
+                         the seat, beside or behind your hip. You can
+                         look at the pocket; a look back past about 70
+                         degrees turns it with you.
                          Still nothing? The session's report says why
                          (`pocket`). The stick picks an app, A
                          opens it, B goes back or puts the phone away.

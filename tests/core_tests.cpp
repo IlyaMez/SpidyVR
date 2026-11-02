@@ -6628,6 +6628,24 @@ int main() {
             for(int i=0;i<20;++i)step(counted,pocket,1,.1f);
             check(counted.stats().letGo==1&&counted.stats().tooSlow==1,"the draws that ended were not counted");
         }
+        // Seated (GolexPrime, October 31): the hand behind the hip on the seat, 35 cm under the neck and 16 cm
+        // behind it, is the pocket; standing it is too high, and seated one at the lower back still is.
+        {
+            const Pose seat{{.2f,1.25f,.25f},{}}, back{{.2f,1.38f,.25f},{}};
+            PocketDraw standing, sitting;
+            sitting.seated(true);
+            check(!step(standing,seat,1)&&standing.hands()==0u&&standing.stats().missed[PocketDraw::high]==1,
+                  "standing, the seat's pocket was no miss as too high");
+            check(!step(sitting,seat,1)&&sitting.hands()==2u&&sitting.stats().begun==1,
+                  "seated, a squeeze at the seat's pocket began no draw");
+            check(step(sitting,front,1)&&sitting.draws()==1,"seated, the draw did not open the phone");
+            step(sitting,front,0);
+            check(!step(sitting,back,1)&&sitting.hands()==0u&&sitting.stats().missed[PocketDraw::high]==1,
+                  "seated, a squeeze at the lower back began a draw or was not counted");
+            step(sitting,back,0);
+            // Seated, a hand hanging at the side or in front of the hip still shoots its web.
+            check(!step(sitting,side,1)&&!step(sitting,hip,1)&&sitting.hands()==0u,"seated, the side made a pocket");
+        }
         // A game hitch on the way (a moment out of play) does not end a draw.
         step(d,pocket,1);
         step(d,pocket,1,1.f/90,false);
