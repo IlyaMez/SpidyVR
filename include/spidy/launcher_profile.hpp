@@ -133,6 +133,7 @@ inline constexpr ProfileSetting profileSettings[] = {
     tabOnly("running_leap", Item::momentumLeap, &Values::momentumLeap),
     tabOnly("early_jump", Item::earlyJump, 0, 2, &Values::earlyJump),
     tabOnly("soft_landing", Item::softLanding, &Values::softLanding),
+    tabOnly("spidy_run", Item::spidyRun, &Values::spidyRun),
     retired("wall_distance_cm", vr_settings::fixedWallDistance),
     tabOnly("realistic_flips", Item::realisticFlips, &Values::realisticFlips),
     tabOnly("rotation_strength", Item::automaticStrength, 25, 100, &Values::automaticStrength),

@@ -1504,6 +1504,12 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
         // On a wall the stick walks it, and gravity does not pull along it.
         wallMotion(dt, in);
         body_.grounded = false;
+    } else if (groundRun_ && body_.grounded) {
+        // SPIDY RUN: the run's own speed across the ground, pressed onto it.
+        groundAlong_ = run_update::groundRunStep(groundAlong_, in.move, dt);
+        const bool stick = finite(in.move) && std::hypot(in.move.x, in.move.z) > .05f;
+        groundIdle_ = stick ? 0 : groundIdle_ + dt;
+        body_.velocity = limited(groundAlong_ + Vec3{0, -run_update::groundRun.press, 0}, speedLimit());
     } else {
         Vec3 steering = finite(in.move) ? limited(Vec3{in.move.x, 0, in.move.z}, 1) : Vec3{};
         body_.velocity +=
@@ -1740,12 +1746,14 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
         !std::isfinite(inputSeconds) || inputSeconds < 0 || !finite(actual.position) ||
         !finite(actual.velocity) || length(actual.velocity) > speedLimit() * 2) {
         releaseAll();
+        endGroundRun();
         return {};
     }
     // A long step is a slow game, not stale input. Over 50 ms used to be
     // refused here: the caller let go of a swinging player, whom the game
     // then dropped at its own fall speed (October 10 headset report).
     seconds = std::min(seconds, longestNativeStep);
+    const bool touchdown = actual.grounded && !body_.grounded;
     if (actual.grounded && !body_.grounded)
         sinceLanding_ = 0;
     if (!actual.grounded)
@@ -1790,10 +1798,27 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
         if (ground && finite(ground->point) && finite(ground->normal) && normalized(ground->normal).y > .5f)
             softGround_ = std::max(0.f, body_.position.y - 1 - ground->point.y);
     }
+    // SPIDY RUN: a landing faster than the sprint goes on at its speed; it
+    // ends off the ground, on a web, a wall or a mount's way up one.
+    const bool webbed =
+        webs_[0].attached || webs_[1].attached || climbing_[0].attached || climbing_[1].attached;
+    if (groundRun_ && (!spidyRun_ || !actual.grounded || wall_.on || mounting_ || mount_ > 0 || webbed))
+        endGroundRun();
+    if (spidyRun_ && touchdown && !groundRun_ && !wall_.on && !webbed && !mounting_ && mount_ <= 0) {
+        const Vec3 along = run_update::groundRunEntry(body_.velocity);
+        if (length(along) > run_update::groundRun.enterAbove) {
+            groundRun_ = true;
+            groundAlong_ = along;
+            groundIdle_ = 0;
+        }
+    }
     const auto count = static_cast<unsigned>(std::ceil(seconds / config_.fixedStep));
     const float dt = seconds / count;
     for (unsigned i = 0; i < count; ++i)
         step(dt, input, world, nullptr);
+    // SPIDY RUN: at the sprint, or a second without the stick, it is the game's run again.
+    if (groundRun_ && (length(groundAlong_) <= run_update::groundRun.sprint + .01f || groundIdle_ >= 1))
+        endGroundRun();
     MotionIntent result{body_.position, body_.velocity, true};
     // Native collision owns position and ground contact. Do not publish the
     // prediction as if the game had already accepted it.

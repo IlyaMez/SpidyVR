@@ -73,6 +73,15 @@ float graspHeight{};
 // the game began on it, the body's height then; a rest the game would not take
 // (not asked again until he walks).
 float restSeconds{}, crawlHeight{};
+// SPIDY RUN (Swing::groundRunning): the velocity the last command asked of a
+// body the swing runs on the ground, how long the body has lagged under half
+// of it, and how many runs ended so. A mover that does not take the swing's
+// command on the ground (unknown before it is played) gives the run back to
+// the game at once, and after three such ends no run starts again until the
+// settings come again.
+Vec3 groundRunAsked{};
+float groundRunLag{};
+uint32_t groundRunRefusals{};
 uint64_t crawlAskedAt{};
 bool crawlBegun{}, crawlDeclined{};
 // The wall the game's crawl last held the player on, where its own wall run
@@ -1024,9 +1033,28 @@ void visit(const native_rays::QueryContext& world) {
         mountTakeoff.reset();
     }
     // Nor does the swing take the body the game runs up its wall (gameRun).
+    // SPIDY RUN: the swing's own run on the ground, as long as it lasts.
+    const bool groundRun = solver.groundRunning() && collidable && !transition.waiting && !mount.waiting;
     const bool drive = !handCrawl && !grasped && !handing && !gameRun && !yielding &&
-                       (striking || (collidable && !body.grounded && !transition.waiting &&
-                                     (attached || owned || transition.resumed || wall.on)));
+                       (striking || groundRun ||
+                        (collidable && !body.grounded && !transition.waiting &&
+                         (attached || owned || transition.resumed || wall.on)));
+    if (solver.groundRunning()) {
+        // Does the body go where the run sends it? Measured against the last command's speed across.
+        const float asked = std::hypot(groundRunAsked.x, groundRunAsked.z);
+        const float went = std::hypot(motion.achievedVelocity.x, motion.achievedVelocity.z);
+        if (owned && asked > 3 && std::isfinite(went) && went < .5f * asked)
+            groundRunLag += motion.dt;
+        else
+            groundRunLag = std::max(0.f, groundRunLag - motion.dt);
+        if (!drive || groundRunLag > .25f) {
+            if (drive && ++groundRunRefusals >= 3)
+                solver.allowGroundRun(false);
+            solver.endGroundRun();
+        }
+    }
+    if (!solver.groundRunning())
+        groundRunAsked = {}, groundRunLag = 0;
     if (drive) {
         native_movement::Command request;
         request.enabled = 1;
@@ -1044,6 +1072,8 @@ void visit(const native_rays::QueryContext& world) {
         // the module moves the body for all of it (native_movement::stepDelta).
         request.leaseMs = motionLeaseMs;
         request.velocity = requested;
+        if (solver.groundRunning())
+            groundRunAsked = requested;
         if (const auto error = submitMotion(&request)) {
             fault(error);
             return;
@@ -1310,7 +1340,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
          header[2] != settingsBytesV15 && header[2] != settingsBytesV16 && header[2] != settingsBytesV17 &&
          header[2] != settingsBytesV18 && header[2] != settingsBytesV19 && header[2] != settingsBytesV20 &&
          header[2] != settingsBytesV21 && header[2] != settingsBytesV22 && header[2] != settingsBytesV23 && header[2] != settingsBytesV24 &&
-         header[2] != settingsBytesV25 && header[2] != settingsBytesV26 && header[2] != sizeof(s)) ||
+         header[2] != settingsBytesV25 && header[2] != settingsBytesV26 && header[2] != settingsBytesV27 &&
+         header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || !validSettings(s))
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
@@ -1357,6 +1388,8 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         solver.allowAirSlingshot(s.version >= 24 && s.airSlingshot != 0);
         solver.allowMomentumLeap(s.version >= 26 && s.momentumLeap != 0);
         solver.allowSoftLanding(s.version >= 27 && s.softLanding != 0);
+        solver.allowGroundRun(s.version >= 28 && s.spidyRun != 0);
+        groundRunRefusals = 0;
         webAngle = s.version >= 25 ? s.webAngle : 0;
         wristShooters = s.version >= 25 && s.wristShooters != 0;
         if (s.version >= 7)

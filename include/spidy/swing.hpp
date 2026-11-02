@@ -379,6 +379,32 @@ class Swing {
     // SOFT LANDING (off until set): a fall the swing flies with no web
     // holding and off any wall eases to run_update::softFall down just above
     // the ground (run_update::softLandVertical). Off: as before.
+    // SPIDY RUN (off until set): a landing faster than the game's sprint,
+    // with no web and off any wall, is the swing's own run on the ground
+    // (groundRunning; run_update::groundRunStep) until it eases to the sprint,
+    // the stick idles a second, the body leaves the ground, a web, a wall or
+    // a mount comes, or the caller ends it (endGroundRun). The caller drives
+    // the body while it runs. Off: every landing is the game's, as before.
+    void allowGroundRun(bool on) {
+        spidyRun_ = on;
+        if (!on)
+            endGroundRun();
+    }
+    bool groundRunEnabled() const {
+        return spidyRun_;
+    }
+    bool groundRunning() const {
+        return groundRun_;
+    }
+    // Its velocity across the ground now.
+    Vec3 groundRunVelocity() const {
+        return groundRun_ ? groundAlong_ : Vec3{};
+    }
+    void endGroundRun() {
+        groundRun_ = false;
+        groundAlong_ = {};
+        groundIdle_ = 0;
+    }
     void allowSoftLanding(bool on) {
         softLanding_ = on;
         softGround_ = -1;
@@ -683,6 +709,11 @@ class Swing {
     // SOFT LANDING: on; the feet's height over the ground found below this
     // native step (under 0: none, or no soft landing now).
     bool softLanding_{};
+    // SPIDY RUN: on; running now, at groundAlong_ across the ground, the stick
+    // idle for groundIdle_.
+    bool spidyRun_{}, groundRun_{};
+    Vec3 groundAlong_{};
+    float groundIdle_{};
     float softGround_{-1};
     bool slingshotTaut(int i) const;
     Vec3 slingshotHands_[2]{}, slingshotEnds_[2]{};

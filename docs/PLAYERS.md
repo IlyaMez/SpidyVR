@@ -996,9 +996,15 @@ VR settings
   SOFT LANDING     (off until you switch it on) falling with no web, your
                    fall eases to about 9 m/s over the last 3 m before the
                    ground; your speed across is kept. Off: as before.
+  SPIDY RUN        (off until you switch it on) land faster than a sprint
+                   (let go of a swing near the street) and you run on at
+                   that speed, steering with the stick without losing it;
+                   it eases to a sprint in a few seconds and the game's
+                   run takes over. A wall ahead is the usual wall run.
+                   Off: the game takes every landing, as before.
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches

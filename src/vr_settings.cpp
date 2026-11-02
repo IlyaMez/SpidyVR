@@ -343,6 +343,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.airSlingshot;
     case Item::wristShooters:
         return &v.wristShooters;
+    case Item::spidyRun:
+        return &v.spidyRun;
     case Item::softLanding:
         return &v.softLanding;
     case Item::momentumLeap:
@@ -401,9 +403,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 82>& rows() {
+const std::array<Row, 83>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 82> all{{
+    static const std::array<Row, 83> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -595,6 +597,10 @@ const std::array<Row, 82>& rows() {
         {Item::softLanding,
          "SOFT LANDING",
          "A fall with no web eases to 9 m/s down just before the ground. Off as before.",
+         {}},
+        {Item::spidyRun,
+         "SPIDY RUN",
+         "Land fast and keep running at that speed, steering, until it eases off.",
          {}},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
@@ -833,6 +839,7 @@ constexpr TabOnly tabOnly[] = {
     {"running_leap", &Values::momentumLeap, nullptr},
     {"early_jump", nullptr, &Values::earlyJump},
     {"soft_landing", &Values::softLanding, nullptr},
+    {"spidy_run", &Values::spidyRun, nullptr},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

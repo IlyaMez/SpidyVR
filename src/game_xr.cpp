@@ -1411,6 +1411,7 @@ DWORD WINAPI run(void*) {
             s.airSlingshot = values.airSlingshot;
             s.momentumLeap = values.momentumLeap;
             s.softLanding = values.softLanding;
+            s.spidyRun = values.spidyRun;
             s.webAngle = values.webAngle;
             s.wristShooters = values.wristShooters;
             sentSwingSettings = s;
@@ -3322,10 +3323,16 @@ DWORD WINAPI run(void*) {
                             // calibration.
                             walk.dodge = (origins.play() & buttonB) && !calibrationInput;
                         } else if (steering && !layerOn && !calibrationInput && swingFresh &&
-                                   swingState.owned && values.softLanding && !swingState.grounded &&
+                                   swingState.owned &&
                                    swingState.wall == static_cast<uint32_t>(game_swing::Surface::none) &&
                                    !swingState.webs[0].attached && !swingState.webs[1].attached &&
-                                   swingState.velocity.y < -4) {
+                                   ((values.softLanding && !swingState.grounded &&
+                                     swingState.velocity.y < -4) ||
+                                    (values.spidyRun && swingState.grounded))) {
+                            // SPIDY RUN (off by default): on the ground the swing runs
+                            // the body, and the game gets the stick for its run's look;
+                            // no RT (NATIVE RUN's gate is the game's ground), so none of
+                            // its vaults fight the swing.
                             // SOFT LANDING (off by default): falling with no web, the
                             // game has the stick already, so its first step on the
                             // ground is the run asked for. Only the stick: the swing

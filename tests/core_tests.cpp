@@ -1591,7 +1591,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 27 && s.bytes == 128 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 28 && s.bytes == 132 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -2254,7 +2254,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 27 && s.bytes == 128 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 28 && s.bytes == 132 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -3610,7 +3610,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 27 && s.bytes == 128, "updated settings did not append the climbing field");
+        check(s.version == 28 && s.bytes == 132, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -9424,7 +9424,7 @@ int main() {
         Swing sw(inert());
         check(!sw.softLandingEnabled(), "soft landing on by default");
         game_swing::Settings packet;
-        check(packet.version == 27 && packet.bytes == 128 && !packet.softLanding &&
+        check(packet.version >= 27 && !packet.softLanding &&
                   offsetof(game_swing::Settings, softLanding) == game_swing::settingsBytesV26,
               "soft landing not appended, or on by default");
         packet.softLanding = 2;
@@ -9433,6 +9433,164 @@ int main() {
         packet.version = 26;
         packet.bytes = game_swing::settingsBytesV26;
         check(game_swing::validSettings(packet), "version 26 settings packet refused");
+    });
+    test("SPIDY RUN: the wall run's momentum on the ground - entry, steering, decay to the sprint", [] {
+        using namespace run_update;
+        const GroundRun& k = groundRun;
+        // Entry: grazing keeps the speed across; a fall into the ground adds carry of it at most.
+        Vec3 e = groundRunEntry({0, 0, -20});
+        near(e.z, -20);
+        e = groundRunEntry({0, -10, -20});
+        const float speed = std::hypot(10.f, 20.f);
+        near(length(e), std::min(speed, 20 * (1 + k.carry * 10 / speed)), .01f);
+        check(length(e) > 20 && length(e) < 20 * 1.15f && e.y == 0, "entry carry not the wall's rule");
+        near(length(groundRunEntry({0, -5, -60})), k.entryMax, .01f);
+        check(length(groundRunEntry({NAN, 0, 0})) == 0, "an entry from no number");
+        // Straight on with the stick: the speed decays by `decay` a second down to the sprint.
+        Vec3 v{0, 0, -20};
+        for (int i = 0; i < 120; ++i)
+            v = groundRunStep(v, {0, 0, -1}, 1.f / 120);
+        near(length(v), 20 - k.decay, .05f);
+        for (int i = 0; i < 2000; ++i)
+            v = groundRunStep(v, {0, 0, -1}, 1.f / 120);
+        near(length(v), k.sprint, .01f);
+        // A turn keeps the speed and is no faster than the turn rate.
+        v = {0, 0, -20};
+        const Vec3 turned = groundRunStep(v, {1, 0, 0}, 1.f / 120);
+        const float rate = k.turnSlow + (k.turnFast - k.turnSlow) * (20 / k.entryMax);
+        near(std::atan2(turned.x, -turned.z), rate / 120, 1e-3f);
+        near(length(turned), 20 - k.decay / 120, 1e-3f);
+        for (int i = 0; i < 240; ++i)
+            v = groundRunStep(v, {1, 0, 0}, 1.f / 120);
+        check(v.x > 0 && std::abs(v.z) < 1e-3f && length(v) > 20 - 2 * k.decay - .1f,
+              "a 90 degree turn lost the run's speed, or did not turn");
+        // No stick: it brakes too. Pulled back: harder.
+        Vec3 coast{0, 0, -20}, back{0, 0, -20};
+        for (int i = 0; i < 60; ++i) {
+            coast = groundRunStep(coast, {}, 1.f / 120);
+            back = groundRunStep(back, {0, 0, 1}, 1.f / 120);
+        }
+        near(length(coast), 20 - (k.brake + k.decay) * .5f, .05f);
+        check(length(back) < length(coast), "pulling back did not brake harder");
+        // Slow and pushed: up to the sprint at the stick's tilt.
+        v = {0, 0, -1};
+        for (int i = 0; i < 240; ++i)
+            v = groundRunStep(v, {0, 0, -.5f}, 1.f / 120);
+        near(length(v), k.sprint * .5f, .01f);
+        check(finite(groundRunStep({NAN, 0, 0}, {0, 0, -1}, .01f)) && finite(groundRunStep(v, {NAN, 0, 0}, .01f)),
+              "a step that is no number");
+        // The swing: a landing at 20 m/s across starts it, only with the setting on.
+        TestWorld w;
+        w.enabled = false;
+        Input in;
+        in.focused = true;
+        in.move = {0, 0, -1};
+        const Body air{{0, 1.5f, 0}, {0, -8, -20}, false};
+        const Body landed{{0, 1, -.3f}, {0, -8, -20}, true};
+        const auto landing = [&](bool on) {
+            Swing sw(inert());
+            sw.allowGroundRun(on);
+            sw.predictNativeStep(1.f / 90, in, w, air);
+            const auto out = sw.predictNativeStep(1.f / 90, in, w, landed);
+            return std::pair{sw.groundRunning(), out.velocity};
+        };
+        check(!landing(false).first, "SPIDY RUN off, and a landing ran on");
+        const auto [running, velocity] = landing(true);
+        check(running, "a fast landing did not start the run");
+        check(std::hypot(velocity.x, velocity.z) > 20 && velocity.y < 0 && velocity.y > -3,
+              "the run did not keep the landing's speed, pressed onto the ground");
+        // A slow landing is the game's; so is one with a web, or one that leaves the ground.
+        {
+            Swing sw(inert());
+            sw.allowGroundRun(true);
+            sw.predictNativeStep(1.f / 90, in, w, {{0, 1.5f, 0}, {0, -8, -6}, false});
+            sw.predictNativeStep(1.f / 90, in, w, {{0, 1, 0}, {0, -8, -6}, true});
+            check(!sw.groundRunning(), "a landing under the sprint ran on");
+        }
+        {
+            Swing sw(inert());
+            sw.allowGroundRun(true);
+            sw.predictNativeStep(1.f / 90, in, w, air);
+            sw.predictNativeStep(1.f / 90, in, w, landed);
+            check(sw.groundRunning(), "no run");
+            const Vec3 at = sw.groundRunVelocity();
+            sw.predictNativeStep(1.f / 90, in, w, {{0, 1, -.5f}, at, true});
+            check(sw.groundRunning(), "the run ended on the ground");
+            sw.predictNativeStep(1.f / 90, in, w, {{0, 1.6f, -.8f}, at + Vec3{0, 2, 0}, false});
+            check(!sw.groundRunning(), "the run went on in the air");
+        }
+        {
+            // It eases to the sprint and hands the body back; a second with no stick ends it too.
+            Swing sw(inert());
+            sw.allowGroundRun(true);
+            sw.predictNativeStep(1.f / 90, in, w, air);
+            sw.predictNativeStep(1.f / 90, in, w, landed);
+            Vec3 at = sw.groundRunVelocity();
+            int steps = 0;
+            while (sw.groundRunning() && steps < 2000) {
+                sw.predictNativeStep(1.f / 90, in, w, {{0, 1, 0}, at, true});
+                at = sw.groundRunVelocity() + Vec3{0, -k.press, 0};
+                ++steps;
+            }
+            check(!sw.groundRunning() && steps > 90 * 2 && steps < 90 * 5, "the run did not ease to the sprint");
+            Swing idle(inert());
+            idle.allowGroundRun(true);
+            idle.predictNativeStep(1.f / 90, in, w, air);
+            idle.predictNativeStep(1.f / 90, in, w, landed);
+            Input none = in;
+            none.move = {};
+            steps = 0;
+            at = idle.groundRunVelocity();
+            while (idle.groundRunning() && steps < 1000) {
+                idle.predictNativeStep(1.f / 90, none, w, {{0, 1, 0}, at, true});
+                at = idle.groundRunVelocity();
+                ++steps;
+            }
+            check(steps <= 92, "the run went on without the stick past a second");
+            Swing off(inert());
+            off.allowGroundRun(true);
+            off.predictNativeStep(1.f / 90, in, w, air);
+            off.predictNativeStep(1.f / 90, in, w, landed);
+            off.allowGroundRun(false);
+            check(!off.groundRunning() && !off.groundRunEnabled(), "switching SPIDY RUN off kept the run");
+        }
+        Swing fresh(inert());
+        check(!fresh.groundRunEnabled() && !fresh.groundRunning(), "SPIDY RUN on by default");
+        game_swing::Settings packet;
+        check(packet.version == 28 && packet.bytes == 132 && !packet.spidyRun &&
+                  offsetof(game_swing::Settings, spidyRun) == game_swing::settingsBytesV27,
+              "SPIDY RUN not appended, or on by default");
+        packet.spidyRun = 2;
+        check(!game_swing::validSettings(packet), "an invalid SPIDY RUN switch accepted");
+        packet = {};
+        packet.version = 27;
+        packet.bytes = game_swing::settingsBytesV27;
+        check(game_swing::validSettings(packet), "version 27 settings packet refused");
+        // RUN LOGS tell a mod-driven run on the ground, and how far the body went against what was asked.
+        RunLog log;
+        RunSample r;
+        r.seconds = 1.f / 90;
+        r.fresh = true;
+        r.velocity = {0, -8, -20};
+        log.update(r);
+        r.grounded = r.owned = true;
+        r.velocity = {0, -2, -20};
+        r.requested = {0, -2, -20};
+        log.update(r);
+        const char* began = log.update(r);
+        (void)began;
+        std::string all;
+        for (int i = 0; i < 90; ++i) {
+            r.position.z -= 10.f / 90;
+            if (const char* line = log.update(r))
+                all += line;
+        }
+        r.owned = false;
+        if (const char* line = log.update(r))
+            all += line;
+        check(all.find("ended after") != std::string::npos && all.find("asked 20.0 m/s") != std::string::npos &&
+                  all.find("went 9.9 m/s") != std::string::npos,
+              "no line of how far a mod-driven run went against what it asked");
     });
     test("the game's camera follows the head's pitch as it follows its turn", [] {
         game_pad::CameraPitch pitch;
@@ -21932,7 +22090,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 27 && s.bytes == 128 && s.combatVisuals == 1 &&
+        check(s.version == 28 && s.bytes == 132 && s.combatVisuals == 1 &&
                   offsetof(Settings, combatVisuals) == 56,
               "free combat broke the settings defaults or layout");
         s.combatVisuals = 0;
@@ -21979,7 +22137,7 @@ int main() {
         check(withTabOnly(Values{}, "single_hand_yank_percent=999\n").singleHandYankPercent == 300,
               "saved single-hand yank strength was not clamped");
         game_swing::Settings packet;
-        check(packet.version == 27 && packet.bytes == 128 && !packet.halfPunchDamage &&
+        check(packet.version == 28 && packet.bytes == 132 && !packet.halfPunchDamage &&
                   packet.singleHandYankPercent == 100 &&
                   offsetof(game_swing::Settings, halfPunchDamage) == 96 &&
                   offsetof(game_swing::Settings, singleHandYankPercent) == 100,
@@ -22579,10 +22737,10 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 71 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 72 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[71 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[71].title, "REALISTIC FLIPS") == 0 && all[71].choices.empty(),
+            check(all[72 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[72].title, "REALISTIC FLIPS") == 0 && all[72].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[50].item == Item::controlledFlips && all[53].item == Item::joystickRunCamera &&
                   all[54].item == Item::wallRunCameraTilt && all[55].item == Item::halfPunchDamage,
@@ -22675,6 +22833,15 @@ int main() {
         check(all[70].item == Item::softLanding && std::strcmp(all[70].title, "SOFT LANDING") == 0 &&
                   all[70].choices.empty() && all[70].place == Place::tab,
               "SOFT LANDING: a switch in the tab, after EARLY JUMP");
+        check(all[71].item == Item::spidyRun && std::strcmp(all[71].title, "SPIDY RUN") == 0 &&
+                  all[71].choices.empty() && all[71].place == Place::tab,
+              "SPIDY RUN: a switch in the tab, after SOFT LANDING");
+        {
+            Values v;
+            check(!v.spidyRun && defaultChoice(Item::spidyRun) == 0, "SPIDY RUN on by default");
+            check(withTabOnly({}, "spidy_run=1\n").spidyRun && !withTabOnly({}, "").spidyRun,
+                  "spidy_vr.ini keeps spidy_run");
+        }
         {
             Values v;
             check(!v.softLanding && defaultChoice(Item::softLanding) == 0, "soft landing on by default");
@@ -22767,7 +22934,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 77,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 78,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -23026,7 +23193,7 @@ int main() {
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
                   "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
                   "degrees=0\nwrist_shooters=0\n"
-                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\n",
+                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

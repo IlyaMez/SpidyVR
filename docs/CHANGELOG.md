@@ -7,6 +7,39 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
 
 Not in a build yet, newest first. The release adds these to the next build's entry.
 
+**SPIDY RUN, the wall run's momentum on the ground.**
+
+- **Before.** Every landing was the game's: the swing let go of the body the
+  step it touched the ground, and the game's mover went on from its own
+  ground speed (about a jog or a sprint), whatever speed the swing landed at.
+- **SPIDY RUN** (EXPERIMENTAL, after SOFT LANDING; `spidy_run` in
+  `spidy_vr.ini` and profiles; off by default): a landing faster than 10 m/s
+  across, with no web attached and off any wall, is the swing's own run on
+  the ground, the wall run's rules on the ground plane
+  (`run_update::groundRunEntry`, `groundRunStep`): the landing's speed across
+  kept (a fall into the ground adds 15% of it at most, as `wallCarry` does on
+  walls; 30 m/s at most); the stick turns it at 540 degrees a second at rest
+  down to 180 at 30 m/s, keeping its speed; a stick held back brakes it;
+  over the sprint (9 m/s) it decays 4 m/s a second (6 more with no stick).
+  At the sprint, a second without the stick, leaving the ground, a web, a
+  wall or a mount's way up one, it ends and the game has the body again
+  (NATIVE RUN takes over from there). A jump keeps its speed. A wall ahead
+  is the existing wall run, unchanged (the run ends as the mount begins).
+  The swing drives the body on the ground through the same lease it flies
+  with (`game_swing.cpp`'s `drive`, extended by the run alone); the game gets
+  the left stick for its run's look and no RT, so its vaults do not fight it.
+  If the body goes under half the speed asked for a quarter of a second
+  (the game's mover not taking the command on the ground, which no session
+  has measured yet), the run ends at once, and after three such ends no run
+  starts again until the settings change. RUN LOGS records each mod-driven
+  run on the ground: when it began, how fast the body went against what was
+  asked, and how it ended. Swing settings version 28.
+- **Validation.** Core checks cover the entry, the decay to the sprint, the
+  turn rate keeping the speed, braking, a landing through the swing with it
+  off and on, a slow landing, leaving the ground, the stick idle, switching
+  it off, the packet, the row and RUN LOGS' lines; launcher checks the
+  profile key. Not played in a headset yet.
+
 **SOFT LANDING, a fall that eases off just above the ground.**
 
 - **Before.** A fall the swing flies (after a release, a leap, a wall jump)

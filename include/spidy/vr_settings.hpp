@@ -253,6 +253,12 @@ struct Values {
     // holding, eases to 9 m/s down over its last 3 m (or 0.35 s), its speed
     // across kept. Off by default: it lands at the speed it falls, as before.
     bool softLanding = false;
+    // SPIDY RUN (the tab's SPIDY RUN; Swing::allowGroundRun, run_update::
+    // groundRunStep): a landing faster than the game's sprint is the mod's
+    // ground run, the wall run's momentum on the ground - its speed kept, the
+    // stick steering it - easing to the sprint and handed back to the game.
+    // Off by default: the game takes every landing, as before.
+    bool spidyRun = false;
     // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
     // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
     int singleHandYankPercent = 100;
@@ -379,8 +385,9 @@ enum class Item : uint8_t {
     momentumLeap,
     earlyJump,
     softLanding,
+    spidyRun,
 };
-inline constexpr Item lastItem = Item::softLanding;
+inline constexpr Item lastItem = Item::spidyRun;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -403,7 +410,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 82>& rows();
+const std::array<Row, 83>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

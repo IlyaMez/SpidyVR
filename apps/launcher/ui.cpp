@@ -1946,6 +1946,12 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "ground, so the game lands you lightly; your speed across is kept. Off: you land as fast as "
                "you fall, as before.",
                S(42), [&] { tabToggle("##softlanding", Item::softLanding); });
+        option("Spidy run (experimental)",
+               "Land faster than the game's sprint (a swing let go of near the street) and the mod runs you "
+               "on at that speed, as its wall run does on walls: the stick steers without losing speed, "
+               "which eases to a sprint in a few seconds, and the game's run (NATIVE RUN) takes over. A wall "
+               "ahead is the usual wall run. Off: the game takes every landing, as before.",
+               S(42), [&] { tabToggle("##spidyrun", Item::spidyRun); });
     });
     group(0, "Flips", [&] {
         option("Flips (experimental)",

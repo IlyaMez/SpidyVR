@@ -91,6 +91,34 @@ class RunLog {
             grounded_ = s.grounded;
             begin(s);
         }
+        // The mod driving the body on the ground (SPIDY RUN, or a web strike's
+        // moment there): when it begins, and on its end how far the body went
+        // against what was asked - whether the game's mover takes the command.
+        const bool mod = s.grounded && s.owned && !s.webbed;
+        if (mod && !mod_) {
+            modTime_ = modAsked_ = 0;
+            modFrom_ = s.position;
+            if (!out) {
+                std::snprintf(line_, sizeof line_, "run log: mod-driven run on the ground began at %.1f m/s",
+                              h);
+                out = line_;
+            }
+        } else if (mod) {
+            modTime_ += dt;
+            modAsked_ += horizontal(s.requested) * dt;
+        } else if (mod_ && !out) {
+            Vec3 d = s.position - modFrom_;
+            d.y = 0;
+            const float went = modTime_ > 0 ? length(d) / modTime_ : 0.f;
+            const float asked = modTime_ > 0 ? modAsked_ / modTime_ : 0.f;
+            std::snprintf(line_, sizeof line_,
+                          "run log: mod-driven run on the ground ended after %.2f s: went %.1f m/s, asked "
+                          "%.1f m/s (%.0f%%), now %s",
+                          modTime_, went, asked, asked > 0 ? 100 * went / asked : 0.f,
+                          s.grounded ? "the game's" : "in the air");
+            out = line_;
+        }
+        mod_ = mod;
         if (!s.grounded) {
             lastAirH_ = h;
             lastAirV_ = s.velocity.y;
@@ -148,7 +176,9 @@ class RunLog {
         from_ = s.position;
         time_ = stick_ = sent_ = run_ = owned_ = swing_ = request_ = 0;
     }
-    bool started_{}, grounded_{};
+    bool started_{}, grounded_{}, mod_{};
+    Vec3 modFrom_{};
+    float modTime_{}, modAsked_{};
     Vec3 from_{}, landingFrom_{};
     float time_{}, stick_{}, sent_{}, run_{}, owned_{}, swing_{}, request_{};
     float measured_{}, top_{}, lastAirH_{}, lastAirV_{}, landing_{-1};
@@ -214,5 +244,70 @@ inline float softLandVertical(float vy, float feetAbove, float dt) {
 // softHeight and what the fall covers in softSeconds, and a step more.
 inline float softLandReach(float falling, float seconds) {
     return 1 + std::max(softHeight, falling * softSeconds) + falling * std::max(seconds, 0.f) + .5f;
+}
+// SPIDY RUN (vr_settings::Values::spidyRun, off by default; Swing::
+// allowGroundRun): the wall run's momentum (Swing's wall entry and its step)
+// on the ground. A landing faster than enterAbove across keeps that speed
+// (grazing the ground loses nothing; of the speed that went into it, carry
+// of it at most comes out ahead, as wallCarry does on a wall), entryMax at
+// most. Each step the stick steers it: its way turns toward the stick's at
+// turnRate (turnSlow at rest down to turnFast at entryMax), its speed kept;
+// a stick held further than the run goes takes it up to sprint at
+// acceleration; one held more than 90 degrees from the run's way brakes it at
+// 3 brake while it turns. Faster than sprint it
+// decays by decay a second, and by brake with no stick. At sprint it is the
+// game's run again (Swing ends it). It goes along the ground plane only: the
+// caller presses the body down at `press` to keep it on slopes and kerbs.
+struct GroundRun {
+    float sprint = 9, enterAbove = 10, carry = .15f, entryMax = 30, acceleration = 24, brake = 6, decay = 4;
+    float turnSlow = 9.42478f /* 540 degrees */, turnFast = 3.14159f /* 180 degrees */, press = 2;
+};
+constexpr GroundRun groundRun{};
+// The run a landing at `velocity` begins with, across the ground (y 0).
+inline Vec3 groundRunEntry(Vec3 velocity, const GroundRun& k = groundRun) {
+    if (!finite(velocity))
+        return {};
+    Vec3 along{velocity.x, 0, velocity.z};
+    const float into = std::max(-velocity.y, 0.f), speed = length(velocity), across = length(along);
+    if (into > 0 && across > 1e-3f && speed > 1e-3f)
+        along = along * std::min(speed / across, 1 + k.carry * into / speed);
+    return limited(along, k.entryMax);
+}
+// One step of the run: `along` its velocity across the ground, `move` the
+// stick in the world (Input::move), dt the step. Returns the new velocity.
+inline Vec3 groundRunStep(Vec3 along, Vec3 move, float dt, const GroundRun& k = groundRun) {
+    along.y = 0;
+    if (!finite(along) || !std::isfinite(dt) || !(dt > 0))
+        return finite(along) ? along : Vec3{};
+    const Vec3 stick = finite(move) ? limited(Vec3{move.x, 0, move.z}, 1) : Vec3{};
+    const float tilt = length(stick);
+    float speed = length(along);
+    Vec3 way = speed > .1f ? along / speed : Vec3{};
+    if (tilt > .05f) {
+        const Vec3 to = stick / tilt;
+        if (speed <= .1f) {
+            way = to;
+        } else {
+            // Turn toward the stick, no faster than the turn rate at this speed.
+            const float rate = k.turnSlow + (k.turnFast - k.turnSlow) *
+                                                std::clamp(speed / std::max(k.entryMax, 1.f), 0.f, 1.f);
+            const float angle = std::atan2(cross(way, to).y, dot(way, to));
+            const float turn = std::clamp(angle, -rate * dt, rate * dt);
+            const float c = std::cos(turn), s = std::sin(turn);
+            // About y: x' = x c + z s, z' = -x s + z c turns way toward `to` by +turn.
+            way = normalized(Vec3{way.x * c + way.z * s, 0, -way.x * s + way.z * c});
+            if (std::abs(angle - turn) < 1e-4f)
+                way = to;
+        }
+        if (dot(way, to) < 0)
+            speed = std::max(0.f, speed - 3 * k.brake * dt);
+        else if (speed < k.sprint * tilt)
+            speed = std::min(speed + k.acceleration * dt, k.sprint * tilt);
+    } else if (speed > k.sprint) {
+        speed -= k.brake * dt;
+    }
+    if (speed > k.sprint)
+        speed = std::max(k.sprint, speed - k.decay * dt);
+    return way * speed;
 }
 } // namespace spidy::run_update
