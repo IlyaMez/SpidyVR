@@ -51,6 +51,7 @@
 #include "spidy/recording_fov.hpp"
 #include "spidy/run_update.hpp"
 #include "spidy/diag_log.hpp"
+#include "spidy/ground_state.hpp"
 #include "spidy/seated.hpp"
 #include "spidy/slow_motion.hpp"
 #include "spidy/steady_hud.hpp"
@@ -972,6 +973,10 @@ DWORD WINAPI run(void*) {
         uint32_t forearmStaleFrames{};
         float forearmLogSeconds{};
         diag_log::ChangeOnly forearmDiag[2];
+        // STEADY STATES' RT (ground_state::RiseDelay), and the state changes'
+        // lines in the diagnostics (ground_state::StateLog).
+        ground_state::RiseDelay runSteady;
+        ground_state::StateLog stateLog;
         std::array<float, 2> forearmJitter{};
         game_pad::TemplePress templePress;
         uint32_t chargesBefore{}, leapsBefore{}, scansBefore{};
@@ -3806,6 +3811,9 @@ DWORD WINAPI run(void*) {
                             gate.onCrawl = onCrawl;
                             gate.gameOwnsGround = game_swing::gameOwnsGround(swingFresh, swingState);
                             gate.grabbing = grabPhases[0] || grabPhases[1];
+                            // STEADY STATES (off by default): no RT in a fight.
+                            gate.steady = values.steadyStates;
+                            gate.fighting = fightLately || moverTable == config.base + bridge::combatCamera;
                             for (unsigned i = 0; i < 2; ++i) {
                                 gate.grips[i] = frame.hands[i].squeeze;
                                 gate.triggers[i] = frame.hands[i].trigger;
@@ -3819,7 +3827,15 @@ DWORD WINAPI run(void*) {
                                 run_update::curveStick(walk.right, walk.forward, values.runCurve);
                             const auto runAt = run_update::nativeRunThresholds(values.nativeRunPercent);
                             nativeRun.thresholds(runAt.onAbove, runAt.offBelow);
-                            const bool runAllowed = game_pad::nativeRunAllowed(gate, walk);
+                            bool runAllowed = game_pad::nativeRunAllowed(gate, walk);
+                            // STEADY STATES (off by default): RT comes back only once
+                            // everything has allowed it for a moment (ground_state::
+                            // RiseDelay); it still goes at once.
+                            {
+                                const bool steadied = runSteady.update(frame.seconds, runAllowed);
+                                if (values.steadyStates)
+                                    runAllowed = steadied;
+                            }
                             nativeRun.update(runAllowed, walk.right, walk.forward);
                             if (nativeRun.held())
                                 walk.parkour = true;
@@ -3840,6 +3856,26 @@ DWORD WINAPI run(void*) {
                                 sample.sent = std::hypot(walk.right, walk.forward);
                                 if (const char* line = runLog.update(sample))
                                     game_prompts::note(line);
+                            }
+                            // The state changes on and off the ground, in and out of a
+                            // fight, to the session's diagnostics only (ground_state::
+                            // StateLog). Changes nothing.
+                            {
+                                ground_state::Sample state;
+                                state.fresh = swingFresh && steering && !calibrationInput;
+                                state.grounded = swingState.grounded != 0;
+                                state.owned = swingState.owned != 0;
+                                state.webbed = swingState.webs[0].attached || swingState.webs[1].attached;
+                                state.wall = swingState.wall;
+                                state.mount = swingState.mount;
+                                state.takeoff = swingState.takeoffPhase;
+                                state.gameGround = gate.gameOwnsGround;
+                                state.runRt = nativeRun.held();
+                                state.fighting = gate.fighting;
+                                state.dodging = walk.dodge;
+                                state.velocity = swingState.velocity;
+                                if (const char* line = stateLog.update(frame.seconds, state))
+                                    diag_log::write(line);
                             }
                         }
                         walk.scan = templePress.held() && steering;

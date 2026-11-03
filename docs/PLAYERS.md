@@ -1026,9 +1026,13 @@ VR settings
                    restarts the swing. Off: as before.
   WEB LANDING IMPACT (24 M/S until you change it) with SMOOTH WEB LANDING, a
                    landing this fast or faster is the game's heavy one.
+  STEADY STATES    (off until you switch it on) NATIVE RUN's RT waits until
+                   nothing has stopped it for a moment, so a kerb, a prompt
+                   or a vent flickering no longer drops and raises it, and
+                   it stays off in a fight. Off: as before.
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, RUN FROM STANDING, WEB AIM, FOREARM BLEND, SMOOTH WEB LANDING, WEB LANDING IMPACT, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, RUN FROM STANDING, WEB AIM, FOREARM BLEND, SMOOTH WEB LANDING, WEB LANDING IMPACT, STEADY STATES, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches

@@ -368,6 +368,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.spidyRun;
     case Item::spidyRunFromStanding:
         return &v.spidyRunFromStanding;
+    case Item::steadyStates:
+        return &v.steadyStates;
     case Item::webLandingSmooth:
         return &v.webLandingSmooth;
     case Item::softLanding:
@@ -431,9 +433,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 88>& rows() {
+const std::array<Row, 89>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 88> all{{
+    static const std::array<Row, 89> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -642,6 +644,8 @@ const std::array<Row, 88>& rows() {
          "Holding a web, a landing under WEB LANDING IMPACT is soft and keeps its speed.", {}},
         {Item::webLandingImpact, "WEB LANDING IMPACT",
          "SMOOTH WEB LANDING: at or over this speed a landing is the game's heavy one.", webLandingImpactChoices},
+        {Item::steadyStates, "STEADY STATES",
+         "NATIVE RUN's RT waits out flickers and stays off in fights. Off as before.", {}},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
          "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
@@ -894,6 +898,7 @@ constexpr TabOnly tabOnly[] = {
     {"forearm_blend", nullptr, &Values::forearmBlend},
     {"web_landing_smooth", &Values::webLandingSmooth, nullptr},
     {"web_landing_impact_speed", nullptr, &Values::webLandingImpact},
+    {"steady_states", &Values::steadyStates, nullptr},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

@@ -76,6 +76,7 @@
 #ifdef _WIN32
 #include "spidy/game_targets.hpp"
 #include "spidy/diag_log.hpp"
+#include "spidy/ground_state.hpp"
 // Stand-ins for the game's classes, by the names the target scan's rules look
 // for: MSVC lays out their type information as it did the game's.
 class Component {
@@ -9627,9 +9628,9 @@ int main() {
                   vr_settings::defaultChoice(vr_settings::Item::webLandingSmooth) == 0 &&
                   vr_settings::defaultChoice(vr_settings::Item::webLandingImpact) == 3,
               "SMOOTH WEB LANDING on, or its impact not 24 m/s, by default");
-        check(vr_settings::withTabOnly({}, "web_landing_smooth=1\nweb_landing_impact_speed=16\n").webLandingSmooth &&
-                  vr_settings::withTabOnly({}, "web_landing_impact_speed=16\n").webLandingImpact == 16 &&
-                  vr_settings::withTabOnly({}, "web_landing_impact_speed=99\n").webLandingImpact == 40 &&
+        check(vr_settings::withTabOnly({}, "web_landing_smooth=1\nweb_landing_impact_speed=16\nsteady_states=0\n").webLandingSmooth &&
+                  vr_settings::withTabOnly({}, "web_landing_impact_speed=16\nsteady_states=0\n").webLandingImpact == 16 &&
+                  vr_settings::withTabOnly({}, "web_landing_impact_speed=99\nsteady_states=0\n").webLandingImpact == 40 &&
                   !vr_settings::withTabOnly({}, "").webLandingSmooth,
               "spidy_vr.ini keeps web_landing_smooth and web_landing_impact_speed, within range");
         const auto& all = vr_settings::rows();
@@ -23064,7 +23065,7 @@ int main() {
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
         // The realistic flips' rows come last, after the EXPERIMENTAL rows before them.
-        constexpr size_t firstRealistic = 77;
+        constexpr size_t firstRealistic = 78;
         check(all.size() == firstRealistic + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
             check(all[firstRealistic + i].item == realistic[i], "the realistic flips' rows out of order");
@@ -23272,7 +23273,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 83,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 84,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -23531,7 +23532,7 @@ int main() {
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
                   "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
                   "degrees=0\nwrist_shooters=0\n"
-                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\n",
+                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\nsteady_states=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;
@@ -26172,6 +26173,78 @@ int main() {
         for (int i = 0; i < 60; ++i)
             turned += f.update(.01f, 0, 16);
         check(turned == 1, "a 6-degree turn not written");
+    });
+    test("STEADY STATES: RT comes back after a moment, goes at once, never in a fight; off as before", [] {
+        using namespace ground_state;
+        RiseDelay r;
+        check(!r.update(.05f, true) && !r.update(.05f, true) && r.update(.05f, true), "RT not back after 0.15 s");
+        check(!r.update(.01f, false) && r.drops() == 1, "RT not gone at once");
+        // A flicker every other frame keeps it off.
+        bool any = false;
+        for (int i = 0; i < 40; ++i)
+            any |= r.update(.025f, i % 2 == 0);
+        check(!any, "a flickering permission held RT");
+        game_pad::NativeRunGate g;
+        g.setting = g.playing = g.gameOwnsGround = true;
+        game_pad::Walk w;
+        check(game_pad::nativeRunAllowed(g, w), "a plain run refused");
+        g.fighting = true;
+        check(game_pad::nativeRunAllowed(g, w), "a fight refused RT with STEADY STATES off");
+        g.steady = true;
+        check(!game_pad::nativeRunAllowed(g, w), "RT in a fight with STEADY STATES on");
+        g.fighting = false;
+        check(game_pad::nativeRunAllowed(g, w), "STEADY STATES refused a plain run");
+        vr_settings::Values values;
+        check(!values.steadyStates && vr_settings::defaultChoice(vr_settings::Item::steadyStates) == 0,
+              "STEADY STATES on by default");
+        check(vr_settings::withTabOnly({}, "steady_states=1\n").steadyStates &&
+                  !vr_settings::withTabOnly({}, "").steadyStates,
+              "spidy_vr.ini keeps steady_states");
+        const auto& all = vr_settings::rows();
+        check(all[77].item == vr_settings::Item::steadyStates && std::strcmp(all[77].title, "STEADY STATES") == 0 &&
+                  all[77].choices.empty() && all[77].place == vr_settings::Place::tab,
+              "STEADY STATES: a switch in the tab, after WEB LANDING IMPACT");
+    });
+    test("state changes: a line at each landing and take-off, why and how fast; a flapping state summed up", [] {
+        using namespace ground_state;
+        StateLog log;
+        Sample s;
+        s.fresh = true;
+        s.owned = true;
+        s.webbed = true;
+        s.velocity = {9, -6, 0};
+        check(!log.update(.02f, s), "a line with nothing changed");
+        s.grounded = true;
+        const char* line = log.update(.02f, s);
+        check(line && std::strstr(line, "grounded 0->1 (touchdown, the swing driving)") &&
+                  std::strstr(line, "9.0 m/s across"),
+              "no touchdown line, or no speed in it");
+        s.owned = false;
+        line = log.update(.02f, s);
+        check(line && std::strstr(line, "owned 1->0 (the game's on the ground)"), "no hand-over line");
+        check(!log.update(.02f, s), "a line again with nothing changed");
+        // A stale sample says nothing.
+        Sample stale = s;
+        stale.fresh = false;
+        stale.grounded = false;
+        check(!log.update(.02f, stale), "a stale sample written");
+        // Flapping for a second: at most perSecond lines, then a summary.
+        StateLog flap;
+        Sample f;
+        f.fresh = true;
+        flap.update(.01f, f);
+        int lines = 0;
+        bool summed = false;
+        for (int i = 0; i < 100; ++i) {
+            f.grounded = !f.grounded;
+            if (const char* l = flap.update(.0105f, f)) {
+                summed |= std::strstr(l, "in the last second") != nullptr;
+                lines += !std::strstr(l, "in the last second");
+            }
+        }
+        check(lines <= 2 * static_cast<int>(StateLog::perSecond) && lines >= static_cast<int>(StateLog::perSecond) &&
+                  summed,
+              "flapping not capped and summed up");
     });
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;

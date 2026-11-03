@@ -7,6 +7,34 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
 
 Not in a build yet, newest first. The release adds these to the next build's entry.
 
+**STEADY STATES, and every leave and land in the diagnostics.**
+
+- **Before.** NATIVE RUN's RT was gated each frame on what the swing last
+  said (`game_swing::gameOwnsGround`: fresh, not owned, grounded, no wall,
+  web, mount or takeoff) and on the hands and prompts
+  (`game_pad::nativeRunAllowed`), with no hysteresis: any of them flickering
+  for a frame (the ground contact over a kerb, a prompt shown and hidden, the
+  vent crawl's flag, `owned` as a landing is handed over) dropped RT and
+  raised it the next frame, and RT was held in a fight too. Nothing recorded
+  how the ground, the air, the swing's ownership and a fight changed.
+- **STEADY STATES** (EXPERIMENTAL, the tab's STEADY STATES after WEB LANDING
+  IMPACT; `steady_states` in `spidy_vr.ini` and profiles; off by default):
+  RT comes back only once everything has allowed it for 0.15 s
+  (`ground_state::RiseDelay`; it still goes at once, as RT off the ground is
+  the game's web swing), and it is never held in a fight (the combat camera,
+  or an enemy in reach within 3 s). Off: as before.
+- **State changes in the diagnostics** (always; changes nothing): a
+  `state:` line at each change of the game's ground contact, the swing's
+  ownership, a web, the wall, the mount, the takeoff, the game's ground (the
+  gate), RT, a fight and a dodge, from -> to, why where it can be told
+  (touchdown with the swing driving or with a web held, the game's on the
+  ground, a takeoff...), with the speed across and up. At most 12 a second; a
+  second with 4 or more changes of the ground or the owner is summed up as
+  flapping.
+- **Validation.** Core checks for the delay, the fight gate (off and on),
+  the state lines, the cap and the summary, the row and the key; launcher
+  checks the profile key. Not played in a headset yet.
+
 **SMOOTH WEB LANDING, a landing with a web held that keeps its speed.**
 
 - **Before.** A landing with a web held went to the game in the very step

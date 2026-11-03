@@ -286,6 +286,11 @@ struct Values {
     // LANDING's threshold; a landing this fast or faster is the game's, heavy
     // as before. 24 by default, 12 to 40.
     int webLandingImpact = 24;
+    // STEADY STATES (the tab's STEADY STATES; ground_state.hpp): NATIVE
+    // RUN's RT comes back only after everything has allowed it for 0.15 s
+    // (a frame's flicker of the ground, a prompt or a vent no longer drops
+    // and raises it), and stays off in a fight. Off by default: as before.
+    bool steadyStates = false;
     // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
     // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
     int singleHandYankPercent = 100;
@@ -418,8 +423,9 @@ enum class Item : uint8_t {
     spidyRunFromStanding,
     webLandingSmooth,
     webLandingImpact,
+    steadyStates,
 };
-inline constexpr Item lastItem = Item::webLandingImpact;
+inline constexpr Item lastItem = Item::steadyStates;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -442,7 +448,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 88>& rows();
+const std::array<Row, 89>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

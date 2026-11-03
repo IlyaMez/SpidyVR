@@ -190,6 +190,9 @@ struct NativeRunGate {
     static constexpr float handBusy = .3f;
     bool setting{}, playing{}, calibrating{}, padLayer{}, mounting{}, ventCrawl{}, onSurface{}, onCrawl{};
     bool gameOwnsGround{}, grabbing{};
+    // STEADY STATES (off by default; ground_state.hpp): with `steady`, no RT
+    // in a fight (`fighting`: the combat camera, or an enemy in reach lately).
+    bool steady{}, fighting{};
     float grips[2]{}, triggers[2]{};
     bool handsIdle() const {
         return !grabbing && grips[0] < handBusy && triggers[0] < handBusy && grips[1] < handBusy &&
@@ -199,7 +202,7 @@ struct NativeRunGate {
 inline bool nativeRunAllowed(const NativeRunGate& g, const Walk& w) {
     return g.setting && g.playing && !g.calibrating && !g.padLayer && !g.mounting && !g.ventCrawl &&
            !g.onSurface && !g.onCrawl && g.gameOwnsGround && g.handsIdle() && !w.jump && !w.interact &&
-           !w.zip && !w.aim && !w.pull && !w.heal && !w.demand.any();
+           !w.zip && !w.aim && !w.pull && !w.heal && !w.demand.any() && !(g.steady && g.fighting);
 }
 // A held on the ground: a charged leap, Spidy's own. The game has one, its
 // Charge Jump ("Hold RT + A while running or standing to build up charge,

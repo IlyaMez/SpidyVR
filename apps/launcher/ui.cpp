@@ -1978,6 +1978,11 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "With smooth web landing: a landing this fast or faster (m/s, all of its speed) is the game's "
                "heavy one. 24 m/s by default.",
                S(150), [&] { tabCombo("##weblandingimpact", Item::webLandingImpact); });
+        option("Steady states (experimental)",
+               "Native run's RT comes back only once nothing has stopped it for 0.15 s, so a kerb, a prompt "
+               "or a vent flickering for a frame no longer drops and raises it, and it stays off in a fight. "
+               "Off: as before.",
+               S(42), [&] { tabToggle("##steadystates", Item::steadyStates); });
     });
     group(0, "Flips", [&] {
         option("Flips (experimental)",
