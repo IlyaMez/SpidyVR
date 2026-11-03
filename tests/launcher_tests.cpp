@@ -238,6 +238,31 @@ int main() {
         options.arcadeWebs = true;
         args = sessionArguments(options, L"r.json", L"", L"");
         check(args.size() == 8 && args[7] == L"--arcade-webs", "arcade webs chosen");
+        options = {};
+        check(!options.firstPersonCutscenes && options.cutsceneHeadTracking,
+              "first-person cutscenes off, with head tracking, in a new launcher");
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 7, "a session with the cutscenes on the screen is told nothing of them");
+        options.firstPersonCutscenes = true;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 8 && args[7] == L"--first-person-cutscenes", "first-person cutscenes chosen");
+        options.cutsceneHeadTracking = false;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 9 && args[7] == L"--first-person-cutscenes" && args[8] == L"--no-cutscene-head-tracking",
+              "first-person cutscenes aimed by the scene's own camera");
+        options.firstPersonCutscenes = false;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 7, "head tracking is said only with first-person cutscenes");
+        check(!options.disableTheater, "the theater screen stays in a new launcher");
+        options.disableTheater = true;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 8 && args[7] == L"--disable-theater-screen", "theater screen disabled, without first person");
+        options.firstPersonCutscenes = true;
+        options.cutsceneHeadTracking = true;
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 9 && args[7] == L"--first-person-cutscenes" && args[8] == L"--disable-theater-screen",
+              "theater screen disabled, with first person");
+        options = {};
         // The view turning onto a wall is no option of its own: it turns whoever holds the player there (the
         // player, October 14: "i like how it feel to walk on building and stand on their side"). Nor, since
         // October 25, are the swing's own walls: off, the game's crawl took every wall, and walls are Spidy's

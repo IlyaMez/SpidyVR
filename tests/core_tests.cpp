@@ -7845,7 +7845,32 @@ int main() {
         bad=c;bad.leaseMs=501;check(!native_eyes::valid(bad),"unbounded lease accepted");
         c.anchor={100,48.3f,-200};c.anchored=1;check(native_eyes::valid(c),"anchored pair rejected");
         bad=c;bad.anchor.y=std::numeric_limits<float>::infinity();check(!native_eyes::valid(bad),"infinite anchor accepted");
-        bad=c;bad.anchored=2;check(!native_eyes::valid(bad),"unknown anchor mode accepted");
+        bad=c;bad.anchored=3;check(!native_eyes::valid(bad),"unknown anchor mode accepted");
+        bad=c;bad.anchored=2;check(native_eyes::valid(bad),"first-person scene pair rejected");
+        bad=c;bad.anchored=4;check(native_eyes::valid(bad),"first-person scene pair (own heading) rejected");
+        bad.enabled=2;check(!native_eyes::valid(bad),"first-person scene mode on the flat screen accepted");
+    });
+    test("a first-person scene's eyes are put on the head of the frame that is rendered", [] {
+        // Eyes 32 mm either side of the head, 4 cm above it, in the head's own axes (right, down, forward).
+        native_eyes::Command c;c.enabled=1;c.serial=1;c.anchored=2;
+        const Mat4 left{1,0,0,0, 0,1,0,0, 0,0,1,0, -.032f,-.04f,0,1}, right{1,0,0,0, 0,1,0,0, 0,0,1,0, .032f,-.04f,0,1};
+        c.eyes[0].world=left;c.eyes[1].world=right;
+        for(auto&e:c.eyes){e.fov[0]=-.8f;e.fov[1]=.8f;e.fov[2]=-.8f;e.fov[3]=.8f;}
+        check(native_eyes::valid(c),"relative eyes rejected");
+        // A head at (10, 2, 5) turned a quarter turn: its right is the world's -z, its down -y, its forward -x.
+        const Mat4 head{0,0,-1,0, 0,-1,0,0, -1,0,0,0, 10,2,5,1};
+        const auto resolved=native_eyes::resolvedOnHead(c,head);
+        check(resolved.anchored==3,"a resolved scene pair is still relative");
+        check(native_view::validPose(resolved.eyes[0].world)&&native_view::validPose(resolved.eyes[1].world),"resolved eyes are not poses");
+        // The left eye is 32 mm along the head's -right = +z, and 4 cm above (-down = +y).
+        near(resolved.eyes[0].world[12],10);near(resolved.eyes[0].world[13],2.04f);near(resolved.eyes[0].world[14],5.032f);
+        near(resolved.eyes[1].world[14],4.968f);
+        // The eyes look where the head does.
+        near(resolved.eyes[0].world[8],-1);near(resolved.eyes[0].world[10],0);
+        // Tracked head turns: an eye turned by 90 degrees of yaw about the head's down axis looks along the head's right.
+        const Mat4 turned{0,0,1,0, 0,1,0,0, -1,0,0,0, 0,0,0,1};
+        const auto yawed=native_eyes::onHead(turned,Mat4{1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1});
+        near(yawed[8],-1);near(yawed[10],0);
     });
     test("game's active view sits between the eyes and its lens holds both eye images", [] {
         native_eyes::Command c;c.enabled=1;c.serial=1;
@@ -22401,6 +22426,79 @@ int main() {
         next(true);
         f.hands[1].stickX = 1;
         check(next(true).head[8] > held.head[8] + .01f, "the stick let go and held again did not turn");
+    });
+    test("game rig: after a scene the view faces where the game's camera does; after a menu, as before", [] {
+        constexpr std::int64_t ms = 1'000'000;
+        for (const bool scene : {true, false}) {
+            GameTrackingRig rig;
+            auto f = trackedFrame();
+            f.seconds = .01f;
+            f.predictedDisplayTime = 1000 * ms;
+            rig.update(f, {}, {0, 0, -1}, true);
+            // The viewer's head stays where it was; the scene (or the menu) ends with the camera turned round.
+            rig.scene(scene);
+            for (int i = 0; i < 100; ++i) {
+                f.predictedDisplayTime += 10 * ms;
+                rig.update(f, {}, {0, 0, 1}, false);
+            }
+            f.predictedDisplayTime += 10 * ms;
+            const auto back = rig.update(f, {}, {0, 0, 1}, true);
+            check(back.head[10] * (scene ? 1.f : -1.f) > .95f,
+                  scene ? "after a scene the view did not face where the camera does"
+                        : "after a menu the view did not keep its facing");
+        }
+        // A stutter inside play (the gate closed for a moment) never turns the view.
+        GameTrackingRig rig;
+        auto f = trackedFrame();
+        f.seconds = .01f;
+        f.predictedDisplayTime = 1000 * ms;
+        rig.update(f, {}, {0, 0, -1}, true);
+        rig.scene(true);
+        f.predictedDisplayTime += 10 * ms;
+        rig.update(f, {}, {0, 0, 1}, false);
+        f.predictedDisplayTime += 10 * ms;
+        check(rig.update(f, {}, {0, 0, 1}, true).head[10] < -.95f, "a stutter turned the view");
+    });
+    test("game rig: play after a first-person scene faces where the scene's view was, even after a short break", [] {
+        constexpr std::int64_t ms = 1'000'000;
+        for (const int frames : {20, 100}) {
+            GameTrackingRig rig;
+            auto f = trackedFrame();
+            f.seconds = .01f;
+            f.predictedDisplayTime = 1000 * ms;
+            rig.update(f, {}, {0, 0, -1}, true);
+            // The scene's view ended facing east (yaw -90 degrees); the game's camera faces south.
+            rig.sceneFacing(true, -1.5707963f);
+            for (int i = 0; i < frames; ++i) {
+                f.predictedDisplayTime += 10 * ms;
+                rig.update(f, {}, {0, 0, 1}, false);
+            }
+            // Play is back (the heading is still sent for that first frame, as the worker sends it from the last
+            // frame's play state, and no longer after it).
+            f.predictedDisplayTime += 10 * ms;
+            const auto back = rig.update(f, {}, {0, 0, 1}, true);
+            rig.sceneFacing(false, 0);
+            check(back.head[8] > .95f, "play after a first-person scene did not face where its view was");
+            // It holds: another second of play keeps that facing.
+            GameMotionFrame later;
+            for (int i = 0; i < 100; ++i) {
+                f.predictedDisplayTime += 10 * ms;
+                later = rig.update(f, {}, {0, 0, 1}, true);
+            }
+            check(later.head[8] > .95f, "the facing after a first-person scene did not hold");
+        }
+        // A menu later, with no scene's heading sent, keeps its facing.
+        GameTrackingRig rig;
+        auto f = trackedFrame();
+        f.seconds = .01f;
+        f.predictedDisplayTime = 1000 * ms;
+        rig.update(f, {}, {0, 0, -1}, true);
+        for (int i = 0; i < 100; ++i) {
+            f.predictedDisplayTime += 10 * ms;
+            rig.update(f, {}, {0, 0, 1}, false);
+        }
+        f.predictedDisplayTime += 10 * ms;
+        check(rig.update(f, {}, {0, 0, 1}, true).head[10] < -.95f, "a menu turned the view");
     });
     test("momentum mode supports manual left-stick rotation and an airborne A brake", [] {
         GameTrackingRig rig;

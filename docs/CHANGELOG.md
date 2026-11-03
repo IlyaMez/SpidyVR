@@ -344,6 +344,27 @@ patch".
   together, built after each step. Not run: the game, a headset (each author
   played their own feature in their own build).
 
+**First-person cutscenes.** You: "I want to see the cutscenes from Spider-Man's eyes", with the head moving as the
+character's does.
+
+- **FIRST-PERSON CUTSCENES** (launcher > Game screen and HUD, off by default). In a cutscene the view is the eyes of
+  the character who plays it: Spider-Man, Peter (his apartment, civilian and City Hall bodies), Miles or MJ. The
+  character's head, mask and lenses are hidden so you don't see the inside of them. The game's own screen is
+  replaced by the live 3D scene, with no flash entering or leaving a scene.
+- **CUTSCENE HEAD TRACKING** (shown while the first is on, on by default). On: your head looks around in the scene.
+  Off: the scene follows where the character is, not where he looks, and the right stick turns the view.
+- **THEATRE SCREEN toggle.** Right stick click switches between first person and the scene's own camera for the
+  current scene. DISABLE THEATER SCREEN FULLY (launcher, off by default) keeps the scene camera for good.
+- **Whose eyes: X on the left controller** (or its equivalent) cycles the characters known to be in the scene
+  (Miles, MJ, Spider-Man, Peter) and then the automatic choice. It only takes X while another character is there.
+  So you can watch the scene where Miles meets Spider-Man as Spider-Man.
+- **After a scene you face where it ended**, and the eyes stay on the head at a swing's speed.
+- **How.** `game_fp.cpp` finds the scene's character from the game's entity pool by the identity of its skeleton
+  and the camera's own picture (no distances); the character's head joint is shrunk in the pose job and its head
+  parts are hidden. Scenes where the player's entity is hidden (suit-ups, Aunt May's scene) are followed by their
+  own bodies, which are known by asset.
+- **Tested** on a Quest 3 over Virtual Desktop, by playing through the story and fixing scenes as they broke; not every scene of the game has been checked again after the last changes. A log line says who the view is on ("first person: ...").
+
 **Earlier build (October 27, eighth): a floor too high is caught by your
 arms.** You: "height calibration showed very wrong number in one of today's
 sessions - 1.43 or something instead of 1.88".
