@@ -274,6 +274,18 @@ struct Values {
     // from a stand or a walk, and it builds past the sprint while held. Off
     // by default: SPIDY RUN starts only from a fast landing, as before.
     bool spidyRunFromStanding = false;
+    // SMOOTH WEB LANDING (the tab's SMOOTH WEB LANDING; Swing::
+    // allowWebLandingSmooth, web_landing.hpp): a landing with a web held,
+    // slower than WEB LANDING IMPACT, eases its fall over the last metres,
+    // keeps its speed across the ground for a moment (decaying to a jog) and
+    // no longer flips between the game and the swing on a flicker of the
+    // ground contact. Off by default: such a landing is the game's at once,
+    // as before.
+    bool webLandingSmooth = false;
+    // WEB LANDING IMPACT, m/s (the tab's WEB LANDING IMPACT): SMOOTH WEB
+    // LANDING's threshold; a landing this fast or faster is the game's, heavy
+    // as before. 24 by default, 12 to 40.
+    int webLandingImpact = 24;
     // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
     // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
     int singleHandYankPercent = 100;
@@ -404,8 +416,10 @@ enum class Item : uint8_t {
     webAimSource,
     forearmBlend,
     spidyRunFromStanding,
+    webLandingSmooth,
+    webLandingImpact,
 };
-inline constexpr Item lastItem = Item::spidyRunFromStanding;
+inline constexpr Item lastItem = Item::webLandingImpact;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -428,7 +442,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 86>& rows();
+const std::array<Row, 88>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

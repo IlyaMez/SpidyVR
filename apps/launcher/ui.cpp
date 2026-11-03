@@ -1968,6 +1968,16 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "and it slows to the sprint and the game's run takes over. Off: Spidy run starts only from a "
                "fast landing, as before.",
                S(42), [&] { tabToggle("##spidyrunfromstanding", Item::spidyRunFromStanding); });
+        option("Smooth web landing (experimental)",
+               "Landing while you hold a web, slower than the web landing impact: your fall eases over the "
+               "last metres, your speed carries on across the ground for a moment and eases to a jog before "
+               "the game's run takes over, and a foot brushing the ground no longer stops and restarts the "
+               "swing. Faster than that it is the game's heavy landing. Off: as before.",
+               S(42), [&] { tabToggle("##weblandingsmooth", Item::webLandingSmooth); });
+        option("Web landing impact",
+               "With smooth web landing: a landing this fast or faster (m/s, all of its speed) is the game's "
+               "heavy one. 24 m/s by default.",
+               S(150), [&] { tabCombo("##weblandingimpact", Item::webLandingImpact); });
     });
     group(0, "Flips", [&] {
         option("Flips (experimental)",

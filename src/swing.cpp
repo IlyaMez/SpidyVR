@@ -754,6 +754,7 @@ void Swing::reset(Body b) {
         throw std::invalid_argument("Invalid body");
     clearSlingshot();
     body_ = b;
+    endLandCarry();
     webs_ = {};
     hands_ = {};
     climbing_ = {};
@@ -1515,7 +1516,13 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
         Vec3 steering = finite(in.move) ? limited(Vec3{in.move.x, 0, in.move.z}, 1) : Vec3{};
         body_.velocity +=
             steering * ((body_.grounded ? config_.groundAcceleration : config_.airAcceleration) * dt);
-        if (body_.grounded) {
+        if (body_.grounded && landCarry_ > 0) {
+            // SMOOTH WEB LANDING: the landing's speed carried, decaying to a
+            // jog, steered as on the ground, in place of the ground's brake.
+            landAlong_ = web_landing::carryStep(landAlong_ + steering * (config_.groundAcceleration * dt), dt);
+            body_.velocity.x = landAlong_.x;
+            body_.velocity.z = landAlong_.z;
+        } else if (body_.grounded) {
             const float damping = std::exp(-5 * dt);
             body_.velocity.x *= damping;
             body_.velocity.z *= damping;
@@ -1545,7 +1552,8 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             body_.velocity -= crestNormal_ * (config_.crestPush * dt);
         }
         if (softGround_ >= 0 && !supported && !wall_.on)
-            body_.velocity.y = run_update::softLandVertical(body_.velocity.y, softGround_, dt);
+            body_.velocity.y = webSoft_ ? web_landing::easeFall(body_.velocity.y, softGround_, dt)
+                                        : run_update::softLandVertical(body_.velocity.y, softGround_, dt);
         body_.velocity = limited(body_.velocity, speedLimit());
         body_.grounded = supported;
         if (!supported && !wasGrounded)
@@ -1748,6 +1756,7 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
         !finite(actual.velocity) || length(actual.velocity) > speedLimit() * 2) {
         releaseAll();
         endGroundRun();
+        endLandCarry();
         return {};
     }
     // A long step is a slow game, not stale input. Over 50 ms used to be
@@ -1767,6 +1776,8 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     }
     if (!actual.grounded)
         gestureTakeoff_ = false;
+    // The swing's own velocity as the last step left it: what a landing came in at.
+    const Vec3 flown = body_.velocity;
     body_ = actual;
     body_.velocity = limited(body_.velocity, speedLimit());
     stepSeconds_ = seconds;
@@ -1798,6 +1809,20 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
         const auto ground = world.bodyRaycast(body_.position, {0, -1, 0}, reach);
         if (ground && finite(ground->point) && finite(ground->normal) && normalized(ground->normal).y > .5f)
             softGround_ = std::max(0.f, body_.position.y - 1 - ground->point.y);
+    }
+    // SMOOTH WEB LANDING: the same for a fall with a web held, below the
+    // impact speed, to web_landing's gentler fall.
+    webSoft_ = false;
+    const bool webHeld = webs_[0].attached || webs_[1].attached;
+    if (webLandSmooth_ && softGround_ < 0 && webHeld && !actual.grounded && !wall_.on &&
+        body_.velocity.y < -web_landing::tuning.fallTarget && finite(body_.position) &&
+        web_landing::gentle(body_.velocity, webLandImpact_)) {
+        const float reach = std::min(web_landing::reach(-body_.velocity.y, seconds), config_.maxRange);
+        const auto ground = world.bodyRaycast(body_.position, {0, -1, 0}, reach);
+        if (ground && finite(ground->point) && finite(ground->normal) && normalized(ground->normal).y > .5f) {
+            softGround_ = std::max(0.f, body_.position.y - 1 - ground->point.y);
+            webSoft_ = true;
+        }
     }
     // SPIDY RUN: a landing faster than the sprint goes on at its speed; it
     // ends off the ground, on a web, a wall or a mount's way up one.
@@ -1832,6 +1857,20 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     } else if (!groundRun_) {
         standHold_ = 0;
     }
+    // SMOOTH WEB LANDING: a landing with a web held, below the impact
+    // speed and faster across than the carry's floor, keeps that speed
+    // across the ground for a moment (the caller drives meanwhile). It ends
+    // off the ground, on a wall, a mount, SPIDY RUN, or with the setting.
+    if (landCarry_ > 0 && (!webLandSmooth_ || !actual.grounded || wall_.on || mounting_ || mount_ > 0 || groundRun_))
+        endLandCarry();
+    if (webLandSmooth_ && touchdown && webHeld && !groundRun_ && !wall_.on && !mounting_ && mount_ <= 0 &&
+        web_landing::gentle(flown, webLandImpact_)) {
+        const Vec3 across{flown.x, 0, flown.z};
+        if (length(across) > web_landing::tuning.floor + .05f) {
+            landCarry_ = web_landing::tuning.carryMax;
+            landAlong_ = across;
+        }
+    }
     const auto count = static_cast<unsigned>(std::ceil(seconds / config_.fixedStep));
     const float dt = seconds / count;
     for (unsigned i = 0; i < count; ++i)
@@ -1842,6 +1881,11 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     if (groundRun_ &&
         ((!building && length(groundAlong_) <= run_update::groundRun.sprint + .01f) || groundIdle_ >= 1))
         endGroundRun();
+    if (landCarry_ > 0) {
+        landCarry_ = std::max(0.f, landCarry_ - seconds);
+        if (landCarry_ <= 0 || length(landAlong_) <= web_landing::tuning.floor + .05f)
+            endLandCarry();
+    }
     MotionIntent result{body_.position, body_.velocity, true};
     // Native collision owns position and ground contact. Do not publish the
     // prediction as if the game had already accepted it.

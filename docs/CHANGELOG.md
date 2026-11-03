@@ -7,6 +7,38 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
 
 Not in a build yet, newest first. The release adds these to the next build's entry.
 
+**SMOOTH WEB LANDING, a landing with a web held that keeps its speed.**
+
+- **Before.** A landing with a web held went to the game in the very step
+  the feet touched: `game_swing.cpp`'s `drive` needs the body off the ground,
+  so the swing let go at once and the game's mover took the body at the fall
+  speed the swing had flown it at (its air handler reads that speed from the
+  swing's own displacement, `native_movement.cpp` `readEvent`), with its own
+  ground speed (0 to a jog) and its hard-land lock. SOFT LANDING and SPIDY RUN
+  both leave web-held landings alone. The swing's ground prediction braked
+  what speed was left at exp(-5 t). And a ground contact that flickered for a
+  step (`groundedContact`, read raw) handed the body to the game and straight
+  back. That is the "janky and sticky" landing.
+- **SMOOTH WEB LANDING** (EXPERIMENTAL, the tab's SMOOTH WEB LANDING after
+  FOREARM BLEND; `web_landing_smooth` in `spidy_vr.ini` and profiles; off by
+  default) and **WEB LANDING IMPACT** (`web_landing_impact_speed`, 12 to 40
+  m/s, 24 by default): a landing with a web held, slower than the impact
+  speed (all of its speed), (1) eases its fall to 4 m/s over its last 3 m (or
+  0.35 s), so the game lands it lightly; (2) carries its speed across the
+  ground with the swing still driving, decaying toward 5 m/s (time constant
+  0.3 s, 0.6 s at most), steered by the stick, then the game's run takes over
+  (the stick goes to the game meanwhile, no RT); (3) with a web held or a
+  carry on, takes the ground only after 0.05 s of contact and the air only
+  after 0.08 s without (`web_landing::Contact`), so a flicker no longer flips
+  the owner. A carry the body does not follow (under half the asked speed for
+  0.25 s, SPIDY RUN's check) ends and the game has the body. At the impact
+  speed or faster nothing of this happens. Swing settings version 30.
+- **Validation.** Core checks for the eased fall, the carry, the impact
+  speed, the contact's hysteresis, the swing with a web held (eased and
+  carried with it on, as before with it off or over the impact speed), the
+  packet, the rows and the keys; launcher checks the profile keys. Not played
+  in a headset yet.
+
 **SESSION DIAGNOSTICS in the console and their own file.**
 
 - **Before.** RUN LOGS' `run log:`, WEB AIM's `forearm aim:` and DODGE

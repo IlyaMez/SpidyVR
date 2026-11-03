@@ -126,6 +126,9 @@ static_assert(std::size(earlyJumpChoices) == std::size(earlyJumps));
 constexpr int webAimSources[] = {0, 1};
 constexpr const char* webAimSourceChoices[] = {"CONTROLLER", "MODEL FOREARM"};
 static_assert(std::size(webAimSourceChoices) == std::size(webAimSources));
+constexpr int webLandingImpactSteps[] = {12, 16, 20, 24, 28, 32, 40};
+constexpr const char* webLandingImpactChoices[] = {"12 M/S", "16 M/S", "20 M/S", "24 M/S", "28 M/S", "32 M/S", "40 M/S"};
+static_assert(std::size(webLandingImpactChoices) == std::size(webLandingImpactSteps));
 constexpr int forearmBlends[] = {0, 25, 50, 75, 100};
 constexpr const char* forearmBlendChoices[] = {"0%", "25%", "50%", "75%", "100%"};
 static_assert(std::size(forearmBlendChoices) == std::size(forearmBlends));
@@ -175,6 +178,8 @@ std::span<const int> steps(Item item) {
         return webAimSources;
     case Item::forearmBlend:
         return forearmBlends;
+    case Item::webLandingImpact:
+        return webLandingImpactSteps;
     case Item::nativeRunAt:
         return nativeRunPercents;
     case Item::nearClip:
@@ -254,6 +259,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.webAimSource);
     case Item::forearmBlend:
         return static_cast<float>(v.forearmBlend);
+    case Item::webLandingImpact:
+        return static_cast<float>(v.webLandingImpact);
     case Item::nativeRunAt:
         return static_cast<float>(v.nativeRunPercent);
     case Item::nearClip:
@@ -361,6 +368,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.spidyRun;
     case Item::spidyRunFromStanding:
         return &v.spidyRunFromStanding;
+    case Item::webLandingSmooth:
+        return &v.webLandingSmooth;
     case Item::softLanding:
         return &v.softLanding;
     case Item::momentumLeap:
@@ -404,6 +413,7 @@ Values sanitized(Values v) {
     v.earlyJump = std::clamp(v.earlyJump, 0, 2);
     v.webAimSource = std::clamp(v.webAimSource, 0, 1);
     v.forearmBlend = std::clamp(v.forearmBlend, 0, 100);
+    v.webLandingImpact = std::clamp(v.webLandingImpact, 12, 40);
     v.nativeRunPercent = std::clamp(v.nativeRunPercent, 50, 90);
     v.nearClipMm = std::clamp(v.nearClipMm, nearClips[0], std::end(nearClips)[-1]);
     v.recordingFov = recording_fov::sanitized(v.recordingFov);
@@ -421,9 +431,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 86>& rows() {
+const std::array<Row, 88>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 86> all{{
+    static const std::array<Row, 88> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -628,6 +638,10 @@ const std::array<Row, 86>& rows() {
          "MODEL FOREARM: webs follow the body's forearm. CONTROLLER as before.", webAimSourceChoices},
         {Item::forearmBlend, "FOREARM BLEND",
          "How much MODEL FOREARM follows the forearm, from the controller's line.", forearmBlendChoices},
+        {Item::webLandingSmooth, "SMOOTH WEB LANDING",
+         "Holding a web, a landing under WEB LANDING IMPACT is soft and keeps its speed.", {}},
+        {Item::webLandingImpact, "WEB LANDING IMPACT",
+         "SMOOTH WEB LANDING: at or over this speed a landing is the game's heavy one.", webLandingImpactChoices},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
          "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
@@ -755,6 +769,9 @@ bool choose(Item item, int index, Values& v) {
     case Item::forearmBlend:
         v.forearmBlend = s[index];
         break;
+    case Item::webLandingImpact:
+        v.webLandingImpact = s[index];
+        break;
     case Item::nativeRunAt:
         v.nativeRunPercent = s[index];
         break;
@@ -875,6 +892,8 @@ constexpr TabOnly tabOnly[] = {
     {"spidy_run_from_standing", &Values::spidyRunFromStanding, nullptr},
     {"web_aim_source", nullptr, &Values::webAimSource},
     {"forearm_blend", nullptr, &Values::forearmBlend},
+    {"web_landing_smooth", &Values::webLandingSmooth, nullptr},
+    {"web_landing_impact_speed", nullptr, &Values::webLandingImpact},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

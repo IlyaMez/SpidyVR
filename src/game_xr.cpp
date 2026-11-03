@@ -1433,6 +1433,8 @@ DWORD WINAPI run(void*) {
             s.spidyRun = values.spidyRun;
             // SPIDY RUN FROM STANDING: only with SPIDY RUN itself.
             s.spidyRunStanding = values.spidyRun && values.spidyRunFromStanding;
+            s.webLandingSmooth = values.webLandingSmooth;
+            s.webLandingImpact = static_cast<float>(values.webLandingImpact);
             s.webAngle = values.webAngle;
             s.wristShooters = values.wristShooters;
             sentSwingSettings = s;
@@ -3494,6 +3496,15 @@ DWORD WINAPI run(void*) {
                             // ground is the run asked for. Only the stick: the swing
                             // moves the body until it lands, and RT in the air is the
                             // game's web swing.
+                            walk.right = motion.walkRight;
+                            walk.forward = motion.walkForward;
+                        } else if (values.webLandingSmooth && steering && !layerOn && !calibrationInput &&
+                                   swingFresh && swingState.owned && swingState.grounded &&
+                                   swingState.wall == static_cast<uint32_t>(game_swing::Surface::none)) {
+                            // SMOOTH WEB LANDING (off by default): the swing carries a
+                            // landing with a web across the ground; the game has the
+                            // stick for its run's look, so its first step when it takes
+                            // the body back is the run asked for. Only the stick, no RT.
                             walk.right = motion.walkRight;
                             walk.forward = motion.walkForward;
                         }

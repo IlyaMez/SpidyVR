@@ -1,5 +1,7 @@
 #pragma once
 #include "math.hpp"
+#include "web_landing.hpp"
+#include <cmath>
 #include <algorithm>
 #include <cstdint>
 #include <optional>
@@ -427,6 +429,34 @@ class Swing {
         groundAlong_ = {};
         groundIdle_ = 0;
     }
+    // SMOOTH WEB LANDING (off until set; web_landing.hpp): below `impact`
+    // m/s a landing with a web held eases its fall over the last metres,
+    // carries its speed across the ground (landCarrying; the caller drives
+    // the body meanwhile) decaying to a jog, and only then is the game's. At
+    // or over `impact`, and off, a landing is as before.
+    void allowWebLandingSmooth(bool on, float impact) {
+        webLandSmooth_ = on;
+        webLandImpact_ = std::isfinite(impact) ? std::clamp(impact, 1.f, 100.f)
+                                               : static_cast<float>(web_landing::impactDefault);
+        if (!on)
+            endLandCarry();
+    }
+    bool webLandingSmoothEnabled() const {
+        return webLandSmooth_;
+    }
+    float webLandingImpact() const {
+        return webLandImpact_;
+    }
+    bool landCarrying() const {
+        return landCarry_ > 0;
+    }
+    Vec3 landCarryVelocity() const {
+        return landCarry_ > 0 ? landAlong_ : Vec3{};
+    }
+    void endLandCarry() {
+        landCarry_ = 0;
+        landAlong_ = {};
+    }
     void allowSoftLanding(bool on) {
         softLanding_ = on;
         softGround_ = -1;
@@ -741,6 +771,13 @@ class Swing {
     bool standRunEnabled_{}, standRun_{}, standArmed_{true};
     float standHold_{};
     float softGround_{-1};
+    // SMOOTH WEB LANDING: on, and its impact speed; this step's soft ground is
+    // a web landing's (web_landing::easeFall); the carry's time left and its
+    // velocity across the ground.
+    bool webLandSmooth_{}, webSoft_{};
+    float webLandImpact_{static_cast<float>(web_landing::impactDefault)};
+    float landCarry_{};
+    Vec3 landAlong_{};
     bool slingshotTaut(int i) const;
     Vec3 slingshotHands_[2]{}, slingshotEnds_[2]{};
     uint64_t slingshotSurfaces_[2]{};

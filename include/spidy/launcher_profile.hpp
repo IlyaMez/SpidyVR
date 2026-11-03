@@ -137,6 +137,8 @@ inline constexpr ProfileSetting profileSettings[] = {
     tabOnly("spidy_run_from_standing", Item::spidyRunFromStanding, &Values::spidyRunFromStanding),
     tabOnly("web_aim_source", Item::webAimSource, 0, 1, &Values::webAimSource),
     tabOnly("forearm_blend", Item::forearmBlend, 0, 100, &Values::forearmBlend),
+    tabOnly("web_landing_smooth", Item::webLandingSmooth, &Values::webLandingSmooth),
+    tabOnly("web_landing_impact_speed", Item::webLandingImpact, 12, 40, &Values::webLandingImpact),
     retired("wall_distance_cm", vr_settings::fixedWallDistance),
     tabOnly("realistic_flips", Item::realisticFlips, &Values::realisticFlips),
     tabOnly("rotation_strength", Item::automaticStrength, 25, 100, &Values::automaticStrength),

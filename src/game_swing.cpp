@@ -82,6 +82,8 @@ float restSeconds{}, crawlHeight{};
 Vec3 groundRunAsked{};
 float groundRunLag{};
 uint32_t groundRunRefusals{};
+// SMOOTH WEB LANDING: the game's ground contact, steadied while a web is held (web_landing::Contact).
+web_landing::Contact landingContact;
 uint64_t crawlAskedAt{};
 bool crawlBegun{}, crawlDeclined{};
 // The wall the game's crawl last held the player on, where its own wall run
@@ -735,9 +737,18 @@ void visit(const native_rays::QueryContext& world) {
     // harness above the supporting surface, while native motion stays in feet coordinates.
     const Vec3 harness = motion.position + Vec3{0, 1, 0};
     // The next command starts where the step in flight ends.
-    const Body body = inFlight.predict(
+    Body sensed = inFlight.predict(
         {motion.steps, motion.serial, harness, motion.achievedVelocity, motion.dt, motion.status == 2},
         motion.grounded != 0);
+    // SMOOTH WEB LANDING (off by default): with a web held, or carrying a
+    // landing, the ground or the air counts once the game's contact has said
+    // so for a moment (web_landing::Contact): a step's flicker handed the
+    // body to the game and back. Off: the contact as it is, as before.
+    sensed.grounded = landingContact.update(
+        motion.dt, sensed.grounded,
+        solver.webLandingSmoothEnabled() &&
+            (solver.webs()[0].attached || solver.webs()[1].attached || solver.landCarrying()));
+    const Body body = sensed;
     if (!initialized) {
         solver.reset(body);
         initialized = true;
@@ -1045,12 +1056,14 @@ void visit(const native_rays::QueryContext& world) {
     }
     // Nor does the swing take the body the game runs up its wall (gameRun).
     // SPIDY RUN: the swing's own run on the ground, as long as it lasts.
-    const bool groundRun = solver.groundRunning() && collidable && !transition.waiting && !mount.waiting;
+    // SMOOTH WEB LANDING's carry across the ground, likewise (off by default).
+    const bool groundRun = (solver.groundRunning() || solver.landCarrying()) && collidable && !transition.waiting &&
+                           !mount.waiting;
     const bool drive = !handCrawl && !grasped && !handing && !gameRun && !yielding &&
                        (striking || groundRun ||
                         (collidable && !body.grounded && !transition.waiting &&
                          (attached || owned || transition.resumed || wall.on)));
-    if (solver.groundRunning()) {
+    if (solver.groundRunning() || solver.landCarrying()) {
         // Does the body go where the run sends it? Measured against the last command's speed across.
         const float asked = std::hypot(groundRunAsked.x, groundRunAsked.z);
         const float went = std::hypot(motion.achievedVelocity.x, motion.achievedVelocity.z);
@@ -1058,13 +1071,16 @@ void visit(const native_rays::QueryContext& world) {
             groundRunLag += motion.dt;
         else
             groundRunLag = std::max(0.f, groundRunLag - motion.dt);
-        if (!drive || groundRunLag > .25f) {
+        if (solver.groundRunning() && (!drive || groundRunLag > .25f)) {
             if (drive && ++groundRunRefusals >= 3)
                 solver.allowGroundRun(false);
             solver.endGroundRun();
         }
+        // A carry the body does not follow, or one the swing may not drive, ends: the game's.
+        if (solver.landCarrying() && (!drive || groundRunLag > .25f))
+            solver.endLandCarry();
     }
-    if (!solver.groundRunning())
+    if (!solver.groundRunning() && !solver.landCarrying())
         groundRunAsked = {}, groundRunLag = 0;
     if (drive) {
         native_movement::Command request;
@@ -1083,7 +1099,7 @@ void visit(const native_rays::QueryContext& world) {
         // the module moves the body for all of it (native_movement::stepDelta).
         request.leaseMs = motionLeaseMs;
         request.velocity = requested;
-        if (solver.groundRunning())
+        if (solver.groundRunning() || solver.landCarrying())
             groundRunAsked = requested;
         if (const auto error = submitMotion(&request)) {
             fault(error);
@@ -1368,7 +1384,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
          header[2] != settingsBytesV18 && header[2] != settingsBytesV19 && header[2] != settingsBytesV20 &&
          header[2] != settingsBytesV21 && header[2] != settingsBytesV22 && header[2] != settingsBytesV23 && header[2] != settingsBytesV24 &&
          header[2] != settingsBytesV25 && header[2] != settingsBytesV26 && header[2] != settingsBytesV27 &&
-         header[2] != settingsBytesV28 && header[2] != sizeof(s)) ||
+         header[2] != settingsBytesV28 && header[2] != settingsBytesV29 && header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || !validSettings(s))
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
@@ -1417,6 +1433,9 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         solver.allowSoftLanding(s.version >= 27 && s.softLanding != 0);
         solver.allowGroundRun(s.version >= 28 && s.spidyRun != 0);
         solver.allowGroundRunFromStanding(s.version >= 29 && s.spidyRunStanding != 0);
+        solver.allowWebLandingSmooth(s.version >= 30 && s.webLandingSmooth != 0,
+                                     s.version >= 30 ? s.webLandingImpact
+                                                     : static_cast<float>(web_landing::impactDefault));
         groundRunRefusals = 0;
         webAngle = s.version >= 25 ? s.webAngle : 0;
         wristShooters = s.version >= 25 && s.wristShooters != 0;

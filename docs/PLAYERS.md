@@ -1018,9 +1018,17 @@ VR settings
                    SHOOTERS still turn on top; punches keep the controller.
   FOREARM BLEND    (100% until you change it) how much of the forearm's
                    line MODEL FOREARM takes, from 0% (the controller's).
+  SMOOTH WEB LANDING (off until you switch it on) land while you hold a
+                   web, slower than WEB LANDING IMPACT, and your fall eases
+                   over the last metres, your speed carries on across the
+                   ground and eases to a jog before the game's run takes
+                   over, and a foot brushing the ground no longer stops and
+                   restarts the swing. Off: as before.
+  WEB LANDING IMPACT (24 M/S until you change it) with SMOOTH WEB LANDING, a
+                   landing this fast or faster is the game's heavy one.
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, RUN FROM STANDING, WEB AIM, FOREARM BLEND, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, RUN FROM STANDING, WEB AIM, FOREARM BLEND, SMOOTH WEB LANDING, WEB LANDING IMPACT, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches
