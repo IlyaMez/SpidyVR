@@ -995,8 +995,13 @@ VR settings
                    jump, further and flatter. Off: as before.
   EARLY JUMP       (OFF until you pick one) QUICK TAP: a tap of A jumps if
                    let go within 0.1 s (0.18 s before). RUNNING: that, and
-                   while NATIVE RUN sprints A jumps the moment you press it
-                   (no charged leap while sprinting).
+                   while you run (NATIVE RUN's sprint, or the stick pushed
+                   at least halfway) A jumps the moment you press it (no
+                   charged leap while running).
+                   Always, whatever the setting: A while SPIDY RUN or a
+                   smooth web landing carries you on the ground ends that
+                   run and is the game's jump, sent the moment the game has
+                   you back (0.2 s at most).
   SOFT LANDING     (off until you switch it on) falling with no web, your
                    fall eases to about 9 m/s over the last 3 m before the
                    ground; your speed across is kept. Off: as before.

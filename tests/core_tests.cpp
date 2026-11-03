@@ -9481,6 +9481,61 @@ int main() {
         odd.earlyJump(9);
         check(waited(9, true) == -1, "an EARLY JUMP past RUNNING not taken as RUNNING");
     });
+    test("JUMP ALWAYS: A waits for the swing's hand-back of a ground run, then a fresh press; a tap's pulse lasts 3 frames", [] {
+        using game_pad::JumpRelay;
+        const float dt = 1.f / 45;
+        // Not on the swing's ground: A as it is held, at once.
+        JumpRelay plain;
+        check(plain.update(dt, true, false) && plain.update(dt, true, false) && !plain.update(dt, false, false) &&
+                  !plain.deferred(),
+              "a plain press changed");
+        // Held while the swing runs: nothing until it lets go, then A held on.
+        JumpRelay held;
+        check(!held.update(dt, true, true) && !held.update(dt, true, true) && held.waiting(), "A went out at once");
+        check(held.update(dt, true, false) && held.relayed() == 1 && held.update(dt, true, false),
+              "A not sent once the game had the body");
+        check(!held.update(dt, false, false), "A stayed down");
+        // A tap let go before the hand-back: a pulse of 3 frames at least.
+        JumpRelay tap;
+        tap.update(dt, true, true);
+        tap.update(dt, false, true);
+        int pulse = 0;
+        for (int i = 0; i < 20; ++i)
+            pulse += tap.update(dt, false, false);
+        check(pulse >= 3 && pulse <= 6, "a tap's A was not one short press");
+        // Never more than 0.2 s held back.
+        JumpRelay stuck;
+        int waited = 0;
+        while (!stuck.update(dt, true, true) && waited < 100)
+            ++waited;
+        check(waited >= 8 && waited <= 10, "A held back past 0.2 s");
+        // ChargeJump's tap at 20 fps: three frames of A, not two.
+        game_pad::ChargeJump slow;
+        slow.update(.05f, true, true);
+        int frames = 0;
+        for (int i = 0; i < 10; ++i)
+            frames += slow.update(.05f, false, true).jump;
+        check(frames == 3, "a tap at 20 fps not three frames of A");
+        // The swing: a press during SPIDY RUN ends it, and is no jump of the swing's own.
+        TestWorld w;
+        w.enabled = false;
+        Input in;
+        in.focused = true;
+        in.move = {0, 0, -1};
+        Swing sw(inert());
+        sw.allowGroundRun(true);
+        sw.predictNativeStep(1.f / 90, in, w, {{0, 1.5f, 0}, {0, -8, -20}, false});
+        sw.predictNativeStep(1.f / 90, in, w, {{0, 1, -.3f}, {0, -8, -20}, true});
+        check(sw.groundRunning(), "no run");
+        Input jump = in;
+        jump.jump = true;
+        const Vec3 at = sw.groundRunVelocity();
+        const auto out = sw.predictNativeStep(1.f / 90, jump, w, {{0, 1, -.5f}, at, true});
+        check(!sw.groundRunning() && sw.jumpCancels() == 1, "the jump did not end SPIDY RUN");
+        check(out.velocity.y <= 0, "the swing jumped itself on the game's ground");
+        sw.predictNativeStep(1.f / 90, jump, w, {{0, 1, -.6f}, at, true});
+        check(!sw.groundRunning() && sw.jumpCancels() == 1, "a held jump counted again or ran again");
+    });
     test("SOFT LANDING: a fall with no web eases to 9 m/s over its last metres; off, webs or walls, as before", [] {
         using namespace run_update;
         // Far above, or slow: untouched. Near the ground: toward softFall, never past it.

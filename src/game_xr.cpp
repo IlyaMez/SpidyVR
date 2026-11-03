@@ -958,6 +958,14 @@ DWORD WINAPI run(void*) {
         // its hand at the temple is the game's R3, its scan. leapOut: the
         // leap let go of, for the swing's next commands.
         game_pad::ChargeJump chargeJump;
+        // JUMP ALWAYS (v5): the game's A held for the moment the swing hands
+        // back a body it ran on the ground (game_pad::JumpRelay), and a jump:
+        // line in the diagnostics for every press: where it went, how late.
+        game_pad::JumpRelay jumpRelay;
+        bool jumpRawBefore{}, jumpOutBefore{}, jumpPressOpen{};
+        uint32_t jumpPressCharges{};
+        float jumpPressAge{};
+        char jumpPressWhere[96]{};
         game_pad::NativeRun nativeRun; // NATIVE RUN's RT on the ground
         run_update::RunLog runLog;     // RUN LOGS' lines
         // WEB AIM: MODEL FOREARM (web_aim::ForearmAim): each hand's forearm
@@ -3370,11 +3378,77 @@ DWORD WINAPI run(void*) {
                     // EARLY JUMP (OFF by default): a quicker tap, and while
                     // NATIVE RUN holds RT the game's A at once.
                     chargeJump.earlyJump(values.earlyJump);
+                    // EARLY JUMP's RUNNING (2) counts the stick's run on the
+                    // game's ground too, not only NATIVE RUN's RT (JUMP ALWAYS,
+                    // v5: the November 3 session ran with NATIVE RUN 0 at every
+                    // take-off, so a press while running still waited or charged).
+                    const bool runningJump =
+                        nativeRun.held() ||
+                        (values.earlyJump == 2 && std::hypot(motion.walkRight, motion.walkForward) >= .5f);
                     const auto leap =
                         chargeJump.update(frame.seconds, (keys & swingJumpKey) && !swingState.takeoff,
-                                          standing, nativeRun.held());
+                                          standing, runningJump);
                     if (!swingState.takeoff)
                         keys = (keys & ~swingJumpKey) | (leap.jump ? swingJumpKey : 0u);
+                    // JUMP ALWAYS (v5, always on): while the swing runs the body on
+                    // the ground (SPIDY RUN, the landing carry) the press ends that
+                    // run (Swing::jumpCancels) and the game's A waits for the game to
+                    // have the body back, 0.2 s at most (game_pad::JumpRelay).
+                    {
+                        const bool swingGround =
+                            steering && swingFresh && swingState.status && swingState.owned &&
+                            swingState.grounded &&
+                            swingState.wall == static_cast<uint32_t>(game_swing::Surface::none) &&
+                            !swingState.webs[0].attached && !swingState.webs[1].attached && !mounting &&
+                            !swingState.takeoff && !swingState.takeoffPhase;
+                        const bool relayed =
+                            jumpRelay.update(frame.seconds, (keys & swingJumpKey) != 0, swingGround);
+                        if (!swingState.takeoff)
+                            keys = (keys & ~swingJumpKey) | (relayed ? swingJumpKey : 0u);
+                        // jump: lines (diagnostics only): each press of A in play, and
+                        // the moment the game's A went out, or that it never did.
+                        const float dt = std::isfinite(frame.seconds) ? std::clamp(frame.seconds, 0.f, .1f) : 0.f;
+                        const bool raw = steering && frame.jump;
+                        const bool out = (keys & swingJumpKey) != 0;
+                        char line[200];
+                        if (raw && !jumpRawBefore) {
+                            if (jumpPressOpen)
+                                game_prompts::note("jump: a press the game never got as A (another came)");
+                            jumpPressOpen = true;
+                            jumpPressAge = 0;
+                            jumpPressCharges = chargeJump.charges();
+                            sprintf_s(jumpPressWhere, "%s%s%s%s%s, fight %d",
+                                      swingGround ? "the swing running on the ground"
+                                      : standing  ? "standing on the game's ground"
+                                      : swingState.grounded ? "on the ground"
+                                                            : "off the ground",
+                                      swingState.owned ? ", owned" : "",
+                                      runningJump ? ", running" : "",
+                                      swingState.wall ? ", on a wall" : "",
+                                      (swingState.webs[0].attached || swingState.webs[1].attached) ? ", webbed" : "",
+                                      fightLately ? 1 : 0);
+                        } else if (jumpPressOpen)
+                            jumpPressAge += dt;
+                        if (jumpPressOpen && out && !jumpOutBefore) {
+                            sprintf_s(line, "jump: A to the game %d ms after the press (%s%s)",
+                                      static_cast<int>(jumpPressAge * 1000 + .5f), jumpPressWhere,
+                                      jumpRelay.relayed() && jumpRelay.waited() > 0 && jumpPressAge > 0 &&
+                                              jumpRelay.waited() >= jumpPressAge - .001f
+                                          ? "; held for the swing's hand-back"
+                                          : "");
+                            game_prompts::note(line);
+                            jumpPressOpen = false;
+                        } else if (jumpPressOpen && !raw && !out && jumpPressAge > .5f) {
+                            sprintf_s(line, "jump: a press the game never got as A (%s%s)", jumpPressWhere,
+                                      chargeJump.charges() != jumpPressCharges ? "; held into a charged leap"
+                                      : !swingState.grounded            ? "; in the air A waits for a press from the ground"
+                                                                        : "");
+                            game_prompts::note(line);
+                            jumpPressOpen = false;
+                        }
+                        jumpRawBefore = raw;
+                        jumpOutBefore = out;
+                    }
                     leapOut = leap.leap;
                     if (chargeJump.charges() != chargesBefore) {
                         chargesBefore = chargeJump.charges();

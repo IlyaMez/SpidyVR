@@ -450,6 +450,14 @@ class Swing {
     bool landCarrying() const {
         return landCarry_ > 0;
     }
+    // JUMP ALWAYS (v5, always on): presses of the jump that ended SPIDY RUN
+    // or SMOOTH WEB LANDING's carry on the ground so far. Such a press is the
+    // game's jump, not the swing's: its body on the ground never followed the
+    // swing's own jump up (the user, November 3: "jump is disabling when I
+    // run"; the session's runs of 4.7 to 9.2 s left the ground only by a web).
+    std::uint32_t jumpCancels() const {
+        return jumpCancels_;
+    }
     Vec3 landCarryVelocity() const {
         return landCarry_ > 0 ? landAlong_ : Vec3{};
     }
@@ -877,6 +885,7 @@ class Swing {
     float sinceZip_ = 100, sinceLanding_ = 100, zipSpeed_{};
     Vec3 zipDirection_{};
     bool jumpHeld_{}, jumpQueued_{};
+    std::uint32_t jumpCancels_{};
     // A leap's charge waiting for the next step, and whether one is held out.
     float leapQueued_{};
     bool leapHeld_{};

@@ -982,6 +982,22 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
         zipGestureBlock_ = .2f;
     climbSeconds_ = dt;
     climbInputs(in, world);
+    // JUMP ALWAYS: a press while the swing runs the body on the ground
+    // (SPIDY RUN, the landing carry) ends that run; the game has the body
+    // back and makes the jump (the caller holds its A until then:
+    // game_pad::JumpRelay). With a web held the press stays the swing's too,
+    // the takeoff's, as before.
+    if (in.jump && !jumpHeld_ && !wall_.on && (groundRun_ || landCarry_ > 0)) {
+        const bool webbed =
+            webs_[0].attached || webs_[1].attached || climbing_[0].attached || climbing_[1].attached;
+        endGroundRun();
+        endLandCarry();
+        standArmed_ = false;
+        standHold_ = 0;
+        ++jumpCancels_;
+        if (!webbed)
+            jumpHeld_ = true; // the game's jump, not queued for the swing's
+    }
     jumpQueued_ |= in.jump && !jumpHeld_;
     const bool leap = std::isfinite(in.leap) && in.leap > 0;
     if (leap && !leapHeld_)

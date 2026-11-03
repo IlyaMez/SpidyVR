@@ -231,6 +231,7 @@ class ChargeJump {
     // player runs (update's `running`: NATIVE RUN holds RT) is the game's A
     // as it is held, at once, with no charge.
     static constexpr float quickTapSeconds = .1f;
+    static constexpr int pulseFrames = 3;
     void earlyJump(int mode) {
         early_ = std::clamp(mode, 0, 2);
         tap_ = early_ ? quickTapSeconds : tapSeconds;
@@ -263,6 +264,7 @@ class ChargeJump {
             if (!held) {
                 phase_ = Phase::pulse;
                 time_ = 0;
+                pulseFrames_ = 1;
                 return {true, 0};
             }
             if (time_ < tap_)
@@ -271,7 +273,10 @@ class ChargeJump {
             ++charges_;
             return {};
         case Phase::pulse:
-            if (time_ < pulseSeconds)
+            // At least pulseFrames updates as well (JUMP ALWAYS, v5): at
+            // under 33 fps 0.09 s is two frames or one, and a game frame can
+            // miss it.
+            if (++pulseFrames_ <= pulseFrames || time_ < pulseSeconds)
                 return {true, 0};
             phase_ = Phase::idle;
             return {};
@@ -323,7 +328,80 @@ class ChargeJump {
     bool down_{};
     int early_{};
     float time_{}, leap_{}, tap_{tapSeconds};
+    int pulseFrames_{};
     uint32_t charges_{}, leaps_{};
+};
+// JUMP ALWAYS (v5, always on): while the swing runs the body on the ground
+// (SPIDY RUN, SMOOTH WEB LANDING's carry: the swing owns a grounded body),
+// the game's mover follows the swing and its jump goes nowhere. The press
+// ends that run in the swing (Swing::jumpCancels), and the game's A waits
+// here until the game has the body back (`swingGround` false), waitSeconds
+// at most, then goes out as a fresh press: held on while the player holds
+// it, or a pulse of pulseSeconds and pulseFrames updates at least if he
+// already let go. Any other press is the game's A as it is held.
+class JumpRelay {
+  public:
+    static constexpr float waitSeconds = .2f, pulseSeconds = .09f;
+    static constexpr int pulseFrames = 3;
+    bool update(float seconds, bool held, bool swingGround) {
+        const float dt = std::isfinite(seconds) ? std::clamp(seconds, 0.f, .1f) : 0.f;
+        const bool pressed = held && !down_;
+        down_ = held;
+        if (pressed && swingGround) {
+            phase_ = Phase::waiting;
+            time_ = 0;
+            tapped_ = false;
+            ++deferred_;
+            return false;
+        }
+        switch (phase_) {
+        case Phase::waiting:
+            time_ += dt;
+            tapped_ |= !held;
+            if (swingGround && time_ < waitSeconds)
+                return false;
+            waited_ = time_;
+            ++relayed_;
+            if (held && !tapped_) {
+                phase_ = Phase::idle;
+                return true;
+            }
+            phase_ = Phase::pulse;
+            time_ = 0;
+            frames_ = 1;
+            return true;
+        case Phase::pulse:
+            time_ += dt;
+            if (++frames_ <= pulseFrames || time_ < pulseSeconds)
+                return true;
+            phase_ = Phase::idle;
+            return held;
+        case Phase::idle:
+            break;
+        }
+        return held;
+    }
+    bool waiting() const {
+        return phase_ == Phase::waiting;
+    }
+    // Presses held back so far, those sent on, and how long the last one waited.
+    uint32_t deferred() const {
+        return deferred_;
+    }
+    uint32_t relayed() const {
+        return relayed_;
+    }
+    float waited() const {
+        return waited_;
+    }
+
+  private:
+    enum class Phase { idle, waiting, pulse };
+    Phase phase_{};
+    bool down_{}, tapped_{};
+    int frames_{};
+    float time_{}, waited_{};
+    uint32_t deferred_{}, relayed_{};
 };
 // A hand at the temple with its trigger pulled: the game's R3, its scan of
 // the surroundings, for as long as the trigger stays pulled (minSeconds at

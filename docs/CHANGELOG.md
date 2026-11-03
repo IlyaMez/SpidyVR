@@ -7,6 +7,36 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
 
 Not in a build yet, newest first. The release adds these to the next build's entry.
 
+**JUMP ALWAYS, A that reaches the game while running.**
+
+- **Before.** With SPIDY RUN (or SMOOTH WEB LANDING's carry) the swing owns
+  the body on the ground, and the game's mover follows the swing: the game's
+  A went nowhere, and the swing's own jump was never followed by a grounded
+  body. In the November 3 session (Quest 3S, 0.7.0 commit 20dc673f17) runs of
+  4.71, 4.99, 5.61 and 9.21 s left the ground only by a web, never by a jump
+  (the user: "jump is disabling when I run"). EARLY JUMP's RUNNING counted
+  only NATIVE RUN's RT, which that session never held at a take-off
+  (`NATIVE RUN 0` on every `off the ground` line), so a press while running
+  on the game's ground still waited for its release, or charged a leap.
+- **JUMP ALWAYS** (always on, a bug fix): a press of A while the swing runs
+  the body on the ground ends that run (`Swing::jumpCancels`; with a web held
+  the press stays the takeoff's too, as before), and the game's A waits for
+  the game to have the body back, 0.2 s at most, then goes out as a fresh
+  press (`game_pad::JumpRelay`): held while A is held, or a pulse if it was a
+  tap. EARLY JUMP = RUNNING (2) now also counts the stick's run (tilt 0.5 or
+  more) as running. A tap's pulse of A (ChargeJump's and the relay's) lasts 3
+  frames at least, so under 33 fps it is no longer 1 or 2 frames.
+- **jump: lines in the diagnostics** (always): each press of A in play, where
+  it was (the swing running on the ground, standing, in the air, owned,
+  running, webbed, fight) and the milliseconds until the game's A went out,
+  or that it never did (a charged leap, in the air).
+- **Unchanged.** Swinging, webs, wall run and crawl, takeoffs with a web,
+  the air (A from the air still waits, it is the game's web zip), the pad
+  layer and the menus. ChargeJump's hold to charge on the game's ground.
+- **Validation.** Core checks for the relay (held, tapped, 0.2 s cap), the
+  20 fps pulse, and a press during SPIDY RUN; the ChargeJump, EARLY JUMP,
+  SPIDY RUN and SMOOTH WEB LANDING checks unchanged. Not played in a headset.
+
 **STEADY STATES, and every leave and land in the diagnostics.**
 
 - **Before.** NATIVE RUN's RT was gated each frame on what the swing last
