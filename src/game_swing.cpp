@@ -1057,7 +1057,9 @@ void visit(const native_rays::QueryContext& world) {
     // Nor does the swing take the body the game runs up its wall (gameRun).
     // SPIDY RUN: the swing's own run on the ground, as long as it lasts.
     // SMOOTH WEB LANDING's carry across the ground, likewise (off by default).
-    const bool groundRun = (solver.groundRunning() || solver.landCarrying()) && collidable && !transition.waiting &&
+    // SPIDY RUN JUMP (v6): the swing's own jump out of the run, until the body is off the ground.
+    const bool groundRun = (solver.groundRunning() || solver.landCarrying() || solver.runJumping()) && collidable &&
+                           !transition.waiting &&
                            !mount.waiting;
     const bool drive = !handCrawl && !grasped && !handing && !gameRun && !yielding &&
                        (striking || groundRun ||

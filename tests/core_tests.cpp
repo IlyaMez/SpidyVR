@@ -9583,7 +9583,7 @@ int main() {
         check(game_swing::valid(c) && !game_swing::input(c).fighting, "the web tie's click (bit 1) taken for a fight");
         c.asks = 7;
         check(game_swing::valid(c), "asks 7 refused");
-        c.asks = 8;
+        c.asks = 16;
         check(!game_swing::valid(c), "an unknown asks bit accepted");
         c.asks = 1;
         check(!game_swing::input(c).fighting, "bit 0 read as a fight");
@@ -9614,6 +9614,74 @@ int main() {
         line = f.update(1.f / 45, .0005f, true);
         check(line && std::strstr(line, "before the fight") && std::strstr(line, "fps"), "no line as the fight began");
         check(!f.update(0, 0, true) && !f.update(NAN, 0, true), "a line from a bad frame time");
+    });
+    test("SPIDY RUN JUMP: A in the swing's run jumps at once with its speed; the game's A swallowed; off as v5", [] {
+        TestWorld w;
+        w.enabled = false;
+        Input in;
+        in.focused = true;
+        in.move = {0, 0, -1};
+        in.runJump = true;
+        const Body air{{0, 1.5f, 0}, {0, -8, -20}, false};
+        const Body landed{{0, 1, -.3f}, {0, -8, -20}, true};
+        Swing sw(inert());
+        sw.allowGroundRun(true);
+        sw.predictNativeStep(1.f / 90, in, w, air);
+        sw.predictNativeStep(1.f / 90, in, w, landed);
+        check(sw.groundRunning(), "no SPIDY RUN to jump out of");
+        const Vec3 run = sw.groundRunVelocity();
+        Input jump = in;
+        jump.jump = true;
+        const auto out = sw.predictNativeStep(1.f / 90, jump, w, {{0, 1, -.5f}, run, true});
+        check(!sw.groundRunning() && sw.runJumping() && out.valid && out.velocity.y > 5,
+              "A did not jump at once on the press's own step");
+        check(std::hypot(out.velocity.x, out.velocity.z) > .9f * std::hypot(run.x, run.z),
+              "the run's speed not kept");
+        // The body still seen on the ground (the command lands a step later): the jump holds, no new run.
+        const auto again = sw.predictNativeStep(1.f / 90, jump, w, {{0, 1, -.6f}, run, true});
+        check(sw.runJumping() && !sw.groundRunning() && again.velocity.y > 5, "the jump lost while still grounded");
+        sw.predictNativeStep(1.f / 90, jump, w, {{0, 1.1f, -.8f}, out.velocity, false});
+        check(!sw.runJumping() && sw.runJumps() == 1, "the jump not counted off the ground");
+        // Off (Input::runJump false): v5, the run ends and the game jumps.
+        {
+            Swing v5(inert());
+            v5.allowGroundRun(true);
+            Input off = in;
+            off.runJump = false;
+            v5.predictNativeStep(1.f / 90, off, w, air);
+            v5.predictNativeStep(1.f / 90, off, w, landed);
+            Input j = off;
+            j.jump = true;
+            v5.predictNativeStep(1.f / 90, j, w, {{0, 1, -.5f}, v5.groundRunVelocity(), true});
+            check(!v5.groundRunning() && !v5.runJumping() && v5.jumpCancels() == 1, "off: not v5's jump");
+        }
+        // The game's A: swallowed for that press, as before for any other.
+        game_pad::JumpRelay r;
+        const float dt = 1.f / 45;
+        check(!r.update(dt, true, true, true) && r.swallowed() == 1 && !r.waiting(), "the game got A");
+        check(!r.update(dt, true, false, true) && !r.update(dt, false, false, true), "A went out after the jump");
+        check(r.update(dt, true, false, true), "the next press off the run not the game's");
+        // Asks bit 2.
+        game_swing::Command c;
+        c.serial = 1;
+        c.asks = 8;
+        check(game_swing::valid(c) && game_swing::input(c).runJump && !game_swing::input(c).fighting,
+              "asks bit 3 refused or lost");
+        c.asks = 16;
+        check(!game_swing::valid(c), "an unknown asks bit accepted");
+        vr_settings::Values values;
+        check(values.spidyRunJump && vr_settings::defaultChoice(vr_settings::Item::spidyRunJump) == 1 &&
+                  values.forearmAimLimit == 180 && !values.palmShooters,
+              "v6 defaults");
+        check(!vr_settings::withTabOnly({}, "spidy_run_jump=0\n").spidyRunJump &&
+                  vr_settings::withTabOnly({}, "").spidyRunJump &&
+                  vr_settings::withTabOnly({}, "forearm_aim_limit=10\n").forearmAimLimit == 35 &&
+                  vr_settings::withTabOnly({}, "palm_shooters=1\n").palmShooters,
+              "spidy_vr.ini's v6 keys");
+        const auto& all = vr_settings::rows();
+        check(all[79].item == vr_settings::Item::spidyRunJump && all[80].item == vr_settings::Item::forearmAimLimit &&
+                  all[80].choices.size() == 4 && all[81].item == vr_settings::Item::palmShooters,
+              "the v6 rows after COMBAT RESPONSIVE");
     });
     test("SOFT LANDING: a fall with no web eases to 9 m/s over its last metres; off, webs or walls, as before", [] {
         using namespace run_update;
@@ -23199,7 +23267,7 @@ int main() {
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
         // The realistic flips' rows come last, after the EXPERIMENTAL rows before them.
-        constexpr size_t firstRealistic = 79;
+        constexpr size_t firstRealistic = 82;
         check(all.size() == firstRealistic + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
             check(all[firstRealistic + i].item == realistic[i], "the realistic flips' rows out of order");
@@ -23407,7 +23475,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 85,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 88,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -23666,7 +23734,7 @@ int main() {
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
                   "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
                   "degrees=0\nwrist_shooters=0\n"
-                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\nsteady_states=0\ncombat_responsive=0\n",
+                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\nsteady_states=0\ncombat_responsive=0\nspidy_run_jump=1\nforearm_aim_limit=180\npalm_shooters=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;
@@ -26055,7 +26123,7 @@ int main() {
             c.asks = asks;
             check(game_swing::valid(c), "a command with the tie's click was refused (2001)");
         }
-        c.asks = 8;
+        c.asks = 16;
         check(!game_swing::valid(c), "an unknown ask was accepted");
     });
     test("web tie: hands together on a wall web and a webbed-up enemy, a click ties him", [&] {

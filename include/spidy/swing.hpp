@@ -235,6 +235,11 @@ struct Input {
     // fights now. SPIDY RUN and SMOOTH WEB LANDING's carry neither start nor
     // go on: the game moves the body for its blows and dodges.
     bool fighting{};
+    // SPIDY RUN JUMP (v6; on unless the caller clears it): A while the swing
+    // runs the body on the ground (SPIDY RUN, the landing carry), with no
+    // web, is the swing's own jump at once, the run's speed kept, instead of
+    // ending the run and leaving the jump to the game (v5's hand-back wait).
+    bool runJump{};
 };
 // The tracking space's orientation in the world (Rig::orientation): hand
 // motion relative to the head turns into the world with it.
@@ -461,6 +466,20 @@ class Swing {
     // run"; the session's runs of 4.7 to 9.2 s left the ground only by a web).
     std::uint32_t jumpCancels() const {
         return jumpCancels_;
+    }
+    // SPIDY RUN JUMP (Input::runJump): the swing's own jump out of a run is
+    // under way until the body is seen off the ground (runJumpSeconds at
+    // most); the caller drives meanwhile. runJumps counts those that left
+    // the ground, runJumpVelocity is the jump's launch.
+    static constexpr float runJumpSeconds = .3f;
+    bool runJumping() const {
+        return runJump_ > 0;
+    }
+    std::uint32_t runJumps() const {
+        return runJumps_;
+    }
+    Vec3 runJumpVelocity() const {
+        return runJumpVelocity_;
     }
     Vec3 landCarryVelocity() const {
         return landCarry_ > 0 ? landAlong_ : Vec3{};
@@ -889,7 +908,9 @@ class Swing {
     float sinceZip_ = 100, sinceLanding_ = 100, zipSpeed_{};
     Vec3 zipDirection_{};
     bool jumpHeld_{}, jumpQueued_{};
-    std::uint32_t jumpCancels_{};
+    std::uint32_t jumpCancels_{}, runJumps_{};
+    float runJump_{};
+    Vec3 runJumpVelocity_{};
     // A leap's charge waiting for the next step, and whether one is held out.
     float leapQueued_{};
     bool leapHeld_{};

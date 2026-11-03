@@ -1988,6 +1988,11 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "neither start nor go on, native run holds no RT, and A is the game's jump at once. "
                "Off: as before.",
                S(42), [&] { tabToggle("##combatresponsive", Item::combatResponsive); });
+        option("Spidy run jump",
+               "A during Spidy run or the web-landing carry is a jump at once that keeps your speed, made by "
+               "the mod rather than waiting for the game to take the body back. On by default; off: v5's "
+               "jump (up to 0.2 s later).",
+               S(42), [&] { tabToggle("##spidyrunjump", Item::spidyRunJump); });
     });
     group(0, "Flips", [&] {
         option("Flips (experimental)",

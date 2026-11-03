@@ -7,6 +7,39 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
 
 Not in a build yet, newest first. The release adds these to the next build's entry.
 
+**SPIDY RUN JUMP, and webs parallel to the forearm.**
+
+- **Before (V5 session, Quest 3S, commit 340f8815c0).** A in SPIDY RUN
+  ended the run and the game's A waited for the hand-back (0.2 s at most):
+  `140.297 jump: a press the game never got as A (the swing running on the
+  ground, owned, running, fight 0)`, then a second press at 140.406 and off
+  the ground at 140.500, about 0.2 s after the first. MODEL FOREARM: of 1134
+  `forearm aim:` lines only 394 were active; 492 fell back for `flip tilt`
+  and 164 for `stale`; and 267 of the 394 active ones had the forearm more
+  than 35 degrees off the controller, held to 35 (`turn 35.0 deg (target
+  35.0) ... forearm vs controller 40.4 deg`): the webs stayed near the
+  controller ("they keep tracking my palm"). WRIST SHOOTERS turned the webs
+  square out of the palm, which is not how the shooters fire.
+- **SPIDY RUN JUMP** (`spidy_run_jump`, ON by default, after COMBAT
+  RESPONSIVE): A with no web while the swing runs the body on the ground
+  (SPIDY RUN, the landing carry) is the swing's own jump on the press's own
+  step: the run's speed across, up at the leap's 9 m/s (`Swing::runJump_`,
+  held up to 0.3 s until the body is seen off the ground; game_swing drives
+  meanwhile; no new run or carry starts). The game gets no A for that press
+  (`JumpRelay` swallows it; in the air A is its zip). The flight after it is
+  the swing's, as after letting go of a web. `Command::asks` bit 3 ->
+  `Input::runJump` (`valid` takes asks up to 15). Off: v5's JUMP ALWAYS.
+  `jump: SPIDY RUN JUMP off the ground N ms after the press` lines.
+- **WRIST SHOOTERS** now fires parallel to the forearm (the MODEL FOREARM
+  turns, all of them; the controller's line when the body cannot say). The
+  old palm-side quarter turn is **PALM SHOOTERS** (`palm_shooters`, off;
+  sent as `wristShooters` 2, valid up to 2). WEB ANGLE tilts on top.
+- **MODEL FOREARM**: **FOREARM AIM LIMIT** (`forearm_aim_limit`, 35/60/90/180,
+  default 180 = none; v3-v5 had 35); a flip's tilt is no fallback (the solve
+  turns the body back with it; the wrist miss check stays); stale after 8
+  VR frames without a solve, not 2. `forearm aim:` lines say active or
+  fallback, the mode, the limit and whether it clamped, and `flip tilt`.
+
 **COMBAT RESPONSIVE, and perf: lines in the diagnostics.**
 
 - **Before.** SPIDY RUN and SMOOTH WEB LANDING's carry had no fight stop

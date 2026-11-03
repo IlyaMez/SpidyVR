@@ -963,6 +963,8 @@ DWORD WINAPI run(void*) {
         // back a body it ran on the ground (game_pad::JumpRelay), and a jump:
         // line in the diagnostics for every press: where it went, how late.
         game_pad::JumpRelay jumpRelay;
+        bool runJumpOpen{};
+        float runJumpAge{};
         bool jumpRawBefore{}, jumpOutBefore{}, jumpPressOpen{};
         uint32_t jumpPressCharges{};
         float jumpPressAge{};
@@ -2651,6 +2653,10 @@ DWORD WINAPI run(void*) {
                         if (input.focused && values.combatResponsive &&
                             (fightLately || moverTable == config.base + bridge::combatCamera))
                             input.asks |= 4u;
+                        // SPIDY RUN JUMP (on by default): A out of the swing's run is
+                        // the swing's own jump, at once (Input::runJump).
+                        if (input.focused && values.spidyRunJump)
+                            input.asks |= 8u;
                         if (const Vec3 look = motion.headPose.orientation.rotate({0, 0, -1});
                             input.focused && finite(look) && length(look) > .5f)
                             input.look = normalized(look);
@@ -3415,8 +3421,14 @@ DWORD WINAPI run(void*) {
                             swingState.wall == static_cast<uint32_t>(game_swing::Surface::none) &&
                             !swingState.webs[0].attached && !swingState.webs[1].attached && !mounting &&
                             !swingState.takeoff && !swingState.takeoffPhase;
-                        const bool relayed =
-                            jumpRelay.update(frame.seconds, (keys & swingJumpKey) != 0, swingGround);
+                        // SPIDY RUN JUMP (v6, on by default): with no web the swing jumps
+                        // at once, the run's speed kept; the game gets no A for that press.
+                        const bool runJumpNow = values.spidyRunJump && swingGround;
+                        const uint32_t swallowedBefore = jumpRelay.swallowed();
+                        const bool relayed = jumpRelay.update(frame.seconds, (keys & swingJumpKey) != 0,
+                                                              swingGround, values.spidyRunJump);
+                        if (runJumpNow && jumpRelay.swallowed() != swallowedBefore)
+                            runJumpOpen = true, runJumpAge = 0;
                         if (!swingState.takeoff)
                             keys = (keys & ~swingJumpKey) | (relayed ? swingJumpKey : 0u);
                         // jump: lines (diagnostics only): each press of A in play, and
@@ -3459,6 +3471,21 @@ DWORD WINAPI run(void*) {
                                                                         : "");
                             diag_log::write(line);
                             jumpPressOpen = false;
+                        }
+                        // SPIDY RUN JUMP: the swing's own jump, press to off the ground.
+                        if (runJumpOpen) {
+                            if (!swingState.grounded) {
+                                sprintf_s(line,
+                                          "jump: SPIDY RUN JUMP off the ground %d ms after the press (the swing's "
+                                          "own jump, the run's speed kept; no wait for the game; fight %d)",
+                                          static_cast<int>(runJumpAge * 1000 + .5f), fightLately ? 1 : 0);
+                                diag_log::write(line);
+                                runJumpOpen = jumpPressOpen = false;
+                            } else if ((runJumpAge += dt) > .5f) {
+                                diag_log::write("jump: SPIDY RUN JUMP never left the ground within 500 ms "
+                                                "(the game kept the body down)");
+                                runJumpOpen = jumpPressOpen = false;
+                            }
                         }
                         jumpRawBefore = raw;
                         jumpOutBefore = out;

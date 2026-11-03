@@ -345,10 +345,18 @@ class JumpRelay {
   public:
     static constexpr float waitSeconds = .2f, pulseSeconds = .09f;
     static constexpr int pulseFrames = 3;
-    bool update(float seconds, bool held, bool swingGround) {
+    // swingJumps (SPIDY RUN JUMP, v6): the swing makes that press's jump
+    // itself, at once; the game gets no A for it (in the air A would be its
+    // zip) until the press is let go (swallowed()).
+    bool update(float seconds, bool held, bool swingGround, bool swingJumps = false) {
         const float dt = std::isfinite(seconds) ? std::clamp(seconds, 0.f, .1f) : 0.f;
         const bool pressed = held && !down_;
         down_ = held;
+        if (pressed && swingGround && swingJumps) {
+            phase_ = Phase::swallowed;
+            ++swallowed_;
+            return false;
+        }
         if (pressed && swingGround) {
             phase_ = Phase::waiting;
             time_ = 0;
@@ -378,10 +386,18 @@ class JumpRelay {
                 return true;
             phase_ = Phase::idle;
             return held;
+        case Phase::swallowed:
+            if (held)
+                return false;
+            phase_ = Phase::idle;
+            return false;
         case Phase::idle:
             break;
         }
         return held;
+    }
+    uint32_t swallowed() const {
+        return swallowed_;
     }
     bool waiting() const {
         return phase_ == Phase::waiting;
@@ -398,12 +414,12 @@ class JumpRelay {
     }
 
   private:
-    enum class Phase { idle, waiting, pulse };
+    enum class Phase { idle, waiting, pulse, swallowed };
     Phase phase_{};
     bool down_{}, tapped_{};
     int frames_{};
     float time_{}, waited_{};
-    uint32_t deferred_{}, relayed_{};
+    uint32_t deferred_{}, relayed_{}, swallowed_{};
 };
 // A hand at the temple with its trigger pulled: the game's R3, its scan of
 // the surroundings, for as long as the trigger stays pulled (minSeconds at

@@ -372,6 +372,10 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.steadyStates;
     case Item::combatResponsive:
         return &v.combatResponsive;
+    case Item::spidyRunJump:
+        return &v.spidyRunJump;
+    case Item::palmShooters:
+        return &v.palmShooters;
     case Item::webLandingSmooth:
         return &v.webLandingSmooth;
     case Item::softLanding:
@@ -435,9 +439,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 90>& rows() {
+const std::array<Row, 93>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 90> all{{
+    static const std::array<Row, 93> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -650,6 +654,12 @@ const std::array<Row, 90>& rows() {
          "NATIVE RUN's RT waits out flickers and stays off in fights. Off as before.", {}},
         {Item::combatResponsive, "COMBAT RESPONSIVE",
          "In a fight: no SPIDY RUN or carry, no RT, A jumps at once. Off as before.", {}},
+        {Item::spidyRunJump, "SPIDY RUN JUMP",
+         "A in SPIDY RUN or the landing carry jumps at once, keeping the speed. Off: v5's.", {}},
+        {Item::forearmAimLimit, "FOREARM AIM LIMIT",
+         "How far MODEL FOREARM and WRIST SHOOTERS turn off the controller's line.", forearmAimLimitChoices},
+        {Item::palmShooters, "PALM SHOOTERS",
+         "The old WRIST SHOOTERS: webs out of the palm side, square to the hand.", {}},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
          "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
@@ -904,6 +914,9 @@ constexpr TabOnly tabOnly[] = {
     {"web_landing_impact_speed", nullptr, &Values::webLandingImpact},
     {"steady_states", &Values::steadyStates, nullptr},
     {"combat_responsive", &Values::combatResponsive, nullptr},
+    {"spidy_run_jump", &Values::spidyRunJump, nullptr},
+    {"forearm_aim_limit", nullptr, &Values::forearmAimLimit},
+    {"palm_shooters", &Values::palmShooters, nullptr},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

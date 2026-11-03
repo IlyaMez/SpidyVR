@@ -297,6 +297,20 @@ struct Values {
     // the body for its blows and dodges; NATIVE RUN holds no RT; and A is
     // the game's jump at once, no charge. Off by default: as before.
     bool combatResponsive = false;
+    // SPIDY RUN JUMP (the tab's SPIDY RUN JUMP; v6; Swing Input::runJump):
+    // A while the swing runs the body on the ground (SPIDY RUN, SMOOTH WEB
+    // LANDING's carry) with no web is the swing's own jump at once, the
+    // run's speed kept. Off: v5's JUMP ALWAYS (the run ends and the game's A
+    // waits up to 0.2 s for the game to have the body back). On by default.
+    bool spidyRunJump = true;
+    // FOREARM AIM LIMIT, degrees (the tab's FOREARM AIM LIMIT; v6): the most
+    // MODEL FOREARM (and WRIST SHOOTERS) turns the webs off the controller's
+    // line onto the forearm. 180 (no limit) by default; v3-v5 had 35.
+    int forearmAimLimit = 180;
+    // PALM SHOOTERS (the tab's PALM SHOOTERS; v6): the old WRIST SHOOTERS of
+    // v2-v5, a quarter turn out of the palm side, square to the hand. Off by
+    // default. WRIST SHOOTERS now shoots parallel to the forearm.
+    bool palmShooters = false;
     // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
     // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
     int singleHandYankPercent = 100;
@@ -431,8 +445,11 @@ enum class Item : uint8_t {
     webLandingImpact,
     steadyStates,
     combatResponsive,
+    spidyRunJump,
+    forearmAimLimit,
+    palmShooters,
 };
-inline constexpr Item lastItem = Item::combatResponsive;
+inline constexpr Item lastItem = Item::palmShooters;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -455,7 +472,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 90>& rows();
+const std::array<Row, 93>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

@@ -764,6 +764,7 @@ void Swing::reset(Body b) {
     zipSpeed_ = 0;
     zipDirection_ = {};
     jumpHeld_ = jumpQueued_ = false;
+    runJump_ = 0;
     leapQueued_ = 0;
     leapHeld_ = false;
     wall_ = {};
@@ -990,13 +991,20 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
     if (in.jump && !jumpHeld_ && !wall_.on && (groundRun_ || landCarry_ > 0)) {
         const bool webbed =
             webs_[0].attached || webs_[1].attached || climbing_[0].attached || climbing_[1].attached;
+        // SPIDY RUN JUMP (v6): with no web the swing jumps itself, now, with
+        // the run's speed across: no wait for the game to have the body back.
+        const Vec3 across = groundRun_ ? groundAlong_ : landAlong_;
         endGroundRun();
         endLandCarry();
         standArmed_ = false;
         standHold_ = 0;
         ++jumpCancels_;
+        if (!webbed && in.runJump && finite(across)) {
+            runJumpVelocity_ = limited(Vec3{across.x, 0, across.z}, speedLimit()) + Vec3{0, config_.leapUp, 0};
+            runJump_ = runJumpSeconds;
+        }
         if (!webbed)
-            jumpHeld_ = true; // the game's jump, not queued for the swing's
+            jumpHeld_ = true; // the game's jump (or the run jump's), not queued for the swing's
     }
     jumpQueued_ |= in.jump && !jumpHeld_;
     const bool leap = std::isfinite(in.leap) && in.leap > 0;
@@ -1485,6 +1493,13 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
         }
         leapQueued_ = 0;
     }
+    // SPIDY RUN JUMP: off the ground with the run's speed, as long as the
+    // body is still seen on it (the command takes a native step to land).
+    if (runJump_ > 0 && body_.grounded && !wall_.on) {
+        body_.velocity = runJumpVelocity_;
+        body_.grounded = false;
+        jumpQueued_ = false;
+    }
     if (jumpQueued_) {
         if (wall_.on) {
             // Off the wall: out from it and up, with what the body had along it.
@@ -1773,13 +1788,25 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
         releaseAll();
         endGroundRun();
         endLandCarry();
+        runJump_ = 0;
         return {};
     }
     // A long step is a slow game, not stale input. Over 50 ms used to be
     // refused here: the caller let go of a swinging player, whom the game
     // then dropped at its own fall speed (October 10 headset report).
     seconds = std::min(seconds, longestNativeStep);
-    const bool touchdown = actual.grounded && !body_.grounded;
+    // SPIDY RUN JUMP: done once the body is off the ground; given up after
+    // runJumpSeconds, or on a wall, a web or a mount.
+    if (runJump_ > 0) {
+        if (!actual.grounded) {
+            runJump_ = 0;
+            ++runJumps_;
+        } else if ((runJump_ -= seconds) <= 0 || wall_.on || mounting_ || mount_ > 0 || webs_[0].attached ||
+                   webs_[1].attached) {
+            runJump_ = 0;
+        }
+    }
+    const bool touchdown = actual.grounded && !body_.grounded && runJump_ <= 0;
     if (actual.grounded && !body_.grounded)
         sinceLanding_ = 0;
     if (!actual.grounded)
@@ -1853,7 +1880,7 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
         (!spidyRun_ || !actual.grounded || wall_.on || mounting_ || mount_ > 0 || webbed || fighting))
         endGroundRun();
     if (spidyRun_ && touchdown && !groundRun_ && !wall_.on && !webbed && !mounting_ && mount_ <= 0 &&
-        !fighting) {
+        !fighting && runJump_ <= 0) {
         const Vec3 along = run_update::groundRunEntry(body_.velocity);
         if (length(along) > run_update::groundRun.enterAbove) {
             groundRun_ = true;
@@ -1864,7 +1891,7 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     // SPIDY RUN FROM STANDING: on the ground, the stick held past standTilt
     // for standHold starts the run from the body's own speed across.
     if (spidyRun_ && standRunEnabled_ && !groundRun_ && actual.grounded && !touchdown && !wall_.on &&
-        !webbed && !mounting_ && mount_ <= 0 && !fighting) {
+        !webbed && !mounting_ && mount_ <= 0 && !fighting && runJump_ <= 0) {
         const auto& k = run_update::groundRun;
         const float tilt = finite(input.move) ? std::hypot(input.move.x, input.move.z) : 0.f;
         if (tilt < k.standRearm)

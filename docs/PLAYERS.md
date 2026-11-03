@@ -1000,8 +1000,9 @@ VR settings
                    charged leap while running).
                    Always, whatever the setting: A while SPIDY RUN or a
                    smooth web landing carries you on the ground ends that
-                   run and is the game's jump, sent the moment the game has
-                   you back (0.2 s at most).
+                   run and jumps: with SPIDY RUN JUMP (on) at once, keeping
+                   your speed; with it off it is the game's jump, sent the
+                   moment the game has you back (0.2 s at most).
   SOFT LANDING     (off until you switch it on) falling with no web, your
                    fall eases to about 9 m/s over the last 3 m before the
                    ground; your speed across is kept. Off: as before.
@@ -1040,9 +1041,14 @@ VR settings
                    carry neither start nor go on, NATIVE RUN holds no RT,
                    and A is the game's jump the moment you press it.
                    Off: as before.
+  SPIDY RUN JUMP   (ON until you switch it off) A while SPIDY RUN or a
+                   smooth web landing carries you on the ground (no web
+                   held) is a jump the moment you press it, keeping your
+                   run's speed; you fly on as after letting go of a web.
+                   Off: v5's jump, the game's, up to 0.2 s later.
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, RUN FROM STANDING, WEB AIM, FOREARM BLEND, SMOOTH WEB LANDING, WEB LANDING IMPACT, STEADY STATES, COMBAT RESPONSIVE, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, RUN FROM STANDING, WEB AIM, FOREARM BLEND, SMOOTH WEB LANDING, WEB LANDING IMPACT, STEADY STATES, COMBAT RESPONSIVE, SPIDY RUN JUMP, FOREARM AIM LIMIT, PALM SHOOTERS, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches
