@@ -140,6 +140,7 @@ inline constexpr ProfileSetting profileSettings[] = {
     tabOnly("web_landing_smooth", Item::webLandingSmooth, &Values::webLandingSmooth),
     tabOnly("web_landing_impact_speed", Item::webLandingImpact, 12, 40, &Values::webLandingImpact),
     tabOnly("steady_states", Item::steadyStates, &Values::steadyStates),
+    tabOnly("combat_responsive", Item::combatResponsive, &Values::combatResponsive),
     retired("wall_distance_cm", vr_settings::fixedWallDistance),
     tabOnly("realistic_flips", Item::realisticFlips, &Values::realisticFlips),
     tabOnly("rotation_strength", Item::automaticStrength, 25, 100, &Values::automaticStrength),

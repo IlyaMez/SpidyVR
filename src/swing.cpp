@@ -1844,9 +1844,16 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     // ends off the ground, on a web, a wall or a mount's way up one.
     const bool webbed =
         webs_[0].attached || webs_[1].attached || climbing_[0].attached || climbing_[1].attached;
-    if (groundRun_ && (!spidyRun_ || !actual.grounded || wall_.on || mounting_ || mount_ > 0 || webbed))
+    // COMBAT RESPONSIVE (Input::fighting): no run of the swing's own on the
+    // ground in a fight, nor its carry; the game's blows and dodges move him.
+    const bool fighting = input.fighting;
+    if (fighting)
+        endLandCarry();
+    if (groundRun_ &&
+        (!spidyRun_ || !actual.grounded || wall_.on || mounting_ || mount_ > 0 || webbed || fighting))
         endGroundRun();
-    if (spidyRun_ && touchdown && !groundRun_ && !wall_.on && !webbed && !mounting_ && mount_ <= 0) {
+    if (spidyRun_ && touchdown && !groundRun_ && !wall_.on && !webbed && !mounting_ && mount_ <= 0 &&
+        !fighting) {
         const Vec3 along = run_update::groundRunEntry(body_.velocity);
         if (length(along) > run_update::groundRun.enterAbove) {
             groundRun_ = true;
@@ -1857,7 +1864,7 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     // SPIDY RUN FROM STANDING: on the ground, the stick held past standTilt
     // for standHold starts the run from the body's own speed across.
     if (spidyRun_ && standRunEnabled_ && !groundRun_ && actual.grounded && !touchdown && !wall_.on &&
-        !webbed && !mounting_ && mount_ <= 0) {
+        !webbed && !mounting_ && mount_ <= 0 && !fighting) {
         const auto& k = run_update::groundRun;
         const float tilt = finite(input.move) ? std::hypot(input.move.x, input.move.z) : 0.f;
         if (tilt < k.standRearm)
@@ -1880,7 +1887,7 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     if (landCarry_ > 0 && (!webLandSmooth_ || !actual.grounded || wall_.on || mounting_ || mount_ > 0 || groundRun_))
         endLandCarry();
     if (webLandSmooth_ && touchdown && webHeld && !groundRun_ && !wall_.on && !mounting_ && mount_ <= 0 &&
-        web_landing::gentle(flown, webLandImpact_)) {
+        !fighting && web_landing::gentle(flown, webLandImpact_)) {
         const Vec3 across{flown.x, 0, flown.z};
         if (length(across) > web_landing::tuning.floor + .05f) {
             landCarry_ = web_landing::tuning.carryMax;

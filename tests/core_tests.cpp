@@ -12,6 +12,7 @@
 #include "spidy/native_render_memory.hpp"
 #include "spidy/enclosure.hpp"
 #include "spidy/game_pad.hpp"
+#include "spidy/frame_stats.hpp"
 #include "spidy/gadget_wheel.hpp"
 #include "spidy/phone.hpp"
 #include "spidy/reel_haptics.hpp"
@@ -9535,6 +9536,84 @@ int main() {
         check(out.velocity.y <= 0, "the swing jumped itself on the game's ground");
         sw.predictNativeStep(1.f / 90, jump, w, {{0, 1, -.6f}, at, true});
         check(!sw.groundRunning() && sw.jumpCancels() == 1, "a held jump counted again or ran again");
+    });
+    test("COMBAT RESPONSIVE: in a fight no SPIDY RUN or carry, A at once, the fight in asks bit 2; off as before", [] {
+        TestWorld w;
+        w.enabled = false;
+        Input in;
+        in.focused = true;
+        in.move = {0, 0, -1};
+        const Body air{{0, 1.5f, 0}, {0, -8, -20}, false};
+        const Body landed{{0, 1, -.3f}, {0, -8, -20}, true};
+        {
+            Swing sw(inert());
+            sw.allowGroundRun(true);
+            Input fight = in;
+            fight.fighting = true;
+            sw.predictNativeStep(1.f / 90, fight, w, air);
+            sw.predictNativeStep(1.f / 90, fight, w, landed);
+            check(!sw.groundRunning(), "SPIDY RUN began in a fight");
+        }
+        {
+            Swing sw(inert());
+            sw.allowGroundRun(true);
+            sw.predictNativeStep(1.f / 90, in, w, air);
+            sw.predictNativeStep(1.f / 90, in, w, landed);
+            check(sw.groundRunning(), "no run out of a fight");
+            Input fight = in;
+            fight.fighting = true;
+            sw.predictNativeStep(1.f / 90, fight, w, {{0, 1, -.5f}, sw.groundRunVelocity(), true});
+            check(!sw.groundRunning(), "SPIDY RUN went on into a fight");
+        }
+        {
+            Swing sw(inert());
+            sw.allowGroundRun(true);
+            sw.allowGroundRunFromStanding(true);
+            Input fight = in;
+            fight.fighting = true;
+            for (int i = 0; i < 200; ++i)
+                sw.predictNativeStep(1.f / 90, fight, w, {{0, 1, 0}, {}, true});
+            check(!sw.groundRunning(), "RUN FROM STANDING began in a fight");
+        }
+        game_swing::Command c;
+        c.serial = 1;
+        c.asks = 4;
+        check(game_swing::valid(c) && game_swing::input(c).fighting, "asks bit 2 refused or lost");
+        c.asks = 2;
+        check(game_swing::valid(c) && !game_swing::input(c).fighting, "the web tie's click (bit 1) taken for a fight");
+        c.asks = 7;
+        check(game_swing::valid(c), "asks 7 refused");
+        c.asks = 8;
+        check(!game_swing::valid(c), "an unknown asks bit accepted");
+        c.asks = 1;
+        check(!game_swing::input(c).fighting, "bit 0 read as a fight");
+        // A at once in a fight, the charge kept out of one.
+        game_pad::ChargeJump j;
+        check(j.update(1.f / 45, true, true, false, true).jump, "A waited in a fight");
+        game_pad::ChargeJump k;
+        check(!k.update(1.f / 45, true, true, false, false).jump, "A at once out of a fight");
+        vr_settings::Values values;
+        check(!values.combatResponsive && vr_settings::defaultChoice(vr_settings::Item::combatResponsive) == 0,
+              "COMBAT RESPONSIVE on by default");
+        check(vr_settings::withTabOnly({}, "combat_responsive=1\n").combatResponsive &&
+                  !vr_settings::withTabOnly({}, "").combatResponsive,
+              "spidy_vr.ini keeps combat_responsive");
+        const auto& all = vr_settings::rows();
+        check(all[78].item == vr_settings::Item::combatResponsive &&
+                  std::strcmp(all[78].title, "COMBAT RESPONSIVE") == 0 && all[78].choices.empty() &&
+                  all[78].place == vr_settings::Place::tab,
+              "COMBAT RESPONSIVE: a switch in the tab, after STEADY STATES");
+        // perf: a line every 5 s, and at a fight's start and end.
+        frame_stats::FrameStats f;
+        const char* line = nullptr;
+        int lines = 0;
+        for (int i = 0; i < 45 * 6; ++i)
+            if ((line = f.update(1.f / 45, .0005f, false)))
+                ++lines;
+        check(lines == 1, "not one perf line in 6 s");
+        line = f.update(1.f / 45, .0005f, true);
+        check(line && std::strstr(line, "before the fight") && std::strstr(line, "fps"), "no line as the fight began");
+        check(!f.update(0, 0, true) && !f.update(NAN, 0, true), "a line from a bad frame time");
     });
     test("SOFT LANDING: a fall with no web eases to 9 m/s over its last metres; off, webs or walls, as before", [] {
         using namespace run_update;
@@ -23120,7 +23199,7 @@ int main() {
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
         // The realistic flips' rows come last, after the EXPERIMENTAL rows before them.
-        constexpr size_t firstRealistic = 78;
+        constexpr size_t firstRealistic = 79;
         check(all.size() == firstRealistic + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
             check(all[firstRealistic + i].item == realistic[i], "the realistic flips' rows out of order");
@@ -23328,7 +23407,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 84,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 85,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -23587,7 +23666,7 @@ int main() {
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
                   "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
                   "degrees=0\nwrist_shooters=0\n"
-                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\nsteady_states=0\n",
+                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\nsteady_states=0\ncombat_responsive=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;
@@ -25976,7 +26055,7 @@ int main() {
             c.asks = asks;
             check(game_swing::valid(c), "a command with the tie's click was refused (2001)");
         }
-        c.asks = 4;
+        c.asks = 8;
         check(!game_swing::valid(c), "an unknown ask was accepted");
     });
     test("web tie: hands together on a wall web and a webbed-up enemy, a click ties him", [&] {

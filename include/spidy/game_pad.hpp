@@ -242,12 +242,14 @@ class ChargeJump {
     };
     // seconds: since the previous update. held: the player's A as the game
     // would get it. ground: he stands on the ground in VR play, free to jump.
-    Keys update(float seconds, bool held, bool ground, bool running = false) {
+    // atOnce (COMBAT RESPONSIVE in a fight, v5): a press is the game's A as
+    // it is held, whatever EARLY JUMP is.
+    Keys update(float seconds, bool held, bool ground, bool running = false, bool atOnce = false) {
         const float dt = std::isfinite(seconds) ? std::clamp(seconds, 0.f, .1f) : 0.f;
         const bool pressed = held && !down_;
         down_ = held;
         if (pressed)
-            phase_ = ground && !(early_ == 2 && running) ? Phase::waiting : Phase::plain, time_ = 0;
+            phase_ = ground && !(early_ == 2 && running) && !atOnce ? Phase::waiting : Phase::plain, time_ = 0;
         else
             time_ += dt;
         switch (phase_) {

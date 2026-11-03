@@ -1983,6 +1983,11 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "or a vent flickering for a frame no longer drops and raises it, and it stays off in a fight. "
                "Off: as before.",
                S(42), [&] { tabToggle("##steadystates", Item::steadyStates); });
+        option("Combat responsive (experimental)",
+               "In a fight the game moves you for every blow and dodge: Spidy run and the landing carry "
+               "neither start nor go on, native run holds no RT, and A is the game's jump at once. "
+               "Off: as before.",
+               S(42), [&] { tabToggle("##combatresponsive", Item::combatResponsive); });
     });
     group(0, "Flips", [&] {
         option("Flips (experimental)",

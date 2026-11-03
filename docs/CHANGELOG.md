@@ -7,6 +7,33 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
 
 Not in a build yet, newest first. The release adds these to the next build's entry.
 
+**COMBAT RESPONSIVE, and perf: lines in the diagnostics.**
+
+- **Before.** SPIDY RUN and SMOOTH WEB LANDING's carry had no fight stop
+  (the swing module has no fight flag): in the November 3 session SPIDY RUN
+  began 18 times in a fight (`state: owned 0->1 (the swing drives on the
+  ground) ... fight 1`), for 0.01 to 0.31 s each, and while the swing owns a
+  grounded body the game's blows and dodges cannot move it. 9 dodges asked
+  for got no dodge of the game's within 500 ms, most of them in the fight
+  of 416-449 s around those runs. Nothing recorded the frame rate or the
+  mod's own time per frame.
+- **COMBAT RESPONSIVE** (EXPERIMENTAL, the tab's COMBAT RESPONSIVE after
+  STEADY STATES; `combat_responsive`; off by default): in a fight (the combat
+  camera, or an enemy in reach within 3 s) the swing starts no SPIDY RUN, RUN
+  FROM STANDING or landing carry and ends one going on (`Command::asks` bit
+  2 -> `Input::fighting`, as WEB TIE has bit 1; no layout change, `valid`
+  accepts asks up to 7);
+  NATIVE RUN holds no RT (as STEADY STATES does); and A is the game's jump at
+  once, no charge (`ChargeJump::update`'s atOnce). Off: as before.
+- **perf: lines** (always; changes nothing): every 5 s and as a fight begins
+  and ends, the VR loop's frames (count, fps, longest, how many over 33 ms)
+  and the mod's own work per frame up to the pad, in ms. jump: lines now go
+  to the diagnostics only, not the session JSON's 32-line timeline.
+- **Validation.** Core checks: no run or carry in a fight (landing, from
+  standing, one going on), asks bit 2 valid and read, A at once in a fight,
+  the row and the key, the perf line's timing; default-settings text and row
+  counts updated; launcher 38/38. Not played in a headset.
+
 **JUMP ALWAYS, A that reaches the game while running.**
 
 - **Before.** With SPIDY RUN (or SMOOTH WEB LANDING's carry) the swing owns

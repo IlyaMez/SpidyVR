@@ -52,6 +52,7 @@
 #include "spidy/run_update.hpp"
 #include "spidy/diag_log.hpp"
 #include "spidy/ground_state.hpp"
+#include "spidy/frame_stats.hpp"
 #include "spidy/seated.hpp"
 #include "spidy/slow_motion.hpp"
 #include "spidy/steady_hud.hpp"
@@ -985,6 +986,8 @@ DWORD WINAPI run(void*) {
         // lines in the diagnostics (ground_state::StateLog).
         ground_state::RiseDelay runSteady;
         ground_state::StateLog stateLog;
+        // perf: lines (frame_stats.hpp).
+        frame_stats::FrameStats frameStats;
         std::array<float, 2> forearmJitter{};
         game_pad::TemplePress templePress;
         uint32_t chargesBefore{}, leapsBefore{}, scansBefore{};
@@ -1645,6 +1648,8 @@ DWORD WINAPI run(void*) {
             const bool active = runtime.frameStereo(
                 [&](const XrFrame& trackedFrame) {
                     XrFrame frame = trackedFrame;
+                    LARGE_INTEGER workStart{};
+                    QueryPerformanceCounter(&workStart);
                     // The phone takes its controls first (Phone::take, PhoneHold):
                     // while it is live the stick picks a button, A presses it, B
                     // puts it away and the triggers step the volume, and none of
@@ -2641,6 +2646,11 @@ DWORD WINAPI run(void*) {
                             !frame.hands[0].stickClick && !padLayer.latched() &&
                             !(namedPress.claimed() & game_pad::NamedPress::rightClick))
                             input.asks |= 2u;
+                        // COMBAT RESPONSIVE (off by default): in a fight the swing
+                        // runs nothing of its own on the ground (Input::fighting).
+                        if (input.focused && values.combatResponsive &&
+                            (fightLately || moverTable == config.base + bridge::combatCamera))
+                            input.asks |= 4u;
                         if (const Vec3 look = motion.headPose.orientation.rotate({0, 0, -1});
                             input.focused && finite(look) && length(look) > .5f)
                             input.look = normalized(look);
@@ -3382,12 +3392,16 @@ DWORD WINAPI run(void*) {
                     // game's ground too, not only NATIVE RUN's RT (JUMP ALWAYS,
                     // v5: the November 3 session ran with NATIVE RUN 0 at every
                     // take-off, so a press while running still waited or charged).
+                    // COMBAT RESPONSIVE (off by default): in a fight A is the
+                    // game's jump at once, no charge.
                     const bool runningJump =
                         nativeRun.held() ||
                         (values.earlyJump == 2 && std::hypot(motion.walkRight, motion.walkForward) >= .5f);
+                    const bool fightJump = values.combatResponsive &&
+                                           (fightLately || moverTable == config.base + bridge::combatCamera);
                     const auto leap =
                         chargeJump.update(frame.seconds, (keys & swingJumpKey) && !swingState.takeoff,
-                                          standing, runningJump);
+                                          standing, runningJump, fightJump);
                     if (!swingState.takeoff)
                         keys = (keys & ~swingJumpKey) | (leap.jump ? swingJumpKey : 0u);
                     // JUMP ALWAYS (v5, always on): while the swing runs the body on
@@ -3413,7 +3427,7 @@ DWORD WINAPI run(void*) {
                         char line[200];
                         if (raw && !jumpRawBefore) {
                             if (jumpPressOpen)
-                                game_prompts::note("jump: a press the game never got as A (another came)");
+                                diag_log::write("jump: a press the game never got as A (another came)");
                             jumpPressOpen = true;
                             jumpPressAge = 0;
                             jumpPressCharges = chargeJump.charges();
@@ -3436,14 +3450,14 @@ DWORD WINAPI run(void*) {
                                               jumpRelay.waited() >= jumpPressAge - .001f
                                           ? "; held for the swing's hand-back"
                                           : "");
-                            game_prompts::note(line);
+                            diag_log::write(line);
                             jumpPressOpen = false;
                         } else if (jumpPressOpen && !raw && !out && jumpPressAge > .5f) {
                             sprintf_s(line, "jump: a press the game never got as A (%s%s)", jumpPressWhere,
                                       chargeJump.charges() != jumpPressCharges ? "; held into a charged leap"
                                       : !swingState.grounded            ? "; in the air A waits for a press from the ground"
                                                                         : "");
-                            game_prompts::note(line);
+                            diag_log::write(line);
                             jumpPressOpen = false;
                         }
                         jumpRawBefore = raw;
@@ -3886,7 +3900,8 @@ DWORD WINAPI run(void*) {
                             gate.gameOwnsGround = game_swing::gameOwnsGround(swingFresh, swingState);
                             gate.grabbing = grabPhases[0] || grabPhases[1];
                             // STEADY STATES (off by default): no RT in a fight.
-                            gate.steady = values.steadyStates;
+                            // COMBAT RESPONSIVE (off by default): none either.
+                            gate.steady = values.steadyStates || values.combatResponsive;
                             gate.fighting = fightLately || moverTable == config.base + bridge::combatCamera;
                             for (unsigned i = 0; i < 2; ++i) {
                                 gate.grips[i] = frame.hands[i].squeeze;
@@ -3949,6 +3964,14 @@ DWORD WINAPI run(void*) {
                                 state.dodging = walk.dodge;
                                 state.velocity = swingState.velocity;
                                 if (const char* line = stateLog.update(frame.seconds, state))
+                                    diag_log::write(line);
+                                // perf: lines (always; changes nothing): the VR loop's
+                                // frames and the mod's own work in them so far this frame.
+                                LARGE_INTEGER workEnd{};
+                                QueryPerformanceCounter(&workEnd);
+                                const float work = static_cast<float>(workEnd.QuadPart - workStart.QuadPart) /
+                                                   static_cast<float>(frequency.QuadPart);
+                                if (const char* line = frameStats.update(frame.seconds, work, gate.fighting))
                                     diag_log::write(line);
                             }
                         }

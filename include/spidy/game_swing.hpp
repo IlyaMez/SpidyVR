@@ -139,6 +139,9 @@ struct Command {
     // layer is off: the web tie's click (web_tie.hpp). No change of layout
     // or version: an older swing module refuses such a command (asks > 1),
     // and both come in one package.
+    // Bit 2 (COMBAT RESPONSIVE): the player fights now (Input::fighting). Bit 1
+    // was this before WEB TIE took it upstream (0.8.0); an older swing module
+    // refuses such a command (asks > 3), and both come in one package.
     uint32_t asks{};
     uint64_t sampleTimeNs = 1;
     // Version 3: a flip's tilt of the tracking space (Input::tilt). Version 2
@@ -609,7 +612,7 @@ inline bool valid(const Command& c) {
           (c.version == 6 && c.bytes == sizeof(c))) ||
         !std::isfinite(c.leap) || c.leap < 0 || c.leap > 1 || !finite(c.look) || length(c.look) > 1.01f ||
         !c.serial || c.focused > 1 || c.jump > 1 || c.leaseMs > 250 || (c.focused && !c.leaseMs) ||
-        !finite(c.move) || length(c.move) > 1.001f || !std::isfinite(c.trackingYaw) || c.asks > 3 ||
+        !finite(c.move) || length(c.move) > 1.001f || !std::isfinite(c.trackingYaw) || c.asks > 7 ||
         !std::isfinite(c.sampleSeconds) || c.sampleSeconds <= 0 || c.sampleSeconds > .1f ||
         (c.focused && !c.sampleTimeNs) || !std::isfinite(tilt) || tilt < .99f || tilt > 1.01f)
         return false;
@@ -777,6 +780,8 @@ inline Input input(const Command& c) {
     Input out;
     out.focused = c.focused != 0;
     out.jump = c.jump != 0;
+    // Bit 2 of asks (COMBAT RESPONSIVE): the player fights now.
+    out.fighting = (c.asks & 4u) != 0;
     out.move = c.move;
     out.trackingYaw = c.trackingYaw;
     const float n =

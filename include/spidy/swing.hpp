@@ -231,6 +231,10 @@ struct Input {
     // (game_shooter, Shooter::aim) instead of along the hand.
     Vec3 gazeOrigin{}, gaze{};
     bool gazeShots{};
+    // COMBAT RESPONSIVE (off unless the caller sets it; v5): the player
+    // fights now. SPIDY RUN and SMOOTH WEB LANDING's carry neither start nor
+    // go on: the game moves the body for its blows and dodges.
+    bool fighting{};
 };
 // The tracking space's orientation in the world (Rig::orientation): hand
 // motion relative to the head turns into the world with it.
