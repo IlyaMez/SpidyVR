@@ -2041,6 +2041,44 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(reachable_in_play(0x20))
         self.assertIn("The game is asking for Back - in VR: the phone's MENU.", prompts_line(0x20))
 
+    def test_session_diagnostics_reach_the_console_and_their_file(self):
+        """SpidyDiagData (diag_log.hpp): every new line goes to the console and reports/<session>-diag.log,
+        the build first; a reader that fell behind says how many it lost; forearm aim has its own ring.
+        November 2: four sessions' consoles had not one feature line, all of them in the report's timeline."""
+        from run_game_vr import diag_snapshot, DiagLog, diag_path, DIAG_BYTES, DIAG_MAIN_AT, DIAG_AIM_AT, DIAG_CHARS
+        self.assertEqual(DIAG_BYTES, 34696)
+        self.assertEqual(diag_path(pathlib.Path('reports/game-vr-20261103-101500.json')).name,
+                         'game-vr-20261103-101500-diag.log')
+        raw = bytearray(DIAG_BYTES)
+        struct.pack_into('<3I', raw, 0, 0x47414944, 1, DIAG_BYTES)
+        raw[24:24+len(b'Spidy 0.7.0 (commit abc1234)')] = b'Spidy 0.7.0 (commit abc1234)'
+
+        def put(at, count, lines):
+            struct.pack_into('<Q', raw, at, len(lines))
+            for index, line in enumerate(lines):
+                slot = at+8+(index % count)*DIAG_CHARS
+                raw[slot:slot+DIAG_CHARS] = bytes(DIAG_CHARS)
+                raw[slot:slot+len(line)] = line.encode()
+        put(DIAG_MAIN_AT, 128, ['[   1.000] run log: touchdown at 12.0 m/s across'])
+        put(DIAG_AIM_AT, 16, [f'[   {i}.000] forearm aim: L none' for i in range(20)])
+        game = Mock()
+        game.read = lambda address, size: bytes(raw[address-0x1000:address-0x1000+size])
+        printed = []
+        with tempfile.TemporaryDirectory() as folder:
+            log = DiagLog(pathlib.Path(folder)/'game-vr-x-diag.log', echo=printed.append)
+            log.take(diag_snapshot(game, 0x1000))
+            self.assertIn('build Spidy 0.7.0 (commit abc1234)', printed[0])
+            self.assertIn('diag [   1.000] run log: touchdown at 12.0 m/s across', printed)
+            self.assertTrue(any('4 aim lines lost' in line for line in printed), printed)
+            self.assertEqual(sum('forearm aim' in line for line in printed), 16)
+            log.take(diag_snapshot(game, 0x1000))  # nothing new: nothing again
+            self.assertEqual(len(printed), log.lines)
+            written = (pathlib.Path(folder)/'game-vr-x-diag.log').read_text(encoding='utf-8').splitlines()
+            self.assertEqual(written, printed)
+        # A layout of another version is reported, never raised.
+        struct.pack_into('<I', raw, 4, 2)
+        self.assertIn('protocol_mismatch', diag_snapshot(game, 0x1000))
+
     def test_every_gesture_the_worker_keeps_reaches_the_games_controller(self):
         """A gesture's held() must be read where the XR worker builds the controller, and every field of
         game_pad::Walk must be filled there.

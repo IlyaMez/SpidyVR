@@ -50,6 +50,7 @@
 #include "spidy/presentation_gate.hpp"
 #include "spidy/recording_fov.hpp"
 #include "spidy/run_update.hpp"
+#include "spidy/diag_log.hpp"
 #include "spidy/seated.hpp"
 #include "spidy/slow_motion.hpp"
 #include "spidy/steady_hud.hpp"
@@ -492,6 +493,8 @@ static_assert(sizeof(HapticsData) == 116 + 4 * body_haptics::kindCount && body_h
 extern "C" {
 __declspec(dllexport) XrData SpidyXrData;
 __declspec(dllexport) PromptData SpidyPromptData;
+// SESSION DIAGNOSTICS (diag_log.hpp), for run_game_vr.py's console and diagnostics file.
+__declspec(dllexport) diag_log::Data SpidyDiagData;
 __declspec(dllexport) SlowMotionData SpidySlowMotionData;
 __declspec(dllexport) HapticsData SpidyHapticsData;
 __declspec(dllexport) XrTimingData SpidyXrTimingData;
@@ -968,6 +971,7 @@ DWORD WINAPI run(void*) {
         uint64_t forearmJob{};
         uint32_t forearmStaleFrames{};
         float forearmLogSeconds{};
+        diag_log::ChangeOnly forearmDiag[2];
         std::array<float, 2> forearmJitter{};
         game_pad::TemplePress templePress;
         uint32_t chargesBefore{}, leapsBefore{}, scansBefore{};
@@ -1445,7 +1449,40 @@ DWORD WINAPI run(void*) {
                 message(3, 0, text.c_str());
             }
         };
+        // SESSION DIAGNOSTICS (diag_log.hpp): the build, and the feature
+        // settings as the session starts and whenever they change, in the
+        // console and the diagnostics file, so a log says what was tested.
+        std::string diagSettings;
+        auto logSettings = [&] {
+            std::string text = vr_settings::tabOnlyText(values);
+            for (auto& c : text)
+                if (c == '\n')
+                    c = ' ';
+            text += "swing_speed=" + std::to_string(values.swingSpeed) +
+                    " weight=" + std::to_string(values.weight);
+            if (text == diagSettings)
+                return;
+            const bool first = diagSettings.empty();
+            diagSettings = text;
+            if (first)
+                diag_log::writef("build: %s", diag_log::build());
+            // In pieces a line holds, each ending at a setting's end.
+            constexpr size_t piece = 200;
+            unsigned part = 0;
+            for (size_t at = 0; at < text.size(); ++part) {
+                size_t end = std::min(text.size(), at + piece);
+                if (end < text.size()) {
+                    const size_t space = text.rfind(' ', end);
+                    if (space != std::string::npos && space > at)
+                        end = space;
+                }
+                diag_log::writef("settings %s %u: %s", first ? "at start" : "changed", part + 1,
+                                 text.substr(at, end - at).c_str());
+                at = end + (end < text.size() && text[end] == ' ' ? 1 : 0);
+            }
+        };
         auto applySettings = [&] {
+            logSettings();
             runtime.hapticStrength(static_cast<float>(values.haptics) / 100);
             // The eyes are read only while something aims with them.
             runtime.wantGaze(values.eyeAim != 0);
@@ -2659,7 +2696,11 @@ DWORD WINAPI run(void*) {
                                 forearmAims[i].update(why == Fallback::none, target, dt);
                                 webTurnsNow[i] = forearmAims[i].turn(values.forearmBlend);
                                 turns.turns[i] = webTurnsNow[i];
-                                if (logNow) {
+                                // In the diagnostics only as it changes
+                                // (diag_log::ChangeOnly); the timeline as before.
+                                const bool diagNow = forearmDiag[i].update(
+                                    dt, static_cast<int>(why), web_aim::turnAngle(webTurnsNow[i]) * 57.29578f);
+                                if (logNow || diagNow) {
                                     // The unknowns, to send back: the forearm against the
                                     // controller's line in the same world (a frame mismatch
                                     // shows as a large or yaw-only angle), the grip the solve
@@ -2686,8 +2727,12 @@ DWORD WINAPI run(void*) {
                                         values.forearmBlend, f.handError, forearmStaleFrames,
                                         f.valid ? off : -1.f, f.valid ? lag : -1.f,
                                         dot(f.palm, aimNow.rotate({1, 0, 0})), forearmJitter[i]);
-                                    game_prompts::note(line);
-                                    forearmJitter[i] = 0;
+                                    if (logNow)
+                                        game_prompts::note(line, false);
+                                    if (diagNow)
+                                        diag_log::write(line);
+                                    if (logNow)
+                                        forearmJitter[i] = 0;
                                 }
                             }
                             if (logNow)
@@ -4257,6 +4302,15 @@ DWORD WINAPI run(void*) {
 
                         d.vrButtons = trackedFrame.buttons;
                         d.vrButtonsPlayed = vrButtonsPlayed;
+                        {
+                            // The session's diagnostics, as they come (diag_log.hpp).
+                            auto& g = SpidyDiagData;
+                            if (!g.build[0])
+                                strncpy_s(g.build, diag_log::build(), _TRUNCATE);
+                            InterlockedIncrement64(&g.sequence);
+                            diag_log::copyOut(g);
+                            InterlockedIncrement64(&g.sequence);
+                        }
                         auto& p = SpidyPromptData;
                         InterlockedIncrement64(&p.sequence);
                         p.invokes = prompts.invokes;

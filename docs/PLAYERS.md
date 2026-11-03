@@ -984,7 +984,11 @@ VR settings
                    70%, as before.
   RUN LOGS         (off until you switch it on) writes how fast you run,
                    land and take off to the session's log, for sending
-                   back. Changes nothing in play.
+                   back. Changes nothing in play. These lines (and WEB AIM's
+                   and DODGE TUMBLE's) show in the launcher's window as
+                   "diag ..." and are saved in reports\ as
+                   game-vr-<time>-diag.log, which starts with the build and
+                   your settings: that file is the one to send back.
   RUNNING LEAP    (off until you switch it on) a charged leap (hold A on
                    the ground) keeps the speed you run at and adds its
                    charge on top; a full one from a fast run is a long

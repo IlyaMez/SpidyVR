@@ -1895,6 +1895,82 @@ def controller_buttons(bits):
     return [name for bit, name in CONTROLLER_BUTTONS if bits & bit]
 
 
+# SESSION DIAGNOSTICS (diag_log.hpp, SpidyDiagData): the build, the feature settings and the features' own lines
+# (RUN LOGS' "run log:", WEB AIM's "forearm aim:", DODGE TUMBLE's, the state changes on and off the ground).
+# Until v4 they reached only the report's timeline; now the console and reports/<session>-diag.log get them.
+DIAG_MAGIC, DIAG_VERSION = 0x47414944, 1
+DIAG_MAIN, DIAG_AIM, DIAG_CHARS, DIAG_BUILD = 128, 16, 240, 96
+DIAG_MAIN_AT = 120
+DIAG_AIM_AT = DIAG_MAIN_AT + 8 + DIAG_MAIN*DIAG_CHARS
+DIAG_BYTES = DIAG_AIM_AT + 8 + DIAG_AIM*DIAG_CHARS
+
+
+def diag_snapshot(game, address):
+    """The diagnostics' two rings as they stand: {'build', 'main': (written, slots), 'aim': (written, slots)},
+    a protocol mismatch reported (never raised: these are diagnostics), or None while it is being written."""
+    for _ in range(8):
+        raw = game.read(address, DIAG_BYTES)
+        if len(raw) != DIAG_BYTES:
+            return None
+        magic, version, size = struct.unpack_from('<3I', raw)
+        if (magic, version, size) != (DIAG_MAGIC, DIAG_VERSION, DIAG_BYTES):
+            return dict(protocol_mismatch=dict(magic=hex(magic), version=version, bytes=size))
+        if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
+            continue
+        text = lambda at, size: raw[at:at+size].split(b'\0', 1)[0].decode('utf-8', 'replace')
+        rings = {}
+        for name, at, count in (('main', DIAG_MAIN_AT, DIAG_MAIN), ('aim', DIAG_AIM_AT, DIAG_AIM)):
+            written = struct.unpack_from('<Q', raw, at)[0]
+            rings[name] = (written, [text(at+8+i*DIAG_CHARS, DIAG_CHARS) for i in range(count)])
+        return dict(build=text(24, DIAG_BUILD), **rings)
+    return None
+
+
+class DiagLog:
+    """What diag_snapshot adds since the last look: each new line printed to the console (where the launcher
+    shows it) and appended to the diagnostics file beside the session report, with the build first."""
+    SIZES = dict(main=DIAG_MAIN, aim=DIAG_AIM)
+
+    def __init__(self, path, echo=None):
+        self.path, self.echo = pathlib.Path(path), echo or (lambda line: print(line, flush=True))
+        self.seen = dict(main=0, aim=0)
+        self.build = None
+        self.lines = 0
+
+    def _out(self, line):
+        self.echo(line)
+        self.lines += 1
+        try:
+            with self.path.open('a', encoding='utf-8') as f:
+                f.write(line + '\n')
+        except OSError:
+            pass  # a full disk or a locked file must not end the session
+
+    def take(self, snapshot):
+        if not snapshot or 'protocol_mismatch' in snapshot:
+            return
+        if snapshot['build'] and snapshot['build'] != self.build:
+            self.build = snapshot['build']
+            self._out(f'Spidy diagnostics: build {self.build} (this file: {self.path})')
+        for name in ('main', 'aim'):
+            written, slots = snapshot[name]
+            size, seen = self.SIZES[name], self.seen[name]
+            if written < seen:  # the module started again
+                seen = 0
+            first = max(seen, written-size)
+            if first > seen:
+                self._out(f'Spidy diagnostics: {first-seen} {name} lines lost (read too late)')
+            for index in range(first, written):
+                self._out('diag ' + slots[index % size])
+            self.seen[name] = written
+
+
+def diag_path(output):
+    """reports/game-vr-<time>.json -> reports/game-vr-<time>-diag.log"""
+    output = pathlib.Path(output)
+    return output.with_name(output.stem + '-diag.log')
+
+
 def prompt_snapshot(game, address):
     """What the game asked a player for (game_prompts.hpp PromptData v2): its calls into Flash and the prompt
     and QTE interface's among them, prompts raised and taken away, texts that named a button and texts
@@ -2440,7 +2516,7 @@ def session(a, startup):
                                            'SpidyGpuData', 'SpidyXrTimingData', 'SpidyAppearanceData',
                                            'SpidyStereoFrames', 'SpidyXrSnapshot', 'SpidyStereoData',
                                            'SpidyBodyData', 'SpidySlowMotionData', 'SpidyHudData',
-                                           'SpidySteamData', 'SpidyPromptData', 'SpidyImpostorReach',
+                                           'SpidySteamData', 'SpidyPromptData', 'SpidyDiagData', 'SpidyImpostorReach',
                                            'SpidyHapticsData', 'SpidyStreamData', 'SpidyPaceData',
                                            'SpidyEyePacing', 'SpidyBlurData',
                                            'SpidyReprojectData', 'SpidyHudCapture'))
@@ -2530,6 +2606,7 @@ def session(a, startup):
         # Body haptics: the latest, once the session has written it.
         haptics_last = None
         prompt_last = None
+        diag_log = DiagLog(diag_path(a.output))
         eye_jobs = None
         timing = None
         render_memory = None
@@ -2766,6 +2843,8 @@ def session(a, startup):
                     # What the game asked for, and the census of the calls its UI
                     # makes: kept for the report however the session ends.
                     prompt_last = prompt_snapshot(game, xr['SpidyPromptData']) or prompt_last
+                    # The features' diagnostics, to the console and the diagnostics file (DiagLog).
+                    diag_log.take(diag_snapshot(game, xr['SpidyDiagData']))
                     hud = hud_snapshot(game, xr['SpidyHudData'])
                     capture = hud_capture_snapshot(game, xr['SpidyHudCapture'])
                     if capture:
@@ -2947,14 +3026,24 @@ def session(a, startup):
                       f"of a second each ({stalls['seconds']} s in all). That is the stream to the headset, not "
                       'the game' + (': this PC was on Wi-Fi.' if links.get('wifi') else '.'), flush=True)
             tell_device_lost()
+            if diag_log.lines:
+                print(f'Diagnostics: {diag_log.path.resolve()}', flush=True)
             print(f'Game closed. Session report: {a.output.resolve()}',flush=True)
             return 0
         if loop_error is not None:
             write_report(session_report(game_exited=False, error=str(loop_error)))
             hand_over_settings(samples[-1] if samples else None)
             tell_device_lost()
+            if diag_log.lines:
+                print(f'Diagnostics: {diag_log.path.resolve()}', flush=True)
             print(f'Session report: {a.output.resolve()}',flush=True)
             raise loop_error
+        try:
+            diag_log.take(diag_snapshot(game, xr['SpidyDiagData']))  # the last lines before VR stops
+        except (OSError, RuntimeError):
+            pass
+        if diag_log.lines:
+            print(f'Diagnostics: {diag_log.path.resolve()}', flush=True)
         xr_stop = call_remote(process, xr['SpidyXrStop'])
         xr_active = xr_stop != 0
         bridge_stop = call_remote(process, bridge['SpidyStop'])

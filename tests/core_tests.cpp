@@ -75,6 +75,7 @@
 #include <vector>
 #ifdef _WIN32
 #include "spidy/game_targets.hpp"
+#include "spidy/diag_log.hpp"
 // Stand-ins for the game's classes, by the names the target scan's rules look
 // for: MSVC lays out their type information as it did the game's.
 class Component {
@@ -26020,6 +26021,59 @@ int main() {
         grab.claim(1 / 90.f, in, lab, world, Body{{0, 1, 0}, {}, true});
         check(grab.grabs()[0].phase == GrabPhase::None, "a held grip caught again");
         check(grab.forSwing(in).hands[0].grip == 0, "a held grip went to the swing");
+    });
+    test("session diagnostics: forearm aim in its own ring, the rest kept, the build named", [] {
+        using namespace diag_log;
+        check(channelOf("forearm aim: L none, turn 3.0 deg") == Channel::aim &&
+                  channelOf("run log: touchdown at 12.0 m/s") == Channel::main &&
+                  channelOf("dodge tumble: no tumble") == Channel::main && channelOf("") == Channel::main,
+              "a line in the wrong ring");
+        // Thirty seconds of forearm aim lines push out nothing of the main ring's.
+        auto data = std::make_unique<Data>();
+        data->main.push("run log: touchdown at 14.0 m/s across");
+        for (int i = 0; i < 200; ++i)
+            data->aim.push("forearm aim: R none");
+        check(data->main.written == 1 && std::strcmp(data->main.at(0), "run log: touchdown at 14.0 m/s across") == 0,
+              "a run log line lost to forearm aim lines");
+        check(data->aim.written == 200 && data->aim.at(199) && !data->aim.at(200) && !data->aim.at(183) &&
+                  data->aim.at(184),
+              "the aim ring does not keep its newest 16");
+        // A line longer than a slot is cut, never overflows.
+        std::string longLine(600, 'x');
+        data->main.push(longLine.c_str());
+        check(std::strlen(data->main.at(1)) == lineChars - 1, "a long line not cut to the slot");
+        // The layout run_game_vr.py's diag_snapshot reads.
+        check(Data{}.magic == 0x47414944 && Data{}.version == 1 && sizeof(Data) == 34696,
+              "SpidyDiagData's layout moved: change run_game_vr.py's DIAG_ constants with it");
+        check(buildId("0.7.0", "56fb4f8abc", "x") == "Spidy 0.7.0 (commit 56fb4f8abc)" &&
+                  buildId("0.7.0", "", "20261103-1600Z") == "Spidy 0.7.0 (built 20261103-1600Z)",
+              "the build id does not tell builds apart");
+    });
+    test("session diagnostics: forearm aim lines only as they change, and a heartbeat", [] {
+        diag_log::ChangeOnly c;
+        check(c.update(.01f, 0, 10), "the first line not written");
+        int lines = 0;
+        for (int i = 0; i < 300; ++i) // 3 s, nothing changes
+            lines += c.update(.01f, 0, 10.5f);
+        check(lines == 0, "an unchanged forearm aim written again");
+        diag_log::ChangeOnly d;
+        d.update(.01f, 0, 10);
+        int changed = 0;
+        for (int i = 0; i < 100; ++i) // a new fallback, at most once in `quiet`
+            changed += d.update(.01f, i % 2 ? 1 : 2, 10);
+        check(changed == 1 || changed == 2, "a flapping fallback floods the diagnostics");
+        diag_log::ChangeOnly e;
+        e.update(.01f, 0, 10);
+        int beats = 0;
+        for (int i = 0; i < 2100; ++i) // 21 s steady
+            beats += e.update(.01f, 0, 10);
+        check(beats == 2, "no heartbeat every 10 s");
+        diag_log::ChangeOnly f;
+        f.update(.01f, 0, 10);
+        int turned = 0;
+        for (int i = 0; i < 60; ++i)
+            turned += f.update(.01f, 0, 16);
+        check(turned == 1, "a 6-degree turn not written");
     });
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;

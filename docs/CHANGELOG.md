@@ -7,6 +7,33 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
 
 Not in a build yet, newest first. The release adds these to the next build's entry.
 
+**SESSION DIAGNOSTICS in the console and their own file.**
+
+- **Before.** RUN LOGS' `run log:`, WEB AIM's `forearm aim:` and DODGE
+  TUMBLE's `dodge tumble:` lines went only into the session report's
+  timeline (`game_prompts::note`: 32 lines of 128 characters, cut at 100),
+  never into the launcher's console; `forearm aim:` every 2 s per hand pushed
+  everything else out of the timeline in seconds. The November 2 logs (four
+  sessions, up to 22 minutes) had not one such line, and nothing said which
+  build or which settings were tested.
+- **Now** every such line also goes, whole (up to 240 characters) and
+  stamped with the seconds since the session's first, into `SpidyDiagData`
+  (`diag_log.hpp`). `run_game_vr.py` reads it with the rest of the session,
+  prints each new line to the console (`diag [  12.345] run log: ...`) and
+  appends it to `reports\<session>-diag.log` beside the report, and says at
+  the end where that file is. Two rings: 128 lines for everything, 16 for
+  `forearm aim:` alone, so those cannot push out the rest; a reader that fell
+  behind writes how many it lost. In the diagnostics `forearm aim:` is
+  written only as it changes (its fallback, a turn of 5 degrees or more, at
+  most once in 0.5 s) and every 10 s otherwise. The session starts with the
+  build (`Spidy 0.7.0 (commit <hash>)`, or when it was built where git was
+  not there) and the feature settings (the tab-only keys, swing speed and
+  weight), and the settings again whenever they change. The report's
+  timeline is as before. Nothing in play changes.
+- **Validation.** Core checks for the rings, the forearm aim filter and the
+  build id; a protocol check for the reader (the console, the file, lines
+  lost, a mismatched layout reported, never raised).
+
 **SPIDY RUN FROM STANDING, the mod's run from a stand.**
 
 - **Before.** SPIDY RUN started only from a landing faster than 10 m/s
