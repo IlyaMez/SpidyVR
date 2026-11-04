@@ -52,6 +52,10 @@ InputSampleClock inputClock, grabInputClock;
 // webbed-up enemy on the other's, hands together, the right stick's click.
 TieGesture tieGesture;
 InputHold inputHold;
+// The game's running time (RunClock), and what it was at the mover's last
+// step seen.
+RunClock runClock;
+uint64_t stepRunMs{};
 // The game's own move out of the swing's flight, asked for (Command::asks).
 AirYield airYield;
 InFlightStep inFlight;
@@ -112,6 +116,8 @@ uint64_t aimSerial{}, aimMadeMs{};
 std::atomic<uint32_t> noBlows{};
 std::atomic<bool> combatVisuals{true};
 std::atomic<bool> halfPunchDamage{};
+// WEB TIE (Settings version 23): the web tie's gesture runs only with it on.
+std::atomic<bool> webTie{};
 bool copy(void* destination, const void* source, size_t bytes) {
     __try {
         if (reinterpret_cast<uintptr_t>(source) < 0x10000 ||
@@ -372,7 +378,8 @@ void visit(const native_rays::QueryContext& world) {
     c = command;
     const bool live = c.focused && GetTickCount64() < inputDeadline;
     ReleaseSRWLockShared(&control);
-    const bool focused = inputHold.update(c, live, GetTickCount64());
+    const uint64_t runMs = runClock.update(GetTickCount64());
+    const bool focused = inputHold.update(c, live, runMs);
     native_movement::Data motion;
     if (sampleMotion(&motion)) {
         fault(3001);
@@ -385,6 +392,8 @@ void visit(const native_rays::QueryContext& world) {
                             ? static_cast<double>(now.QuadPart - motion.qpc) / frequency.QuadPart
                             : std::numeric_limits<double>::infinity();
     const bool fresh = idle < .05;
+    if (fresh)
+        stepRunMs = runMs;
     if (worldIdentity && worldIdentity != world.identity()) {
         cancel();
         worldIdentity = world.identity();
@@ -500,9 +509,9 @@ void visit(const native_rays::QueryContext& world) {
         // The web tie: the click (Command::asks bit 1) with the hands together,
         // one on a web stuck to a surface, the other on a webbed-up enemy.
         // Both webs go to the tie, which draws him over to the surface and
-        // holds him there until the fight is over (game_grab::tie).
-        {
-            const auto held = game_grab::data();
+        // holds him there until the fight is over (game_grab::tie). Only with
+        // WEB TIE on: off, nothing of it runs.
+        if (webTie.load(std::memory_order_relaxed)) {
             std::array<TieHand, 2> hands{};
             // Where each hand's web holds for a tie, and the surface's normal
             // there. The first thing the web's line meets from the wrist, as
@@ -549,6 +558,7 @@ void visit(const native_rays::QueryContext& world) {
                 }
             }
             if (const auto request = tieGesture.update(sampleSeconds, (c.asks & 2u) != 0, hands)) {
+                const auto held = game_grab::data();
                 Vec3 normal = tieNormal[request->anchorHand];
                 if (length(normal) < .5f) {
                     // No surface found (a crane's cable): toward the enemy while
@@ -664,11 +674,12 @@ void visit(const native_rays::QueryContext& world) {
     }
     // No step for 50 ms: a long frame, or a paused game. The next step goes on
     // from here; letting go dropped the player into the game's fall (InputHold).
-    // With live input and no step for longer than a stutter, the game moves
-    // the player some other way (a perch), or is paused: the swing lets go. A
-    // player on a wall is on it still when the steps come back.
+    // With live input and no step for longer than a stutter of the game's
+    // running time (a load hitch is one long frame of it: RunClock), the game
+    // moves the player some other way (a perch), or is paused: the swing lets
+    // go. A player on a wall is on it still when the steps come back.
     if (!fresh) {
-        if (live && idle * 1000 > controlHoldMs)
+        if (live && runMs - stepRunMs > controlHoldMs)
             cancelSwing(true);
         return;
     }
@@ -1170,6 +1181,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStart(void* input) {
             break;
         combatVisuals = true;
         halfPunchDamage = false;
+        webTie = false;
         started = true;
         solver = Swing(physicsConfig(config));
         QueryPerformanceFrequency(&frequency);
@@ -1273,7 +1285,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
          header[2] != settingsBytesV12 && header[2] != settingsBytesV13 && header[2] != settingsBytesV14 &&
          header[2] != settingsBytesV15 && header[2] != settingsBytesV16 && header[2] != settingsBytesV17 &&
          header[2] != settingsBytesV18 && header[2] != settingsBytesV19 && header[2] != settingsBytesV20 &&
-         header[2] != settingsBytesV21 && header[2] != sizeof(s)) ||
+         header[2] != settingsBytesV21 && header[2] != settingsBytesV22 && header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || !validSettings(s))
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
@@ -1309,6 +1321,14 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         combatVisuals = s.version < 11 || s.combatVisuals != 0;
         halfPunchDamage = s.version >= 21 && s.halfPunchDamage != 0;
         solver.singleHandYankStrength((s.version >= 22 ? s.singleHandYankPercent : 100u) / 100.f);
+        // WEB TIE: off (and in older packets) no gesture and no tie, and a
+        // webbed enemy comes as before; switched off, the ties let go.
+        const bool tiesOn = s.version >= 23 && s.webTie != 0;
+        if (webTie.exchange(tiesOn) && !tiesOn) {
+            tieGesture.reset();
+            game_grab::tieArmed(false);
+        }
+        game_grab::allowTies(tiesOn);
         if (s.version >= 7)
             solver.allowArcade(s.arcade != 0);
         if (s.version >= 8)

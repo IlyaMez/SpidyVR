@@ -1840,6 +1840,11 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "Web balls and zips go where your eyes look. Only where the headset and its VR runtime track "
                "the eyes (Quest Pro, Varjo, Pimax Crystal...); elsewhere hands and head aim as before.",
                S(150), [&] { tabCombo("##eyeaim", Item::eyeAim); });
+        option("Web tie (experimental)",
+               "Web an enemy up, put one web on a wall and the other on him, bring your hands together "
+               "and click the right stick: he is stuck to the wall. On, a webbed enemy comes to you only "
+               "when you yank him.",
+               S(42), [&] { tabToggle("##webtie", Item::webTie); });
     });
     group(0, "Moving", [&] {
         option("Swing speed limit", "How fast a swing can carry you.", S(150), [&] {

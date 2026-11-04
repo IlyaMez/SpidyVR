@@ -6,6 +6,11 @@ fight is over.
 
 ## Controls
 
+**WEB TIE** switches it on: the SPIDY VR tab's EXPERIMENTAL section, or the
+launcher's Webs card. It is off by default, and off none of this runs: no
+gesture, no tick, and an enemy on a web comes to you as before. On, a webbed
+enemy comes to you only when you yank him (WEB-GRAB.md).
+
 1. **Web him up.** Hit him with the web shooter's balls (the trigger of a
    hand without a web) until the game has him in his cocoon: three quick hits
    for a street thug.
@@ -50,8 +55,10 @@ In the game:
   the other state rules. Fallback, `game_shooter::webbedUp`: Spidy's own web
   balls brought his webbing to 30 (11 a hit, wearing off at 4 a second) within
   the last 12 s.
-- **The click** is the right thumbstick alone, in VR play, with the pad layer
-  off and no R3 the game asks for: `Command::asks` bit 1 (no layout change).
+- **The click** is the right thumbstick alone, in VR play with WEB TIE on,
+  with the pad layer off and no R3 the game asks for: `Command::asks` bit 1
+  (no layout change). WEB TIE reaches the swing in its settings, version 23
+  (`game_swing::Settings::webTie`); off, the gesture is not looked for.
 - **The webs handed over:** `Swing::handOver` (no SOFT RELEASE pull) and
   `WebGrab::handOver` (no throw, no trailing web); both grips shoot nothing
   until let go.
@@ -159,8 +166,10 @@ Spidy can request only the flight (`RequestState` with the flung state's
 type and parameters, `native_bodies::fling`).
 
 So the state log (`native_bodies::StateLog`, export `SpidyStateLog`, kept in
-the session report as `state_log`): `RequestState` (20e51c0) is hooked while
-bodies run, and each request the game makes for a tied bot is kept - the
+the session report as `state_log`): `RequestState` (20e51c0) is hooked from
+a session's first tie on (`native_bodies::logStates`: a player who ties
+nobody never has the hook), while bodies run, and each request the game
+makes for a tied bot is kept - the
 type it asks for (image offset and its class's RTTI name), the caller, the
 result and the parameters' first 0x180 bytes - with a mark of what the tie
 knew (where its web stuck, the surface's normal, where he was) when the game
@@ -169,7 +178,7 @@ session with ties to walls the request that sticks a thug can be read off:
 its type, and where the wall's point and normal sit in its parameters. The
 next step is to make that request under a ceiling, the normal facing down.
 The hook is optional: if it cannot be made, nothing else changes, and the
-log's status says so (1 hooked, 3 not).
+log's status says so (0 no tie yet, 1 hooked, 3 not).
 
 ### What the state log showed (09:44), and the stick Spidy asks
 

@@ -151,7 +151,8 @@ void addWebbing(uint64_t record) {
         *slot = {record};
     }
     const float since = slot->at ? static_cast<float>(now - slot->at) / 1000.f : 0.f;
-    slot->amount = std::max(0.f, slot->amount - since * game_shooter::webbingDecay) + game_shooter::webbingPerHit;
+    slot->amount =
+        std::max(0.f, slot->amount - since * game_shooter::webbingDecay) + game_shooter::webbingPerHit;
     slot->at = now;
     if (slot->amount >= game_shooter::webbedThreshold)
         slot->upAt = now;

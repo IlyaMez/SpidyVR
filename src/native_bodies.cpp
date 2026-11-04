@@ -692,7 +692,8 @@ void preCollide(void* world, const void* input) {
 // The state log (native_bodies.hpp). Optional: without its hook the rest runs.
 RequestState originalRequest{};
 void* requestHook{};
-bool requestHooked{};
+// The hook is made, enabled now, and tried since the last start (logStates).
+bool requestHooked{}, requestEnabled{}, requestTried{};
 std::atomic<uint64_t> watchedMachines[8]{};
 bool watched(uint64_t machine) {
     for (const auto& w : watchedMachines)
@@ -812,11 +813,6 @@ uint32_t native_bodies::start(uintptr_t gameBase) {
             }
             hooked = true;
         }
-        if (!requestHooked) {
-            requestHook = reinterpret_cast<void*>(base + requestStateRva);
-            requestHooked = MH_CreateHook(requestHook, reinterpret_cast<void*>(loggedRequest),
-                                          reinterpret_cast<void**>(&originalRequest)) == MH_OK;
-        }
         AcquireSRWLockExclusive(&lock);
         for (auto& s : table)
             s = {};
@@ -840,10 +836,9 @@ uint32_t native_bodies::start(uintptr_t gameBase) {
             enabled = false;
             result = 8300 + s;
         }
-        // The state log's hook: optional, its failure costs nothing else.
-        if (requestHooked && MH_EnableHook(requestHook) != MH_OK)
-            requestHooked = false;
-        SpidyStateLog.status = requestHooked ? 1u : 3u;
+        // The state log's hook waits for the first tie (logStates).
+        requestTried = false;
+        SpidyStateLog.status = 0;
     } while (false);
     ReleaseSRWLockExclusive(&lifecycle);
     return result;
@@ -855,8 +850,10 @@ uint32_t native_bodies::stop() {
     if (hooked)
         if (const auto s = MH_DisableHook(hook); s != MH_OK && s != MH_ERROR_DISABLED)
             result = 8400 + s;
-    if (requestHooked)
+    if (requestEnabled) {
         MH_DisableHook(requestHook);
+        requestEnabled = false;
+    }
     for (auto& w : watchedMachines)
         w.store(0, std::memory_order_relaxed);
     const auto until = GetTickCount64() + 2000;
@@ -956,8 +953,8 @@ bool native_bodies::fling(uint64_t machine, uint64_t record, Vec3 velocity, bool
     ReleaseSRWLockExclusive(&lock);
     return slot != nullptr;
 }
-bool native_bodies::stick(uint64_t machine, uint64_t record, uint32_t surface, Vec3 point, Vec3 normal, Vec3 along,
-                          uint32_t pose) {
+bool native_bodies::stick(uint64_t machine, uint64_t record, uint32_t surface, Vec3 point, Vec3 normal,
+                          Vec3 along, uint32_t pose) {
     if (!enabled || !machine || !record || !finite(point) || !finite(normal) || !finite(along) ||
         length(normal) < .5f || length(along) < .5f)
         return false;
@@ -1020,6 +1017,22 @@ float native_bodies::timeScale() {
     const auto out = scale;
     ReleaseSRWLockShared(&lock);
     return out;
+}
+void native_bodies::logStates() {
+    AcquireSRWLockExclusive(&lifecycle);
+    // Optional: its failure costs nothing else, and is not tried again until
+    // the next start.
+    if (enabled && !requestTried) {
+        requestTried = true;
+        if (!requestHooked) {
+            requestHook = reinterpret_cast<void*>(base + requestStateRva);
+            requestHooked = MH_CreateHook(requestHook, reinterpret_cast<void*>(loggedRequest),
+                                          reinterpret_cast<void**>(&originalRequest)) == MH_OK;
+        }
+        requestEnabled = requestHooked && MH_EnableHook(requestHook) == MH_OK;
+        SpidyStateLog.status = requestEnabled ? 1u : 3u;
+    }
+    ReleaseSRWLockExclusive(&lifecycle);
 }
 void native_bodies::watchStates(const uint64_t* machines, unsigned count) {
     for (unsigned i = 0; i < 8; ++i)

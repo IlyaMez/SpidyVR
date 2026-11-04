@@ -188,7 +188,12 @@ struct StateLog {
 static_assert(sizeof(StateRequest) == 488 && sizeof(StateMark) == 64 && sizeof(StateLog) == 97840);
 // The machines whose requests are logged (at most 8; the rest ignored).
 void watchStates(const uint64_t* machines, unsigned count);
-void markState(uint64_t machine, Vec3 anchor, Vec3 normal, Vec3 position, uint32_t stuck, uint32_t surface = 0);
+// Hooks RequestState for the state log, once a start, from the first tie on:
+// a player who ties nobody never has it (StateLog::status 0; 1 hooked, 2
+// with requests, 3 the hook failed).
+void logStates();
+void markState(uint64_t machine, Vec3 anchor, Vec3 normal, Vec3 position, uint32_t stuck,
+               uint32_t surface = 0);
 // The game's own stick (BotStateWallStuck), asked of a bot at the next
 // physics step, as the game asks it when a webbed thug flies into a wall.
 // Read off November 2's state log (09:44): its type is the static at

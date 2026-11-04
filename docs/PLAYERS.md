@@ -881,6 +881,14 @@ VR settings
                    finishers. Launch and smash velocity, knockback, combo
                    rules and punch recognition do not change. Off restores
                    normal damage. This is not a global game damage setting.
+  WEB TIE ........ in EXPERIMENTAL after HALF PUNCH DAMAGE, off by default.
+                   Web an enemy up, put one web on a wall (a ceiling, a
+                   beam, a crane, a lamp post) and the other on him, bring
+                   your hands together and click the right stick: he is
+                   pulled onto it and stuck there until the fight is over.
+                   Both controllers tick when it is ready. While it is on,
+                   a webbed enemy comes to you only when you yank him; off,
+                   as before.
   EXPERIMENTAL ... FLIPS (off until you switch it on) uses the right stick
                    in the air; release holds the angle and A returns upright.
                    CONTROLLED FLIPS is a separate A-toggle mode, above.
@@ -889,6 +897,7 @@ VR settings
                    uses a fixed wall-camera clearance. EYE AIM (OFF unless
                    you pick WEB BALLS, ZIPS or BOTH; below). FLIP
                    REPROJECTION (off until you switch it on; below).
+                   WEB TIE (off until you switch it on, above).
                    REALISTIC FLIPS (off until you switch it on, above) and
                    the ten rows that tune it.
   EYE AIM ........ for a headset whose VR runtime gives games your eyes

@@ -1358,6 +1358,7 @@ DWORD WINAPI run(void*) {
             s.webSpeed = static_cast<uint32_t>(values.webSpeed);
             s.halfPunchDamage = values.halfPunchDamage;
             s.singleHandYankPercent = static_cast<uint32_t>(values.singleHandYankPercent);
+            s.webTie = values.webTie;
             sentSwingSettings = s;
             swingSettingsSent = true;
             // A hand-over owns the walls while it lasts; the player's own
@@ -2359,11 +2360,12 @@ DWORD WINAPI run(void*) {
                         input.tilt = motion.swing.tilt;
                         input.leap = input.focused ? leapOut : 0.f;
                         input.asks = input.focused && askingGame ? 1u : 0u;
-                        // The web tie's click: the right stick alone, not half of
-                        // clicking both (the pad layer, the pause), not an R3 the
-                        // game asks for.
-                        if (input.focused && frame.hands[1].stickClick && !frame.hands[0].stickClick &&
-                            !padLayer.latched() && !(namedPress.claimed() & game_pad::NamedPress::rightClick))
+                        // The web tie's click (WEB TIE): the right stick alone, not
+                        // half of clicking both (the pad layer, the pause), not an R3
+                        // the game asks for.
+                        if (values.webTie && input.focused && frame.hands[1].stickClick &&
+                            !frame.hands[0].stickClick && !padLayer.latched() &&
+                            !(namedPress.claimed() & game_pad::NamedPress::rightClick))
                             input.asks |= 2u;
                         if (const Vec3 look = motion.headPose.orientation.rotate({0, 0, -1});
                             input.focused && finite(look) && length(look) > .5f)
@@ -2437,8 +2439,9 @@ DWORD WINAPI run(void*) {
                         {
                             game_grab::TieData sample;
                             const game_grab::TieData expected;
-                            if (sampleTie && !sampleTie(&sample) && sample.magic == expected.magic &&
-                                sample.version == expected.version && sample.bytes == expected.bytes)
+                            if (values.webTie && sampleTie && !sampleTie(&sample) &&
+                                sample.magic == expected.magic && sample.version == expected.version &&
+                                sample.bytes == expected.bytes)
                                 tieState = sample;
                             else
                                 tieState = {};
@@ -2969,7 +2972,8 @@ DWORD WINAPI run(void*) {
                             // The web tie's webs, in the game's own rope material.
                             native_webs::TieRope tieRopes[native_webs::maxTieRopes]{};
                             uint32_t tieRopeCount{};
-                            for (uint32_t k = 0; k < tieState.count && tieRopeCount < native_webs::maxTieRopes; ++k)
+                            for (uint32_t k = 0;
+                                 k < tieState.count && tieRopeCount < native_webs::maxTieRopes; ++k)
                                 tieRopes[tieRopeCount++] = {tieState.lines[k].anchor, tieState.lines[k].end};
                             native_webs::submitTies(tieRopes, tieRopeCount, 200);
                         }
@@ -4232,7 +4236,8 @@ DWORD WINAPI run(void*) {
                     saved.webSlots = {webRopes.slot(0), webRopes.slot(1)};
                     saved.strandUpper = webRopes.upper();
                     saved.tiesByGame = native_webs::tiesDrawn();
-                    saved.tieCount = std::min<uint32_t>(tieState.count, static_cast<uint32_t>(saved.ties.size()));
+                    saved.tieCount =
+                        std::min<uint32_t>(tieState.count, static_cast<uint32_t>(saved.ties.size()));
                     for (uint32_t i = 0; i < saved.tieCount; ++i)
                         saved.ties[i] = {tieState.lines[i].anchor, tieState.lines[i].end};
                     saved.webFlight = webFlight;

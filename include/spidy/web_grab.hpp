@@ -47,8 +47,9 @@ struct GrabConfig {
     // pulls as the hand or the player moves away - it pays out, staying slack
     // (November 2: "a webbed enemy far away, caught on a second web, came
     // over to me by himself; pulling should only happen with the pull
-    // gesture"). Props keep both. False: as before.
-    bool yankOnlyCharacters = true;
+    // gesture"). Props keep both. False (the default): as before. On with
+    // WEB TIE (game_grab::allowTies).
+    bool yankOnlyCharacters = false;
     // Trigger winds a web in; a sharp pull of the hand away from the target
     // (the zip gesture) yanks it over to the hand at its pull speed times this.
     float reelSpeed = 12;
@@ -205,6 +206,10 @@ class WebGrab {
     }
     const GrabConfig& config() const {
         return config_;
+    }
+    // GrabConfig::yankOnlyCharacters, switched during play.
+    void yankOnlyCharacters(bool on) {
+        config_.yankOnlyCharacters = on;
     }
 
   private:

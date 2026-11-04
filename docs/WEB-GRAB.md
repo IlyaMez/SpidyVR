@@ -405,9 +405,9 @@ own pulls on thugs not yet.
 
 ## Enemies come only on the pull gesture
 
-Since November 2 (`GrabConfig::yankOnlyCharacters`, on by default) an enemy
-on a web comes to the player only when the hand yanks him with the pull
-gesture. His web does not wind in on the trigger, and it does not pull as
+With WEB TIE on (`GrabConfig::yankOnlyCharacters`, since November 2; off by
+default, and off as before) an enemy on a web comes to the player only when
+the hand yanks him with the pull gesture. His web does not wind in on the trigger, and it does not pull as
 the hand or the player moves away: it pays out and stays slack, however far
 he is. Before, a webbed enemy far off, caught on a second web, came over by
 himself as soon as the hand drew back a little. Props still wind in on the

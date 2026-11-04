@@ -115,8 +115,8 @@ bool WebTies::add(const GrabTarget& target, Vec3 anchor, Vec3 normal) {
     ++made_;
     return true;
 }
-void WebTies::step(float dt, const TargetQueries& targets, bool fightOn, const std::vector<std::uint64_t>& taken,
-                   std::vector<TargetCommand>& out) {
+void WebTies::step(float dt, const TargetQueries& targets, bool fightOn,
+                   const std::vector<std::uint64_t>& taken, std::vector<TargetCommand>& out) {
     if (!std::isfinite(dt) || dt <= 0)
         return;
     quiet_ = fightOn ? 0.f : quiet_ + dt;

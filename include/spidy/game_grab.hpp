@@ -163,6 +163,11 @@ uint64_t heldLately(unsigned hand);
 bool tie(unsigned hand, Vec3 anchor, Vec3 normal);
 // The gesture is ready now (TieGesture::armed), for the telemetry.
 void tieArmed(bool);
+// WEB TIE (vr_settings::Values::webTie): ties are made, and an enemy on a web
+// comes only on the yank (GrabConfig::yankOnlyCharacters). Off (as at a
+// start): no tie, an enemy comes as before, and the ties there are let go,
+// as at a fight's end.
+void allowTies(bool on);
 TieData tieData();
 // The kinds this build can move.
 constexpr uint32_t movableKinds = 1u << static_cast<unsigned>(game_targets::Kind::throwable) |

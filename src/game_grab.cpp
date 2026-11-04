@@ -12,8 +12,8 @@
 #include "spidy/native_bodies.hpp"
 #include "spidy/native_movement.hpp"
 #include <algorithm>
-#include <unordered_map>
 #include <cstring>
+#include <unordered_map>
 #include <windows.h>
 using namespace spidy;
 using namespace spidy::game_grab;
@@ -151,6 +151,8 @@ std::vector<Shield> shields;
 WebGrab core{GrabConfig{}};
 WebTies ties{TieConfig{}};
 bool tieReady{};
+// WEB TIE (allowTies); and whether the state log watches tied bots (step).
+bool tiesAllowed{}, statesWatched{};
 // Bots seen webbed up, and when (GetTickCount64), for game_grab::cocooned.
 std::unordered_map<uint64_t, uint64_t> cocoonSeen;
 // The bot each hand's web held lately (game_grab::heldLately).
@@ -560,7 +562,8 @@ void pull(Tracked& t, const TargetCommand& c, float dt, const WorldQueries& worl
 // place: knocks again and again at a place he could not reach made him
 // twitch (one tie that day: 14 of them); his mover holds him there.
 constexpr float tieKnockDamage = .25f, tieReknockSeconds = .8f;
-constexpr float tieStickReach = 1.2f, tieStickLead = .12f, tieWebDamage = .1f, tieWebbing = 40, tieWebEvery = .25f;
+constexpr float tieStickReach = 1.2f, tieStickLead = .12f, tieWebDamage = .1f, tieWebbing = 40,
+                tieWebEvery = .25f;
 constexpr uint32_t tieWebsMost = 6;
 // Down without being stuck this long after he arrived: the game has him
 // (knocked out); the tie lets go.
@@ -787,7 +790,8 @@ void hold(Tracked& t, const TargetCommand& c, const Tie& tie, float dt, const Wo
             steer(t, false, {});
             t.steering = false;
         }
-        t.launch = limited(tieLaunch(described(t.who, t.position, t.velocity), tie, ties.config()), maxDriveSpeed);
+        t.launch =
+            limited(tieLaunch(described(t.who, t.position, t.velocity), tie, ties.config()), maxDriveSpeed);
         knock(t, t.launch, tieKnockDamage);
         t.launching = true;
         t.launchAge = 0;
@@ -1076,7 +1080,7 @@ uint32_t game_grab::start(uintptr_t gameBase, Call drive, Call driven, uint32_t 
         offered = 0;
     core = WebGrab(GrabConfig{});
     ties = WebTies(TieConfig{});
-    tieReady = false;
+    tieReady = tiesAllowed = statesWatched = false;
     tiesDown = tiesStuck = tieKnocks = tieWebHits = 0;
     finishing.clear();
     finishes = 0;
@@ -1148,6 +1152,15 @@ bool game_grab::offering() {
 void game_grab::allow(bool on) {
     allowed = on;
 }
+void game_grab::allowTies(bool on) {
+    tiesAllowed = on;
+    core.yankOnlyCharacters(on);
+    if (!on) {
+        ties.clear();
+        finishing.clear();
+        tieReady = false;
+    }
+}
 Input game_grab::claim(float inputSeconds, const Input& in, const WorldQueries& world, const Body& player,
                        unsigned kept) {
     if (!offered)
@@ -1211,8 +1224,10 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
     counted = 0;
     const Vec3 gravity{0, -core.config().gravity, 0};
     // The ties: a target knocked out is the game's again; the fight goes on
-    // while an enemy who is not tied is in it near the player.
-    {
+    // while an enemy who is not tied is in it near the player. Only while
+    // there are ties or finishing blows to see to (and once after, to stop
+    // watching their states): without them nothing here runs.
+    if (!ties.ties().empty() || !finishing.empty() || statesWatched) {
         std::vector<uint64_t> taken, down, stuck;
         for (const auto& g : core.grabs())
             if (g.phase != GrabPhase::None)
@@ -1256,67 +1271,69 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
         bool fightOn{};
         for (const auto& c : candidates) {
             Vec3 at{};
-            if (!fightOn && !ties.tied(c.record) && game_targets::fighting(base, c) && game_targets::position(c, at))
+            if (!fightOn && !ties.tied(c.record) && game_targets::fighting(base, c) &&
+                game_targets::position(c, at))
                 fightOn = !finite(heroBody.position) || length(at - heroBody.position) <= fightReach;
         }
         ties.step(dt, targets, fightOn, taken, commands);
         // The stuck, finished where they hang (Finish).
         finishing.erase(
-            std::remove_if(finishing.begin(), finishing.end(),
-                           [&](Finish& f) {
-                               const game_targets::Candidate* c{};
-                               for (const auto& each : candidates)
-                                   if (each.record == f.record)
-                                       c = &each;
-                               if (!c || f.age > finishEnd + finishCheck)
-                                   return true;
-                               f.age += dt;
-                               Vec3 at{};
-                               game_targets::position(*c, at);
-                               const bool stuckNow = game_targets::wallStuck(base, *c);
-                               if (!f.struck) {
-                                   if (f.age < finishAfter)
-                                       return false;
-                                   if (!stuckNow)
-                                       return f.age > finishEnd; // off his surface: not ours to finish
-                                   float points{};
-                                   game_targets::health(*c, points);
-                                   native_bodies::Damage d;
-                                   d.victim = f.record;
-                                   d.damager = hero;
-                                   d.point = at;
-                                   d.direction = f.normal * -1.f;
-                                   d.normal = f.normal;
-                                   d.amount = std::max(points, 1.f) + finishExtra;
-                                   d.type = 20;     // kWebImpact: the web finished him
-                                   d.knockback = 0; // kNone: he stays where he hangs
-                                   d.knockbackAmount = 0;
-                                   d.impulse = 0;
-                                   f.struck = native_bodies::damage(d) != 0;
-                                   if (f.struck) {
-                                       ++finishes;
-                                       f.age = 0;
-                                       native_bodies::markState(f.machine, f.anchor, Vec3{points, 0, 0}, at, 3);
-                                   }
-                                   return false;
-                               }
-                               if (!f.checked && f.age >= finishCheck) {
-                                   f.checked = true;
-                                   native_bodies::markState(f.machine, f.anchor, f.normal, at, stuckNow ? 4 : 5);
-                               }
-                               if (f.checked && !stuckNow && f.resticks < finishResticks &&
-                                   f.age >= finishCheck + .4f * f.resticks) {
-                                   ++f.resticks;
-                                   uint32_t surface{};
-                                   askStickAt(f.machine, f.record, at, f.anchor, f.normal, world, surface);
-                               }
-                               if (f.age >= finishEnd) {
-                                   if (stuckNow && !game_targets::up(base, *c))
-                                       native_bodies::markState(f.machine, f.anchor, f.normal, at, 6);
-                                   return true;
-                               }
-                               return false;
-                           }),
+            std::remove_if(
+                finishing.begin(), finishing.end(),
+                [&](Finish& f) {
+                    const game_targets::Candidate* c{};
+                    for (const auto& each : candidates)
+                        if (each.record == f.record)
+                            c = &each;
+                    if (!c || f.age > finishEnd + finishCheck)
+                        return true;
+                    f.age += dt;
+                    Vec3 at{};
+                    game_targets::position(*c, at);
+                    const bool stuckNow = game_targets::wallStuck(base, *c);
+                    if (!f.struck) {
+                        if (f.age < finishAfter)
+                            return false;
+                        if (!stuckNow)
+                            return f.age > finishEnd; // off his surface: not ours to finish
+                        float points{};
+                        game_targets::health(*c, points);
+                        native_bodies::Damage d;
+                        d.victim = f.record;
+                        d.damager = hero;
+                        d.point = at;
+                        d.direction = f.normal * -1.f;
+                        d.normal = f.normal;
+                        d.amount = std::max(points, 1.f) + finishExtra;
+                        d.type = 20;     // kWebImpact: the web finished him
+                        d.knockback = 0; // kNone: he stays where he hangs
+                        d.knockbackAmount = 0;
+                        d.impulse = 0;
+                        f.struck = native_bodies::damage(d) != 0;
+                        if (f.struck) {
+                            ++finishes;
+                            f.age = 0;
+                            native_bodies::markState(f.machine, f.anchor, Vec3{points, 0, 0}, at, 3);
+                        }
+                        return false;
+                    }
+                    if (!f.checked && f.age >= finishCheck) {
+                        f.checked = true;
+                        native_bodies::markState(f.machine, f.anchor, f.normal, at, stuckNow ? 4 : 5);
+                    }
+                    if (f.checked && !stuckNow && f.resticks < finishResticks &&
+                        f.age >= finishCheck + .4f * f.resticks) {
+                        ++f.resticks;
+                        uint32_t surface{};
+                        askStickAt(f.machine, f.record, at, f.anchor, f.normal, world, surface);
+                    }
+                    if (f.age >= finishEnd) {
+                        if (stuckNow && !game_targets::up(base, *c))
+                            native_bodies::markState(f.machine, f.anchor, f.normal, at, 6);
+                        return true;
+                    }
+                    return false;
+                }),
             finishing.end());
         {
             uint64_t machines[8]{};
@@ -1325,6 +1342,7 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
                 if (const auto* t = track(tie.target); t && t->who.machine && watching < 8)
                     machines[watching++] = t->who.machine;
             native_bodies::watchStates(machines, watching);
+            statesWatched = watching != 0;
         }
     }
     for (auto& t : tracked) {
@@ -1562,7 +1580,7 @@ uint64_t game_grab::heldLately(unsigned hand) {
     return lately[hand].since <= heldGrace ? lately[hand].target : 0;
 }
 bool game_grab::tie(unsigned hand, Vec3 anchor, Vec3 normal) {
-    if (!offered || !allowed || hand > 1 || !finite(anchor))
+    if (!offered || !allowed || !tiesAllowed || hand > 1 || !finite(anchor))
         return false;
     // Its web's target now, or the one it held lately (a yanked thug at the hand).
     const auto record = heldLately(hand);
@@ -1583,6 +1601,8 @@ bool game_grab::tie(unsigned hand, Vec3 anchor, Vec3 normal) {
     core.handOver(static_cast<int>(hand));
     trails[hand] = {};
     lately[hand] = {};
+    // The state log follows tied bots from the first tie on.
+    native_bodies::logStates();
     t->snatched = false;
     t->tieContact = t->tieWebbed = -1;
     t->tieWebs = 0;

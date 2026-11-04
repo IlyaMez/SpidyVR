@@ -325,8 +325,8 @@ void update(void* manager, float dt) {
             if (!tieHand[hand])
                 continue;
             for (int p = 0; p < 4; ++p)
-                std::memcpy(&handPointsBefore[hand][p], reinterpret_cast<void*>(mgr + 0x7d60 + p * 0x18 + hand * 12),
-                            sizeof(Vec3));
+                std::memcpy(&handPointsBefore[hand][p],
+                            reinterpret_cast<void*>(mgr + 0x7d60 + p * 0x18 + hand * 12), sizeof(Vec3));
             const Vec3 none{};
             const Vec3 at = tieAnchor[hand];
             for (const auto [offset, point] : {std::pair{0x7d60, at}, std::pair{0x7d78, none},
