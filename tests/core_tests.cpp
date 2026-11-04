@@ -8694,6 +8694,30 @@ int main() {
         for(int i=0;i<5;++i){++s2;t2+=5;check(!other.update(t2,true,false,true,false,s2,a2),"nobody's hero let go");}
         for(int i=0;i<5;++i){++s2;t2+=5;check(!other.update(t2,true,true,false,false,s2,a2),"the ground let go");}
     });
+    test("a load hitch is one long frame of the game's running time: the held input outlives it", [] {
+        game_swing::RunClock clock;
+        check(clock.update(1000) == 0 && clock.update(1016) == 16 && clock.update(1032) == 32,
+              "the frames' time not counted");
+        // A two second hitch counts as one frame of maxGapMs.
+        const uint64_t after = clock.update(3032);
+        check(after == 32 + game_swing::RunClock::maxGapMs, "a hitch counted at its length");
+        check(clock.update(3048) == after + 16 && clock.update(3000) == after + 16,
+              "the frames after it, or a clock going back, miscounted");
+        // The swing's input over that hitch: the gate closed for it, the
+        // sample held through it, the live input back after it.
+        game_swing::RunClock run;
+        game_swing::InputHold hold;
+        game_swing::Command c;c.serial=7;c.focused=1;c.hands[0].grip=1;
+        check(hold.update(c,true,run.update(1000)),"live input refused");
+        game_swing::Command lost;lost.serial=8;lost.focused=0;
+        auto x=lost;
+        check(hold.update(x,false,run.update(2500))&&x.serial==7&&x.hands[0].grip==1,
+              "a 1.5 s load hitch let go of the held grip");
+        uint64_t t=2500;
+        for(int i=0;i<30;++i){t+=16;x=lost;hold.update(x,false,run.update(t));}
+        x=lost;
+        check(!hold.update(x,false,run.update(t+16)),"input lost through running frames held on");
+    });
     test("a stutter keeps the last focused input; a longer loss of it does not", [] {
         game_swing::InputHold hold;
         game_swing::Command c;c.serial=7;c.focused=1;c.hands[0].grip=1;

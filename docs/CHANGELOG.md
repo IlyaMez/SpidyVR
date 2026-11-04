@@ -3,7 +3,27 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (November 2): pull request #55 by ImStillDead - SINGLE HAND
+**Latest build (November 2): pull request #57 by GolexPrime - a load hitch
+no longer lets go of the webs.** GolexPrime: "with load stutters while
+swinging I very often lose the web, as if it were cut or I let go".
+
+- **Why.** The swing runs in the game's frame (its ray batch). A load hitch
+  stops that frame, and the swing timed two things by the wall clock: the
+  last input it holds through a closed gameplay gate (`InputHold`, 500 ms),
+  and how long the mover has not stepped with input coming (500 ms: a perch
+  or a pause). A hitch over half a second ran out either, and the first
+  frame after it let go of every web (`coast()` or `cancelSwing(true)`).
+- **The change.** Both are timed by the game's running time now
+  (`game_swing::RunClock`): from one frame to the next, each gap counted up
+  to 100 ms, so a hitch of any length is one long frame. A perch or a lost
+  input still lets go after half a second of frames.
+- **Not changed.** The movement lease (250 ms, wall clock) can still run out
+  over a hitch, so the first step after one may be the game's own; the next
+  frame's command takes over again.
+- **Tests.** Core: the clock over a two second hitch, and the held grip
+  outliving a 1.5 s hitch but not half a second of frames without input.
+
+**Earlier build (November 2): pull request #55 by ImStillDead - SINGLE HAND
 YANK STRENGTH, how much speed a one-hand web yank adds.**
 
 - **SINGLE HAND YANK STRENGTH** (SWINGING, before TWO HAND WEB ZIP; the
