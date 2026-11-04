@@ -133,6 +133,13 @@ bool running();
 // stood for this sample; a shot leaves from where the hand was relative to
 // it when the main thread fires it.
 void update(float seconds, const Input&, uint32_t busy, uint64_t record, Vec3 feet, const WorldQueries&);
+// Whether Spidy's own web balls webbed this actor up lately: their webbing
+// (webbingPerHit a hit, wearing off at webbingDecay a second, as the game's
+// tracker wears off within seconds) reached webbedThreshold (a street
+// thug's 30), within webbedSeconds. The web tie's fallback, where the game's
+// webbed-up state is not seen (game_targets::cocooned).
+constexpr float webbingDecay = 4, webbedThreshold = 30, webbedSeconds = 12;
+bool webbedUp(uint64_t record);
 // Input lost focus (a menu, the flat screen, a lost headset): a trigger
 // held through it is no pull when play resumes.
 void cancel();

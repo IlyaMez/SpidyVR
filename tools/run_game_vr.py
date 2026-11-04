@@ -2417,9 +2417,9 @@ def session(a, startup):
                                        'SpidyRaySample', 'SpidyRayData', 'SpidySwingData', 'SpidyGrabData',
                                        'SpidyPunchData', 'SpidyStrikeData', 'SpidyShooterData', 'SpidyRopeData',
                                        'SpidySenseData', 'SpidyFocusData', 'SpidySoundData',
-                                       'SpidyDodgeData'))
+                                       'SpidyDodgeData', 'SpidyTieData', 'SpidyStateLog'))
         # Imported here: probe_game_grab imports from this module.
-        from probe_game_grab import grab_snapshot
+        from probe_game_grab import grab_snapshot, tie_snapshot, state_log_snapshot
         ray_module = next(m['base'] for m in modules(game.pid) if m['name'].lower() == 'spidy_ray_bridge.dll')
         motion, motion_hash = prepare(game.pid,process,ROOT/'build/windows-ninja/spidy_movement_bridge.dll',
             ROOT/'reports/motion-modules',('SpidyMotionStart','SpidyMotionSubmit','SpidyMotionSample',
@@ -2480,6 +2480,10 @@ def session(a, startup):
         swing_samples = deque(maxlen=12000)
         # The web grab: a sample when a counter or a hand's grab changes, else once a second.
         grab_samples = deque(maxlen=12000)
+        tie_samples = deque(maxlen=12000)
+        # The state log (research for ties under ceilings): read every 2 s, kept as last read.
+        state_log = {}
+        state_log_read = [0.0]
         motion_samples = deque(maxlen=12000)
         eye_shots = deque()
         eye_folder = a.output.with_name(a.output.stem+'-eyes')
@@ -2598,7 +2602,7 @@ def session(a, startup):
                         xr_runtime=runtime, motion_hash=motion_hash,
                         xr_hash=xr_hash, ray_hash=ray_hash, samples=list(samples),
                         swing_samples=list(swing_samples), motion_samples=list(motion_samples),
-                        grab_samples=list(grab_samples), body=body, punch=punch,
+                        grab_samples=list(grab_samples), tie_samples=list(tie_samples), state_log=dict(state_log), body=body, punch=punch,
                         punch_samples=list(punch_samples), strikes=strikes, strike_samples=list(strike_samples),
                         focus=focus, sense=sense, sense_samples=list(sense_samples), dodge=dodge,
                         ropes=ropes, steam_guard=steam,
@@ -2848,6 +2852,24 @@ def session(a, startup):
                         if not last or last['key'] != key or grab['seconds']-last['seconds'] >= 1:
                             grab['key'] = key
                             grab_samples.append(grab)
+                    if time.monotonic() - state_log_read[0] >= 2:
+                        state_log_read[0] = time.monotonic()
+                        try:
+                            log = state_log_snapshot(game, rays['SpidyStateLog'])
+                            if log:
+                                state_log.clear()
+                                state_log.update(log)
+                        except OSError:
+                            pass
+                    # The web tie: a sample when a tie is made or ends, and twice a second while one holds.
+                    tie = tie_snapshot(game, rays['SpidyTieData'])
+                    if tie and tie['status']:
+                        tie['seconds'] = round(time.monotonic()-started, 3)
+                        key = [tie[k] for k in ('made', 'ended', 'taken', 'gone', 'down', 'stuck', 'armed')]
+                        last = tie_samples[-1] if tie_samples else None
+                        if not last or last['key'] != key or (tie['ties'] and tie['seconds']-last['seconds'] >= .5):
+                            tie['key'] = key
+                            tie_samples.append(tie)
                     movement = motion_snapshot(game, motion['SpidyMotionData'])
                     if movement and movement['steps'] and (not motion_samples or movement['steps'] != motion_samples[-1]['steps']):
                         motion_samples.append(movement)
@@ -2935,7 +2957,7 @@ def session(a, startup):
             motion_hash=motion_hash, swing_speed=a.swing_speed, vr_settings=settings_start, xr_runtime=runtime,
             game_settings_refused=startup.fields.get('game_settings_refused'),
             swing_samples=list(swing_samples),
-            grab_samples=list(grab_samples), grab=grab_snapshot(game, rays['SpidyGrabData']),
+            grab_samples=list(grab_samples), tie_samples=list(tie_samples), state_log=dict(state_log), grab=grab_snapshot(game, rays['SpidyGrabData']),
             body=body_snapshot(game, xr['SpidyBodyData']) or body,
             punch=punch_snapshot(game, rays['SpidyPunchData']) or punch, punch_samples=list(punch_samples),
             strikes=strike_snapshot(game, rays['SpidyStrikeData']) or strikes, strike_samples=list(strike_samples),

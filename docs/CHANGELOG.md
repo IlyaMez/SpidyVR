@@ -3,7 +3,34 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (November 2): pull request #57 by GolexPrime - a load hitch
+**Latest build (November 2): pull request #56 by HaNToP - WEB TIE, an enemy
+webbed to a wall.**
+
+- **WEB TIE** (EXPERIMENTAL, after HALF PUNCH DAMAGE; the launcher's Webs
+  card; `web_tie` in `spidy_vr.ini` and in profiles), off by default. Web an
+  enemy up, put one web on a surface (a wall, a ceiling, a beam, a crane, a
+  lamp post) and the other on him - also right after yanking him into the
+  air - bring both hands together and click the right stick: he is pulled
+  onto the surface in an arc, stuck there by the game's own
+  `BotStateWallStuck`, and defeated where he hangs. Both controllers tick
+  when the tie is ready. Details in [WEB-TIE.md](WEB-TIE.md).
+- **With it on, a webbed enemy comes only on the yank**
+  (`GrabConfig::yankOnlyCharacters`): his web neither winds in on the
+  trigger nor pulls as the hand moves away. Off, he comes as before.
+- **Off, nothing of it runs:** no gesture and no click for it, no tie
+  samples, no per-step tie work, and the hook on the game's state requests
+  (the state log, `RequestState`) is made only at a session's first tie.
+  Swing settings version 23; older packets leave it off.
+- **The tab's pending changes** are a bit per value an Item can have
+  (`game_menu`, a `std::bitset`): WEB TIE is Item 64, past the 64-bit mask.
+- **Tests.** Core: the gesture, the tie's place, arc, launch and law, a
+  settle short of the place, the end of a fight, taken and gone targets, the
+  hand-over of both webs, an enemy who comes only on the yank with WEB TIE
+  and on the trigger without it, WEB TIE off by default and kept as
+  `web_tie`, swing settings version 23; launcher (profiles). Played by
+  HaNToP on a Quest 3 over Virtual Desktop; not run in the game here.
+
+**Earlier build (November 2): pull request #57 by GolexPrime - a load hitch
 no longer lets go of the webs.** GolexPrime: "with load stutters while
 swinging I very often lose the web, as if it were cut or I let go".
 

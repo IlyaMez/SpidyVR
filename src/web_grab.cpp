@@ -213,6 +213,17 @@ void WebGrab::letGo(int i, const TargetQueries& targets, const Body& player, boo
     }
     end(i, GrabEventKind::Throw, launch);
 }
+void WebGrab::handOver(int i) {
+    if (i < 0 || i > 1)
+        return;
+    grabs_[i] = {};
+    auto& h = hands_[i];
+    h.reeling = h.yankUsed = h.launched = false;
+    h.pullDistance = h.pullTime = h.obstructed = h.flight = h.stalled = 0;
+    h.closest = std::numeric_limits<float>::infinity();
+    h.sample = false;
+    h.held = h.owned = true;
+}
 void WebGrab::releaseAll() {
     for (int i = 0; i < 2; ++i) {
         end(i, GrabEventKind::Lost);
@@ -289,7 +300,8 @@ Input WebGrab::claim(float seconds, const Input& in, const WorldQueries& world, 
                 if (g.phase != GrabPhase::None) {
                     if (hand.trigger < .35f)
                         h.triggerReleased = true;
-                    h.reeling = g.phase == GrabPhase::Tethered && h.triggerReleased && hand.trigger > .65f;
+                    h.reeling = g.phase == GrabPhase::Tethered && h.triggerReleased && hand.trigger > .65f &&
+                                !(config_.yankOnlyCharacters && g.kind == TargetKind::Character);
                     // The zip gesture, aimed at a target instead of an anchor:
                     // fast and deliberate within a short window, measured from
                     // head-relative samples so travel and room-scale steps
@@ -493,6 +505,12 @@ void WebGrab::step(float dt, const WorldQueries& world, const TargetQueries& tar
         bool acts = false;
         switch (g.phase) {
         case GrabPhase::Tethered:
+            if (config_.yankOnlyCharacters && g.kind == TargetKind::Character) {
+                // Only a yank brings him: the web pays out, slack.
+                g.length = std::max(g.length, distance + config_.slack);
+                acts = rope(0);
+                break;
+            }
             if (h.reeling && caught()) {
                 acts = true;
                 break;

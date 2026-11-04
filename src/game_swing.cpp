@@ -48,6 +48,9 @@ Swing solver;
 CrawlHands crawlHands;
 VentCrawlMode ventCrawlMode;
 InputSampleClock inputClock, grabInputClock;
+// The web tie's gesture (web_tie.hpp): a web on a surface in one hand, a
+// webbed-up enemy on the other's, hands together, the right stick's click.
+TieGesture tieGesture;
 InputHold inputHold;
 // The game's running time (RunClock), and what it was at the mover's last
 // step seen.
@@ -113,6 +116,8 @@ uint64_t aimSerial{}, aimMadeMs{};
 std::atomic<uint32_t> noBlows{};
 std::atomic<bool> combatVisuals{true};
 std::atomic<bool> halfPunchDamage{};
+// WEB TIE (Settings version 23): the web tie's gesture runs only with it on.
+std::atomic<bool> webTie{};
 bool copy(void* destination, const void* source, size_t bytes) {
     __try {
         if (reinterpret_cast<uintptr_t>(source) < 0x10000 ||
@@ -172,6 +177,8 @@ void cancelSwing(bool keepWall = false) {
 }
 void cancel() {
     cancelSwing();
+    tieGesture.reset();
+    game_grab::tieArmed(false);
     game_grab::cancel();
     game_shooter::cancel();
     grabInputClock.reset();
@@ -193,6 +200,8 @@ void coast() {
     solver.releaseAll();
     inputClock.reset();
     game_punch::cancelStrike();
+    tieGesture.reset();
+    game_grab::tieArmed(false);
     game_grab::cancel();
     game_shooter::cancel();
     grabInputClock.reset();
@@ -497,6 +506,75 @@ void visit(const native_rays::QueryContext& world) {
         // web, whatever the hand points at.
         const unsigned onStrand = (solver.onStrand(0) ? 1u : 0u) | (solver.onStrand(1) ? 2u : 0u);
         game_grab::claim(sampleSeconds, in, world, player, onStrand);
+        // The web tie: the click (Command::asks bit 1) with the hands together,
+        // one on a web stuck to a surface, the other on a webbed-up enemy.
+        // Both webs go to the tie, which draws him over to the surface and
+        // holds him there until the fight is over (game_grab::tie). Only with
+        // WEB TIE on: off, nothing of it runs.
+        if (webTie.load(std::memory_order_relaxed)) {
+            std::array<TieHand, 2> hands{};
+            // Where each hand's web holds for a tie, and the surface's normal
+            // there. The first thing the web's line meets from the wrist, as
+            // the game's rays see it: arcade webs (SwingConfig::arcade) go
+            // through thin things - a crane's beams, a lamp post, a sign -
+            // to what is behind them, or out into the air; a tie aimed at a
+            // crane went to the building behind it or nowhere ("you cannot
+            // stick him to a crane", November 2). A web that met nothing
+            // there holds where it stuck, unless that is open air.
+            Vec3 tieNormal[2]{};
+            for (unsigned i = 0; i < 2; ++i) {
+                auto& h = hands[i];
+                h.tracked = in.hands[i].tracked;
+                h.grip = in.hands[i].gripRelativeToHead;
+                // The bot its web holds, or held lately: a thug just yanked to
+                // the hand, flying in the air (game_grab::heldLately).
+                h.target = game_grab::heldLately(i);
+                h.grabbing = h.target != 0;
+                h.character = h.grabbing;
+                h.cocooned = h.grabbing && game_grab::cocooned(h.target);
+            }
+            for (unsigned i = 0; i < 2; ++i) {
+                const auto& web = solver.webs()[i];
+                auto& h = hands[i];
+                if (!web.ready() || game_grab::holds(i) || !hands[1 - i].cocooned)
+                    continue;
+                const Vec3 from = in.hands[i].aim.position, end = web.end();
+                const Vec3 line = end - from;
+                if (finite(from) && finite(end) && length(line) > 1)
+                    if (const auto hit = world.raycast(from, normalized(line), length(line) + .3f);
+                        hit && hit->fixed && finite(hit->point) && length(hit->point - from) > .8f) {
+                        h.wallWeb = true;
+                        h.anchor = hit->point;
+                        if (finite(hit->normal) && length(hit->normal) > .5f) {
+                            tieNormal[i] = normalized(hit->normal);
+                            if (dot(tieNormal[i], from - hit->point) < 0)
+                                tieNormal[i] = tieNormal[i] * -1.f;
+                        }
+                        continue;
+                    }
+                if (!web.airAnchor) {
+                    h.wallWeb = true;
+                    h.anchor = end;
+                }
+            }
+            if (const auto request = tieGesture.update(sampleSeconds, (c.asks & 2u) != 0, hands)) {
+                const auto held = game_grab::data();
+                Vec3 normal = tieNormal[request->anchorHand];
+                if (length(normal) < .5f) {
+                    // No surface found (a crane's cable): toward the enemy while
+                    // the web holds him, else toward the hand.
+                    const auto& h = held.hands[request->targetHand];
+                    const Vec3 toward = h.phase != 0 && h.target == request->target
+                                            ? h.end
+                                            : in.hands[request->anchorHand].aim.position;
+                    const Vec3 out = toward - request->anchor;
+                    normal = finite(out) && length(out) > .05f ? normalized(out) : Vec3{0, 1, 0};
+                }
+                if (game_grab::tie(static_cast<unsigned>(request->targetHand), request->anchor, normal))
+                    solver.handOver(request->anchorHand);
+            }
+            game_grab::tieArmed(tieGesture.armed());
+        }
         float grabDt{};
         if (game_grab::due(grabDt))
             game_grab::step(grabDt, world, config.record);
@@ -1103,6 +1181,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStart(void* input) {
             break;
         combatVisuals = true;
         halfPunchDamage = false;
+        webTie = false;
         started = true;
         solver = Swing(physicsConfig(config));
         QueryPerformanceFrequency(&frequency);
@@ -1206,7 +1285,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
          header[2] != settingsBytesV12 && header[2] != settingsBytesV13 && header[2] != settingsBytesV14 &&
          header[2] != settingsBytesV15 && header[2] != settingsBytesV16 && header[2] != settingsBytesV17 &&
          header[2] != settingsBytesV18 && header[2] != settingsBytesV19 && header[2] != settingsBytesV20 &&
-         header[2] != settingsBytesV21 && header[2] != sizeof(s)) ||
+         header[2] != settingsBytesV21 && header[2] != settingsBytesV22 && header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || !validSettings(s))
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
@@ -1242,6 +1321,14 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         combatVisuals = s.version < 11 || s.combatVisuals != 0;
         halfPunchDamage = s.version >= 21 && s.halfPunchDamage != 0;
         solver.singleHandYankStrength((s.version >= 22 ? s.singleHandYankPercent : 100u) / 100.f);
+        // WEB TIE: off (and in older packets) no gesture and no tie, and a
+        // webbed enemy comes as before; switched off, the ties let go.
+        const bool tiesOn = s.version >= 23 && s.webTie != 0;
+        if (webTie.exchange(tiesOn) && !tiesOn) {
+            tieGesture.reset();
+            game_grab::tieArmed(false);
+        }
+        game_grab::allowTies(tiesOn);
         if (s.version >= 7)
             solver.allowArcade(s.arcade != 0);
         if (s.version >= 8)
@@ -1392,6 +1479,16 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyGrabSample(void* out) {
     if (!enabled || GetTickCount64() >= deadline || GetTickCount64() >= inputDeadline || !command.focused)
         for (auto& hand : sample.hands)
             hand = {};
+    ReleaseSRWLockShared(&control);
+    return copy(out, &sample, sizeof(sample)) ? 0 : 2201;
+}
+// The web tie's telemetry (game_grab::TieData): the ties and their webs, and
+// whether the gesture is ready now, for the headset's strands and its tick.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyTieSample(void* out) {
+    auto sample = game_grab::tieData();
+    AcquireSRWLockShared(&control);
+    if (!enabled || GetTickCount64() >= deadline || GetTickCount64() >= inputDeadline || !command.focused)
+        sample.armed = 0;
     ReleaseSRWLockShared(&control);
     return copy(out, &sample, sizeof(sample)) ? 0 : 2201;
 }

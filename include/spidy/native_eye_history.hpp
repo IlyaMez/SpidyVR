@@ -26,6 +26,15 @@ struct NativeEyeFrame {
     // part running from wrist to wrist; -1 otherwise.
     std::array<int, 2> webSlots{-1, -1};
     int strandUpper = -1;
+    // The web tie's webs (game_grab::TieData): from where each sticks to its
+    // surface to the enemy it holds there.
+    struct TieStrand {
+        Vec3 anchor{}, end{};
+    };
+    std::array<TieStrand, 8> ties{};
+    uint32_t tieCount{};
+    // A bit per tie the game draws in its own rope (native_webs::tiesDrawn).
+    uint32_t tiesByGame{};
     // What each hand's grip press would do (game_swing::AimKind none while
     // the aim markers are off).
     std::array<game_swing::Aim, 2> aims{};

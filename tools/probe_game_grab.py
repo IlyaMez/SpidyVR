@@ -116,6 +116,76 @@ def web_request(feet, wrist, anchor, attached, attached_at):
     return raw+struct.pack('<2Iq6f', 0, 0, 0, *([0.]*6))+struct.pack('<If3f4x', 0, 0, 0, 0, 0)
 
 
+TIE_SIZE = 352
+STATE_LOG_SIZE, STATE_ENTRY, STATE_ENTRIES, STATE_MARK, STATE_MARKS = 97840, 488, 192, 64, 64
+
+
+def state_log_snapshot(game, address):
+    """The state log (native_bodies::StateLog): the state requests the game made for tied bots, with their
+    parameters as hex, and the marks the tie left as the game stuck one (or as one arrived overhead, unstuck)."""
+    raw = game.read(address, STATE_LOG_SIZE)
+    if len(raw) != STATE_LOG_SIZE:
+        return None
+    if struct.unpack_from('<3I', raw) != (0x534c4f47, 1, STATE_LOG_SIZE):
+        raise RuntimeError('State log protocol mismatch')
+    status = struct.unpack_from('<I', raw, 12)[0]
+    stick_refused, watched, marks = struct.unpack_from('<3Q', raw, 24)
+    entries = []
+    for i in range(STATE_ENTRIES):
+        o = 48 + i*STATE_ENTRY
+        seq, machine = struct.unpack_from('<2Q', raw, o)
+        if not seq:
+            continue
+        type_offset, type_class, caller, result = struct.unpack_from('<4I', raw, o+16)
+        name = raw[o+32:o+96].split(b'\0')[0].decode('latin-1')
+        read = struct.unpack_from('<I', raw, o+96)[0]
+        entries.append(dict(sequence=seq, machine=hex(machine), type=hex(type_offset), type_class=hex(type_class),
+                            type_name=name, caller=hex(caller), result=result,
+                            params=raw[o+104:o+104+min(read, 0x180)].hex()))
+    entries.sort(key=lambda e: e['sequence'])
+    mark_list = []
+    base = 48 + STATE_ENTRIES*STATE_ENTRY
+    for i in range(min(marks, STATE_MARKS)):
+        o = base + i*STATE_MARK
+        seq, machine = struct.unpack_from('<2Q', raw, o)
+        v = struct.unpack_from('<9f', raw, o+16)
+        mark_list.append(dict(sequence=seq, machine=hex(machine), anchor=[round(x, 3) for x in v[0:3]],
+                              normal=[round(x, 3) for x in v[3:6]], position=[round(x, 3) for x in v[6:9]],
+                              stuck=struct.unpack_from('<I', raw, o+52)[0],
+                              surface=hex(struct.unpack_from('<I', raw, o+56)[0]),
+                              ms=struct.unpack_from('<I', raw, o+60)[0]))
+    return dict(status=status, watched_requests=watched, stick_refused=stick_refused, marks=mark_list,
+                entries=entries)
+
+
+def tie_snapshot(game, address):
+    """The web tie (game_grab::TieData, version 3): ties made and how they ended, and each tie's web."""
+    for _ in range(8):
+        raw = game.read(address, TIE_SIZE)
+        if len(raw) != TIE_SIZE:
+            return None
+        if struct.unpack_from('<3I', raw) != (0x53544945, 3, TIE_SIZE):
+            raise RuntimeError('Tie protocol mismatch')
+        if struct.unpack_from('<q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
+            continue
+        d = dict(zip(('made', 'ended', 'taken', 'gone', 'down', 'knocks', 'stuck', 'webs'),
+                     struct.unpack_from('<8Q', raw, 24)))
+        d['status'] = struct.unpack_from('<I', raw, 12)[0]
+        count, armed = struct.unpack_from('<2I', raw, 88)
+        d['armed'] = armed
+        d['ties'] = []
+        for i in range(min(count, 8)):
+            o = 96 + i*32
+            flags = struct.unpack_from('<I', raw, o+28)[0]
+            d['ties'].append(dict(anchor=[round(v, 2) for v in struct.unpack_from('<3f', raw, o)],
+                                  end=[round(v, 2) for v in struct.unpack_from('<3f', raw, o+12)],
+                                  distance=round(struct.unpack_from('<f', raw, o+24)[0], 2),
+                                  flying=bool(flags & 1), mover=bool(flags & 2), arrived=bool(flags & 4),
+                                  touched=bool(flags & 8), down=bool(flags & 16)))
+        return d
+    return None
+
+
 def grab_snapshot(game, address):
     for _ in range(8):
         raw = game.read(address, GRAB_SIZE)

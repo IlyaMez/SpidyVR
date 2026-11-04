@@ -356,6 +356,10 @@ class Swing {
     void settleStep(float predictedSeconds, float actualSeconds);
     void reset(Body body = {});
     void releaseAll();
+    // Lets go of one hand's web at once, without SOFT RELEASE's pull: the web
+    // becomes another's (the web tie, web_tie.hpp). A grip still held shoots
+    // nothing until it is let go.
+    void handOver(int hand);
     // Grounded web shots stay grounded; draw two fixed webs, then release to launch.
     void allowSlingshot(bool on) {
         if (slingshotEnabled_ != on) {

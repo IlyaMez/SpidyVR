@@ -283,6 +283,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.joystickRunCamera;
     case Item::halfPunchDamage:
         return &v.halfPunchDamage;
+    case Item::webTie:
+        return &v.webTie;
     case Item::view:
         return &v.flatScreen;
     case Item::realisticFlips:
@@ -353,9 +355,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 70>& rows() {
+const std::array<Row, 71>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 70> all{{
+    static const std::array<Row, 71> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -500,6 +502,10 @@ const std::array<Row, 70>& rows() {
         {Item::halfPunchDamage,
          "HALF PUNCH DAMAGE",
          "Punches and web strikes deal 50% damage. Launches and smash force stay the same.",
+         {}},
+        {Item::webTie,
+         "WEB TIE",
+         "Web an enemy up, web a wall: hands together, click the right stick. He sticks.",
          {}},
         {Item::eyeAim, "EYE AIM",
          "Web balls and zips go where your eyes look. Needs a headset with eye tracking.", eyeAimChoices},
@@ -724,6 +730,7 @@ constexpr TabOnly tabOnly[] = {
     {"swing_haptics", &Values::swingHaptics, nullptr},
     {"pc_media", &Values::pcMedia, nullptr},
     {"single_hand_yank_percent", nullptr, &Values::singleHandYankPercent},
+    {"web_tie", &Values::webTie, nullptr},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

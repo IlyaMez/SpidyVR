@@ -115,6 +115,20 @@ void retarget(uintptr_t record);
 // per Request::hands entry); none when null.
 void submit(const Request&, uint32_t leaseMs, const Bent* bends = nullptr);
 Status status();
+// The web tie's webs (web_tie.hpp), in the game's own rope material: from
+// where each sticks to a surface, `anchor`, to the enemy it holds, `end`.
+// The hero rope manager starts a rope at one of two hand points (Start, Grip,
+// Grip2, End at 7d60.. +12 per hand), so a tie's rope is made on a hand whose
+// own web is not drawn now, and that hand's points are the anchor for the
+// update. While both hands have webs of their own, a tie's rope is let go and
+// the overlay draws it; it is made again once a hand is free.
+constexpr unsigned maxTieRopes = 2;
+struct TieRope {
+    Vec3 anchor{}, end{};
+};
+void submitTies(const TieRope* ropes, uint32_t count, uint32_t leaseMs);
+// A bit per tie (in submitTies' order) the game draws now.
+uint32_t tiesDrawn();
 // True while the game draws this hand's web, so the overlay must not.
 bool drawing(unsigned hand);
 // The game draws a web held in both hands from wrist to wrist (Request::held):
