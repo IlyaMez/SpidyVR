@@ -286,6 +286,12 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         wallRoll_.suspend();
         handCollision_.reset();
         wasActive_ = false;
+        // A scene (play does not run, the game's time does, or a first-person scene was shown): when play
+        // comes back the view faces where the scene left it (below). Whether the last frame without play had
+        // the game's time running, or a scene's view, tells a scene from a menu.
+        activeFor_ = 0;
+        if (!gameplay)
+            faceGame_ = sceneRuns_ || facingValid_;
         // Menus and scenes find the player level, and so does a break as
         // long as blipSeconds. A frame or a few that play could not place -
         // a stutter, a display time the headset repeated, the game's camera
@@ -341,8 +347,30 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
         const Vec3 travel = feet - lastFeet_;
         rig_.origin += travel;
         lastHead_.position += travel;
-        if (rested) {
-            // After a break: over the feet again, facing as before.
+        // (A scene's own heading is used after any break; the camera's only after one longer than a blip: a
+        // stutter of play must not turn the view.)
+        const bool facing = resumed && faceGame_ && (rested || facingValid_);
+        if (rested || facing) {
+            // After a break: over the feet again. After a scene the player faces where the scene left the
+            // view (the heading the first-person scene last showed, sceneFacing) or, for a scene shown
+            // otherwise, where the game's camera faces now, behind the character as the scene left him: not
+            // the way the view faced before the scene, which was often the opposite (the player, October 31).
+            // Any other break (a menu): facing as before.
+            if (facing) {
+                const auto headForward = horizontal(f.head.orientation.rotate({0, 0, -1}));
+                float target{};
+                bool known = false;
+                if (facingValid_) {
+                    target = facing_;
+                    known = true;
+                } else if (cameraLevel) {
+                    target = std::atan2(-gameForward.x, -gameForward.z);
+                    known = true;
+                }
+                // Looking straight up or down the head has no heading: the old one stands.
+                if (known && length(headForward) > .9f)
+                    rig_.yaw = target - std::atan2(-headForward.x, -headForward.z);
+            }
             rig_.origin = feet - Quat::yaw(rig_.yaw).rotate({f.head.position.x, 0, f.head.position.z});
             flip_.reset(f.jump);
             automatic_.reset();
@@ -362,6 +390,11 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
             rig_.preserveHead(lastHead_, f.head);
         }
     }
+    // The scene's facing is used by the play that follows it, which may start and stop a few times (a camera
+    // that comes back and goes again): a second of play without a break ends it.
+    activeFor_ += f.seconds;
+    if (activeFor_ > 1.f)
+        faceGame_ = false;
     // On a wall the head stands off it level, under a ceiling straight down.
     // On a wall the game's actor rocks up to 14 degrees about the wall's
     // normal and snaps back, several times a second (in the game, October 8);

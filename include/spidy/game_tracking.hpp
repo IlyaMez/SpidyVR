@@ -308,6 +308,19 @@ class GameTrackingRig {
         staleDisplay = 64,  // the headset gave a display time no later than the last
         noEyes = 128,       // an eye's pose or lens was not usable
     };
+    // Whether the game's time is running this frame (a scene is a stretch without play in which it does; a
+    // menu's is not): after a scene, play resumes facing where the game's camera faces (update). False until
+    // set.
+    void scene(bool timeRuns) {
+        sceneRuns_ = timeRuns;
+    }
+    // The heading a first-person scene's view has now, in world yaw (radians, 0 facing -z, as the rig's own),
+    // while one is shown and for a moment after: play that follows it faces there, as the scene left it.
+    // `valid` false: none, and the game's camera is the way instead.
+    void sceneFacing(bool valid, float yaw) {
+        facingValid_ = valid && std::isfinite(yaw);
+        facing_ = yaw;
+    }
     // How far a flick of the right stick turns the player (0: it does not);
     // 30 degrees until set. reset() keeps it.
     void snapTurn(float radians) {
@@ -445,7 +458,9 @@ class GameTrackingRig {
     Pose lastHead_{};
     Vec3 lastFeet_{}, standOff_{}, lastGameForward_{0, 0, -1};
     std::int64_t lastTime_{};
-    bool initialized_{}, wasActive_{}, turnHeld_{}, pendingRecenter_{}, onSurface_{}, flips_{};
+    bool initialized_{}, wasActive_{}, turnHeld_{}, pendingRecenter_{}, onSurface_{}, flips_{}, faceGame_{},
+        sceneRuns_{}, facingValid_{};
+    float facing_{}, activeFor_{};
     bool controlledFlips_{};
     // The trigger webs, and the web button changed since the last frame of play.
     bool triggerWebs_{}, buttonsChanged_{};

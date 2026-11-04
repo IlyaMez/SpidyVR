@@ -825,6 +825,17 @@ bool XrRuntime::frameStereo(const std::function<bool(const XrFrame&)>& prepare,
                     projectionViews[i].pose = targets[i].view.pose;
                     projectionViews[i].fov = targets[i].view.fov;
                 }
+                if (headLocked_ && !flatScreen_) {
+                    // In the head's own space: where each eye lies in the head, whatever the head does.
+                    layer.space = head_;
+                    const Pose back = inverse(tracked.head);
+                    for (unsigned i = 0; i < 2; ++i) {
+                        const Pose local = compose(back, tracked.eyes[i].pose);
+                        projectionViews[i].pose = {{local.orientation.x, local.orientation.y,
+                                                    local.orientation.z, local.orientation.w},
+                                                   {local.position.x, local.position.y, local.position.z}};
+                    }
+                }
                 phase = Clock::now();
                 for (unsigned i = 0; i < 2; ++i) {
                     const auto result = xrReleaseSwapchainImage(eyes_[i].swapchain, &release);

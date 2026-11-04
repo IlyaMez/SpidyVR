@@ -95,7 +95,10 @@ one **START VR** button.
   Settings for aim markers, snap or smooth turning, vibration, swing speed,
   how heavy you swing, screen size, the HUD and more. Changes apply at once.
 - **Menus and cutscenes on a screen.** Cutscenes in 3D: the game draws
-  them once for each eye. The Touch controllers work as an Xbox controller
+  them once for each eye. Or turn on **First-person cutscenes** in the
+  launcher: scenes then play all round you from inside Spider-Man's head,
+  with CUTSCENE HEAD TRACKING choosing whether your head or the scene's own
+  camera aims the view. The Touch controllers work as an Xbox controller
   there; VR resumes when play does. **SWITCH TO GAME SCREEN** in the pause
   menu plays the game as it is on that screen, whenever you like.
 - **One launcher.** It checks the game, the headset and your PC, fixes what it

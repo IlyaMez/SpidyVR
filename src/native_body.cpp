@@ -2,6 +2,7 @@
 // game's animation writes them (native_body.hpp, body_ik.hpp).
 #include "spidy/native_body.hpp"
 #include "spidy/body_ik.hpp"
+#include "spidy/game_fp.hpp"
 #include "spidy/native_appearance.hpp"
 #include <MinHook.h>
 #include <algorithm>
@@ -359,6 +360,8 @@ void solveHero(float* out, uintptr_t job, uintptr_t instance) {
         lastRig = rig;
     }
     const Cache& cache = rigEntry(rig);
+    if (!cache.problem && cache.ik.ready)
+        game_fp::setHeadAxes(cache.ik.headForward, cache.ik.headUp, cache.ik.eyesFromHead);
     Command wanted{};
     AcquireSRWLockShared(&commandLock);
     wanted = command;
@@ -546,6 +549,8 @@ float writer(float* out, void* job) {
     const auto instance = hero ? pointer(hero) : 0;
     if (instance && pointer(instance + 0xd8) == reinterpret_cast<uintptr_t>(out))
         solveHero(out, reinterpret_cast<uintptr_t>(job), instance);
+    // A first-person scene: the head of the character the view is on shrinks away, as the player's does.
+    game_fp::shrinkHead(out, pointer(reinterpret_cast<uintptr_t>(job) + 0x28));
     return moved;
 }
 } // namespace

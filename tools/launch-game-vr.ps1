@@ -29,6 +29,9 @@ param(
     [switch]$Flips,
     [switch]$TriggerWebs,
     [switch]$ArcadeWebs,
+    [switch]$FirstPersonCutscenes,
+    [switch]$NoCutsceneHeadTracking,
+    [switch]$DisableTheaterScreen,
     [switch]$NoStandOnWalls,
     [switch]$NoWallRun,
     [switch]$NoEyeOcclusion,
@@ -101,6 +104,8 @@ $captureArgs=@()
 if($CaptureImages) { $captureArgs=@('--capture-images') }
 if($TriggerWebs) { $captureArgs+=@('--trigger-webs') }
 if($ArcadeWebs) { $captureArgs+=@('--arcade-webs'); Write-Host 'Web style: arcade (webs go through lamp posts, signs and cars; swings stay above the street).' }
+if($FirstPersonCutscenes) { $captureArgs+=@('--first-person-cutscenes'); Write-Host "First-person cutscenes: scenes play in 3D round you, from inside Spider-Man's head."; if($NoCutsceneHeadTracking) { $captureArgs+=@('--no-cutscene-head-tracking'); Write-Host "Cutscene head tracking off: the scene's own camera aims the view." } }
+if($DisableTheaterScreen) { $captureArgs+=@('--disable-theater-screen'); Write-Host "Theater screen off: every scene plays in 3D round you (first person with first-person cutscenes, else from the scene's own camera)." }
 if($NoStandOnWalls) { $captureArgs+=@('--no-stand-on-walls'); Write-Host 'Stand on walls off: on a wall your view stays upright.' }
 if($NoWallRun) { $captureArgs+=@('--no-wall-run'); Write-Host "Wall running off: the game's own wall crawl takes you at a wall." }
 if($OverlayWebs) { $captureArgs+=@('--overlay-webs'); Write-Host 'Webs: Spidy overlay strands.' }

@@ -182,7 +182,13 @@ holding, done; `hint`: what the panel asks for; `progress`; `done` and
 the session's last line hands a calibration made or skipped to the launcher;
 `body` has `arm_scale`. XrConfig is version 23 and XrData version 23 (664 and 824
 bytes; a sample's `heals` and `zips` count the right stick's pushes that reached the
-game as its D-pad down and its LT + RT; `run_game_vr.py --screen-depth 0`..`3` is the depth cutscenes have on
+game as its D-pad down and its LT + RT; `run_game_vr.py --first-person-cutscenes`
+plays scenes from inside the hero's head instead of on the game screen (options
+bit 22; `--no-cutscene-head-tracking`, bit 23: the scene's camera aims;
+`game_fp.cpp`), and `--disable-theater-screen` (bit 24) plays every scene
+around you with no theatre screen, from the scene's own camera when
+first-person cutscenes are off;
+`run_game_vr.py --screen-depth 0`..`3` is the depth cutscenes have on
 the game screen, 2 by default and 0 flat, a sample's `vr_settings`
 `screen_depth`; `run_game_vr.py --upscale 50`..`100` is the share of the eye's size, per
 side, that its scene is rendered at, 67 by default; `--no-eye-antialiasing`

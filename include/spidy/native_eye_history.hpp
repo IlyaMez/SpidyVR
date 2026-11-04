@@ -56,6 +56,12 @@ struct NativeEyeFrame {
     UiStyle uiStyle{};
     bool combatVisuals{}; // overlay choice when this image was submitted
     bool flatScreen{};
+    // A first-person scene (eye command anchored 2): the eyes show the scene from inside the head of the
+    // character it plays; Spidy's own marks, webs and hands are not drawn over it.
+    bool scene{};
+    // ... and the scene's own camera aims (no head tracking): the image is locked to the head
+    // (XrRuntime::headLocked).
+    bool headLocked{};
     // The game screen in stereo (eye command 3): the pair goes on the screen,
     // the left image for the left eye and the right one for the right.
     bool stereoScreen{};

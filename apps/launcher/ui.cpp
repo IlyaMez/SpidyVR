@@ -2062,6 +2062,22 @@ void App::options(ImVec2 origin, ImVec2 size) {
                    static constexpr int depths[] = {0, 1, 2, 3};
                    stepCombo("##depth", kScreenDepths, depths, 4, &o.screenDepth);
                });
+        option("First person cutscenes (experimental)",
+               "Cutscenes, finishers and car chases play around you, from inside the head of the character "
+               "in them. Click the right stick in a scene to switch to the theater screen and back. X on "
+               "your left controller swaps between Peter, MJ and Miles when they are there (also if you "
+               "are on the wrong Spider-Man model). Expect bugs.",
+               S(42), [&] { changed |= toggle("##fpscenes", &o.firstPersonCutscenes); });
+        if (o.firstPersonCutscenes)
+            option("Cutscene head tracking",
+                   "On, your head looks around in the scene. Off, the scene's own camera aims the view and "
+                   "the right stick turns it: better if you get motion sick.",
+                   S(42), [&] { changed |= toggle("##fpscenehead", &o.cutsceneHeadTracking); });
+        option("Disable theater screen fully",
+               "Every scene plays around you in VR, never on the theater screen: from the scene's own "
+               "camera, or in first person with first-person cutscenes on (the right stick then switches "
+               "between the two).",
+               S(42), [&] { changed |= toggle("##notheater", &o.disableTheater); });
         option("HUD", "How large the game's HUD shows in front of you; off, there is none in VR.", S(150), [&] {
             static constexpr int sizes[] = {0, 1, 2, 3};
             stepCombo("##hud", kHudSizes, sizes, 4, &o.hud);
