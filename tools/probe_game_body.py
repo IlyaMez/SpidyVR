@@ -93,6 +93,29 @@ def body_status(game, address):
                 arm_scale=round(v[26], 4), calibrated=bool(v[27]))
 
 
+FOREARMS_SIZE = 160
+
+
+def body_forearms(game, address):
+    """SpidyForearms (native_body::Forearms): each arm as the latest solve left it, for WEB AIM: MODEL FOREARM."""
+    raw = seqlock(game, address, FOREARMS_SIZE)
+    if not raw:
+        return None
+    if struct.unpack_from('<3I', raw) != (0x53424641, 1, FOREARMS_SIZE):
+        raise RuntimeError('Body forearms protocol mismatch')
+    job, tilted = struct.unpack_from('<QI', raw, 24)
+    arms = []
+    for i in range(2):
+        v = struct.unpack_from('<I9f4ff', raw, 40 + 60 * i)
+        elbow, wrist, palm = v[1:4], v[4:7], v[7:10]
+        line = [w - e for w, e in zip(wrist, elbow)]
+        n = math.sqrt(sum(x * x for x in line)) or 1
+        arms.append(dict(valid=bool(v[0]), elbow=[round(x, 4) for x in elbow], wrist=[round(x, 4) for x in wrist],
+                         forearm=[round(x / n, 4) for x in line], palm=[round(x, 4) for x in palm],
+                         grip=[round(x, 5) for x in v[10:14]], hand_error=round(v[14], 4)))
+    return dict(job=job, tilted=bool(tilted), arms=arms)
+
+
 def body_poses(game, address):
     raw = seqlock(game, address, POSES_SIZE)
     if not raw:
@@ -735,7 +758,7 @@ def main():
             raise c.WinError(c.get_last_error())
         stereo, digest = prepare(game.pid, process, STEREO_DLL, ROOT/'reports/stereo-modules',
                                  ('SpidyBodyStart', 'SpidyBodySubmit', 'SpidyBodyRoles', 'SpidyBodyCapture',
-                                  'SpidyBodyStop', 'SpidyBodyData', 'SpidyBodyPoses', 'SpidyStart', 'SpidyStop',
+                                  'SpidyBodyStop', 'SpidyBodyData', 'SpidyBodyPoses', 'SpidyForearms', 'SpidyStart', 'SpidyStop',
                                   'SpidySetEyes', 'SpidyGpuStart', 'SpidyGpuStop', 'SpidyGpuData',
                                   'SpidyGpuFreeze', 'SpidyAppearanceData', 'SpidyStereoData'))
         report['stereo_dll'] = digest
@@ -752,6 +775,8 @@ def main():
             time.sleep(.02)
         report['status_start'] = status
         print('Body:', json.dumps(status), flush=True)
+        report['forearms_start'] = body_forearms(game, stereo['SpidyForearms'])
+        print('Forearms:', json.dumps(report['forearms_start']), flush=True)
         if not status or not status['rig']:
             raise RuntimeError('The hero\'s pose job never ran through the body')
         rig = status['rig']

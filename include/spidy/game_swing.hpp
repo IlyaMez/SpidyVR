@@ -357,6 +357,30 @@ static_assert(sizeof(Settings) == 132 && offsetof(Settings, walls) == settingsBy
               offsetof(Settings, momentumLeap) == settingsBytesV25 &&
               offsetof(Settings, softLanding) == settingsBytesV26 &&
               offsetof(Settings, spidyRun) == settingsBytesV27);
+// SpidySwingWebTurns (WEB AIM: MODEL FOREARM, web_aim::ForearmAim): the turn
+// each hand's aim pose takes before WEB ANGLE and WRIST SHOOTERS, in the aim
+// pose's own frame, sent by the VR worker each frame while the setting is on
+// (and the identity once when it goes off). Only the webs' line takes it - the
+// swing, the grab, the web balls and the aim previews - never the fists, the
+// walls or the vents. Turns older than webTurnsMaxAgeMs are the identity, so a
+// worker that stops sending leaves the controller's line. An optional export:
+// a module without it aims as before.
+struct WebTurns {
+    uint32_t magic = 0x53575754, version = 1, bytes = sizeof(WebTurns), active{};
+    Quat turns[2]{};
+};
+static_assert(sizeof(WebTurns) == 48);
+constexpr uint64_t webTurnsMaxAgeMs = 250;
+inline bool validWebTurns(const WebTurns& t) {
+    if (t.magic != 0x53575754 || t.version != 1 || t.bytes != sizeof(WebTurns) || t.active > 1)
+        return false;
+    for (const auto& q : t.turns) {
+        const float n = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+        if (!std::isfinite(n) || std::abs(n - 1) > .01f)
+            return false;
+    }
+    return true;
+}
 // SpidyWebFlightSample: each hand's web in flight (WEB SPEED). phases: 0 no
 // web, 1 flying, 2 just arrived and catching softly, 3 holding.
 struct WebFlightData {

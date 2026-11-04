@@ -1879,6 +1879,16 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "Webs leave square to the hand, out of the palm side, as Spider-Man's shooters do: turn the "
                "palm to where the web should go. Off: along the controller, as before.",
                S(42), [&] { tabToggle("##wristshooters", Item::wristShooters); });
+        option("Web aim (experimental)",
+               "MODEL FOREARM: your webs leave along the forearm of the Spider-Man body you see, rather than "
+               "along the controller, and go back to the controller's line whenever the body cannot say "
+               "(body off, a cutscene, an arm it cannot reach). Web angle and wrist shooters still turn on "
+               "top. Punches, walls and vents keep the controller. CONTROLLER: as before.",
+               S(150), [&] { tabCombo("##webaimsource", Item::webAimSource); });
+        option("Forearm blend",
+               "With web aim MODEL FOREARM: how much of the forearm's line the webs take, from 0% (the "
+               "controller's) to 100% (the forearm's). 100% by default.",
+               S(150), [&] { tabCombo("##forearmblend", Item::forearmBlend); });
         option(
             "Dodge tumble (experimental)",
             "When the game takes your dodge, the view leans (LEAN, 24 degrees, under half a second) or rolls "

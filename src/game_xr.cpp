@@ -539,6 +539,8 @@ BridgeCall sampleSense{};
 // an older module throws the camera's way.
 BridgeCall aimGameThrow{};
 BridgeCall startShooter{}, sampleShooter{}, stopShooter{}, wheelShooter{};
+// WEB AIM: MODEL FOREARM: optional (an older ray module aims as before).
+BridgeCall swingWebTurns{};
 // The game's own crawl under the player (game_warp, in the same module):
 // optional, for the session report.
 BridgeCall sampleWarp{};
@@ -954,6 +956,19 @@ DWORD WINAPI run(void*) {
         game_pad::ChargeJump chargeJump;
         game_pad::NativeRun nativeRun; // NATIVE RUN's RT on the ground
         run_update::RunLog runLog;     // RUN LOGS' lines
+        // WEB AIM: MODEL FOREARM (web_aim::ForearmAim): each hand's forearm
+        // turn, smoothed, and the turn sent to the swing this frame (the aim
+        // markers take the same one); the body's latest forearms' solve count
+        // and the frames it has not moved; the log's clock and each hand's
+        // largest step of the forearm's turn from frame to frame since the
+        // last line (its jitter). webTurnsOn: turns are being sent.
+        std::array<web_aim::ForearmAim, 2> forearmAims;
+        std::array<Quat, 2> webTurnsNow{}, forearmTargets{};
+        bool webTurnsOn{};
+        uint64_t forearmJob{};
+        uint32_t forearmStaleFrames{};
+        float forearmLogSeconds{};
+        std::array<float, 2> forearmJitter{};
         game_pad::TemplePress templePress;
         uint32_t chargesBefore{}, leapsBefore{}, scansBefore{};
         // Both hands at the chest with both triggers pulled: the game's suit
@@ -2592,6 +2607,100 @@ DWORD WINAPI run(void*) {
                                               hand.grip};
                             input.wallPositions[i] = motion.grips[i].position;
                             input.wallGrips[i] = hand.tracked ? frame.hands[i].squeeze : 0.f;
+                        }
+                        // WEB AIM: MODEL FOREARM (off by default): each hand's webs turn
+                        // from the controller's line onto the body's forearm, carried on
+                        // the controller's pose now (web_aim::forearmTurn), smoothed, and
+                        // back to the controller's line whenever the body cannot say. The
+                        // swing puts the turn on the webs' line alone (WebTurns).
+                        if (values.webAimSource == static_cast<int>(web_aim::Source::forearm) &&
+                            swingWebTurns) {
+                            using web_aim::Fallback;
+                            const auto arms = native_body::forearms();
+                            forearmStaleFrames = arms.job != forearmJob ? 0u : forearmStaleFrames + 1;
+                            forearmJob = arms.job;
+                            const float dt = input.sampleSeconds;
+                            forearmLogSeconds += dt;
+                            const bool logNow = forearmLogSeconds >= 2;
+                            game_swing::WebTurns turns;
+                            turns.active = 1;
+                            for (unsigned i = 0; i < 2; ++i) {
+                                const auto& f = arms.arms[i];
+                                Fallback why = Fallback::none;
+                                if (!values.body || flatScreen)
+                                    why = Fallback::off;
+                                else if (!input.focused)
+                                    why = Fallback::gameCamera;
+                                else if (!input.hands[i].tracked)
+                                    why = Fallback::untracked;
+                                else if (!native_body::drawn() || !f.valid)
+                                    why = Fallback::notSolved;
+                                else if (forearmStaleFrames > 2)
+                                    why = Fallback::stale;
+                                else if (!(f.handError >= 0 && f.handError <= web_aim::forearmMiss))
+                                    why = Fallback::wristMiss;
+                                else if (arms.tilted)
+                                    why = Fallback::tilted;
+                                const Quat aimNow = input.hands[i].aim.orientation;
+                                Quat target{};
+                                if (why == Fallback::none) {
+                                    target =
+                                        web_aim::forearmTurn(web_aim::forearmInGrip(f.elbow, f.wrist, f.grip),
+                                                             motion.grips[i].orientation, aimNow);
+                                    if (forearmAims[i].primed)
+                                        forearmJitter[i] = std::max(
+                                            forearmJitter[i],
+                                            web_aim::turnAngle(forearmTargets[i].conjugate() * target) *
+                                                57.29578f);
+                                    forearmTargets[i] = target;
+                                }
+                                forearmAims[i].update(why == Fallback::none, target, dt);
+                                webTurnsNow[i] = forearmAims[i].turn(values.forearmBlend);
+                                turns.turns[i] = webTurnsNow[i];
+                                if (logNow) {
+                                    // The unknowns, to send back: the forearm against the
+                                    // controller's line in the same world (a frame mismatch
+                                    // shows as a large or yaw-only angle), the grip the solve
+                                    // had against the grip now (the solve's lag), which side
+                                    // the palm faces (+ toward the aim's +X; the left palm is
+                                    // expected +, the right -), and the jitter.
+                                    const Vec3 forearm = normalized(f.wrist - f.elbow);
+                                    const float off =
+                                        std::acos(
+                                            std::clamp(dot(forearm, aimNow.rotate({0, 0, -1})), -1.f, 1.f)) *
+                                        57.29578f;
+                                    const float lag =
+                                        web_aim::turnAngle(f.grip.conjugate() * motion.grips[i].orientation) *
+                                        57.29578f;
+                                    char line[320];
+                                    std::snprintf(
+                                        line, sizeof(line),
+                                        "forearm aim: %s %s, turn %.1f deg (target %.1f), weight %.2f, "
+                                        "blend %d%%, wrist miss %.3f, stale %u, forearm vs controller "
+                                        "%.1f deg, grip lag %.1f deg, palm.x %+.2f, jitter %.2f deg",
+                                        i ? "R" : "L", web_aim::fallbackName(why),
+                                        web_aim::turnAngle(webTurnsNow[i]) * 57.29578f,
+                                        web_aim::turnAngle(target) * 57.29578f, forearmAims[i].weight,
+                                        values.forearmBlend, f.handError, forearmStaleFrames,
+                                        f.valid ? off : -1.f, f.valid ? lag : -1.f,
+                                        dot(f.palm, aimNow.rotate({1, 0, 0})), forearmJitter[i]);
+                                    game_prompts::note(line);
+                                    forearmJitter[i] = 0;
+                                }
+                            }
+                            if (logNow)
+                                forearmLogSeconds = 0;
+                            swingWebTurns(&turns);
+                            webTurnsOn = true;
+                        } else if (webTurnsOn) {
+                            // Off again: the controller's line at once.
+                            for (auto& a : forearmAims)
+                                a.reset();
+                            webTurnsNow = {};
+                            game_swing::WebTurns turns;
+                            if (swingWebTurns)
+                                swingWebTurns(&turns);
+                            webTurnsOn = false;
                         }
                         check(submitSwing(&input), "Tracked swing input");
                         check(sampleSwing(&swingState), "Native swing feedback");
@@ -5018,8 +5127,12 @@ DWORD WINAPI run(void*) {
                             const Vec3 origin = input.aim.position + travel;
                             // Along the line its webs leave (WEB ANGLE, WRIST
                             // SHOOTERS; web_aim.hpp), as the swing's aim previews.
-                            const Pose webLine = web_aim::shooterAim(input.aim, static_cast<int>(hand),
-                                                                     {values.webAngle, values.wristShooters});
+                            // WEB AIM: MODEL FOREARM: the turn the swing was sent.
+                            const web_aim::Shooters shooters{values.webAngle, values.wristShooters};
+                            const Pose webLine =
+                                webTurnsOn ? web_aim::shooterAim(input.aim, static_cast<int>(hand), shooters,
+                                                                 webTurnsNow[hand])
+                                           : web_aim::shooterAim(input.aim, static_cast<int>(hand), shooters);
                             const Vec3 direction =
                                 steady.aim(normalized(webLine.orientation.rotate({0, 0, -1})),
                                            trackingTurn(rendered.swing));
@@ -5512,6 +5625,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
                                                           dodgeResults->bytes != expected.bytes))
         dodgeResults = nullptr;
     swingSettings = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingSettings"));
+    swingWebTurns = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingWebTurns"));
     // Optional: an older ray module has no web shooter.
     startShooter = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyShooterStart"));
     sampleShooter = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyShooterSample"));

@@ -7,6 +7,47 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
 
 Not in a build yet, newest first. The release adds these to the next build's entry.
 
+**WEB AIM: MODEL FOREARM, webs along the arm you see.**
+
+- **Before.** Every web left along the controller's line (its aim pose's -Z),
+  turned only by WEB ANGLE and WRIST SHOOTERS, whatever the forearm of the
+  body you see did; with a normal grip that forearm points 10-20 degrees off
+  the controller.
+- **WEB AIM** (EXPERIMENTAL, after SPIDY RUN; `web_aim_source` in
+  `spidy_vr.ini` and profiles: 0 CONTROLLER, 1 MODEL FOREARM; CONTROLLER by
+  default) and **FOREARM BLEND** (`forearm_blend`, 0-100 percent, 100 by
+  default). At the end of each hero pose job the body solved,
+  `native_body.cpp` publishes each arm: the elbow (lower arm joint) and
+  wrist (hand joint), the palm's normal and the controller grip the solve was
+  given (`native_body::Forearms`, also exported as `SpidyForearms` for
+  `tools/probe_game_body.py`). With MODEL FOREARM the VR worker keeps the
+  forearm as a turn in the grip's frame and puts it on the controller's pose
+  of this frame (`web_aim::forearmTurn`), so the line moves with the
+  controller at once and only the elbow's bend is a solve behind; the turn
+  is smoothed over about 80 ms, held to 35 degrees off the controller's line,
+  and goes back to the controller's line over 0.15 s whenever the body cannot
+  say: the body off or `-NoBody`, VIEW: GAME SCREEN or the game's camera, an
+  untracked hand, a solve that failed, a wrist 0.1 m or more from its
+  target, a sample not new for more than two frames, or a flip's tilt
+  (`web_aim::ForearmAim`). The swing gets the turns through a new optional
+  export, `SpidySwingWebTurns` (`game_swing::WebTurns`; turns older than
+  250 ms are ignored), and puts them on the webs' line alone: the swing, the
+  grab, the web balls and the aim previews; the aim markers take the same
+  turn. WEB ANGLE stays a tilt on top, WRIST SHOOTERS a quarter turn about
+  the forearm. Where a web leaves from is unchanged; the fists, the walls and
+  the vents keep the controller's aim. Every 2 s while it is on, a
+  `forearm aim:` line per hand goes to the session's timeline (reason, turn,
+  weight, wrist miss, staleness, the forearm against the controller, the
+  solve's grip lag, the palm's side and the jitter). No swing settings
+  version change: CONTROLLER sends nothing, and the swing aims exactly as
+  before.
+- **Validation.** Core checks cover no turn along the controller, following
+  the forearm, carrying it on the current grip, the aim frame's offset, the
+  35-degree clamp, mirrored hands, the 80 ms smoothing, FOREARM BLEND, the
+  0.15 s fallback, WEB ANGLE and WRIST SHOOTERS on top, the identity turn
+  being the old aim exactly, the rows, the ini keys and the packets; launcher
+  checks the profile keys. Not played in a headset yet.
+
 **SPIDY RUN, the wall run's momentum on the ground.**
 
 - **Before.** Every landing was the game's: the swing let go of the body the

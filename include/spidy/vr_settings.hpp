@@ -222,6 +222,15 @@ struct Values {
     // default: along the controller, as before. The fists keep the controller's.
     int webAngle = 0;
     bool wristShooters = false;
+    // WEB AIM (the tab's WEB AIM; web_aim::Source): 0 CONTROLLER, the webs
+    // along the controller as before; 1 MODEL FOREARM, along the forearm of
+    // the body the player sees (web_aim::ForearmAim), back to the controller's
+    // line whenever the body cannot say. WEB ANGLE and WRIST SHOOTERS turn on
+    // top of either. CONTROLLER by default. And FOREARM BLEND, percent (the
+    // tab's FOREARM BLEND): how much of the forearm's line MODEL FOREARM takes,
+    // 0 (the controller's) to 100 (the forearm's), 100 by default.
+    int webAimSource = 0;
+    int forearmBlend = 100;
     // DODGE TUMBLE (the tab's DODGE TUMBLE; dodge_tumble.hpp): 0 OFF, 1 LEAN,
     // 2 ROLL. The view leans or rolls with a dodge of the game's, so it reads
     // as one. OFF by default: the view stays level, as before.
@@ -386,8 +395,10 @@ enum class Item : uint8_t {
     earlyJump,
     softLanding,
     spidyRun,
+    webAimSource,
+    forearmBlend,
 };
-inline constexpr Item lastItem = Item::spidyRun;
+inline constexpr Item lastItem = Item::forearmBlend;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -410,7 +421,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 83>& rows();
+const std::array<Row, 85>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

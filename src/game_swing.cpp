@@ -132,6 +132,11 @@ std::atomic<bool> webTie{};
 // along; 0 and off as before.
 std::atomic<int> webAngle{};
 std::atomic<bool> wristShooters{};
+// WEB AIM: MODEL FOREARM (SpidySwingWebTurns): each hand's turn and when it
+// came; none (as before) until the VR worker sends one.
+SRWLOCK webTurnsLock = SRWLOCK_INIT;
+WebTurns webTurns{};
+uint64_t webTurnsAt{};
 bool copy(void* destination, const void* source, size_t bytes) {
     __try {
         if (reinterpret_cast<uintptr_t>(source) < 0x10000 ||
@@ -440,8 +445,14 @@ void visit(const native_rays::QueryContext& world) {
     if (focused) {
         const web_aim::Shooters shooters{webAngle.load(std::memory_order_relaxed),
                                          wristShooters.load(std::memory_order_relaxed)};
+        AcquireSRWLockShared(&webTurnsLock);
+        const WebTurns turns = webTurns;
+        const uint64_t turnsAt = webTurnsAt;
+        ReleaseSRWLockShared(&webTurnsLock);
+        const bool forearm = turns.active && GetTickCount64() - turnsAt <= webTurnsMaxAgeMs;
         for (int i = 0; i < 2; ++i)
-            in.hands[i].aim = web_aim::shooterAim(in.hands[i].aim, i, shooters);
+            in.hands[i].aim = forearm ? web_aim::shooterAim(in.hands[i].aim, i, shooters, turns.turns[i])
+                                      : web_aim::shooterAim(in.hands[i].aim, i, shooters);
     }
     const auto controllerAims = [&](Input with) {
         for (int i = 0; i < 2; ++i)
@@ -1236,6 +1247,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStart(void* input) {
         webTie = false;
         webAngle = 0;
         wristShooters = false;
+        AcquireSRWLockExclusive(&webTurnsLock);
+        webTurns = {};
+        webTurnsAt = 0;
+        ReleaseSRWLockExclusive(&webTurnsLock);
         started = true;
         solver = Swing(physicsConfig(config));
         QueryPerformanceFrequency(&frequency);
@@ -1328,6 +1343,18 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingRetarget(void* input) {
 // thugs, whether they hold in open air, the gravity (weight), whether walls
 // are the swing's own, and the webs' style. All apply from the next step; the
 // visit holds `simulation`.
+// WEB AIM: MODEL FOREARM: the VR worker's turns for each hand's web line
+// (WebTurns). 2001: not a WebTurns.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingWebTurns(void* input) {
+    WebTurns t;
+    if (!input || !copy(&t, input, sizeof(t)) || !validWebTurns(t))
+        return 2001;
+    AcquireSRWLockExclusive(&webTurnsLock);
+    webTurns = t;
+    webTurnsAt = GetTickCount64();
+    ReleaseSRWLockExclusive(&webTurnsLock);
+    return 0;
+}
 extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
     // Version 3 to 6 settings (the probes') are shorter: read as many bytes as they say.
     Settings s;

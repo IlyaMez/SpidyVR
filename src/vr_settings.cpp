@@ -123,6 +123,12 @@ static_assert(std::size(nativeRunPercentChoices) == std::size(nativeRunPercents)
 constexpr int earlyJumps[] = {0, 1, 2};
 constexpr const char* earlyJumpChoices[] = {"OFF", "QUICK TAP", "RUNNING"};
 static_assert(std::size(earlyJumpChoices) == std::size(earlyJumps));
+constexpr int webAimSources[] = {0, 1};
+constexpr const char* webAimSourceChoices[] = {"CONTROLLER", "MODEL FOREARM"};
+static_assert(std::size(webAimSourceChoices) == std::size(webAimSources));
+constexpr int forearmBlends[] = {0, 25, 50, 75, 100};
+constexpr const char* forearmBlendChoices[] = {"0%", "25%", "50%", "75%", "100%"};
+static_assert(std::size(forearmBlendChoices) == std::size(forearmBlends));
 } // namespace
 
 std::span<const int> steps(Item item) {
@@ -165,6 +171,10 @@ std::span<const int> steps(Item item) {
         return dodgeTumbles;
     case Item::earlyJump:
         return earlyJumps;
+    case Item::webAimSource:
+        return webAimSources;
+    case Item::forearmBlend:
+        return forearmBlends;
     case Item::nativeRunAt:
         return nativeRunPercents;
     case Item::nearClip:
@@ -240,6 +250,10 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.dodgeTumble);
     case Item::earlyJump:
         return static_cast<float>(v.earlyJump);
+    case Item::webAimSource:
+        return static_cast<float>(v.webAimSource);
+    case Item::forearmBlend:
+        return static_cast<float>(v.forearmBlend);
     case Item::nativeRunAt:
         return static_cast<float>(v.nativeRunPercent);
     case Item::nearClip:
@@ -386,6 +400,8 @@ Values sanitized(Values v) {
     v.webAngle = std::clamp(v.webAngle, -45, 45);
     v.dodgeTumble = std::clamp(v.dodgeTumble, 0, 2);
     v.earlyJump = std::clamp(v.earlyJump, 0, 2);
+    v.webAimSource = std::clamp(v.webAimSource, 0, 1);
+    v.forearmBlend = std::clamp(v.forearmBlend, 0, 100);
     v.nativeRunPercent = std::clamp(v.nativeRunPercent, 50, 90);
     v.nearClipMm = std::clamp(v.nearClipMm, nearClips[0], std::end(nearClips)[-1]);
     v.recordingFov = recording_fov::sanitized(v.recordingFov);
@@ -403,9 +419,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 83>& rows() {
+const std::array<Row, 85>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 83> all{{
+    static const std::array<Row, 85> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -602,6 +618,10 @@ const std::array<Row, 83>& rows() {
          "SPIDY RUN",
          "Land fast and keep running at that speed, steering, until it eases off.",
          {}},
+        {Item::webAimSource, "WEB AIM",
+         "MODEL FOREARM: webs follow the body's forearm. CONTROLLER as before.", webAimSourceChoices},
+        {Item::forearmBlend, "FOREARM BLEND",
+         "How much MODEL FOREARM follows the forearm, from the controller's line.", forearmBlendChoices},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
          "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
@@ -723,6 +743,12 @@ bool choose(Item item, int index, Values& v) {
     case Item::earlyJump:
         v.earlyJump = s[index];
         break;
+    case Item::webAimSource:
+        v.webAimSource = s[index];
+        break;
+    case Item::forearmBlend:
+        v.forearmBlend = s[index];
+        break;
     case Item::nativeRunAt:
         v.nativeRunPercent = s[index];
         break;
@@ -840,6 +866,8 @@ constexpr TabOnly tabOnly[] = {
     {"early_jump", nullptr, &Values::earlyJump},
     {"soft_landing", &Values::softLanding, nullptr},
     {"spidy_run", &Values::spidyRun, nullptr},
+    {"web_aim_source", nullptr, &Values::webAimSource},
+    {"forearm_blend", nullptr, &Values::forearmBlend},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

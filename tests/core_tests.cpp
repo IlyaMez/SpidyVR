@@ -1570,6 +1570,115 @@ int main() {
                   !withTabOnly({}, "").wristShooters,
               "spidy_vr.ini's web_angle_degrees not clamped, or wrist_shooters on when absent");
     });
+    test("WEB AIM: MODEL FOREARM turns the webs onto the forearm, clamped, smoothed, falling back", [] {
+        using namespace web_aim;
+        auto line = [](Quat q) { return q.rotate({0, 0, -1}); };
+        auto close = [](Vec3 a, Vec3 b, float e = 1e-3f) { return length(a - b) < e; };
+        const float deg = 3.14159265f / 180;
+        // The forearm along the controller's line: no turn.
+        const Quat grip = Quat::around({0, 1, 0}, .4f) * Quat::around({1, 0, 0}, .2f);
+        const Vec3 along = grip.rotate({0, 0, -1});
+        const Vec3 inGrip = forearmInGrip({1, 1, 1}, Vec3{1, 1, 1} + along * .3f, grip);
+        check(turnAngle(forearmTurn(inGrip, grip, grip)) < 1e-3f, "a forearm along the controller turned it");
+        check(turnAngle(forearmTurn({}, grip, grip)) == 0 && forearmInGrip({NAN, 0, 0}, {}, grip).x == 0,
+              "no forearm turned the line");
+        // Fifteen degrees down from the controller: the line follows it.
+        const Vec3 down15{0, -std::sin(15 * deg), -std::cos(15 * deg)};
+        const Quat t15 = forearmTurn(down15, {}, {});
+        check(close(line(t15), down15), "the line did not follow the forearm");
+        // Carried on the grip now: the same forearm in the grip's frame, the grip turned since.
+        const Quat now = Quat::around({0, 1, 0}, 1.1f);
+        check(close(line(now * forearmTurn(down15, now, now)), now.rotate(down15)),
+              "the turn not carried on the current grip");
+        // The aim pose's frame may differ from the grip's.
+        const Quat aimOff = Quat::around({1, 0, 0}, -.3f);
+        check(close(line(aimOff * forearmTurn(down15, {}, aimOff)), down15),
+              "the aim frame's offset not undone");
+        // Clamped at 35 degrees.
+        const Vec3 side60{std::sin(60 * deg), 0, -std::cos(60 * deg)};
+        check(std::abs(turnAngle(forearmTurn(side60, {}, {})) - forearmClampDegrees * deg) < 1e-3f,
+              "the turn not held to 35 degrees");
+        // Mirrored hands, mirrored turns (x -> -x: the turn's y and z change sign).
+        const Vec3 left{std::sin(12 * deg), -std::sin(10 * deg), -1}, right{-left.x, left.y, left.z};
+        const Quat tl = forearmTurn(normalized(left), {}, {}), tr = forearmTurn(normalized(right), {}, {});
+        check(std::abs(tl.x - tr.x) < 1e-5f && std::abs(tl.y + tr.y) < 1e-5f &&
+                  std::abs(tl.z + tr.z) < 1e-5f && std::abs(tl.w - tr.w) < 1e-5f,
+              "the hands' turns not mirrored");
+        // Smoothing: the first sample at once, then about 80 ms to follow a change.
+        ForearmAim a;
+        a.update(true, t15, 1.f / 90);
+        check(a.primed && close(line(a.smoothed), down15) && a.weight > 0 && a.weight < .1f,
+              "the first sample not taken at once, or blended in at once");
+        const Vec3 up10{0, std::sin(10 * deg), -std::cos(10 * deg)};
+        const Quat tUp = forearmTurn(up10, {}, {});
+        a.update(true, tUp, .08f);
+        const float left80 = turnAngle(a.smoothed.conjugate() * tUp) / turnAngle(t15.conjugate() * tUp);
+        check(left80 > .3f && left80 < .45f, "80 ms did not take about 63% of the change");
+        for (int i = 0; i < 60; ++i)
+            a.update(true, tUp, 1.f / 90);
+        check(a.weight == 1 && turnAngle(a.smoothed.conjugate() * tUp) < 1e-3f, "the turn not reached");
+        // Blend: 0% the controller, 50% half, 100% all.
+        check(turnAngle(a.turn(0)) == 0 && std::abs(turnAngle(a.turn(50)) - 5 * deg) < 1e-3f &&
+                  std::abs(turnAngle(a.turn(100)) - 10 * deg) < 1e-3f,
+              "FOREARM BLEND's share");
+        // Invalid: back to the controller within 0.15 s, not at once.
+        a.update(false, {}, .05f);
+        check(a.weight > .6f && a.weight < .7f && turnAngle(a.turn(100)) > 0, "the fallback not gradual");
+        for (int i = 0; i < 9; ++i)
+            a.update(false, {}, 1.f / 90);
+        check(a.weight == 0 && !a.primed && turnAngle(a.turn(100)) == 0,
+              "the fallback did not reach the controller's line in 0.15 s");
+        a.update(true, tUp, NAN);
+        check(std::isfinite(a.weight) && a.weight == 0, "a NaN step moved the blend");
+        // WEB ANGLE on top of the forearm, about its own side; WRIST SHOOTERS a quarter turn about it.
+        const Pose level{{0, 1, 0}, {}};
+        const Pose tilted = shooterAim(level, 0, {15, false}, t15);
+        check(close(tilted.position, level.position) && close(line(tilted.orientation), {0, 0, -1}),
+              "WEB ANGLE UP 15 did not undo a forearm 15 down");
+        const Pose wrist = shooterAim(level, 0, {0, true}, t15);
+        check(std::abs(dot(line(wrist.orientation), down15)) < 1e-4f &&
+                  close(line(wrist.orientation), {1, 0, 0}),
+              "WRIST SHOOTERS not square to the forearm");
+        // The identity turn is the old shooterAim exactly.
+        const Quat held = Quat::around({0, 1, 0}, .7f) * Quat::around({1, 0, 0}, -.3f);
+        for (int hand = 0; hand < 2; ++hand) {
+            const Pose o = shooterAim({{1, 2, 3}, held}, hand, {30, true});
+            const Pose n = shooterAim({{1, 2, 3}, held}, hand, {30, true}, Quat{});
+            check(o.orientation.x == n.orientation.x && o.orientation.y == n.orientation.y &&
+                      o.orientation.z == n.orientation.z && o.orientation.w == n.orientation.w,
+                  "an identity forearm turn changed the line");
+        }
+        check(std::string(fallbackName(Fallback::wristMiss)) == "wrist miss", "the fallback's log name");
+    });
+    test("WEB AIM and FOREARM BLEND's settings: CONTROLLER and 100% by default, kept, WebTurns", [] {
+        using namespace vr_settings;
+        Values v;
+        check(v.webAimSource == 0 && v.forearmBlend == 100 && defaultChoice(Item::webAimSource) == 0 &&
+                  defaultChoice(Item::forearmBlend) == 4,
+              "web aim not CONTROLLER, or forearm blend not 100%, by default");
+        check(choose(Item::webAimSource, 1, v) && v.webAimSource == 1 && choose(Item::forearmBlend, 2, v) &&
+                  v.forearmBlend == 50,
+              "web aim's or forearm blend's choices");
+        const Values kept = withTabOnly({}, tabOnlyText(v));
+        check(kept.webAimSource == 1 && kept.forearmBlend == 50, "web aim or forearm blend not kept");
+        check(withTabOnly({}, "web_aim_source=5\nforearm_blend=150\n").webAimSource == 1 &&
+                  withTabOnly({}, "forearm_blend=-3\n").forearmBlend == 0 &&
+                  withTabOnly({}, "").webAimSource == 0 && withTabOnly({}, "").forearmBlend == 100,
+              "spidy_vr.ini's web_aim_source or forearm_blend not clamped, or not defaulted");
+        game_swing::WebTurns t;
+        check(game_swing::validWebTurns(t) && !t.active, "the default WebTurns refused or active");
+        t.active = 1;
+        t.turns[1] = web_aim::forearmTurn({0, -.2588f, -.9659f}, {}, {});
+        check(game_swing::validWebTurns(t), "a valid WebTurns refused");
+        t.turns[0] = {0, 0, 0, 2};
+        check(!game_swing::validWebTurns(t), "a turn that is not a unit accepted");
+        t.turns[0] = {};
+        t.active = 2;
+        check(!game_swing::validWebTurns(t), "an invalid active accepted");
+        native_body::Forearms f;
+        check(f.magic == 0x53424641 && f.bytes == 160 && !f.arms[0].valid && f.arms[1].handError < 0,
+              "the forearms' packet");
+    });
     test("AIR SLINGSHOT's settings: version 24, off by default, kept as air_slingshot", [] {
         game_swing::Settings s;
         check(!s.airSlingshot && offsetof(game_swing::Settings, airSlingshot) == game_swing::settingsBytesV23,
@@ -22737,10 +22846,10 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 72 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 74 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[72 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[72].title, "REALISTIC FLIPS") == 0 && all[72].choices.empty(),
+            check(all[74 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[74].title, "REALISTIC FLIPS") == 0 && all[74].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[50].item == Item::controlledFlips && all[53].item == Item::joystickRunCamera &&
                   all[54].item == Item::wallRunCameraTilt && all[55].item == Item::halfPunchDamage,
@@ -22836,6 +22945,12 @@ int main() {
         check(all[71].item == Item::spidyRun && std::strcmp(all[71].title, "SPIDY RUN") == 0 &&
                   all[71].choices.empty() && all[71].place == Place::tab,
               "SPIDY RUN: a switch in the tab, after SOFT LANDING");
+        check(all[72].item == Item::webAimSource && std::strcmp(all[72].title, "WEB AIM") == 0 &&
+                  all[72].choices.size() == 2 && std::strcmp(all[72].choices[1], "MODEL FOREARM") == 0 &&
+                  all[72].place == Place::tab && all[73].item == Item::forearmBlend &&
+                  std::strcmp(all[73].title, "FOREARM BLEND") == 0 && all[73].choices.size() == 5 &&
+                  std::strcmp(all[73].choices[4], "100%") == 0 && all[73].place == Place::tab,
+              "WEB AIM and FOREARM BLEND: in the tab, after SPIDY RUN");
         {
             Values v;
             check(!v.spidyRun && defaultChoice(Item::spidyRun) == 0, "SPIDY RUN on by default");
@@ -22934,7 +23049,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 78,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 80,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -23193,7 +23308,7 @@ int main() {
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
                   "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
                   "degrees=0\nwrist_shooters=0\n"
-                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\n",
+                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nweb_aim_source=0\nforearm_blend=100\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

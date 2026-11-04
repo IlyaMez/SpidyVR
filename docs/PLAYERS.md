@@ -1002,9 +1002,17 @@ VR settings
                    it eases to a sprint in a few seconds and the game's
                    run takes over. A wall ahead is the usual wall run.
                    Off: the game takes every landing, as before.
+  WEB AIM          (CONTROLLER until you pick MODEL FOREARM) MODEL
+                   FOREARM: your webs leave along the forearm of the body
+                   you see, not the controller; whenever the body cannot
+                   say (body off, a cutscene, an arm it cannot reach) they
+                   go back to the controller's line. WEB ANGLE and WRIST
+                   SHOOTERS still turn on top; punches keep the controller.
+  FOREARM BLEND    (100% until you change it) how much of the forearm's
+                   line MODEL FOREARM takes, from 0% (the controller's).
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, WEB AIM, FOREARM BLEND, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches
