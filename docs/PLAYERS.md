@@ -1002,6 +1002,10 @@ VR settings
                    it eases to a sprint in a few seconds and the game's
                    run takes over. A wall ahead is the usual wall run.
                    Off: the game takes every landing, as before.
+  RUN FROM STANDING (off until you switch it on; needs SPIDY RUN) hold the
+                   stick all the way for a moment on the ground and SPIDY
+                   RUN starts from a stand, building past a sprint while you
+                   hold it; ease off and the game's run takes over.
   WEB AIM          (CONTROLLER until you pick MODEL FOREARM) MODEL
                    FOREARM: your webs leave along the forearm of the body
                    you see, not the controller; whenever the body cannot
@@ -1012,7 +1016,7 @@ VR settings
                    line MODEL FOREARM takes, from 0% (the controller's).
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, WEB AIM, FOREARM BLEND, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, RUN FROM STANDING, WEB AIM, FOREARM BLEND, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches

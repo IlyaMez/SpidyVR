@@ -1427,6 +1427,8 @@ DWORD WINAPI run(void*) {
             s.momentumLeap = values.momentumLeap;
             s.softLanding = values.softLanding;
             s.spidyRun = values.spidyRun;
+            // SPIDY RUN FROM STANDING: only with SPIDY RUN itself.
+            s.spidyRunStanding = values.spidyRun && values.spidyRunFromStanding;
             s.webAngle = values.webAngle;
             s.wristShooters = values.wristShooters;
             sentSwingSettings = s;

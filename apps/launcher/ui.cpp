@@ -1962,6 +1962,12 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "which eases to a sprint in a few seconds, and the game's run (NATIVE RUN) takes over. A wall "
                "ahead is the usual wall run. Off: the game takes every landing, as before.",
                S(42), [&] { tabToggle("##spidyrun", Item::spidyRun); });
+        option("Spidy run from standing (experimental)",
+               "With Spidy run on: hold the stick all the way for a moment on the ground and the mod's run "
+               "starts from a stand or a walk, building past the game's sprint while you hold it; ease off "
+               "and it slows to the sprint and the game's run takes over. Off: Spidy run starts only from a "
+               "fast landing, as before.",
+               S(42), [&] { tabToggle("##spidyrunfromstanding", Item::spidyRunFromStanding); });
     });
     group(0, "Flips", [&] {
         option("Flips (experimental)",

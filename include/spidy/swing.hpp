@@ -393,6 +393,25 @@ class Swing {
     bool groundRunEnabled() const {
         return spidyRun_;
     }
+    // SPIDY RUN FROM STANDING (off until set; only with allowGroundRun): the
+    // run also starts on the ground from any speed, the stick held past
+    // run_update::GroundRun::standTilt for standHold seconds, and builds past
+    // the sprint while it stays held (run_update::standRunStep). Off: the run
+    // starts only from a fast landing, as before.
+    void allowGroundRunFromStanding(bool on) {
+        standRunEnabled_ = on;
+        standHold_ = 0;
+        standArmed_ = true;
+        if (!on && standRun_)
+            endGroundRun();
+    }
+    bool groundRunFromStandingEnabled() const {
+        return standRunEnabled_;
+    }
+    // The run now began standing (not from a landing).
+    bool groundRunFromStanding() const {
+        return groundRun_ && standRun_;
+    }
     bool groundRunning() const {
         return groundRun_;
     }
@@ -401,6 +420,9 @@ class Swing {
         return groundRun_ ? groundAlong_ : Vec3{};
     }
     void endGroundRun() {
+        if (standRun_)
+            standArmed_ = false;
+        standRun_ = false;
         groundRun_ = false;
         groundAlong_ = {};
         groundIdle_ = 0;
@@ -714,6 +736,10 @@ class Swing {
     bool spidyRun_{}, groundRun_{};
     Vec3 groundAlong_{};
     float groundIdle_{};
+    // SPIDY RUN FROM STANDING: on; this run began standing; how long the
+    // stick has been held for one; whether the stick came back since the last.
+    bool standRunEnabled_{}, standRun_{}, standArmed_{true};
+    float standHold_{};
     float softGround_{-1};
     bool slingshotTaut(int i) const;
     Vec3 slingshotHands_[2]{}, slingshotEnds_[2]{};

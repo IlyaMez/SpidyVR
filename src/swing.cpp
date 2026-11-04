@@ -1506,7 +1506,8 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
         body_.grounded = false;
     } else if (groundRun_ && body_.grounded) {
         // SPIDY RUN: the run's own speed across the ground, pressed onto it.
-        groundAlong_ = run_update::groundRunStep(groundAlong_, in.move, dt);
+        groundAlong_ = standRun_ ? run_update::standRunStep(groundAlong_, in.move, dt)
+                                 : run_update::groundRunStep(groundAlong_, in.move, dt);
         const bool stick = finite(in.move) && std::hypot(in.move.x, in.move.z) > .05f;
         groundIdle_ = stick ? 0 : groundIdle_ + dt;
         body_.velocity = limited(groundAlong_ + Vec3{0, -run_update::groundRun.press, 0}, speedLimit());
@@ -1812,12 +1813,34 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
             groundIdle_ = 0;
         }
     }
+    // SPIDY RUN FROM STANDING: on the ground, the stick held past standTilt
+    // for standHold starts the run from the body's own speed across.
+    if (spidyRun_ && standRunEnabled_ && !groundRun_ && actual.grounded && !touchdown && !wall_.on &&
+        !webbed && !mounting_ && mount_ <= 0) {
+        const auto& k = run_update::groundRun;
+        const float tilt = finite(input.move) ? std::hypot(input.move.x, input.move.z) : 0.f;
+        if (tilt < k.standRearm)
+            standArmed_ = true;
+        standHold_ = standArmed_ && run_update::standHeld(input.move) ? standHold_ + seconds : 0.f;
+        if (standHold_ >= k.standHold) {
+            const Vec3 across{body_.velocity.x, 0, body_.velocity.z};
+            groundRun_ = standRun_ = true;
+            groundAlong_ = finite(across) ? limited(across, k.entryMax) : Vec3{};
+            groundIdle_ = 0;
+            standHold_ = 0;
+        }
+    } else if (!groundRun_) {
+        standHold_ = 0;
+    }
     const auto count = static_cast<unsigned>(std::ceil(seconds / config_.fixedStep));
     const float dt = seconds / count;
     for (unsigned i = 0; i < count; ++i)
         step(dt, input, world, nullptr);
     // SPIDY RUN: at the sprint, or a second without the stick, it is the game's run again.
-    if (groundRun_ && (length(groundAlong_) <= run_update::groundRun.sprint + .01f || groundIdle_ >= 1))
+    // A run from standing held past standTilt is still building: not yet.
+    const bool building = standRun_ && run_update::standHeld(input.move);
+    if (groundRun_ &&
+        ((!building && length(groundAlong_) <= run_update::groundRun.sprint + .01f) || groundIdle_ >= 1))
         endGroundRun();
     MotionIntent result{body_.position, body_.velocity, true};
     // Native collision owns position and ground contact. Do not publish the

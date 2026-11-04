@@ -1368,7 +1368,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
          header[2] != settingsBytesV18 && header[2] != settingsBytesV19 && header[2] != settingsBytesV20 &&
          header[2] != settingsBytesV21 && header[2] != settingsBytesV22 && header[2] != settingsBytesV23 && header[2] != settingsBytesV24 &&
          header[2] != settingsBytesV25 && header[2] != settingsBytesV26 && header[2] != settingsBytesV27 &&
-         header[2] != sizeof(s)) ||
+         header[2] != settingsBytesV28 && header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || !validSettings(s))
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
@@ -1416,6 +1416,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         solver.allowMomentumLeap(s.version >= 26 && s.momentumLeap != 0);
         solver.allowSoftLanding(s.version >= 27 && s.softLanding != 0);
         solver.allowGroundRun(s.version >= 28 && s.spidyRun != 0);
+        solver.allowGroundRunFromStanding(s.version >= 29 && s.spidyRunStanding != 0);
         groundRunRefusals = 0;
         webAngle = s.version >= 25 ? s.webAngle : 0;
         wristShooters = s.version >= 25 && s.wristShooters != 0;

@@ -268,6 +268,12 @@ struct Values {
     // stick steering it - easing to the sprint and handed back to the game.
     // Off by default: the game takes every landing, as before.
     bool spidyRun = false;
+    // SPIDY RUN FROM STANDING (the tab's RUN FROM STANDING; Swing::
+    // allowGroundRunFromStanding, run_update::standRunStep): with SPIDY RUN
+    // on, the stick held fully on the ground for 0.3 s starts the mod's run
+    // from a stand or a walk, and it builds past the sprint while held. Off
+    // by default: SPIDY RUN starts only from a fast landing, as before.
+    bool spidyRunFromStanding = false;
     // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
     // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
     int singleHandYankPercent = 100;
@@ -397,8 +403,9 @@ enum class Item : uint8_t {
     spidyRun,
     webAimSource,
     forearmBlend,
+    spidyRunFromStanding,
 };
-inline constexpr Item lastItem = Item::forearmBlend;
+inline constexpr Item lastItem = Item::spidyRunFromStanding;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -421,7 +428,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 85>& rows();
+const std::array<Row, 86>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

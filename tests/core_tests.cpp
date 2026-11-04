@@ -1700,7 +1700,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 28 && s.bytes == 132 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 29 && s.bytes == 136 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -2363,7 +2363,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 28 && s.bytes == 132 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 29 && s.bytes == 136 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -3719,7 +3719,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 28 && s.bytes == 132, "updated settings did not append the climbing field");
+        check(s.version == 29 && s.bytes == 136, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -9666,7 +9666,7 @@ int main() {
         Swing fresh(inert());
         check(!fresh.groundRunEnabled() && !fresh.groundRunning(), "SPIDY RUN on by default");
         game_swing::Settings packet;
-        check(packet.version == 28 && packet.bytes == 132 && !packet.spidyRun &&
+        check(packet.version == 29 && packet.bytes == 136 && !packet.spidyRun &&
                   offsetof(game_swing::Settings, spidyRun) == game_swing::settingsBytesV27,
               "SPIDY RUN not appended, or on by default");
         packet.spidyRun = 2;
@@ -9700,6 +9700,126 @@ int main() {
         check(all.find("ended after") != std::string::npos && all.find("asked 20.0 m/s") != std::string::npos &&
                   all.find("went 9.9 m/s") != std::string::npos,
               "no line of how far a mod-driven run went against what it asked");
+    });
+    test("SPIDY RUN FROM STANDING: the stick held fully starts the run from a stand; off as before", [] {
+        using namespace run_update;
+        const GroundRun& k = groundRun;
+        // standRunStep: held past standTilt it builds to the sprint, then past it to standTop, no decay.
+        Vec3 v{};
+        for (int i = 0; i < 45; ++i) // 24 m/s a second: the sprint in 0.375 s
+            v = standRunStep(v, {0, 0, -1}, 1.f / 120);
+        near(length(v), k.sprint, .01f);
+        check(v.z < 0 && std::abs(v.x) < 1e-4f, "the run from standing not along the stick");
+        for (int i = 0; i < 120; ++i)
+            v = standRunStep(v, {0, 0, -1}, 1.f / 120);
+        near(length(v), k.sprint + k.standAcceleration, .05f);
+        for (int i = 0; i < 120 * 10; ++i)
+            v = standRunStep(v, {0, 0, -1}, 1.f / 120);
+        near(length(v), k.standTop, .01f);
+        // Under standTilt, or against the run: exactly groundRunStep.
+        for (const Vec3 move : {Vec3{0, 0, -.8f}, Vec3{}, Vec3{0, 0, 1}, Vec3{NAN, 0, 0}}) {
+            const Vec3 a = standRunStep({0, 0, -12}, move, 1.f / 120),
+                       b = groundRunStep({0, 0, -12}, move, 1.f / 120);
+            check(finite(a) && a.x == b.x && a.y == b.y && a.z == b.z,
+                  "standRunStep not the run's step unheld");
+        }
+        // A turn held fully keeps the turn rate.
+        const Vec3 turned = standRunStep({0, 0, -12}, {1, 0, 0}, 1.f / 120);
+        const Vec3 rule = groundRunStep({0, 0, -12}, {1, 0, 0}, 1.f / 120);
+        near(std::atan2(turned.x, -turned.z), std::atan2(rule.x, -rule.z), 1e-4f);
+        check(standHeld({0, 0, -.95f}) && !standHeld({0, 0, -.85f}) && !standHeld({NAN, 0, 0}), "standHeld");
+        // The swing: standing, the stick held fully for standHold seconds.
+        TestWorld w;
+        w.enabled = false;
+        Input in;
+        in.focused = true;
+        in.move = {0, 0, -1};
+        const Body stand{{0, 1, 0}, {0, 0, 0}, true};
+        const auto hold = [&](Swing& sw, const Input& with, int steps) {
+            for (int i = 0; i < steps; ++i)
+                sw.predictNativeStep(1.f / 90, with, w, stand);
+        };
+        {
+            // Off (either switch): a stand stays the game's, as before.
+            Swing a(inert());
+            a.allowGroundRun(true);
+            hold(a, in, 90);
+            check(!a.groundRunning(), "SPIDY RUN alone started a run from a stand");
+            Swing b(inert());
+            b.allowGroundRunFromStanding(true);
+            hold(b, in, 90);
+            check(!b.groundRunning(), "RUN FROM STANDING without SPIDY RUN started a run");
+            Swing fresh(inert());
+            check(!fresh.groundRunFromStandingEnabled(), "RUN FROM STANDING on by default");
+        }
+        {
+            Swing sw(inert());
+            sw.allowGroundRun(true);
+            sw.allowGroundRunFromStanding(true);
+            hold(sw, in, 20);
+            check(!sw.groundRunning(), "the run began before the stick was held standHold");
+            hold(sw, in, 10);
+            check(sw.groundRunning() && sw.groundRunFromStanding(),
+                  "the stick held fully did not start the run");
+            // It builds while held: well past the sprint after a few seconds of the swing's own steps.
+            Vec3 at{};
+            for (int i = 0; i < 90 * 3 && sw.groundRunning(); ++i) {
+                sw.predictNativeStep(1.f / 90, in, w, {{0, 1, 0}, at, true});
+                at = sw.groundRunVelocity() + Vec3{0, -k.press, 0};
+            }
+            check(sw.groundRunning() && length(sw.groundRunVelocity()) > k.sprint + 1,
+                  "the run from standing did not build past the sprint");
+            // Eased off: it slows to the sprint and the game has the body.
+            Input half = in;
+            half.move = {0, 0, -.7f};
+            int steps = 0;
+            while (sw.groundRunning() && steps < 2000) {
+                sw.predictNativeStep(1.f / 90, half, w, {{0, 1, 0}, at, true});
+                at = sw.groundRunVelocity() + Vec3{0, -k.press, 0};
+                ++steps;
+            }
+            check(!sw.groundRunning() && steps < 90 * 4, "eased off, the run from standing did not end");
+            // Not again until the stick comes back under standRearm.
+            hold(sw, in, 90);
+            check(!sw.groundRunning(), "a second run from standing without the stick let go");
+            Input rest = in;
+            rest.move = {};
+            hold(sw, rest, 2);
+            hold(sw, in, 30);
+            check(sw.groundRunning(), "the stick let go and held again did not start a run");
+            sw.allowGroundRunFromStanding(false);
+            check(!sw.groundRunning(), "switching RUN FROM STANDING off kept its run");
+        }
+        {
+            // In the air, on a slow walk under standTilt: none.
+            Swing sw(inert());
+            sw.allowGroundRun(true);
+            sw.allowGroundRunFromStanding(true);
+            Input walk = in;
+            walk.move = {0, 0, -.6f};
+            hold(sw, walk, 90);
+            check(!sw.groundRunning(), "a walk started a run from standing");
+            for (int i = 0; i < 90; ++i)
+                sw.predictNativeStep(1.f / 90, in, w, {{0, 3, 0}, {0, 0, 0}, false});
+            check(!sw.groundRunning(), "the air started a run from standing");
+        }
+        game_swing::Settings packet;
+        check(packet.version == 29 && packet.bytes == 136 && !packet.spidyRunStanding &&
+                  offsetof(game_swing::Settings, spidyRunStanding) == game_swing::settingsBytesV28,
+              "SPIDY RUN FROM STANDING not appended, or on by default");
+        packet.spidyRunStanding = 2;
+        check(!game_swing::validSettings(packet), "an invalid RUN FROM STANDING switch accepted");
+        packet = {};
+        packet.version = 28;
+        packet.bytes = game_swing::settingsBytesV28;
+        check(game_swing::validSettings(packet), "version 28 settings packet refused");
+        vr_settings::Values values;
+        check(!values.spidyRunFromStanding &&
+                  vr_settings::defaultChoice(vr_settings::Item::spidyRunFromStanding) == 0,
+              "RUN FROM STANDING on by default");
+        check(vr_settings::withTabOnly({}, "spidy_run_from_standing=1\n").spidyRunFromStanding &&
+                  !vr_settings::withTabOnly({}, "").spidyRunFromStanding,
+              "spidy_vr.ini keeps spidy_run_from_standing");
     });
     test("the game's camera follows the head's pitch as it follows its turn", [] {
         game_pad::CameraPitch pitch;
@@ -22199,7 +22319,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 28 && s.bytes == 132 && s.combatVisuals == 1 &&
+        check(s.version == 29 && s.bytes == 136 && s.combatVisuals == 1 &&
                   offsetof(Settings, combatVisuals) == 56,
               "free combat broke the settings defaults or layout");
         s.combatVisuals = 0;
@@ -22246,7 +22366,7 @@ int main() {
         check(withTabOnly(Values{}, "single_hand_yank_percent=999\n").singleHandYankPercent == 300,
               "saved single-hand yank strength was not clamped");
         game_swing::Settings packet;
-        check(packet.version == 28 && packet.bytes == 132 && !packet.halfPunchDamage &&
+        check(packet.version == 29 && packet.bytes == 136 && !packet.halfPunchDamage &&
                   packet.singleHandYankPercent == 100 &&
                   offsetof(game_swing::Settings, halfPunchDamage) == 96 &&
                   offsetof(game_swing::Settings, singleHandYankPercent) == 100,
@@ -22846,10 +22966,10 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 74 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 75 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[74 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[74].title, "REALISTIC FLIPS") == 0 && all[74].choices.empty(),
+            check(all[75 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[75].title, "REALISTIC FLIPS") == 0 && all[75].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[50].item == Item::controlledFlips && all[53].item == Item::joystickRunCamera &&
                   all[54].item == Item::wallRunCameraTilt && all[55].item == Item::halfPunchDamage,
@@ -22945,12 +23065,16 @@ int main() {
         check(all[71].item == Item::spidyRun && std::strcmp(all[71].title, "SPIDY RUN") == 0 &&
                   all[71].choices.empty() && all[71].place == Place::tab,
               "SPIDY RUN: a switch in the tab, after SOFT LANDING");
-        check(all[72].item == Item::webAimSource && std::strcmp(all[72].title, "WEB AIM") == 0 &&
-                  all[72].choices.size() == 2 && std::strcmp(all[72].choices[1], "MODEL FOREARM") == 0 &&
-                  all[72].place == Place::tab && all[73].item == Item::forearmBlend &&
-                  std::strcmp(all[73].title, "FOREARM BLEND") == 0 && all[73].choices.size() == 5 &&
-                  std::strcmp(all[73].choices[4], "100%") == 0 && all[73].place == Place::tab,
-              "WEB AIM and FOREARM BLEND: in the tab, after SPIDY RUN");
+        check(all[72].item == Item::spidyRunFromStanding &&
+                  std::strcmp(all[72].title, "RUN FROM STANDING") == 0 && all[72].choices.empty() &&
+                  all[72].place == Place::tab,
+              "RUN FROM STANDING: a switch in the tab, after SPIDY RUN");
+        check(all[73].item == Item::webAimSource && std::strcmp(all[73].title, "WEB AIM") == 0 &&
+                  all[73].choices.size() == 2 && std::strcmp(all[73].choices[1], "MODEL FOREARM") == 0 &&
+                  all[73].place == Place::tab && all[74].item == Item::forearmBlend &&
+                  std::strcmp(all[74].title, "FOREARM BLEND") == 0 && all[74].choices.size() == 5 &&
+                  std::strcmp(all[74].choices[4], "100%") == 0 && all[74].place == Place::tab,
+              "WEB AIM and FOREARM BLEND: in the tab, after RUN FROM STANDING");
         {
             Values v;
             check(!v.spidyRun && defaultChoice(Item::spidyRun) == 0, "SPIDY RUN on by default");
@@ -23049,7 +23173,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 80,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 81,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -23308,7 +23432,7 @@ int main() {
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
                   "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
                   "degrees=0\nwrist_shooters=0\n"
-                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nweb_aim_source=0\nforearm_blend=100\n",
+                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_blend=100\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;
