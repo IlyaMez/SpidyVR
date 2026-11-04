@@ -28,7 +28,7 @@ from probe_stereo import frame_snapshot, render_memory_snapshot, scene_pool_snap
 from probe_native_rays import snapshot as ray_snapshot
 from probe_game_swing import snapshot as swing_snapshot
 from probe_native_motion import snapshot as motion_snapshot
-from vr_launcher import (LauncherLock, alive, bring_to_front, wait_for_game, enlarge_render_memory, elevated,
+from vr_launcher import (LauncherLock, alive, exit_status, bring_to_front, wait_for_game, enlarge_render_memory, elevated,
                          RENDER_MEMORY_HOOKS, NeedsAdministrator, NEEDS_ADMINISTRATOR_EXIT, CLOSE_GAME_EXIT,
                          close_game)
 import game_freeze
@@ -1936,6 +1936,7 @@ class DiagLog:
         self.seen = dict(main=0, aim=0)
         self.build = None
         self.lines = 0
+        self.stage = None  # the last "stage:" line (diag_log::Stages), for crash_advice
 
     def _out(self, line):
         self.echo(line)
@@ -1961,8 +1962,29 @@ class DiagLog:
             if first > seen:
                 self._out(f'Spidy diagnostics: {first-seen} {name} lines lost (read too late)')
             for index in range(first, written):
-                self._out('diag ' + slots[index % size])
+                line = slots[index % size]
+                if '] stage: ' in line:
+                    self.stage = line.split('] stage: ', 1)[1]
+                self._out('diag ' + line)
             self.seen[name] = written
+
+
+CRASH_CODES = {0xC0000005: 'an access violation', 0xC0000409: 'a stack buffer overrun',
+               0xC00000FD: 'a stack overflow', 0xC000001D: 'an illegal instruction',
+               0xC0000374: 'a heap corruption', 0xE06D7363: 'an unhandled C++ exception'}
+
+
+def crash_advice(code, stage=None):
+    """The console's line when the game ended with a crash's exit code, else None. November 3: three sessions
+    'froze' in the headset (the compositor keeps the last frame); the game had crashed, an access violation,
+    and only the game's own log said so."""
+    if code is None or code < 0xC0000000:
+        return None
+    what = CRASH_CODES.get(code, 'an error')
+    return (f'The game crashed (exit code 0x{code:08X}, {what})'
+            + (f' at stage: {stage}' if stage else '') +
+            ". The headset kept its last picture. Send this console, the diagnostics file and the game's "
+            "log (Documents\\Marvel's Spider-Man Remastered\\*.log, the newest; its .mdmp beside it too).")
 
 
 def diag_path(output):
@@ -3026,6 +3048,9 @@ def session(a, startup):
                       f"of a second each ({stalls['seconds']} s in all). That is the stream to the headset, not "
                       'the game' + (': this PC was on Wi-Fi.' if links.get('wifi') else '.'), flush=True)
             tell_device_lost()
+            crashed = crash_advice(exit_status(game), diag_log.stage)
+            if crashed:
+                diag_log._out(crashed)
             if diag_log.lines:
                 print(f'Diagnostics: {diag_log.path.resolve()}', flush=True)
             print(f'Game closed. Session report: {a.output.resolve()}',flush=True)

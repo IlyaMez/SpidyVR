@@ -2079,6 +2079,37 @@ class ProtocolTests(unittest.TestCase):
         struct.pack_into('<I', raw, 4, 2)
         self.assertIn('protocol_mismatch', diag_snapshot(game, 0x1000))
 
+    def test_a_crashed_game_says_so_with_its_last_stage(self):
+        """November 3: three sessions 'froze' in the headset; the game had crashed (0xC0000005) a second
+        after VR became active, and only the game's own log said so. The console and the diagnostics file now
+        say it, with the last "stage:" line (diag_log::Stages)."""
+        from run_game_vr import crash_advice, DiagLog
+        self.assertIsNone(crash_advice(None))
+        self.assertIsNone(crash_advice(0))
+        self.assertIsNone(crash_advice(1))
+        text = crash_advice(0xC0000005, 'frames reaching the headset - the eye images')
+        self.assertIn('0xC0000005, an access violation', text)
+        self.assertIn('at stage: frames reaching the headset', text)
+        self.assertIn('.mdmp', text)
+        with tempfile.TemporaryDirectory() as folder:
+            log = DiagLog(pathlib.Path(folder)/'x-diag.log', echo=lambda line: None)
+            raw = {'build': 'b', 'main': (2, ['[   1.000] stage: headset active, the eye views not started',
+                                              '[   2.000] stage: frames reaching the headset - the eye images']
+                                          + ['']*126), 'aim': (0, ['']*16)}
+            log.take(raw)
+            self.assertEqual(log.stage, 'frames reaching the headset - the eye images')
+
+    def test_the_forearm_aim_line_is_formatted_from_named_fields(self):
+        """v6 (78a43ed) passed two arguments more than its format to the forearm aim: snprintf; the last %s
+        read palm.x's double as a pointer and the game crashed at the first solved forearm. The line is
+        web_aim::formatForearmAimLine's now; no long printf of it is left in the worker."""
+        root = pathlib.Path(__file__).resolve().parents[1]
+        worker = (root/'src/game_xr.cpp').read_text(encoding='utf-8')
+        self.assertIn('web_aim::formatForearmAimLine(line, sizeof(line), fields);', worker)
+        self.assertNotIn('"forearm aim: %s', worker)
+        self.assertIn('startupStages.beat(', worker)
+        self.assertIn('stageLine(diag_log::Stages::headset)', worker)
+
     def test_every_gesture_the_worker_keeps_reaches_the_games_controller(self):
         """A gesture's held() must be read where the XR worker builds the controller, and every field of
         game_pad::Walk must be filled there.

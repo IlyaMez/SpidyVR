@@ -556,7 +556,7 @@ inline bool validSettings(const Settings& s) {
         (s.version < 22 || (s.singleHandYankPercent >= 50 && s.singleHandYankPercent <= 300)) &&
         s.webTie <= 1 &&
         (s.version < 24 || s.airSlingshot <= 1) &&
-        (s.version < 25 || (s.webAngle >= -45 && s.webAngle <= 45 && s.wristShooters <= 1)) &&
+        (s.version < 25 || (s.webAngle >= -45 && s.webAngle <= 45 && s.wristShooters <= 2)) &&
         (s.version < 26 || s.momentumLeap <= 1) && (s.version < 27 || s.softLanding <= 1) &&
         (s.version < 28 || s.spidyRun <= 1) && (s.version < 29 || s.spidyRunStanding <= 1) &&
         (s.version < 30 || (s.webLandingSmooth <= 1 && std::isfinite(s.webLandingImpact) &&

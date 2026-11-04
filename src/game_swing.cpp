@@ -1440,7 +1440,9 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
                                                      : static_cast<float>(web_landing::impactDefault));
         groundRunRefusals = 0;
         webAngle = s.version >= 25 ? s.webAngle : 0;
-        wristShooters = s.version >= 25 && s.wristShooters != 0;
+        // PALM SHOOTERS (v6) arrives as 2: the palm side's quarter turn. 1, WRIST
+        // SHOOTERS, is no turn here: game_xr sends the forearm's (WebTurns).
+        wristShooters = s.version >= 25 && s.wristShooters == 2;
         if (s.version >= 7)
             solver.allowArcade(s.arcade != 0);
         if (s.version >= 8)

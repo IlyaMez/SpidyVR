@@ -217,9 +217,12 @@ struct Values {
     bool airSlingshot = false;
     // WEB ANGLE, degrees (the tab's WEB ANGLE; web_aim.hpp): a hand's webs
     // tilt up (positive) or down from the controller's line, -45 to 45. And
-    // WRIST SHOOTERS (the tab's WRIST SHOOTERS): they leave square to the
-    // hand, out of the palm side, as the comics' shooters do. 0 and off by
-    // default: along the controller, as before. The fists keep the controller's.
+    // WRIST SHOOTERS (the tab's WRIST SHOOTERS; redefined in v6): they leave
+    // parallel to the forearm, out past the wrist toward the fingers, as the
+    // comics' and the films' shooters do: along the body's forearm when the
+    // body can say (as MODEL FOREARM), else along the controller's line. The
+    // old palm-side quarter turn is PALM SHOOTERS. 0 and off by default:
+    // along the controller, as before. The fists keep the controller's.
     int webAngle = 0;
     bool wristShooters = false;
     // WEB AIM (the tab's WEB AIM; web_aim::Source): 0 CONTROLLER, the webs

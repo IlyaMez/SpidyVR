@@ -7,6 +7,33 @@ Per-check results are in [VALIDATION.md](VALIDATION.md).
 
 Not in a build yet, newest first. The release adds these to the next build's entry.
 
+**No crash a second into VR with WEB AIM: MODEL FOREARM or WRIST SHOOTERS; startup stages and a watchdog in the diagnostics.**
+
+- **Before (November 3, Quest 3S over Link, commit 78a43ed4f5, three
+  sessions).** "The game starts, then the headset view freezes." Each time
+  the game had crashed: `[Crash] Unhandled exception at address
+  0x00000000daeb571d (code: 0xc0000005): "Access violation"`, 10-11 s after
+  the game's `Request save type 2`, a second after `VR active` and the first
+  `forearm aim:` lines, at the same address all three times. Those lines
+  showed the cause: `blend 0%, wrist miss 0.000, stale 100` with FOREARM
+  BLEND 100 - every field two along. The `forearm aim:` snprintf passed the
+  turn and the target twice; the last `%s` read palm.x's double as a
+  pointer: 0.0 untracked (printed nothing harmful), about +-1.0 at the first
+  solved forearm: the access violation. The headset kept its last picture.
+- **The line** is `web_aim::formatForearmAimLine` from named fields
+  (`ForearmAimLine`), tested with palm.x +-1.
+- **STARTUP STAGES** (`diag_log::Stages`): `stage:` lines in the diagnostics
+  (headset active; the eye views started; the first frame OpenXR accepted,
+  with what it showed; 300 frames), and a watchdog thread writing `watchdog:`
+  when no frame reached the headset 10 s after it went active, or the VR
+  worker has not come round for 5 s, with the stage and the frame count. It
+  publishes the diagnostics itself, so they arrive though the worker is
+  stuck.
+- **A crashed game says so** (run_game_vr.py `crash_advice`): with an exit
+  code of 0xC0000000 or above the console and the diagnostics file get `The
+  game crashed (exit code 0xC0000005, an access violation) at stage: ...`
+  and where the game's log and minidump are.
+
 **SPIDY RUN JUMP, and webs parallel to the forearm.**
 
 - **Before (V5 session, Quest 3S, commit 340f8815c0).** A in SPIDY RUN

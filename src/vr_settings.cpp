@@ -126,6 +126,9 @@ static_assert(std::size(earlyJumpChoices) == std::size(earlyJumps));
 constexpr int webAimSources[] = {0, 1};
 constexpr const char* webAimSourceChoices[] = {"CONTROLLER", "MODEL FOREARM"};
 static_assert(std::size(webAimSourceChoices) == std::size(webAimSources));
+constexpr int forearmAimLimits[] = {35, 60, 90, 180};
+constexpr const char* forearmAimLimitChoices[] = {"35 DEG", "60 DEG", "90 DEG", "NO LIMIT"};
+static_assert(std::size(forearmAimLimitChoices) == std::size(forearmAimLimits));
 constexpr int webLandingImpactSteps[] = {12, 16, 20, 24, 28, 32, 40};
 constexpr const char* webLandingImpactChoices[] = {"12 M/S", "16 M/S", "20 M/S", "24 M/S", "28 M/S", "32 M/S", "40 M/S"};
 static_assert(std::size(webLandingImpactChoices) == std::size(webLandingImpactSteps));
@@ -178,6 +181,8 @@ std::span<const int> steps(Item item) {
         return webAimSources;
     case Item::forearmBlend:
         return forearmBlends;
+    case Item::forearmAimLimit:
+        return forearmAimLimits;
     case Item::webLandingImpact:
         return webLandingImpactSteps;
     case Item::nativeRunAt:
@@ -259,6 +264,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.webAimSource);
     case Item::forearmBlend:
         return static_cast<float>(v.forearmBlend);
+    case Item::forearmAimLimit:
+        return static_cast<float>(v.forearmAimLimit);
     case Item::webLandingImpact:
         return static_cast<float>(v.webLandingImpact);
     case Item::nativeRunAt:
@@ -421,6 +428,7 @@ Values sanitized(Values v) {
     v.earlyJump = std::clamp(v.earlyJump, 0, 2);
     v.webAimSource = std::clamp(v.webAimSource, 0, 1);
     v.forearmBlend = std::clamp(v.forearmBlend, 0, 100);
+    v.forearmAimLimit = std::clamp(v.forearmAimLimit, 35, 180);
     v.webLandingImpact = std::clamp(v.webLandingImpact, 12, 40);
     v.nativeRunPercent = std::clamp(v.nativeRunPercent, 50, 90);
     v.nearClipMm = std::clamp(v.nearClipMm, nearClips[0], std::end(nearClips)[-1]);
@@ -613,7 +621,7 @@ const std::array<Row, 93>& rows() {
          webAngleChoices},
         {Item::wristShooters,
          "WRIST SHOOTERS",
-         "Webs leave square to the hand, out of the palm side, as Spider-Man's do.",
+         "Webs leave parallel to the forearm, past the wrist, as Spider-Man's do.",
          {}},
         {Item::dodgeTumble, "DODGE TUMBLE",
          "The view leans or rolls with the game's dodge, so you see it was one.", dodgeTumbleChoices},
@@ -786,6 +794,9 @@ bool choose(Item item, int index, Values& v) {
         break;
     case Item::forearmBlend:
         v.forearmBlend = s[index];
+        break;
+    case Item::forearmAimLimit:
+        v.forearmAimLimit = s[index];
         break;
     case Item::webLandingImpact:
         v.webLandingImpact = s[index];

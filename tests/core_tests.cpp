@@ -1556,7 +1556,9 @@ int main() {
         s.webAngle = 46;
         check(!game_swing::validSettings(s), "a web angle over 45 accepted");
         s.webAngle = 0;
-        s.wristShooters = 2;
+        s.wristShooters = 2; // PALM SHOOTERS (v6)
+        check(game_swing::validSettings(s), "PALM SHOOTERS' 2 refused");
+        s.wristShooters = 3;
         check(!game_swing::validSettings(s), "an invalid wrist shooters switch accepted");
         Values v;
         check(v.webAngle == 0 && !v.wristShooters && defaultChoice(Item::webAngle) == 3 &&
@@ -1572,6 +1574,82 @@ int main() {
                   withTabOnly({}, "web_angle_degrees=30\n").webAngle == 30 &&
                   !withTabOnly({}, "").wristShooters,
               "spidy_vr.ini's web_angle_degrees not clamped, or wrist_shooters on when absent");
+    });
+    test("WEB AIM: the forearm aim: line formats every field in its place (v6 crashed on palm.x)", [] {
+        using namespace web_aim;
+        ForearmAimLine l;
+        l.right = true;
+        l.reason = "none";
+        l.active = l.modelForearm = l.wristShooters = true;
+        l.turnDegrees = 12.5f;
+        l.targetDegrees = 13.5f;
+        l.limitDegrees = 180;
+        l.weight = .75f;
+        l.blend = 100;
+        l.handError = .02f;
+        l.stale = 3;
+        l.offDegrees = 40.f;
+        l.lagDegrees = 1.5f;
+        l.palmX = -1.f; // v6 read this double as the last %s's pointer: an access violation
+        l.jitterDegrees = .5f;
+        l.tilted = true;
+        char out[480];
+        formatForearmAimLine(out, sizeof(out), l);
+        const std::string text = out;
+        check(text.rfind("forearm aim: R none (active: the forearm's line), MODEL FOREARM + WRIST SHOOTERS, ", 0) ==
+                  0,
+              "the line's head");
+        for (const char* part :
+             {"turn 12.5 deg (target 13.5), limit 180 deg, not clamped, weight 0.75, blend 100%",
+              "wrist miss 0.020, stale 3, forearm vs controller 40.0 deg, grip lag 1.5 deg, palm.x -1.00",
+              "jitter 0.50 deg, flip tilt"})
+            check(text.find(part) != std::string::npos, part);
+        l.palmX = 1.f;
+        l.tilted = l.active = false;
+        formatForearmAimLine(out, sizeof(out), l);
+        check(std::string(out).find("palm.x +1.00, jitter 0.50 deg") != std::string::npos &&
+                  std::string(out).find("(null)") == std::string::npos,
+              "a fallback line");
+        check(formatForearmAimLine(nullptr, 0, l) == 0, "no buffer");
+    });
+    test("STARTUP STAGES: stage lines once each, the watchdog for no first frame or a stuck worker", [] {
+        diag_log::Stages s;
+        char out[diag_log::lineChars];
+        check(!s.check(1000, out, sizeof(out)), "a watchdog before the worker began");
+        s.beat(1000);
+        check(s.mark(diag_log::Stages::headset, 1000) && !s.mark(diag_log::Stages::headset, 1100),
+              "headset active marked twice");
+        check(s.mark(diag_log::Stages::views, 2000) && !s.mark(diag_log::Stages::headset, 2100) &&
+                  s.stage() == diag_log::Stages::views,
+              "a stage went back");
+        s.beat(10900);
+        check(!s.check(10900, out, sizeof(out)), "the watchdog before 10 s");
+        s.beat(11000);
+        check(s.check(11000, out, sizeof(out)) &&
+                  std::string(out).find("no frame reached the headset 10.0 s after it went active") !=
+                      std::string::npos &&
+                  std::string(out).find("waiting for the first eye images") != std::string::npos,
+              out);
+        check(!s.check(12000, out, sizeof(out)), "the watchdog repeated within 10 s");
+        check(s.submitted(12500) == diag_log::Stages::firstFrame && s.submitted(12510) == diag_log::Stages::none,
+              "the first frame");
+        for (int i = 2; i < 300; ++i)
+            s.submitted(12510 + i);
+        check(s.frames() == 300 && s.stage() == diag_log::Stages::running, "300 frames");
+        s.beat(13000);
+        check(!s.check(17000, out, sizeof(out)), "a running worker 4 s quiet");
+        check(s.check(21000, out, sizeof(out)) && std::string(out).find("running (300 frames") != std::string::npos,
+              "a worker stuck after 300 frames");
+        diag_log::Stages t;
+        t.beat(1000);
+        t.mark(diag_log::Stages::headset, 1000);
+        t.submitted(1100);
+        t.beat(2000);
+        check(!t.check(6900, out, sizeof(out)), "silent under 5 s");
+        check(t.check(7000, out, sizeof(out)) &&
+                  std::string(out).find("has not come round for 5.0 s") != std::string::npos &&
+                  std::string(out).find("1 frames submitted") != std::string::npos,
+              out);
     });
     test("WEB AIM: MODEL FOREARM turns the webs onto the forearm, clamped, smoothed, falling back", [] {
         using namespace web_aim;
@@ -1597,10 +1675,35 @@ int main() {
         const Quat aimOff = Quat::around({1, 0, 0}, -.3f);
         check(close(line(aimOff * forearmTurn(down15, {}, aimOff)), down15),
               "the aim frame's offset not undone");
-        // Clamped at 35 degrees.
+        // FOREARM AIM LIMIT 35 (v3-v5's clamp) holds at 35 degrees; v6's default has no limit.
         const Vec3 side60{std::sin(60 * deg), 0, -std::cos(60 * deg)};
-        check(std::abs(turnAngle(forearmTurn(side60, {}, {})) - forearmClampDegrees * deg) < 1e-3f,
+        check(std::abs(turnAngle(forearmTurn(side60, {}, {}, forearmClampDegrees)) - forearmClampDegrees * deg) <
+                  1e-3f,
               "the turn not held to 35 degrees");
+        check(close(line(forearmTurn(side60, {}, {})), side60) &&
+                  std::abs(turnAngle(forearmTurn(side60, {}, {})) - 60 * deg) < 1e-3f,
+              "v6's default limit clamped a 60 degree forearm");
+        const Vec3 side120{std::sin(120 * deg), 0, -std::cos(120 * deg)};
+        check(close(line(forearmTurn(side120, {}, {})), side120), "a forearm 120 degrees off not followed");
+        check(std::abs(turnAngle(forearmTurn(side120, {}, {}, 90)) - 90 * deg) < 1e-3f, "the 90 degree limit");
+        {
+            ForearmAim wide;
+            wide.update(true, forearmTurn(side60, {}, {}), 1.f / 90);
+            check(close(line(wide.smoothed), side60), "ForearmAim clamped by default");
+            ForearmAim narrow;
+            narrow.update(true, forearmTurn(side60, {}, {}), 1.f / 90, 35);
+            check(std::abs(turnAngle(narrow.smoothed) - 35 * deg) < 1e-3f, "ForearmAim's limit not taken");
+        }
+        // The web goes parallel to the forearm, elbow to wrist, out past the wrist: not
+        // out of the palm. A forearm along -Z with the controller pitched 40 degrees
+        // down gives the forearm's line, not the controller's.
+        {
+            const Vec3 elbow{0, 1, .3f}, wrist{0, 1, 0};
+            const Quat grip = Quat::around({1, 0, 0}, -40 * deg);
+            const Vec3 inGrip = forearmInGrip(elbow, wrist, grip);
+            const Quat turnOn = forearmTurn(inGrip, grip, grip);
+            check(close(line(grip * turnOn), {0, 0, -1}), "the web not parallel to the forearm (elbow->wrist)");
+        }
         // Mirrored hands, mirrored turns (x -> -x: the turn's y and z change sign).
         const Vec3 left{std::sin(12 * deg), -std::sin(10 * deg), -1}, right{-left.x, left.y, left.z};
         const Quat tl = forearmTurn(normalized(left), {}, {}), tr = forearmTurn(normalized(right), {}, {});
@@ -1641,7 +1744,7 @@ int main() {
         const Pose wrist = shooterAim(level, 0, {0, true}, t15);
         check(std::abs(dot(line(wrist.orientation), down15)) < 1e-4f &&
                   close(line(wrist.orientation), {1, 0, 0}),
-              "WRIST SHOOTERS not square to the forearm");
+              "PALM SHOOTERS (the old WRIST SHOOTERS) not square to the forearm");
         // The identity turn is the old shooterAim exactly.
         const Quat held = Quat::around({0, 1, 0}, .7f) * Quat::around({1, 0, 0}, -.3f);
         for (int hand = 0; hand < 2; ++hand) {

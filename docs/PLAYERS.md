@@ -968,10 +968,15 @@ VR settings
                    your hands along, up or down from the controller's, 15
                    to 45 degrees. The aim markers follow it. Your punches
                    keep the controller's own line.
-  WRIST SHOOTERS   (off until you switch it on) webs leave square to your
-                   hand, out of the palm side, as Spider-Man's shooters
-                   on the inside of his wrists do: turn your palm toward
-                   where the web should go. WEB ANGLE tilts that line too.
+  WRIST SHOOTERS   (off until you switch it on) webs leave parallel to your
+                   forearm, out past the wrist toward your fingers, as
+                   Spider-Man's shooters (and the films' natural webs) do:
+                   along the forearm of the body you see when it can say,
+                   else along the controller. WEB ANGLE tilts that line.
+                   (Before v6 this sent webs square out of the palm side:
+                   that was wrong, and is now PALM SHOOTERS.)
+  PALM SHOOTERS    (off until you switch it on) the old WRIST SHOOTERS:
+                   webs leave square to your hand, out of the palm side.
   DODGE TUMBLE     (OFF until you pick one) when the game dodges, your
                    view tips toward the dodge (LEAN) or turns a full roll
                    (ROLL, sideways dodges) so you can tell it dodged. Your
@@ -989,6 +994,10 @@ VR settings
                    "diag ..." and are saved in reports\ as
                    game-vr-<time>-diag.log, which starts with the build and
                    your settings: that file is the one to send back.
+                   It also says how far VR got ("stage: ...") and, when
+                   the game crashed, "The game crashed (exit code ...)":
+                   send that file with the game's newest log from
+                   Documents\Marvel's Spider-Man Remastered.
   RUNNING LEAP    (off until you switch it on) a charged leap (hold A on
                    the ground) keeps the speed you run at and adds its
                    charge on top; a full one from a fast run is a long
@@ -1022,8 +1031,14 @@ VR settings
                    say (body off, a cutscene, an arm it cannot reach) they
                    go back to the controller's line. WEB ANGLE and WRIST
                    SHOOTERS still turn on top; punches keep the controller.
+                   Since v6 the line is the forearm's own (elbow to wrist),
+                   no longer held within 35 degrees of the controller, and
+                   a flip's tilt no longer drops it.
   FOREARM BLEND    (100% until you change it) how much of the forearm's
                    line MODEL FOREARM takes, from 0% (the controller's).
+  FOREARM AIM LIMIT (NO LIMIT until you change it) how far MODEL FOREARM
+                   and WRIST SHOOTERS may turn your webs off the
+                   controller's line: 35 DEG (v5's), 60, 90 or NO LIMIT.
   SMOOTH WEB LANDING (off until you switch it on) land while you hold a
                    web, slower than WEB LANDING IMPACT, and your fall eases
                    over the last metres, your speed carries on across the

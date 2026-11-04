@@ -1876,9 +1876,14 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "degrees. 0: along the controller, as before. Punches keep the controller's own.",
                S(150), [&] { tabCombo("##webangle", Item::webAngle); });
         option("Wrist shooters",
-               "Webs leave square to the hand, out of the palm side, as Spider-Man's shooters do: turn the "
-               "palm to where the web should go. Off: along the controller, as before.",
+               "Webs leave parallel to your forearm, out past the wrist toward the fingers, as Spider-Man's "
+               "shooters do (and the films' natural webs): along the forearm of the body you see when it can "
+               "say, else along the controller. Off: along the controller, as before.",
                S(42), [&] { tabToggle("##wristshooters", Item::wristShooters); });
+        option("Palm shooters",
+               "The old wrist shooters (before v6): webs leave square to the hand, out of the palm side. "
+               "Off by default.",
+               S(42), [&] { tabToggle("##palmshooters", Item::palmShooters); });
         option("Web aim (experimental)",
                "MODEL FOREARM: your webs leave along the forearm of the Spider-Man body you see, rather than "
                "along the controller, and go back to the controller's line whenever the body cannot say "
@@ -1889,6 +1894,11 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "With web aim MODEL FOREARM: how much of the forearm's line the webs take, from 0% (the "
                "controller's) to 100% (the forearm's). 100% by default.",
                S(150), [&] { tabCombo("##forearmblend", Item::forearmBlend); });
+        option("Forearm aim limit",
+               "How far web aim MODEL FOREARM and wrist shooters may turn your webs off the controller's line "
+               "onto the forearm. NO LIMIT by default (v5 had 35 degrees, which kept the webs near the "
+               "controller).",
+               S(150), [&] { tabCombo("##forearmaimlimit", Item::forearmAimLimit); });
         option(
             "Dodge tumble (experimental)",
             "When the game takes your dodge, the view leans (LEAN, 24 degrees, under half a second) or rolls "

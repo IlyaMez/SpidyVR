@@ -2,17 +2,23 @@
 #include "math.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdio>
 
 // WEB ANGLE and WRIST SHOOTERS (vr_settings::Values::webAngle, wristShooters):
 // which way a hand's webs leave it. The controller's aim pose points its -Z
 // along the controller, +Y up out of its top, +X to its right, for either
 // hand. As before (WEB ANGLE 0, WRIST SHOOTERS off) a web goes along -Z.
 //
-// WRIST SHOOTERS turns the line a quarter turn onto the palm side, square to
-// the hand and forearm, as the comics' shooters on the inside of the wrist
-// fire: the palm of a controller held in the left hand faces its +X, in the
-// right hand its -X. WEB ANGLE then tilts it up (positive, toward the top of
-// the controller, the thumb) or down, degrees, either way.
+// Shooters::wrist (PALM SHOOTERS since v6; WRIST SHOOTERS in v2-v5) turns the
+// line a quarter turn onto the palm side, square to the hand: the palm of a
+// controller held in the left hand faces its +X, in the right hand its -X.
+// That was a misreading: the comics' shooters, and the films' natural webs,
+// fire parallel to the forearm, out past the wrist. WRIST SHOOTERS (v6) is
+// therefore no turn here: game_xr sends the forearm's line (as MODEL FOREARM)
+// and the controller's line where the body cannot say. WEB ANGLE then tilts
+// it up (positive, toward the top of the controller, the thumb) or down,
+// degrees, either way.
 //
 // Only a web's line turns, never where it leaves from: the aim pose's position
 // stays, so a web and its marker start at the hand as before. game_swing turns
@@ -64,8 +70,16 @@ inline Pose shooterAim(Pose aim, int hand, Shooters s) {
 // forearm line's own side, the shooters a quarter turn about the forearm.
 // Where a web leaves from does not change.
 enum class Source : int { controller = 0, forearm = 1 };
-constexpr float forearmClampDegrees = 35, forearmSmoothSeconds = .08f, forearmFallbackSeconds = .15f,
+// forearmClampDegrees: v3-v5's limit (FOREARM AIM LIMIT 35). The V5 session
+// had the forearm 35-77 degrees off the controller in 267 of its 394 active
+// samples, so the webs stayed clamped near the controller ("they keep
+// tracking my palm"): v6 takes the limit from the setting, none by default.
+constexpr float forearmClampDegrees = 35, forearmLimitDefault = 180, forearmSmoothSeconds = .08f, forearmFallbackSeconds = .15f,
                 forearmMiss = .1f;
+// A sample this many VR frames without a new solve is stale (v3-v5: 2; the
+// V5 session fell back as stale in 164 lines, mostly at 3; the forearm is
+// carried on the grip now, so a solve 100 ms old still points right).
+constexpr unsigned forearmStaleFrames = 8;
 // Why a hand's sample is not used (the log's reason).
 enum class Fallback : int { none, off, untracked, notSolved, wristMiss, stale, gameCamera, tilted };
 inline const char* fallbackName(Fallback f) {
@@ -130,14 +144,46 @@ inline Vec3 forearmInGrip(Vec3 elbow, Vec3 wrist, Quat gripAtSolve) {
 // The turn of the current aim pose (aimNow) that takes its line (-Z) onto
 // that forearm, carried on the current grip (gripNow), clamped; the identity
 // when there is no forearm.
-inline Quat forearmTurn(Vec3 inGrip, Quat gripNow, Quat aimNow) {
+inline Quat forearmTurn(Vec3 inGrip, Quat gripNow, Quat aimNow, float limitDegrees = forearmLimitDefault) {
     if (!finite(inGrip) || length(inGrip) < .5f)
         return {};
     const Vec3 world = unitOr(gripNow).rotate(inGrip);
     const Vec3 local = normalized(unitOr(aimNow).conjugate().rotate(world));
     if (!finite(local) || length(local) < .5f)
         return {};
-    return clampTurn(arc({0, 0, -1}, local), forearmClampDegrees * 3.14159265f / 180);
+    return clampTurn(arc({0, 0, -1}, local), std::clamp(limitDegrees, 0.f, 180.f) * 3.14159265f / 180);
+}
+// One "forearm aim:" line (the diagnostics and the report's timeline), from
+// named fields rather than a long printf list in game_xr. v6 (78a43ed) passed
+// the turn and target twice there, two arguments more than the format had: every
+// later field moved two along, and the last %s read palm.x's double as a
+// pointer. 0.0 printed "(null)"; the first solved forearm (palm.x about +-1)
+// crashed the game, an access violation, a second after VR became active (the
+// November 3 sessions, three times at the same address).
+struct ForearmAimLine {
+    bool right{}, active{}, modelForearm{}, wristShooters{}, clamped{}, tilted{};
+    const char* reason = "";
+    float turnDegrees{}, targetDegrees{}, limitDegrees{}, weight{}, handError{}, offDegrees{}, lagDegrees{},
+          palmX{}, jitterDegrees{};
+    int blend{};
+    unsigned stale{};
+};
+inline int formatForearmAimLine(char* out, std::size_t size, const ForearmAimLine& l) {
+    if (!out || !size)
+        return 0;
+    return std::snprintf(
+        out, size,
+        "forearm aim: %s %s (%s), %s, turn %.1f deg (target %.1f), limit %.0f deg%s, weight %.2f, blend %d%%, "
+        "wrist miss %.3f, stale %u, forearm vs controller %.1f deg, grip lag %.1f deg, palm.x %+.2f, jitter "
+        "%.2f deg%s",
+        l.right ? "R" : "L", l.reason ? l.reason : "",
+        l.active ? "active: the forearm's line" : "fallback: the controller's line",
+        l.modelForearm ? (l.wristShooters ? "MODEL FOREARM + WRIST SHOOTERS" : "MODEL FOREARM") : "WRIST SHOOTERS",
+        static_cast<double>(l.turnDegrees), static_cast<double>(l.targetDegrees),
+        static_cast<double>(l.limitDegrees), l.clamped ? ", clamped" : ", not clamped",
+        static_cast<double>(l.weight), l.blend, static_cast<double>(l.handError), l.stale,
+        static_cast<double>(l.offDegrees), static_cast<double>(l.lagDegrees), static_cast<double>(l.palmX),
+        static_cast<double>(l.jitterDegrees), l.tilted ? ", flip tilt" : "");
 }
 // One hand's forearm turn, smoothed, and how much of it is used (weight: 0
 // the controller's line, 1 the forearm's).
@@ -148,12 +194,12 @@ struct ForearmAim {
     void reset() {
         *this = {};
     }
-    void update(bool valid, Quat target, float dt) {
+    void update(bool valid, Quat target, float dt, float limitDegrees = forearmLimitDefault) {
         if (!std::isfinite(dt) || dt < 0)
             dt = 0;
         dt = std::min(dt, .1f);
         if (valid) {
-            target = clampTurn(target, forearmClampDegrees * 3.14159265f / 180);
+            target = clampTurn(target, std::clamp(limitDegrees, 0.f, 180.f) * 3.14159265f / 180);
             smoothed = primed ? slerp(smoothed, target, 1 - std::exp(-dt / forearmSmoothSeconds)) : target;
             primed = true;
             weight = std::min(1.f, weight + dt / forearmFallbackSeconds);
