@@ -3,9 +3,9 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (November 2): a load hitch no longer lets go of the webs.**
-GolexPrime: "with load stutters while swinging I very often lose the web, as
-if it were cut or I let go".
+**Latest build (November 2): pull request #57 by GolexPrime - a load hitch
+no longer lets go of the webs.** GolexPrime: "with load stutters while
+swinging I very often lose the web, as if it were cut or I let go".
 
 - **Why.** The swing runs in the game's frame (its ray batch). A load hitch
   stops that frame, and the swing timed two things by the wall clock: the
