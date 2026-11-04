@@ -402,8 +402,9 @@ struct FrameHead {
     // the XR worker with the command), and whether the worker sent one.
     Mat4 panel{};
     bool followed{};
-    // The command is a first-person scene's (anchored 2 or 4): its head is where the character's head was when this
-    // head was latched, which in a scene can be a frame of travel before the eyes are placed (placeEyes).
+    // The command is a first-person scene's (anchored 2 or 4): its head is where the character's head was
+    // when this head was latched, which in a scene can be a frame of travel before the eyes are placed
+    // (placeEyes).
     bool scene{};
 };
 FrameHead frameHead, earlyFrameHead;
@@ -1734,7 +1735,8 @@ void enqueueCommand(void* list, uint32_t command, uint64_t order, void* payload)
 // each eye's previous camera equal to its current one, so motion vectors and
 // temporal anti-aliasing saw no camera motion.
 void placeEyes() {
-    // First-person scenes: this frame's player entity for the head search, and the hiding the worker asked for.
+    // First-person scenes: this frame's player entity for the head search, and the hiding the worker asked
+    // for.
     game_fp::hero(playerRecord.load() ? pointer(playerRecord.load()) : 0);
     Descriptor main{};
     const auto primary = pointer(base + 0x7a34dd0);
@@ -1748,9 +1750,10 @@ void placeEyes() {
     activeHeroPlaced = false;
     native_eyes::Command desired{};
     bool controlled{};
-    // A first-person scene's eyes are put on the character's head as it is NOW: the head latched earlier in the frame
-    // (the HUD's placement, inside the frame's gameplay) can be a step of the character's travel behind it, which at a
-    // swing's speed left the eyes trailing the head by up to a metre. The active view and the HUD keep the latched one.
+    // A first-person scene's eyes are put on the character's head as it is NOW: the head latched earlier in
+    // the frame (the HUD's placement, inside the frame's gameplay) can be a step of the character's travel
+    // behind it, which at a swing's speed left the eyes trailing the head by up to a metre. The active view
+    // and the HUD keep the latched one.
     if (render && frameHead.frame == frameIndex && !frameHead.scene) {
         // The active view and the HUD went to this command's head (latchHead).
         desired = frameHead.command;
@@ -1843,11 +1846,12 @@ void placeEyes() {
         native_eyes::Bounds lens{};
         if (native_eyes::headView(desired, pose, lens)) {
             if (frameHead.frame == frameIndex && frameHead.scene && frameHead.viewed) {
-                // How far the head latched earlier in the frame was from the one the eyes now stand on: the report's
-                // offset mismatch, for a scene (what the HUD and the eyes did not move alike by).
-                const float apart =
-                    length(Vec3{pose[12] - frameHead.pose[12], pose[13] - frameHead.pose[13], pose[14] - frameHead.pose[14]});
-                native_hud::publish([&](native_hud::Data& d) { d.offsetMismatch = std::max(d.offsetMismatch, apart); });
+                // How far the head latched earlier in the frame was from the one the eyes now stand on: the
+                // report's offset mismatch, for a scene (what the HUD and the eyes did not move alike by).
+                const float apart = length(Vec3{pose[12] - frameHead.pose[12], pose[13] - frameHead.pose[13],
+                                                pose[14] - frameHead.pose[14]});
+                native_hud::publish(
+                    [&](native_hud::Data& d) { d.offsetMismatch = std::max(d.offsetMismatch, apart); });
             }
             pose[12] += placed.offset.x;
             pose[13] += placed.offset.y;

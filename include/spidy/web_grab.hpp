@@ -42,6 +42,14 @@ struct GrabConfig {
     // A new web leaves this much slack: taking hold of a target does not yet
     // pull it, so a webbed thug stays on its feet until the hand pulls.
     float slack = .3f;
+    // An enemy (a character) comes to the player only when the hand yanks
+    // him (the pull gesture): his web neither winds in on the trigger nor
+    // pulls as the hand or the player moves away - it pays out, staying slack
+    // (November 2: "a webbed enemy far away, caught on a second web, came
+    // over to me by himself; pulling should only happen with the pull
+    // gesture"). Props keep both. False (the default): as before. On with
+    // WEB TIE (game_grab::allowTies).
+    bool yankOnlyCharacters = false;
     // Trigger winds a web in; a sharp pull of the hand away from the target
     // (the zip gesture) yanks it over to the hand at its pull speed times this.
     float reelSpeed = 12;
@@ -185,6 +193,10 @@ class WebGrab {
     std::optional<GrabTarget> preview(Pose aim, const WorldQueries&, const TargetQueries&) const;
     // Drops every web; a grip still held must be released before the next shot.
     void releaseAll();
+    // Hands one hand's web over to another (the web tie, web_tie.hpp): the
+    // grab ends with no event, no throw and nothing for the web to trail, and
+    // a grip still held shoots nothing until it is let go.
+    void handOver(int hand);
     const std::array<Grab, 2>& grabs() const {
         return grabs_;
     }
@@ -194,6 +206,10 @@ class WebGrab {
     }
     const GrabConfig& config() const {
         return config_;
+    }
+    // GrabConfig::yankOnlyCharacters, switched during play.
+    void yankOnlyCharacters(bool on) {
+        config_.yankOnlyCharacters = on;
     }
 
   private:

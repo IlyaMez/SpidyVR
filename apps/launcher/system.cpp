@@ -545,9 +545,12 @@ Settings loadSettings() {
         else if (key == "flips") o.flips = number() != 0;
         else if (key == "trigger_webs") o.triggerWebs = number() != 0;
         else if (key == "arcade_webs") o.arcadeWebs = number() != 0;
-        else if (key == "first_person_cutscenes") o.firstPersonCutscenes = number() != 0;
-        else if (key == "cutscene_head_tracking") o.cutsceneHeadTracking = number() != 0;
-        else if (key == "disable_theater_screen") o.disableTheater = number() != 0;
+        else if (key == "first_person_cutscenes")
+            o.firstPersonCutscenes = number() != 0;
+        else if (key == "cutscene_head_tracking")
+            o.cutsceneHeadTracking = number() != 0;
+        else if (key == "disable_theater_screen")
+            o.disableTheater = number() != 0;
         // wall_run (before October 25) and stand_on_walls (written until then, read until October 15) are no
         // longer read: the swing's walls and the view on them are always on.
         else if (key == "game_depth_of_field") o.gameDepthOfField = number() != 0;

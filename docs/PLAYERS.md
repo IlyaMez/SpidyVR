@@ -747,6 +747,18 @@ launcher's options) sets how much: LOW and MEDIUM keep the scene further
 behind the screen, HIGH shows everything as far from you as it is from the
 game's camera, OFF is the flat picture again.
 
+Or play them around you, from inside the head of the character who plays
+them: "First person cutscenes" in the launcher's options (Game screen and
+HUD; experimental, off by default). Spider-Man, Peter, Miles or MJ: their
+head is hidden, so you do not see the inside of it. Click the right stick in
+a scene to switch to the theater screen and back. X on the left controller
+changes whose eyes you see through while another character is in the scene.
+"Cutscene head tracking" (on by default) lets your head turn the view; off,
+the scene's own camera aims it and the right stick turns it. "Disable
+theater screen fully" plays every scene around you, from the scene's own
+camera when first-person cutscenes are off. With either on, play after a
+scene faces where the scene left you.
+
 The game's HUD (health, gadgets, minimap, prompts, subtitles and the game's
 markers) floats 2 m ahead of you, about 60 degrees wide. It stays still while
 your head moves a little, and glides back in front of you when you look
@@ -881,6 +893,14 @@ VR settings
                    finishers. Launch and smash velocity, knockback, combo
                    rules and punch recognition do not change. Off restores
                    normal damage. This is not a global game damage setting.
+  WEB TIE ........ in EXPERIMENTAL after HALF PUNCH DAMAGE, off by default.
+                   Web an enemy up, put one web on a wall (a ceiling, a
+                   beam, a crane, a lamp post) and the other on him, bring
+                   your hands together and click the right stick: he is
+                   pulled onto it and stuck there until the fight is over.
+                   Both controllers tick when it is ready. While it is on,
+                   a webbed enemy comes to you only when you yank him; off,
+                   as before.
   EXPERIMENTAL ... FLIPS (off until you switch it on) uses the right stick
                    in the air; release holds the angle and A returns upright.
                    CONTROLLED FLIPS is a separate A-toggle mode, above.
@@ -889,6 +909,7 @@ VR settings
                    uses a fixed wall-camera clearance. EYE AIM (OFF unless
                    you pick WEB BALLS, ZIPS or BOTH; below). FLIP
                    REPROJECTION (off until you switch it on; below).
+                   WEB TIE (off until you switch it on, above).
                    REALISTIC FLIPS (off until you switch it on, above) and
                    the ten rows that tune it.
   EYE AIM ........ for a headset whose VR runtime gives games your eyes

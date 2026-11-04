@@ -24,9 +24,10 @@ struct Command {
     // 0: the eyes are in the world as sent. 1: they were placed from the player's feet at `anchor`, and the
     // render thread moves them with the player's travel since. 2 (a first-person scene, enabled 1): they are
     // relative to the head of the character the scene plays, each a pose in that head's own axes (rows right,
-    // down, forward; translation along them), and the render thread resolves them with the head of the frame it
-    // renders (onHead, game_fp.hpp). 3: such a command, once resolved; the eyes are in the world, as sent. 4: as 2, but
-    // the axes are a level frame (game_fp::frameLevel): only the head's place follows the character, not its turn.
+    // down, forward; translation along them), and the render thread resolves them with the head of the frame
+    // it renders (onHead, game_fp.hpp). 3: such a command, once resolved; the eyes are in the world, as sent.
+    // 4: as 2, but the axes are a level frame (game_fp::frameLevel): only the head's place follows the
+    // character, not its turn.
     uint32_t anchored{};
 };
 static_assert(sizeof(Command) == 208);
@@ -36,7 +37,8 @@ inline Mat4 onHead(const Mat4& relative, const Mat4& head) {
     Mat4 world{};
     for (int row = 0; row < 3; ++row)
         for (int column = 0; column < 3; ++column)
-            world[row * 4 + column] = relative[row * 4] * head[column] + relative[row * 4 + 1] * head[4 + column] +
+            world[row * 4 + column] = relative[row * 4] * head[column] +
+                                      relative[row * 4 + 1] * head[4 + column] +
                                       relative[row * 4 + 2] * head[8 + column];
     for (int column = 0; column < 3; ++column)
         world[12 + column] = relative[12] * head[column] + relative[13] * head[4 + column] +
@@ -100,7 +102,9 @@ inline bool valid(const Stereo& s) {
 }
 inline bool valid(const Command& c) {
     if (c.magic != 0x53455043 || c.version != 2 || c.bytes != sizeof(c) || c.enabled > 3 || !c.serial ||
-        c.leaseMs > 500 || c.reserved || (c.anchored > 2 && c.anchored != 4) || ((c.anchored == 2 || c.anchored == 4) && c.enabled != 1) || !finite(c.anchor) || std::abs(c.anchor.x) > 1e6f ||
+        c.leaseMs > 500 || c.reserved || (c.anchored > 2 && c.anchored != 4) ||
+        ((c.anchored == 2 || c.anchored == 4) && c.enabled != 1) || !finite(c.anchor) ||
+        std::abs(c.anchor.x) > 1e6f ||
         std::abs(c.anchor.y) > 1e6f || std::abs(c.anchor.z) > 1e6f)
         return false;
     if (!c.enabled)

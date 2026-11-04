@@ -508,9 +508,10 @@ struct SessionOptions {
     // With first-person cutscenes: your head turns the view in a scene. Off, the scene's own camera aims
     // the view (your position still follows the headset).
     bool cutsceneHeadTracking = true;
-    // No theatre screen for the scenes the game plays (cutscenes, finishers, story moments): every one is rendered
-    // around you in VR, from inside the character's head with first-person cutscenes on, from the scene's own camera
-    // without them. Menus, the pause screen and loading have nothing to put around you and stay on the screen.
+    // No theatre screen for the scenes the game plays (cutscenes, finishers, story moments): every one is
+    // rendered around you in VR, from inside the character's head with first-person cutscenes on, from the
+    // scene's own camera without them. Menus, the pause screen and loading have nothing to put around you and
+    // stay on the screen.
     bool disableTheater = false;
     int smoothTurn = 0; // degrees a second the right stick turns you while held over; 0: it snap turns
     int weight = 100;   // how heavy you are while webs fly you, percent of real gravity

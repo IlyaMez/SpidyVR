@@ -110,7 +110,9 @@ struct XrConfig {
     // bit 21: arcade webs (WEB STYLE: ARCADE; vr_settings::Values::arcadeWebs);
     // bit 22: first-person cutscenes (cutscenes and story moments play in 3D around the player, from
     // inside the hero's head, instead of on the game screen: game_fp.hpp, game_fp.cpp);
-    // bit 23: with bit 22, the scene's own camera aims the view, not the player's head
+    // bit 23: with bit 22, the scene's own camera aims the view, not the player's head;
+    // bit 24: no theatre screen: every scene the game plays is shown round the player, from the
+    // scene's own camera without bit 22 (game_fp::sceneCamera)
     uint32_t options{};
     // OpenXR runtime manifest the launcher chose; empty: Virtual Desktop's if
     // installed, else Windows' active runtime.
@@ -517,6 +519,8 @@ const game_dodge::Data* dodgeResults{};
 // The tab's BLOW SOUNDS to the ray module (SpidySoundMode; optional).
 DWORD(WINAPI* soundMode)(void*){};
 BridgeCall startSwing{}, submitSwing{}, sampleSwing{}, stopSwing{}, retargetSwing{}, sampleGrab{}, sampleAim{};
+// Optional: the web tie's telemetry (game_grab::TieData; an older ray module has none).
+BridgeCall sampleTie{};
 // Each web's edges (game_swing::Bends): optional, without it a web round an
 // edge is drawn to that edge.
 BridgeCall sampleBends{}, sampleWebFlight{};
@@ -1029,26 +1033,27 @@ DWORD WINAPI run(void*) {
         // and whether that scene's stereo eyes have the HUD's panel.
         SceneClock sceneClock;
         ScenePanel scenePanel;
-        // First-person cutscenes (options bit 22): the tracking-space pose the view of a scene is measured from
-        // (the headset where the scene began, turned to its heading), whether it is taken, and the last line of
-        // the worker that finds the scene's character the log has.
+        // First-person cutscenes (options bit 22): the tracking-space pose the view of a scene is measured
+        // from (the headset where the scene began, turned to its heading), whether it is taken, and the last
+        // line of the worker that finds the scene's character the log has.
         Pose sceneRef{};
         bool sceneRefSet{}, wasFpScene{}, wasCameraView{};
         uint64_t fpLastWanted{};
-        // The right thumbstick's click in a first-person scene puts the theatre screen back, and again the first-person
-        // view (fpTheatre); with the theater screen disabled (options bit 24) it puts the scene's own camera there instead
-        // of the screen; it stays until clicked again, in play too. fpClickTaken: that click toggled the view, it is
-        // not slow motion.
+        // The right thumbstick's click in a first-person scene puts the theatre screen back, and again the
+        // first-person view (fpTheatre); with the theater screen disabled (options bit 24) it puts the
+        // scene's own camera there instead of the screen; it stays until clicked again in a scene (in play
+        // the click is the game's R3, or WEB TIE's). fpClickTaken: that click toggled the view, it is not
+        // slow motion.
         bool fpTheatre{}, wasFpRightClick{}, fpClickTaken{}, wasFpX{};
-        // Head tracking off: the right stick turns the view (your snap or smooth turn setting), radians, and whether
-        // the stick is held past a flick.
+        // Head tracking off: the right stick turns the view (your snap or smooth turn setting), radians, and
+        // whether the stick is held past a flick.
         float sceneTurn{};
-        // The heading the first-person scene's view last had, world yaw, and when: play that follows a scene faces
-        // there (GameTrackingRig::sceneFacing).
+        // The heading the first-person scene's view last had, world yaw, and when: play that follows a scene
+        // faces there (GameTrackingRig::sceneFacing).
         float fpFacing{};
         uint64_t fpFacingMs{};
-        // When play (the gameplay camera) last began / the game's own camera last began, for the first-person view's
-        // quick entry and its hold across a blink of play inside one scene (a finisher's shots).
+        // When play (the gameplay camera) last began / the game's own camera last began, for the first-person
+        // view's quick entry and its hold across a blink of play inside one scene (a finisher's shots).
         uint64_t fpPlayStart{}, fpIdleSince{}, fpWantStart{};
         bool sceneFlick{};
         uint32_t fpNoteSeen{};
@@ -1082,6 +1087,11 @@ DWORD WINAPI run(void*) {
         // What each hand's web holds, when it caught a thug instead of a wall.
         game_grab::Data grabState;
         uint32_t grabPhases[2]{};
+        // The web tie: its webs, and the gesture's state and ties made before
+        // this frame (a tick in both hands when it is ready, a pulse on a tie).
+        game_grab::TieData tieState;
+        bool tieArmedBefore{};
+        uint64_t tiesMadeBefore{};
         // A grab's event pulse plays this long before the web's tension
         // takes the hand's haptics again (predicted display time, ns).
         int64_t pulseUntil[2]{};
@@ -1378,6 +1388,7 @@ DWORD WINAPI run(void*) {
             s.webSpeed = static_cast<uint32_t>(values.webSpeed);
             s.halfPunchDamage = values.halfPunchDamage;
             s.singleHandYankPercent = static_cast<uint32_t>(values.singleHandYankPercent);
+            s.webTie = values.webTie;
             sentSwingSettings = s;
             swingSettingsSent = true;
             // A hand-over owns the walls while it lasts; the player's own
@@ -2017,14 +2028,19 @@ DWORD WINAPI run(void*) {
                     if (zipPriority || (flipZipPlay && zipPress.active())) {
                         controller.hands[1].stickX = controller.hands[1].stickY = 0;
                     }
-                    // Whether the game's time runs, for the rig to tell a scene's end from a menu's (after a scene
-                    // the view faces where the game's camera does).
+                    // Whether the game's time runs, for the rig to tell a scene's end from a menu's (after a
+                    // scene the view faces where the game's camera does). Only with first-person cutscenes or
+                    // the theater screen disabled (options bits 22, 24): without them play resumes after a
+                    // scene facing as it did before it, as it always has.
                     {
                         const auto sceneTime = game_time::telemetry();
-                        rig.scene(sceneClock.running(sceneTime.installed && sceneTime.gameFrame > 0, GetTickCount64()));
-                        // The heading the first-person scene's view had at its last frame, for 4 s after it and only
-                        // while play has not come back (a menu later is no scene's end).
-                        rig.sceneFacing(fpFacingMs && GetTickCount64() - fpFacingMs < 4000 && !motion.active, fpFacing);
+                        rig.scene((config.options & 0x1400000) && !flatScreen &&
+                                  sceneClock.running(sceneTime.installed && sceneTime.gameFrame > 0,
+                                                     GetTickCount64()));
+                        // The heading the first-person scene's view had at its last frame, for 4 s after it
+                        // and only while play has not come back (a menu later is no scene's end).
+                        rig.sceneFacing(fpFacingMs && GetTickCount64() - fpFacingMs < 4000 && !motion.active,
+                                        fpFacing);
                     }
                     motion = rig.update(seated::raised(controller, seatRaise), feet, {camera[8], camera[9], camera[10]}, gameplay,
                                         swingState.owned ? Vec3{0, 1, 0} : heroUp,
@@ -2072,24 +2088,27 @@ DWORD WINAPI run(void*) {
                     const auto clock = game_time::telemetry();
                     const bool timeRuns =
                         sceneClock.running(clock.installed && clock.gameFrame > 0, GetTickCount64());
-                    // FIRST-PERSON CUTSCENES: the scene is shown from inside the head of the character it plays,
-                    // round the viewer, instead of on the screen (game_fp.hpp). Wanted while a scene plays
-                    // (the same conditions, but the screen's 3D depth and its HUD panel); it is shown once the
-                    // character's head has been found, the screen's stereo scene until then.
+                    // FIRST-PERSON CUTSCENES: the scene is shown from inside the head of the character it
+                    // plays, round the viewer, instead of on the screen (game_fp.hpp). Wanted while a scene
+                    // plays (the same conditions, but the screen's 3D depth and its HUD panel); it is shown
+                    // once the character's head has been found, the screen's stereo scene until then.
                     const bool sceneBase = screen && player.hero && bridgeRunning && timeRuns;
-                    // A cut from one scene to the next, a loading frame, a moment with no hero: the first-person view is
-                    // held up to 1.5 s (never into play, which is `vrPlay`), so the next scene replaces it in place.
+                    // A cut from one scene to the next, a loading frame, a moment with no hero: the
+                    // first-person view is held up to 1.5 s (never into play, which is `vrPlay`), so the next
+                    // scene replaces it in place.
                     const uint64_t fpNow = GetTickCount64();
                     const bool fpBase = (config.options & 0x400000) && !flatScreen;
-                    // DISABLE THEATER SCREEN ENTIRELY (options bit 24): every scene the game plays is rendered around the
-                    // viewer, from inside the character's head with first-person cutscenes on, from the scene's own camera
-                    // without them or where no head is found (game_fp::sceneCamera). Menus, the pause screen and loading
-                    // have no scene to put around you: they stay on the screen.
+                    // DISABLE THEATER SCREEN ENTIRELY (options bit 24): every scene the game plays is
+                    // rendered around the viewer, from inside the character's head with first-person
+                    // cutscenes on, from the scene's own camera without them or where no head is found
+                    // (game_fp::sceneCamera). Menus, the pause screen and loading have no scene to put around
+                    // you: they stay on the screen.
                     const bool noTheater = (config.options & 0x1000000) && !flatScreen;
                     const bool sceneAny = fpBase || noTheater;
-                    // The first-person view needs none of the screen's 250 ms wait (screenDelayMs, there to keep a late
-                    // camera sample in play from flashing the screen): 60 ms of the game's own camera is enough, and
-                    // a blink of play (under 250 ms) inside a scene, as between a finisher's shots, keeps the view.
+                    // The first-person view needs none of the screen's 250 ms wait (screenDelayMs, there to
+                    // keep a late camera sample in play from flashing the screen): 60 ms of the game's own
+                    // camera is enough, and a blink of play (under 250 ms) inside a scene, as between a
+                    // finisher's shots, keeps the view.
                     if (vrPlay) {
                         fpIdleSince = 0;
                         if (!fpPlayStart)
@@ -2100,26 +2119,33 @@ DWORD WINAPI run(void*) {
                             fpIdleSince = fpNow;
                     }
                     fpPlayBlip = vrPlay && wasFpScene && fpPlayStart && fpNow - fpPlayStart < 250;
-                    const bool fpOwn = !vrPlay && fpIdleSince && fpNow - fpIdleSince >= (wasFpScene ? 0u : 60u);
+                    const bool fpOwn =
+                        !vrPlay && fpIdleSince && fpNow - fpIdleSince >= (wasFpScene ? 0u : 60u);
                     const bool fpSceneBase =
                         viewing && player.hero && bridgeRunning && timeRuns && (fpOwn || fpPlayBlip);
-                    // The right thumbstick's click (not with the left: both held are the game's pause) switches between the
-                    // first-person view and the theatre screen, for a scene that glitches in first person.
+                    // The right thumbstick's click (not with the left: both held are the game's pause)
+                    // switches between the first-person view and the theatre screen, for a scene that
+                    // glitches in first person.
                     const bool fpClick = frame.hands[1].stickClick && !frame.hands[0].stickClick;
-                    if (fpClick && !wasFpRightClick && fpBase && (sceneBase || fpSceneBase || fpTheatre)) {
+                    // Only while a scene plays: in play the click is the game's R3, or WEB TIE's.
+                    if (fpClick && !wasFpRightClick && fpBase && (sceneBase || fpSceneBase)) {
                         fpTheatre = !fpTheatre;
                         fpClickTaken = true;
-                        message(3, 0, fpTheatre ? (noTheater ? "First-person cutscene: the scene's own camera (right stick)"
-                                                             : "First-person cutscene: theatre screen (right stick)")
-                                                : "First-person cutscene: first-person view (right stick)");
+                        message(3, 0,
+                                fpTheatre
+                                    ? (noTheater
+                                           ? "First-person cutscene: the scene's own camera (right stick)"
+                                           : "First-person cutscene: theatre screen (right stick)")
+                                    : "First-person cutscene: first-person view (right stick)");
                     }
                     wasFpRightClick = fpClick;
-                    // X on the left controller (the equivalent on the others: buttonX) swaps whose eyes the view is in,
-                    // Spider-Man, Miles, MJ, while a first-person scene has Miles or MJ in it; then the game does not get
-                    // that X (its Back).
+                    // X on the left controller (the equivalent on the others: buttonX) swaps whose eyes the
+                    // view is in, Spider-Man, Miles, MJ, while a first-person scene has Miles or MJ in it;
+                    // then the game does not get that X (its Back).
                     {
                         const bool x = (frame.buttons & buttonX) != 0;
-                        if (fpBase && (sceneBase || fpSceneBase) && !fpTheatre && game_fp::alternatives() > 0) {
+                        if (fpBase && (sceneBase || fpSceneBase) && !fpTheatre &&
+                            game_fp::alternatives() > 0) {
                             if (x && !wasFpX)
                                 game_fp::cycleCharacter();
                             frame.buttons &= ~static_cast<uint32_t>(buttonX);
@@ -2128,11 +2154,13 @@ DWORD WINAPI run(void*) {
                     }
                     if (!frame.hands[1].stickClick)
                         fpClickTaken = false;
-                    // Both sticks held is the game's pause: its menu is drawn only into the game's own frame, so the
-                    // theatre screen is wanted at once, and no cut-hold keeps the first-person view over it.
+                    // Both sticks held is the game's pause: its menu is drawn only into the game's own frame,
+                    // so the theatre screen is wanted at once, and no cut-hold keeps the first-person view
+                    // over it.
                     const bool fpPausing = frame.hands[0].stickClick && frame.hands[1].stickClick;
-                    // The click's alternative view: the theatre screen, or with the theater screen disabled the scene's own
-                    // camera (cameraChosen: also what a session without first-person cutscenes always has).
+                    // The click's alternative view: the theatre screen, or with the theater screen disabled
+                    // the scene's own camera (cameraChosen: also what a session without first-person
+                    // cutscenes always has).
                     const bool theaterChosen = fpTheatre && !noTheater;
                     const bool cameraChosen = noTheater && (!fpBase || fpTheatre);
                     bool fpWanted = sceneAny && (sceneBase || fpSceneBase) && !theaterChosen && !fpPausing;
@@ -2148,12 +2176,14 @@ DWORD WINAPI run(void*) {
                         fpWantStart = fpNow;
                     game_fp::want(fpWanted);
                     fpScene = fpWanted && game_fp::available();
-                    // Wanted, the character's head not found yet: the last image stays up (the eye images' own hold)
-                    // for up to 0.7 s, not the theatre screen; a scene with no head to be found gets the theatre then.
+                    // Wanted, the character's head not found yet: the last image stays up (the eye images'
+                    // own hold) for up to 0.7 s, not the theatre screen; a scene with no head to be found
+                    // gets the theatre then.
                     fpPending = fpWanted && !fpScene && fpNow - fpWantStart < 700;
-                    // One worker line every 120 ms, not one a frame: message() is a single slot that the session log
-                    // samples every 50 to 100 ms, so lines sent faster than that overwrite each other and only the last
-                    // of a burst reaches the log (the start of every listing was lost this way).
+                    // One worker line every 120 ms, not one a frame: message() is a single slot that the
+                    // session log samples every 50 to 100 ms, so lines sent faster than that overwrite each
+                    // other and only the last of a burst reaches the log (the start of every listing was lost
+                    // this way).
                     if (static ULONGLONG lastNoteAt{}; GetTickCount64() - lastNoteAt >= 120) {
                         char line[200];
                         if (game_fp::note(fpNoteSeen, line, sizeof(line))) {
@@ -2162,8 +2192,9 @@ DWORD WINAPI run(void*) {
                         }
                     }
                     if (const bool onCamera = fpScene && game_fp::onCamera(); onCamera != wasCameraView) {
-                        message(3, 0, onCamera ? "First-person cutscene: the scene's own camera is the view"
-                                               : "First-person cutscene: a head is the view");
+                        message(3, 0,
+                                onCamera ? "First-person cutscene: the scene's own camera is the view"
+                                         : "First-person cutscene: a head is the view");
                         wasCameraView = onCamera;
                     }
                     if (fpScene != wasFpScene) {
@@ -2176,18 +2207,18 @@ DWORD WINAPI run(void*) {
                     }
                     if (!fpScene || frame.recentered)
                         sceneRefSet = false;
-                    // Head tracking off, or the scene's own camera the view by choice: a level frame at the character's (or
-                    // the camera's) place, and the right stick turns the view.
+                    // Head tracking off, or the scene's own camera the view by choice: a level frame at the
+                    // character's (or the camera's) place, and the right stick turns the view.
                     levelView = (config.options & 0x800000) != 0 || (noTheater && cameraChosen);
                     if (!fpScene || !levelView) {
                         sceneTurn = 0;
                         sceneFlick = false;
                     }
-                    // (While a first-person view is pending, no stereo-screen scene is asked for either: its images
-                    // would show the theatre screen the moment they arrive.)
+                    // (While a first-person view is pending, no stereo-screen scene is asked for either: its
+                    // images would show the theatre screen the moment they arrive.)
                     const bool panelScene =
-                        scenePanel.wanted(sceneBase && values.screenDepth > 0, native_hud::onScreen(sceneHoldMs),
-                                          GetTickCount64());
+                        scenePanel.wanted(sceneBase && values.screenDepth > 0,
+                                          native_hud::onScreen(sceneHoldMs), GetTickCount64());
                     const bool scene = fpScene || (panelScene && !fpPending);
                     // On the screen the controllers are the game's Xbox
                     // controller; in VR it gets Start (menu), Back (X) and
@@ -2503,6 +2534,13 @@ DWORD WINAPI run(void*) {
                         input.tilt = motion.swing.tilt;
                         input.leap = input.focused ? leapOut : 0.f;
                         input.asks = input.focused && askingGame ? 1u : 0u;
+                        // The web tie's click (WEB TIE): the right stick alone, not
+                        // half of clicking both (the pad layer, the pause), not an R3
+                        // the game asks for.
+                        if (values.webTie && input.focused && frame.hands[1].stickClick &&
+                            !frame.hands[0].stickClick && !padLayer.latched() &&
+                            !(namedPress.claimed() & game_pad::NamedPress::rightClick))
+                            input.asks |= 2u;
                         if (const Vec3 look = motion.headPose.orientation.rotate({0, 0, -1});
                             input.focused && finite(look) && length(look) > .5f)
                             input.look = normalized(look);
@@ -2572,6 +2610,28 @@ DWORD WINAPI run(void*) {
                         check(swingState.error, "Native swinging");
                         if (!sampleGrab || sampleGrab(&grabState))
                             grabState = {};
+                        {
+                            game_grab::TieData sample;
+                            const game_grab::TieData expected;
+                            if (values.webTie && sampleTie && !sampleTie(&sample) &&
+                                sample.magic == expected.magic && sample.version == expected.version &&
+                                sample.bytes == expected.bytes)
+                                tieState = sample;
+                            else
+                                tieState = {};
+                            const bool armedNow = input.focused && tieState.armed != 0;
+                            if (armedNow && !tieArmedBefore) {
+                                runtime.haptic(0, .25f);
+                                runtime.haptic(1, .25f);
+                            }
+                            if (tieState.made > tiesMadeBefore && tiesMadeBefore) {
+                                runtime.haptic(0, .9f);
+                                runtime.haptic(1, .9f);
+                            }
+                            tieArmedBefore = armedNow;
+                            if (tieState.made)
+                                tiesMadeBefore = tieState.made;
+                        }
                         // What each free hand's web button would do: the aim markers.
                         aims = aimed = {};
                         if (sampleAim && input.focused) {
@@ -3083,6 +3143,13 @@ DWORD WINAPI run(void*) {
                                 }
                             }
                             native_webs::submit(webs, 200, bent);
+                            // The web tie's webs, in the game's own rope material.
+                            native_webs::TieRope tieRopes[native_webs::maxTieRopes]{};
+                            uint32_t tieRopeCount{};
+                            for (uint32_t k = 0;
+                                 k < tieState.count && tieRopeCount < native_webs::maxTieRopes; ++k)
+                                tieRopes[tieRopeCount++] = {tieState.lines[k].anchor, tieState.lines[k].end};
+                            native_webs::submitTies(tieRopes, tieRopeCount, 200);
                         }
                     }
                     const bool steering = motion.active && !flatScreen && controlsVisible;
@@ -4071,52 +4138,59 @@ DWORD WINAPI run(void*) {
                         return !vrPlay;
                     }
                     if ((!vrPlay || fpPlayBlip) && fpScene) {
-                        // A first-person scene: the headset's own two eyes, inside the head of the character the
-                        // scene plays. The eyes are sent relative to that head (anchored 2); the native views
-                        // put them on the head of the frame they render (stereo_probe.cpp, resolveScene).
+                        // A first-person scene: the headset's own two eyes, inside the head of the character
+                        // the scene plays. The eyes are sent relative to that head (anchored 2); the native
+                        // views put them on the head of the frame they render (stereo_probe.cpp,
+                        // resolveScene).
                         if (!sceneRefSet) {
                             // The view starts where the character looks, from where the headset is.
                             sceneRef = {frame.head.position, screenAhead(frame.head, 0).orientation};
                             sceneRefSet = validTrackedPose(frame.head);
                         }
-                        const bool follow = !levelView; // CUTSCENE HEAD TRACKING (off, or the scene's own camera: level)
+                        const bool follow =
+                            !levelView; // CUTSCENE HEAD TRACKING (off, or the scene's own camera: level)
                         const Pose toRef = inverse(sceneRef);
                         const Mat4 axes = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
                         native_eyes::Command eyes;
                         eyes.enabled = 1;
                         eyes.serial = ++serial;
                         eyes.leaseMs = 250;
-                        // Head tracking on: the view turns with the character's head as well as with yours. Off: only
-                        // his place follows him, on a level frame (anchored 4); you look about freely from there.
+                        // Head tracking on: the view turns with the character's head as well as with yours.
+                        // Off: only his place follows him, on a level frame (anchored 4); you look about
+                        // freely from there.
                         eyes.anchored = follow ? 2 : 4;
                         if (!follow) {
-                            // The right stick turns the view, as it turns you in play: smooth while held, or a snap
-                            // a flick (the launcher's turn settings).
+                            // The right stick turns the view, as it turns you in play: smooth while held, or
+                            // a snap a flick (the launcher's turn settings).
                             const float x = frame.hands[1].stickX;
                             const float degrees = 3.14159265f / 180;
                             if (values.smoothTurn > 0) {
                                 if (std::abs(x) > .15f)
-                                    sceneTurn -= x * static_cast<float>(values.smoothTurn) * degrees * frame.seconds;
+                                    sceneTurn -=
+                                        x * static_cast<float>(values.smoothTurn) * degrees * frame.seconds;
                             } else if (values.snapTurn > 0) {
                                 if (!sceneFlick && std::abs(x) > .7f) {
                                     sceneFlick = true;
-                                    sceneTurn -= (x > 0 ? 1.f : -1.f) * static_cast<float>(values.snapTurn) * degrees;
+                                    sceneTurn -=
+                                        (x > 0 ? 1.f : -1.f) * static_cast<float>(values.snapTurn) * degrees;
                                 } else if (sceneFlick && std::abs(x) < .4f)
                                     sceneFlick = false;
                             }
                         }
                         const Pose turned{{}, Quat::yaw(sceneTurn)};
                         {
-                            // The heading the view has now: the character's head (or the level frame, head tracking
-                            // off) turned by how far your head has turned from where it was when the scene began.
+                            // The heading the view has now: the character's head (or the level frame, head
+                            // tracking off) turned by how far your head has turned from where it was when the
+                            // scene began.
                             float base{};
                             const Vec3 headLook = frame.head.orientation.rotate({0, 0, -1});
                             const Vec3 refLook = sceneRef.orientation.rotate({0, 0, -1});
-                            if (game_fp::sceneYaw(!follow, base) && std::hypot(headLook.x, headLook.z) > .3f &&
+                            if (game_fp::sceneYaw(!follow, base) &&
+                                std::hypot(headLook.x, headLook.z) > .3f &&
                                 std::hypot(refLook.x, refLook.z) > .3f) {
-                                const float turnedBy = std::remainder(
-                                    std::atan2(-headLook.x, -headLook.z) - std::atan2(-refLook.x, -refLook.z),
-                                    6.2831853f);
+                                const float turnedBy = std::remainder(std::atan2(-headLook.x, -headLook.z) -
+                                                                          std::atan2(-refLook.x, -refLook.z),
+                                                                      6.2831853f);
                                 fpFacing = base + turnedBy + (follow ? 0.f : sceneTurn);
                                 fpFacingMs = GetTickCount64();
                             }
@@ -4130,8 +4204,11 @@ DWORD WINAPI run(void*) {
                             eyes.eyes[i].fov[2] = f.down;
                             eyes.eyes[i].fov[3] = f.up;
                         }
-                        // The HUD panel (the scene's subtitles) goes in front of the head, as in play.
-                        const Quat hudFacing = hudFollow.update(frame.head.orientation, frame.seconds);
+                        // The HUD panel (the scene's subtitles) goes in front of the head, as in play,
+                        // and STEADY HUD's layer with it.
+                        hudFacing = hudFollow.update(frame.head.orientation, frame.seconds);
+                        hudHead = frame.head.position;
+                        hudPlaced = true;
                         native_hud::follow(eyes.serial, frame.head.orientation.conjugate() * hudFacing);
                         NativeEyeFrame saved;
                         saved.serial = eyes.serial;
@@ -4418,6 +4495,11 @@ DWORD WINAPI run(void*) {
                     }
                     saved.webSlots = {webRopes.slot(0), webRopes.slot(1)};
                     saved.strandUpper = webRopes.upper();
+                    saved.tiesByGame = native_webs::tiesDrawn();
+                    saved.tieCount =
+                        std::min<uint32_t>(tieState.count, static_cast<uint32_t>(saved.ties.size()));
+                    for (uint32_t i = 0; i < saved.tieCount; ++i)
+                        saved.ties[i] = {tieState.lines[i].anchor, tieState.lines[i].end};
                     saved.webFlight = webFlight;
                     for (unsigned i = 0; i < 2; ++i)
                         saved.flightVisual[i] = flightVisual[i];
@@ -4705,6 +4787,28 @@ DWORD WINAPI run(void*) {
                                                               timing.anchor, line)) {
                                 appendWeb(vertices, line, viewer, pixelAngle);
                             }
+                        }
+                        // The web tie's webs: from the surface to the enemy held on it,
+                        // taut, with the splat where they stick.
+                        // Only those the game does not draw itself (both hands have webs of
+                        // their own, or a tie beyond the game's ropes for them): as thin as
+                        // a game web, not the overlay's swing strand.
+                        WebLook tieLook;
+                        tieLook.radius = .0018f;
+                        tieLook.minPixels = 1.f;
+                        for (uint32_t i = 0; !bare && i < saved->tieCount; ++i) {
+                            const auto& strand = saved->ties[i];
+                            if ((saved->tiesByGame >> i) & 1u)
+                                continue;
+                            if (!finite(strand.anchor) || !finite(strand.end))
+                                continue;
+                            WebLine line;
+                            line.start = strand.end;
+                            line.end = strand.anchor;
+                            line.slack = 0;
+                            line.extended = 1;
+                            line.seed = 3.1f + static_cast<float>(i) * .9f + strand.anchor.x * .23f;
+                            appendWeb(vertices, line, viewer, pixelAngle, tieLook);
                         }
                         // Aim markers: where each free hand's web button would send its
                         // web, on the line that hand points along in this image, that
@@ -5191,6 +5295,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     retargetSwing = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidySwingRetarget"));
     // Optional: an older ray module has no web grab, nor punching, nor aim previews.
     sampleGrab = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyGrabSample"));
+    sampleTie = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyTieSample"));
     sampleAim = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyAimSample"));
     startPunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchStart"));
     samplePunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchSample"));

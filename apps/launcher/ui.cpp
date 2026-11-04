@@ -1840,6 +1840,11 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "Web balls and zips go where your eyes look. Only where the headset and its VR runtime track "
                "the eyes (Quest Pro, Varjo, Pimax Crystal...); elsewhere hands and head aim as before.",
                S(150), [&] { tabCombo("##eyeaim", Item::eyeAim); });
+        option("Web tie (experimental)",
+               "Web an enemy up, put one web on a wall and the other on him, bring your hands together "
+               "and click the right stick: he is stuck to the wall. On, a webbed enemy comes to you only "
+               "when you yank him.",
+               S(42), [&] { tabToggle("##webtie", Item::webTie); });
     });
     group(0, "Moving", [&] {
         option("Swing speed limit", "How fast a swing can carry you.", S(150), [&] {
@@ -2058,19 +2063,20 @@ void App::options(ImVec2 origin, ImVec2 size) {
                    stepCombo("##depth", kScreenDepths, depths, 4, &o.screenDepth);
                });
         option("First person cutscenes (experimental)",
-               "Renders all cutscenes in full VR first person, works with finishers and car chases. Press "
-               "right stick to switch between the normal cutscene camera. Press \"X\" on your left "
-               "controller to swap characters between Peter, MJ & Miles when they are available. If you "
-               "are on the wrong Spider-Man model, press X. Expect bugs.",
+               "Cutscenes, finishers and car chases play around you, from inside the head of the character "
+               "in them. Click the right stick in a scene to switch to the theater screen and back. X on "
+               "your left controller swaps between Peter, MJ and Miles when they are there (also if you "
+               "are on the wrong Spider-Man model). Expect bugs.",
                S(42), [&] { changed |= toggle("##fpscenes", &o.firstPersonCutscenes); });
         if (o.firstPersonCutscenes)
             option("Cutscene head tracking",
-                   "On by default, disable to remove head tracking from cutscenes. Best if you get motion "
-                   "sickness.",
+                   "On, your head looks around in the scene. Off, the scene's own camera aims the view and "
+                   "the right stick turns it: better if you get motion sick.",
                    S(42), [&] { changed |= toggle("##fpscenehead", &o.cutsceneHeadTracking); });
         option("Disable theater screen fully",
-               "Removes the theater screen so cutscenes are always rendered in vr, even when not in first "
-               "person. Press right stick to switch.",
+               "Every scene plays around you in VR, never on the theater screen: from the scene's own "
+               "camera, or in first person with first-person cutscenes on (the right stick then switches "
+               "between the two).",
                S(42), [&] { changed |= toggle("##notheater", &o.disableTheater); });
         option("HUD", "How large the game's HUD shows in front of you; off, there is none in VR.", S(150), [&] {
             static constexpr int sizes[] = {0, 1, 2, 3};

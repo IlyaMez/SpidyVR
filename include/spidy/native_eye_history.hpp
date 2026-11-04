@@ -26,6 +26,15 @@ struct NativeEyeFrame {
     // part running from wrist to wrist; -1 otherwise.
     std::array<int, 2> webSlots{-1, -1};
     int strandUpper = -1;
+    // The web tie's webs (game_grab::TieData): from where each sticks to its
+    // surface to the enemy it holds there.
+    struct TieStrand {
+        Vec3 anchor{}, end{};
+    };
+    std::array<TieStrand, 8> ties{};
+    uint32_t tieCount{};
+    // A bit per tie the game draws in its own rope (native_webs::tiesDrawn).
+    uint32_t tiesByGame{};
     // What each hand's grip press would do (game_swing::AimKind none while
     // the aim markers are off).
     std::array<game_swing::Aim, 2> aims{};
@@ -50,7 +59,8 @@ struct NativeEyeFrame {
     // A first-person scene (eye command anchored 2): the eyes show the scene from inside the head of the
     // character it plays; Spidy's own marks, webs and hands are not drawn over it.
     bool scene{};
-    // ... and the scene's own camera aims (no head tracking): the image is locked to the head (XrRuntime::headLocked).
+    // ... and the scene's own camera aims (no head tracking): the image is locked to the head
+    // (XrRuntime::headLocked).
     bool headLocked{};
     // The game screen in stereo (eye command 3): the pair goes on the screen,
     // the left image for the left eye and the right one for the right.

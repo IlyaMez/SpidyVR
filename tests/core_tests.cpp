@@ -31,6 +31,7 @@
 #include "spidy/web_visual.hpp"
 #include "spidy/web_pull.hpp"
 #include "spidy/web_grab.hpp"
+#include "spidy/web_tie.hpp"
 #include "spidy/lab_props.hpp"
 #include "spidy/body_ik.hpp"
 #include "spidy/native_body.hpp"
@@ -59,6 +60,7 @@
 #include "spidy/throw_aim.hpp"
 #include "spidy/vd_eyes.hpp"
 #include <algorithm>
+#include <bitset>
 #include <cstring>
 #include <functional>
 #include <iostream>
@@ -1418,7 +1420,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 22 && s.bytes == 104 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 23 && s.bytes == 108 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -1966,7 +1968,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 22 && s.bytes == 104 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 23 && s.bytes == 108 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -3302,10 +3304,10 @@ int main() {
     });
     test("grip climbing settings keep old packets and reject invalid versions, sizes and switches", [] {
         using namespace game_swing;
-        for (uint32_t version = 3; version <= 22; ++version) {
+        for (uint32_t version = 3; version <= 23; ++version) {
             Settings s;
             s.version = version;
-            s.bytes = 16 + 4 * version; // official v3=28 through custom v22=104
+            s.bytes = 16 + 4 * version; // official v3=28 through custom v23=108
             check(validSettings(s), "compatible settings packet was refused");
             ++s.bytes;
             check(!validSettings(s), "wrong settings length was accepted");
@@ -3322,7 +3324,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 22 && s.bytes == 104, "updated settings did not append the climbing field");
+        check(s.version == 23 && s.bytes == 108, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -8719,6 +8721,30 @@ int main() {
         for(int i=0;i<5;++i){++s2;t2+=5;check(!other.update(t2,true,false,true,false,s2,a2),"nobody's hero let go");}
         for(int i=0;i<5;++i){++s2;t2+=5;check(!other.update(t2,true,true,false,false,s2,a2),"the ground let go");}
     });
+    test("a load hitch is one long frame of the game's running time: the held input outlives it", [] {
+        game_swing::RunClock clock;
+        check(clock.update(1000) == 0 && clock.update(1016) == 16 && clock.update(1032) == 32,
+              "the frames' time not counted");
+        // A two second hitch counts as one frame of maxGapMs.
+        const uint64_t after = clock.update(3032);
+        check(after == 32 + game_swing::RunClock::maxGapMs, "a hitch counted at its length");
+        check(clock.update(3048) == after + 16 && clock.update(3000) == after + 16,
+              "the frames after it, or a clock going back, miscounted");
+        // The swing's input over that hitch: the gate closed for it, the
+        // sample held through it, the live input back after it.
+        game_swing::RunClock run;
+        game_swing::InputHold hold;
+        game_swing::Command c;c.serial=7;c.focused=1;c.hands[0].grip=1;
+        check(hold.update(c,true,run.update(1000)),"live input refused");
+        game_swing::Command lost;lost.serial=8;lost.focused=0;
+        auto x=lost;
+        check(hold.update(x,false,run.update(2500))&&x.serial==7&&x.hands[0].grip==1,
+              "a 1.5 s load hitch let go of the held grip");
+        uint64_t t=2500;
+        for(int i=0;i<30;++i){t+=16;x=lost;hold.update(x,false,run.update(t));}
+        x=lost;
+        check(!hold.update(x,false,run.update(t+16)),"input lost through running frames held on");
+    });
     test("a stutter keeps the last focused input; a longer loss of it does not", [] {
         game_swing::InputHold hold;
         game_swing::Command c;c.serial=7;c.focused=1;c.hands[0].grip=1;
@@ -12546,6 +12572,65 @@ int main() {
         check(caughtAt>=0&&caughtAt<=grab.config().catchSpeed+.5f,"the can was not caught, or caught fast");
         check(fastest>8,"the reel did not drag the can in");
         check(behind<.6f,"the can slid past the hand toward the player");
+    });
+    test("with WEB TIE a webbed enemy far off comes only on the pull gesture: no reel, no pull as the hand moves away", [] {
+        check(!GrabConfig{}.yankOnlyCharacters,"an enemy comes only on the yank by default");
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-20},80,.45f,TargetKind::Character);
+        WebGrab grab;Body player{{0,1,0},{},true};
+        grab.yankOnlyCharacters(true);
+        check(grab.config().yankOnlyCharacters,"WEB TIE's yank-only not taken");
+        auto in=forward();in.hands[0].trigger=0;
+        grab.claim(1.f/90,in,world,targets,player);
+        check(grab.grabs()[0].phase==GrabPhase::Tethered,"the enemy was not webbed");
+        // The trigger held, the hand drawn slowly back 0.6 m and the player
+        // walking away 3 m: nothing brings him.
+        in.hands[0].trigger=0;grab.claim(1.f/90,in,world,targets,player);
+        in.hands[0].trigger=1;
+        std::vector<TargetCommand> out;
+        bool pulled{};
+        for(int frame=1;frame<=270;++frame) {
+            in.hands[0].gripRelativeToHead={0,0,std::min(.6f,frame*.003f)};
+            player.position.z=std::min(3.f,frame*.02f);
+            grab.claim(1.f/90,in,world,targets,player);
+            if(frame%3)continue;
+            out.clear();grab.step(1.f/30,world,targets,out);targets.apply(1.f/30,out);
+            for(const auto& c:out)pulled|=c.id==7&&(c.mode!=TargetCommand::Mode::Rope||c.ropes[0].length<length(targets.find(7)->position-c.ropes[0].anchor));
+        }
+        check(grab.grabs()[0].phase==GrabPhase::Tethered,"the enemy's web was lost or he was caught");
+        check(!pulled&&targets.find(7)->position.z<-19.9f,"the enemy was pulled without the pull gesture");
+        // The pull gesture yanks him.
+        in.hands[0].trigger=0;
+        for(int i=1;i<=9;++i){in.hands[0].gripRelativeToHead={0,0,.6f-.033f*i};grab.claim(1.f/90,in,world,targets,player);}
+        for(int i=1;i<=9;++i){in.hands[0].gripRelativeToHead={0,0,.3f+.033f*i};grab.claim(1.f/90,in,world,targets,player);if(events(grab,GrabEventKind::Yank))break;}
+        check(grab.grabs()[0].phase==GrabPhase::Yanked,"the pull gesture did not yank the enemy");
+    });
+    test("without WEB TIE a webbed enemy winds in on the trigger, as before", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-20},80,.45f,TargetKind::Character);
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[0].trigger=0;
+        grab.claim(1.f/90,in,world,targets,player);
+        check(grab.grabs()[0].phase==GrabPhase::Tethered,"the enemy was not webbed");
+        in.hands[0].trigger=1;
+        std::vector<TargetCommand> out;
+        for(int frame=1;frame<=180;++frame) {
+            grab.claim(1.f/90,in,world,targets,player);
+            if(frame%3)continue;
+            out.clear();grab.step(1.f/30,world,targets,out);targets.apply(1.f/30,out);
+        }
+        check(targets.find(7)->position.z>-19,"the trigger no longer winds a webbed enemy in");
+    });
+    test("a webbed prop still winds in on the trigger", [] {
+        TestWorld world;world.enabled=false;
+        GrabTargets targets;targets.add(7,{0,1,-12},30,.45f);
+        WebGrab grab;Body player{{0,1,0},{},true};
+        auto in=forward();in.hands[0].trigger=0;
+        grab.claim(1.f/90,in,world,targets,player);
+        in.hands[0].trigger=1;
+        std::vector<TargetCommand> out;
+        for(int frame=1;frame<=90;++frame){grab.claim(1.f/90,in,world,targets,player);if(frame%3)continue;out.clear();grab.step(1.f/30,world,targets,out);targets.apply(1.f/30,out);}
+        check(targets.find(7)->position.z>-10,"the prop did not wind in");
     });
     test("the zip gesture yanks a target to the hand without overshooting it", [] {
         TestWorld world;world.enabled=false;
@@ -21207,7 +21292,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 22 && s.bytes == 104 && s.combatVisuals == 1 &&
+        check(s.version == 23 && s.bytes == 108 && s.combatVisuals == 1 &&
                   offsetof(Settings, combatVisuals) == 56,
               "free combat broke the settings defaults or layout");
         s.combatVisuals = 0;
@@ -21254,7 +21339,7 @@ int main() {
         check(withTabOnly(Values{}, "single_hand_yank_percent=999\n").singleHandYankPercent == 300,
               "saved single-hand yank strength was not clamped");
         game_swing::Settings packet;
-        check(packet.version==22 && packet.bytes==104 && !packet.halfPunchDamage &&
+        check(packet.version==23 && packet.bytes==108 && !packet.halfPunchDamage &&
               packet.singleHandYankPercent==100 && offsetof(game_swing::Settings,halfPunchDamage)==96 &&
               offsetof(game_swing::Settings,singleHandYankPercent)==100,"yank protocol shifted older fields");
         packet.halfPunchDamage=1;
@@ -21265,6 +21350,8 @@ int main() {
         check(game_swing::validSettings(packet),"maximum yank strength refused");
         packet.singleHandYankPercent=301;
         check(!game_swing::validSettings(packet),"out-of-range yank strength accepted");
+        packet={}; packet.version=22; packet.bytes=game_swing::settingsBytesV22;
+        check(game_swing::validSettings(packet),"version 22 settings packet refused");
         packet={}; packet.version=21; packet.bytes=game_swing::settingsBytesV21;
         check(game_swing::validSettings(packet),"version 21 settings packet refused");
         packet={}; packet.version=20; packet.bytes=game_swing::settingsBytesV20;
@@ -21780,9 +21867,9 @@ int main() {
               "the hand gestures missing under better climbing");
         check(all[14].item == Item::webSlingshot, "slingshot missing under SWINGING");
         check(all[16].item == Item::betterClimbing, "better climbing missing under SWINGING");
-        uint64_t seen = 0;
+        std::bitset<256> seen;
         unsigned headings = 0;
-        static_assert(static_cast<unsigned>(lastItem) < 64, "more settings than the test's bits");
+        static_assert(static_cast<unsigned>(lastItem) < 256, "more settings than the test's bits");
         for (const auto& row : all) {
             check(row.title && *row.title, "a row without a title");
             for (const char* c = row.title; *c; ++c)
@@ -21792,9 +21879,9 @@ int main() {
                 ++headings;
                 continue;
             }
-            const uint64_t bit = uint64_t{1} << static_cast<unsigned>(row.item);
-            check(!(seen & bit), "a setting twice");
-            seen |= bit;
+            const auto bit = static_cast<size_t>(row.item);
+            check(!seen.test(bit), "a setting twice");
+            seen.set(bit);
             check(row.help && std::strlen(row.help) <= 80, "help missing, or too long for the game's column");
             check(row.choices.size() <= maxChoices, "more choices than the tab shows");
             for (const char* c : row.choices)
@@ -21831,20 +21918,23 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        check(all.size() == 59 + std::size(realistic), "the realistic flips' rows are not the last");
+        check(all.size() == 60 + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
-            check(all[59 + i].item == realistic[i], "the realistic flips' rows out of order");
-        check(std::strcmp(all[59].title, "REALISTIC FLIPS") == 0 && all[59].choices.empty(),
+            check(all[60 + i].item == realistic[i], "the realistic flips' rows out of order");
+        check(std::strcmp(all[60].title, "REALISTIC FLIPS") == 0 && all[60].choices.empty(),
               "realistic flips: a switch, first of its rows");
         check(all[50].item == Item::controlledFlips && all[53].item == Item::joystickRunCamera &&
                   all[54].item == Item::wallRunCameraTilt && all[55].item == Item::halfPunchDamage,
               "custom switches misplaced");
+        check(all[56].item == Item::webTie && std::strcmp(all[56].title, "WEB TIE") == 0 &&
+                  all[56].choices.empty() && all[56].place == Place::tab,
+              "WEB TIE: a switch in the tab after HALF PUNCH DAMAGE");
         // EYE AIM, before the realistic flips: what the eyes aim, off by default (only a headset that tracks
         // the eyes can).
-        check(all[56].item == Item::eyeAim && std::strcmp(all[56].title, "EYE AIM") == 0 &&
-                  all[56].choices.size() == 4 && std::strcmp(all[56].choices[0], "OFF") == 0 &&
-                  std::strcmp(all[56].choices[1], "WEB BALLS") == 0 && std::strcmp(all[56].choices[2], "ZIPS") == 0 &&
-                  std::strcmp(all[56].choices[3], "BOTH") == 0 && all[56].place == Place::tab,
+        check(all[57].item == Item::eyeAim && std::strcmp(all[57].title, "EYE AIM") == 0 &&
+                  all[57].choices.size() == 4 && std::strcmp(all[57].choices[0], "OFF") == 0 &&
+                  std::strcmp(all[57].choices[1], "WEB BALLS") == 0 && std::strcmp(all[57].choices[2], "ZIPS") == 0 &&
+                  std::strcmp(all[57].choices[3], "BOTH") == 0 && all[57].place == Place::tab,
               "EYE AIM: OFF, WEB BALLS, ZIPS, BOTH, in the tab before the realistic flips");
         {
             Values v;
@@ -21860,8 +21950,8 @@ int main() {
         }
         // FLIP REPROJECTION, after EYE AIM: a switch in the tab, off by default so the headset can compare
         // (the user, October 29), kept in spidy_vr.ini.
-        check(all[57].item == Item::flipReprojection && std::strcmp(all[57].title, "FLIP REPROJECTION") == 0 &&
-                  all[57].choices.empty() && all[57].place == Place::tab,
+        check(all[58].item == Item::flipReprojection && std::strcmp(all[58].title, "FLIP REPROJECTION") == 0 &&
+                  all[58].choices.empty() && all[58].place == Place::tab,
               "FLIP REPROJECTION: a switch in the tab, after EYE AIM");
         {
             Values v;
@@ -21875,8 +21965,8 @@ int main() {
         }
         // STEADY HUD, after EYE AIM: a switch in the tab, off by default to compare, kept in
         // spidy_vr.ini.
-        check(all[58].item == Item::steadyHud && std::strcmp(all[58].title, "STEADY HUD") == 0 &&
-                  all[58].choices.empty() && all[58].place == Place::tab,
+        check(all[59].item == Item::steadyHud && std::strcmp(all[59].title, "STEADY HUD") == 0 &&
+                  all[59].choices.empty() && all[59].place == Place::tab,
               "STEADY HUD: a switch in the tab, after EYE AIM");
         {
             Values v;
@@ -21940,7 +22030,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 65,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 66,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -21974,7 +22064,9 @@ int main() {
                   std::strcmp(all[45].choices[1], "ON RESUME") == 0,
               "the body's calibration: NO, or ON RESUME");
         // Every setting has a row.
-        constexpr uint64_t everySetting = (~uint64_t{0} >> (63 - static_cast<unsigned>(lastItem))) & ~uint64_t{1};
+        std::bitset<256> everySetting;
+        for (size_t i = 1; i <= static_cast<size_t>(lastItem); ++i)
+            everySetting.set(i);
         check(seen == everySetting, "a setting missing");
         auto choicesOf = [&](Item item) {
             return std::find_if(all.begin(), all.end(), [&](const Row& r) { return r.item == item; })->choices.size();
@@ -21997,6 +22089,27 @@ int main() {
         check(tabOnlyText(v).find("reel_haptics=1\n") != std::string::npos &&
                   withTabOnly({}, "reel_haptics=1\n").reelHaptics && !withTabOnly({}, "reel_haptics=0\n").reelHaptics,
               "spidy_vr.ini does not keep REEL HAPTICS as reel_haptics");
+    });
+    test("WEB TIE: off by default, a switch kept as web_tie, sent in swing settings version 23", [] {
+        using namespace vr_settings;
+        Values v;
+        check(!v.webTie && defaultChoice(Item::webTie) == 0, "the web tie on by default");
+        check(choose(Item::webTie, 1, v) && v.webTie && choice(Item::webTie, v) == 1, "not switched on");
+        check(tabOnlyText(v).find("web_tie=1\n") != std::string::npos &&
+                  withTabOnly({}, "web_tie=1\n").webTie && !withTabOnly({}, "web_tie=0\n").webTie &&
+                  !withTabOnly({}, "pc_media=1\n").webTie,
+              "spidy_vr.ini does not keep WEB TIE as web_tie");
+        game_swing::Settings s;
+        check(!s.webTie && offsetof(game_swing::Settings, webTie) == game_swing::settingsBytesV22,
+              "the web tie on in a new packet, or not appended");
+        s.webTie = 1;
+        check(game_swing::validSettings(s), "a packet with the web tie refused");
+        s.webTie = 2;
+        check(!game_swing::validSettings(s), "an invalid web tie switch accepted");
+        s = {};
+        s.version = 22;
+        s.bytes = game_swing::settingsBytesV22;
+        check(game_swing::validSettings(s), "a version 22 packet (no web tie) refused");
     });
     test("PC MEDIA: off by default, a switch after BLOW SOUNDS kept as pc_media", [] {
         using namespace vr_settings;
@@ -22173,7 +22286,7 @@ int main() {
                                        "slingshot_speed=0\nrecording_smoothing=0\n"
                                        "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\n"
                                        "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
-                                       "pc_media=0\nsingle_hand_yank_percent=100\n",
+                                       "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;
@@ -24544,6 +24657,223 @@ int main() {
               "a new copy not shown");
         check(!steady_hud::fresh(1001 + holdMs, 1000, true), "a stale copy shown: the eyes would lack the panel");
         check(!steady_hud::fresh(1000, 0, false) && !steady_hud::fresh(1000, 1200, true), "no copy, yet shown");
+    });
+    // The web tie (web_tie.hpp): one hand's web on a wall, the other's on a
+    // webbed-up enemy, hands together, the right stick's click.
+    auto tieHands = [](bool cocooned, float apart) {
+        std::array<TieHand, 2> h{};
+        h[0] = {true, {-apart / 2, -.4f, -.3f}, true, {5, 2, -10}, false, 0, false, false};
+        h[1] = {true, {apart / 2, -.4f, -.3f}, false, {}, true, 42, true, cocooned};
+        return h;
+    };
+    test("web tie: a swing command carrying the right stick's click (asks bit 1) is valid", [&] {
+        game_swing::Command c;
+        c.serial = 1;
+        c.focused = 1;
+        c.tilt = Quat{};
+        for (const uint32_t asks : {0u, 1u, 2u, 3u}) {
+            c.asks = asks;
+            check(game_swing::valid(c), "a command with the tie's click was refused (2001)");
+        }
+        c.asks = 4;
+        check(!game_swing::valid(c), "an unknown ask was accepted");
+    });
+    test("web tie: hands together on a wall web and a webbed-up enemy, a click ties him", [&] {
+        TieGesture g;
+        const auto h = tieHands(true, .1f);
+        check(!g.update(1 / 90.f, false, h), "nothing tied without a click");
+        check(g.armed(), "the gesture was not armed");
+        const auto r = g.update(1 / 90.f, true, h);
+        check(r && r->anchorHand == 0 && r->targetHand == 1 && r->target == 42, "the click tied nothing");
+        near(r->anchor.z, -10);
+        check(!g.update(1 / 90.f, true, h), "a click held tied twice");
+        check(!g.update(1 / 90.f, false, h) && g.update(1 / 90.f, true, h), "a second click tied nothing");
+    });
+    test("web tie: either hand may hold the wall", [&] {
+        TieGesture g;
+        auto h = tieHands(true, .1f);
+        std::swap(h[0], h[1]);
+        const auto r = g.update(1 / 90.f, true, h);
+        check(r && r->anchorHand == 1 && r->targetHand == 0, "the swapped hands tied nothing");
+    });
+    test("web tie: no tie for an enemy not webbed up, hands apart, a prop, or a web in the air", [&] {
+        TieGesture g;
+        check(!g.update(1 / 90.f, true, tieHands(false, .1f)) && !g.armed(), "an enemy not webbed up was tied");
+        g.update(1 / 90.f, false, tieHands(false, .1f));
+        check(!g.update(1 / 90.f, true, tieHands(true, .6f)) && !g.armed(), "hands apart tied");
+        g.update(1 / 90.f, false, tieHands(true, .6f));
+        auto prop = tieHands(true, .1f);
+        prop[1].character = false;
+        check(!g.update(1 / 90.f, true, prop), "a prop was tied");
+        g.update(1 / 90.f, false, prop);
+        auto air = tieHands(true, .1f);
+        air[0].wallWeb = false;
+        check(!g.update(1 / 90.f, true, air), "a hand without a web on a surface tied");
+        g.update(1 / 90.f, false, air);
+        auto lost = tieHands(true, .1f);
+        lost[1].tracked = false;
+        check(!g.update(1 / 90.f, true, lost), "an untracked hand tied");
+    });
+    test("web tie: the click may come just after the hands part, not long after", [&] {
+        TieGesture g;
+        g.update(1 / 90.f, false, tieHands(true, .1f));
+        for (int i = 0; i < 18; ++i) // 0.2 s apart
+            g.update(1 / 90.f, false, tieHands(true, .6f));
+        check(g.update(1 / 90.f, true, tieHands(true, .6f)).has_value(), "a click 0.2 s after tied nothing");
+        TieGesture late;
+        late.update(1 / 90.f, false, tieHands(true, .1f));
+        for (int i = 0; i < 60; ++i) // 0.67 s apart
+            late.update(1 / 90.f, false, tieHands(true, .6f));
+        check(!late.update(1 / 90.f, true, tieHands(true, .6f)), "a click long after tied");
+    });
+    test("web tie: the place is off the surface by the target's radius", [&] {
+        const Vec3 p = tiePlace({0, 3, -5}, {0, 0, 2}, .45f);
+        near(p.x, 0);
+        near(p.y, 3);
+        near(p.z, -4.5f);
+        const Vec3 floor = tiePlace({1, 0, 1}, {}, .4f);
+        near(floor.y, .45f);
+        // Under a ceiling his head touches it: his centre 1 m below, not his radius.
+        near(tiePlace({0, 5, 0}, {0, -1, 0}, .45f).y, 5 - 1.05f);
+        // A surface tilted half down: between the two.
+        const Vec3 tilted = tiePlace({0, 5, 0}, normalized(Vec3{1, -1, 0}), .45f);
+        check(length(tilted - Vec3{0, 5, 0}) > .5f && length(tilted - Vec3{0, 5, 0}) < 1.05f, "a tilted place off its surface");
+    });
+    // A thug 8 m from a wall, drawn to a place on it 2.5 m up, at 30 physics steps a second.
+    auto tieRun = [&](GrabTargets& world, WebTies& ties, float seconds, bool fightOn, float& fastest,
+                      std::vector<std::uint64_t> taken = {}) {
+        const float dt = 1 / 30.f;
+        for (float t = 0; t < seconds; t += dt) {
+            std::vector<TargetCommand> commands;
+            ties.step(dt, world, fightOn, taken, commands);
+            world.apply(dt, commands);
+            for (const auto& item : world.items)
+                fastest = std::max(fastest, length(item.velocity));
+        }
+    };
+    test("web tie: a tied thug comes onto the wall gently and stays there", [&] {
+        GrabTargets world;
+        world.add(7, {0, .95f, 0}, 80, .45f, TargetKind::Character);
+        WebTies ties;
+        check(ties.add(*world.find(7), {0, 2.5f, -8}, {0, 0, 1}), "the tie was not made");
+        float fastest = 0;
+        tieRun(world, ties, 1.5f, true, fastest);
+        const Vec3 place{0, 2.5f, -8 + .45f + .05f};
+        check(length(world.items[0].position - place) < .1f, "the thug did not reach the wall within 1.5 s");
+        check(ties.ties()[0].arrived, "the tie did not see him arrive");
+        check(fastest <= 16.5f, "the thug flew faster than the tie draws");
+        // On it, he hangs still: no sag under gravity, for as long as the fight goes on.
+        float still = 0;
+        tieRun(world, ties, 60, true, still);
+        check(length(world.items[0].position - place) < .05f, "the thug sagged off the wall");
+        check(length(world.items[0].velocity) < .05f, "the thug was not held still");
+        check(ties.tied(7) && ties.ended() == 0, "the tie let go during the fight");
+    });
+    test("web tie: a thug far off comes in an arc, lifted off the ground, and a yank starts him", [&] {
+        GrabTargets world;
+        world.add(7, {0, .95f, 0}, 80, .45f, TargetKind::Character);
+        WebTies ties;
+        ties.add(*world.find(7), {0, 1.5f, -14}, {0, 0, 1});
+        const Vec3 place = ties.ties()[0].place;
+        const Vec3 launch = tieLaunch(*world.find(7), ties.ties()[0]);
+        check(length(launch) > 4 && length(launch) < 10, "the first pull was no yank");
+        world.items[0].velocity = launch;
+        float highest = 0, fastest = 0;
+        const float dt = 1 / 30.f;
+        for (float t = 0; t < 2.5f; t += dt) {
+            std::vector<TargetCommand> commands;
+            ties.step(dt, world, true, {}, commands);
+            world.apply(dt, commands);
+            const auto& p = world.items[0].position;
+            // Above the straight line from where he started to his place.
+            const float along = std::clamp((0 - p.z) / 13.5f, 0.f, 1.f);
+            highest = std::max(highest, p.y - (.95f + along * (1.5f - .95f)));
+            fastest = std::max(fastest, length(world.items[0].velocity));
+        }
+        check(highest > .5f, "he came along the straight line, not an arc");
+        check(length(world.items[0].position - place) < .1f, "he did not come to his place");
+        check(fastest <= 16.5f, "he flew faster than the tie draws");
+        near(tieAim({0, 1, -13}, place, {0, 0, 1}).y, place.y);
+        // Under a ceiling, no arc up into it.
+        near(tieAim({0, 1, 0}, {0, 4, -12}, {0, -1, 0}).y, 4);
+    });
+    test("web tie: settled short of his place, he is held where he came to", [&] {
+        GrabTargets world;
+        world.add(7, {0, 3.9f, -2}, 80, .45f, TargetKind::Character);
+        WebTies ties;
+        ties.add(*world.find(7), {0, 5, -2}, {0, -1, 0});
+        ties.settle(7, {0, 3.9f, -2});
+        check(ties.ties()[0].arrived, "a settled tie did not arrive");
+        float fastest = 0;
+        const float dt = 1 / 30.f;
+        for (float t = 0; t < 5; t += dt) {
+            std::vector<TargetCommand> commands;
+            ties.step(dt, world, true, {}, commands);
+            world.apply(dt, commands);
+            fastest = std::max(fastest, length(world.items[0].velocity));
+        }
+        check(length(world.items[0].position - Vec3{0, 3.9f, -2}) < .03f && fastest < .2f,
+              "a settled thug did not stay where he came to");
+    });
+    test("web tie: the fight over, every tie lets go; a short lull does not", [&] {
+        GrabTargets world;
+        world.add(7, {0, .95f, 0}, 80, .45f, TargetKind::Character);
+        world.add(8, {3, .95f, 0}, 80, .45f, TargetKind::Character);
+        WebTies ties;
+        ties.add(*world.find(7), {0, 2.5f, -8}, {0, 0, 1});
+        ties.add(*world.find(8), {3, 0, 0}, {0, 1, 0});
+        float fastest = 0;
+        tieRun(world, ties, 3, false, fastest);
+        tieRun(world, ties, .1f, true, fastest);
+        check(ties.ties().size() == 2, "a lull of 3 s ended the ties");
+        tieRun(world, ties, 5.2f, false, fastest);
+        check(ties.ties().empty() && ties.ended() == 2, "the end of the fight kept the ties");
+    });
+    test("web tie: a gone target or one a web takes again ends its tie", [&] {
+        GrabTargets world;
+        world.add(7, {0, .95f, 0}, 80, .45f, TargetKind::Character);
+        world.add(8, {3, .95f, 0}, 80, .45f, TargetKind::Character);
+        WebTies ties;
+        ties.add(*world.find(7), {0, 2.5f, -8}, {0, 0, 1});
+        ties.add(*world.find(8), {3, 2.5f, -8}, {0, 0, 1});
+        float fastest = 0;
+        tieRun(world, ties, .5f, true, fastest, {8});
+        check(ties.tied(7) && !ties.tied(8), "a target the hand took again stayed tied");
+        world.items.erase(world.items.begin());
+        tieRun(world, ties, .1f, true, fastest);
+        check(!ties.tied(7), "a gone target stayed tied");
+        check(ties.made() == 2 && ties.taken() == 1 && ties.gone() == 1, "ties made or ended were miscounted");
+    });
+    test("web tie: tying a tied target again moves its tie; bad configurations throw", [&] {
+        GrabTargets world;
+        world.add(7, {0, .95f, 0}, 80, .45f, TargetKind::Character);
+        WebTies ties;
+        ties.add(*world.find(7), {0, 2.5f, -8}, {0, 0, 1});
+        ties.add(*world.find(7), {4, 0, 0}, {0, 1, 0});
+        check(ties.ties().size() == 1 && ties.ties()[0].anchor.x == 4, "a target was tied twice");
+        TieConfig bad;
+        bad.webForce = 0;
+        bool threw = false;
+        try {
+            WebTies broken(bad);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+        check(threw, "a tie without strength was accepted");
+    });
+    test("web tie: the hands' webs are handed over, a held grip shoots nothing new", [&] {
+        GrabTargets world;
+        world.add(5, {0, 1, -6}, 80, .45f, TargetKind::Character);
+        WebGrab grab;
+        Input in = forward();
+        LabWorld lab{std::vector<Box>{}};
+        grab.claim(1 / 90.f, in, lab, world, Body{{0, 1, 0}, {}, true});
+        check(grab.grabs()[0].phase != GrabPhase::None, "the grab caught nothing");
+        grab.handOver(0);
+        check(grab.grabs()[0].phase == GrabPhase::None, "the grab kept its target");
+        grab.claim(1 / 90.f, in, lab, world, Body{{0, 1, 0}, {}, true});
+        check(grab.grabs()[0].phase == GrabPhase::None, "a held grip caught again");
+        check(grab.forSwing(in).hands[0].grip == 0, "a held grip went to the swing");
     });
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;

@@ -134,6 +134,14 @@ bool held(uintptr_t base, const Candidate&);
 inline bool fighting(uintptr_t base, const Candidate& c) {
     return enemy(c) && up(base, c) && !held(base, c);
 }
+// A bot the game has webbed up: in its BotStateWebStruggle (a class derived
+// from it included), the state a bot's StatusEffectTrackerWebbed puts him in
+// once the webbing reaches his threshold (docs/REFERENCE.md: kWebImpact with
+// kWebEncase at 25-100 webbed thugs up). What the web tie asks of its target.
+bool cocooned(uintptr_t base, const Candidate&);
+// A bot the game has stuck to a surface in his cocoon: BotStateWallStuck (a
+// down state, so not up()). What the web tie ends in.
+bool wallStuck(uintptr_t base, const Candidate&);
 // A device that still stands: one with hit points left, where it has any
 // (a turret torn off and thrown has none).
 bool standing(const Candidate& device);

@@ -831,8 +831,8 @@ bool XrRuntime::frameStereo(const std::function<bool(const XrFrame&)>& prepare,
                     const Pose back = inverse(tracked.head);
                     for (unsigned i = 0; i < 2; ++i) {
                         const Pose local = compose(back, tracked.eyes[i].pose);
-                        projectionViews[i].pose = {{local.orientation.x, local.orientation.y, local.orientation.z,
-                                                    local.orientation.w},
+                        projectionViews[i].pose = {{local.orientation.x, local.orientation.y,
+                                                    local.orientation.z, local.orientation.w},
                                                    {local.position.x, local.position.y, local.position.z}};
                     }
                 }

@@ -3,7 +3,101 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (November 2): pull request #55 by ImStillDead - SINGLE HAND
+**Latest build (November 3): pull request #58 by vrfloop-lab (vrfloopy) and
+HaNToP - first-person cutscenes.** vrfloopy: "I want to see the cutscenes
+from Spider-Man's eyes", with the head moving as the character's does.
+
+- **FIRST-PERSON CUTSCENES** (the launcher's Game screen and HUD,
+  experimental, off by default; `first_person_cutscenes` in launcher.ini,
+  XrConfig options bit 22). In a cutscene, a finisher or a car chase the view
+  is the eyes of the character who plays it: Spider-Man, Peter (his
+  apartment, civilian and City Hall bodies), Miles or MJ. Their head, mask
+  and lenses are hidden so you do not see the inside of them. The game's own
+  screen is replaced by the live 3D scene, with no flash entering or leaving
+  a scene.
+- **CUTSCENE HEAD TRACKING** (shown while the first is on, on by default;
+  bit 23 when off). On: your head looks around in the scene. Off: the view
+  follows where the character is, not where he looks, and the right stick
+  turns it.
+- **The theatre screen.** The right stick's click in a scene switches
+  between first person and the theatre screen (or the scene's own camera,
+  below) for the scenes after it, until clicked again in a scene. DISABLE
+  THEATER SCREEN FULLY (launcher, off by default; bit 24) shows every scene
+  around you: from the scene's own camera without first-person cutscenes.
+- **Whose eyes: X on the left controller** (or its equivalent) cycles the
+  characters known to be in the scene (Miles, MJ, Spider-Man, Peter) and
+  then the automatic choice. It takes X only while another character is
+  there. So you can watch the scene where Miles meets Spider-Man as
+  Spider-Man.
+- **After such a scene you face where it ended**, and the eyes stay on the
+  head at a swing's speed.
+- **How.** `game_fp.cpp` finds the scene's character from the game's entity
+  pool by the identity of its skeleton and the camera's own picture (no
+  distances); the character's head joint is shrunk in the pose job and its
+  head parts are hidden. Scenes where the player's entity is hidden
+  (suit-ups, Aunt May's scene) are followed by their own bodies, which are
+  known by asset. The eye command's `anchored` 2 and 4 put the eyes on that
+  head in the render thread (`native_eyes::onHead`).
+- **Off, nothing changes:** play resumes after a scene facing as it did
+  before it (the camera's heading is taken only with one of the two options
+  on), the head-search worker starts only with the first scene that wants
+  first person, and the right stick's click in play stays the game's R3 (or
+  WEB TIE's).
+- **Tests.** Core: the eye command's new anchors and the eyes put on a
+  head, the rig's facing after a scene, a first-person scene and a menu;
+  launcher: the session's arguments. Played by vrfloopy on a Quest 3 over
+  Virtual Desktop through the story, fixing scenes as they broke; not every
+  scene has been checked again after the last changes. A log line says who
+  the view is on ("first person: ..."). Not run in the game here.
+
+**Earlier build (November 2): pull request #56 by HaNToP - WEB TIE, an enemy
+webbed to a wall.**
+
+- **WEB TIE** (EXPERIMENTAL, after HALF PUNCH DAMAGE; the launcher's Webs
+  card; `web_tie` in `spidy_vr.ini` and in profiles), off by default. Web an
+  enemy up, put one web on a surface (a wall, a ceiling, a beam, a crane, a
+  lamp post) and the other on him - also right after yanking him into the
+  air - bring both hands together and click the right stick: he is pulled
+  onto the surface in an arc, stuck there by the game's own
+  `BotStateWallStuck`, and defeated where he hangs. Both controllers tick
+  when the tie is ready. Details in [WEB-TIE.md](WEB-TIE.md).
+- **With it on, a webbed enemy comes only on the yank**
+  (`GrabConfig::yankOnlyCharacters`): his web neither winds in on the
+  trigger nor pulls as the hand moves away. Off, he comes as before.
+- **Off, nothing of it runs:** no gesture and no click for it, no tie
+  samples, no per-step tie work, and the hook on the game's state requests
+  (the state log, `RequestState`) is made only at a session's first tie.
+  Swing settings version 23; older packets leave it off.
+- **The tab's pending changes** are a bit per value an Item can have
+  (`game_menu`, a `std::bitset`): WEB TIE is Item 64, past the 64-bit mask.
+- **Tests.** Core: the gesture, the tie's place, arc, launch and law, a
+  settle short of the place, the end of a fight, taken and gone targets, the
+  hand-over of both webs, an enemy who comes only on the yank with WEB TIE
+  and on the trigger without it, WEB TIE off by default and kept as
+  `web_tie`, swing settings version 23; launcher (profiles). Played by
+  HaNToP on a Quest 3 over Virtual Desktop; not run in the game here.
+
+**Earlier build (November 2): pull request #57 by GolexPrime - a load hitch
+no longer lets go of the webs.** GolexPrime: "with load stutters while
+swinging I very often lose the web, as if it were cut or I let go".
+
+- **Why.** The swing runs in the game's frame (its ray batch). A load hitch
+  stops that frame, and the swing timed two things by the wall clock: the
+  last input it holds through a closed gameplay gate (`InputHold`, 500 ms),
+  and how long the mover has not stepped with input coming (500 ms: a perch
+  or a pause). A hitch over half a second ran out either, and the first
+  frame after it let go of every web (`coast()` or `cancelSwing(true)`).
+- **The change.** Both are timed by the game's running time now
+  (`game_swing::RunClock`): from one frame to the next, each gap counted up
+  to 100 ms, so a hitch of any length is one long frame. A perch or a lost
+  input still lets go after half a second of frames.
+- **Not changed.** The movement lease (250 ms, wall clock) can still run out
+  over a hitch, so the first step after one may be the game's own; the next
+  frame's command takes over again.
+- **Tests.** Core: the clock over a two second hitch, and the held grip
+  outliving a 1.5 s hitch but not half a second of frames without input.
+
+**Earlier build (November 2): pull request #55 by ImStillDead - SINGLE HAND
 YANK STRENGTH, how much speed a one-hand web yank adds.**
 
 - **SINGLE HAND YANK STRENGTH** (SWINGING, before TWO HAND WEB ZIP; the
@@ -343,27 +437,6 @@ patch".
 - **Checked:** ctest 3/3 and the six Python protocol suites on the twelve
   together, built after each step. Not run: the game, a headset (each author
   played their own feature in their own build).
-
-**First-person cutscenes.** You: "I want to see the cutscenes from Spider-Man's eyes", with the head moving as the
-character's does.
-
-- **FIRST-PERSON CUTSCENES** (launcher > Game screen and HUD, off by default). In a cutscene the view is the eyes of
-  the character who plays it: Spider-Man, Peter (his apartment, civilian and City Hall bodies), Miles or MJ. The
-  character's head, mask and lenses are hidden so you don't see the inside of them. The game's own screen is
-  replaced by the live 3D scene, with no flash entering or leaving a scene.
-- **CUTSCENE HEAD TRACKING** (shown while the first is on, on by default). On: your head looks around in the scene.
-  Off: the scene follows where the character is, not where he looks, and the right stick turns the view.
-- **THEATRE SCREEN toggle.** Right stick click switches between first person and the scene's own camera for the
-  current scene. DISABLE THEATER SCREEN FULLY (launcher, off by default) keeps the scene camera for good.
-- **Whose eyes: X on the left controller** (or its equivalent) cycles the characters known to be in the scene
-  (Miles, MJ, Spider-Man, Peter) and then the automatic choice. It only takes X while another character is there.
-  So you can watch the scene where Miles meets Spider-Man as Spider-Man.
-- **After a scene you face where it ended**, and the eyes stay on the head at a swing's speed.
-- **How.** `game_fp.cpp` finds the scene's character from the game's entity pool by the identity of its skeleton
-  and the camera's own picture (no distances); the character's head joint is shrunk in the pose job and its head
-  parts are hidden. Scenes where the player's entity is hidden (suit-ups, Aunt May's scene) are followed by their
-  own bodies, which are known by asset.
-- **Tested** on a Quest 3 over Virtual Desktop, by playing through the story and fixing scenes as they broke; not every scene of the game has been checked again after the last changes. A log line says who the view is on ("first person: ...").
 
 **Earlier build (October 27, eighth): a floor too high is caught by your
 arms.** You: "height calibration showed very wrong number in one of today's
