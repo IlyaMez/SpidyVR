@@ -1717,10 +1717,14 @@ DWORD WINAPI run(void*) {
                     }
                     // Both hands at the chest with both triggers pulled is the
                     // game's suit power (its L3 + R3, which VR play had no way
-                    // to), and those triggers shoot nothing meanwhile.
+                    // to), and those triggers shoot nothing meanwhile. A hand
+                    // whose web is out reels with its trigger instead.
                     {
                         const float triggers[2]{frame.hands[0].trigger, frame.hands[1].trigger};
-                        suitPress.update(frame.seconds, gesturesPlay, frame.head, grips, gripsTracked, triggers);
+                        const bool webs[2]{swingState.webs[0].attached != 0,
+                                           swingState.webs[1].attached != 0};
+                        suitPress.update(frame.seconds, gesturesPlay, frame.head, grips, gripsTracked,
+                                         triggers, webs);
                         for (unsigned i = 0; i < 2; ++i)
                             if (suitPress.hands() & (1u << i))
                                 controller.hands[i].trigger = 0;

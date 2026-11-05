@@ -9105,13 +9105,32 @@ int main() {
         check(!power.hands(),"released triggers are still the gesture's");
         triggers[0]=triggers[1]=1;
         check(power.update(dt,true,head,grips,both,triggers)&&power.powers()==2,"a second gesture asked for nothing");
-        // Half a second apart: none, though each trigger at the chest stays the gesture's.
+        // Half a second apart: none, and the first trigger is the web's again after `together`, still held.
         SuitPowerPress slow;
         float late[2]{1,0};
-        for(int i=0;i<46;++i)slow.update(dt,true,head,grips,both,late);
+        check(!slow.update(dt,true,head,grips,both,late)&&slow.hands()==1,"a trigger at the chest did not wait");
+        for(int i=0;i<45;++i)slow.update(dt,true,head,grips,both,late);
+        check(!slow.hands(),"a lone trigger at the chest stayed the gesture's");
         late[1]=1;
-        check(!slow.update(dt,true,head,grips,both,late)&&!slow.powers()&&slow.hands()==3,
+        check(!slow.update(dt,true,head,grips,both,late)&&!slow.powers()&&slow.hands()==2,
               "triggers half a second apart were the suit power");
+        // November 5: one hand at the chest, the other away, is a web at once (the
+        // other hand on the web's trigger, a player at rest, never waits).
+        SuitPowerPress alone;
+        Pose spread[2]{{{-.06f,1.33f,-.15f},{}},{{.3f,1.1f,-.3f},{}}};
+        float single[2]{1,0};
+        check(!alone.update(dt,true,head,spread,both,single)&&!alone.hands(),"one hand at the chest held its trigger");
+        // Both at the chest but 22 cm apart (an October 28 player at rest): no gesture.
+        SuitPowerPress wide;
+        Pose wideGrips[2]{{{-.11f,1.33f,-.15f},{}},{{.11f,1.33f,-.15f},{}}};
+        float bothPulled[2]{1,1};
+        check(!wide.update(dt,true,head,wideGrips,both,bothPulled)&&!wide.hands()&&!wide.powers(),
+              "hands 22 cm apart were the suit power");
+        // A hand whose web is out reels with its trigger: never the gesture's.
+        SuitPowerPress reel;
+        const bool webOut[2]{true,false};
+        check(!reel.update(dt,true,head,grips,both,bothPulled,webOut)&&reel.hands()==2&&!reel.powers(),
+              "the trigger of a hand on a web was the gesture's");
         // Hands at the belt are not at the chest; a turned head's chest is where it looks, level.
         SuitPowerPress low;
         Pose belt[2]{{{-.06f,1.f,-.15f},{}},{{.06f,1.f,-.15f},{}}};
