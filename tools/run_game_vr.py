@@ -1678,7 +1678,7 @@ def save_eye_snapshot(game, address, shot, folder, name, view=544, crop=512):
 
 
 HUD_SHOTS = 6
-HUD_CAPTURE_SKIPS = ('copied', 'no_resource', 'unknown_state', 'other_device', 'busy', 'format', 'failed')
+HUD_CAPTURE_SKIPS = ('copied', 'no_resource', 'unknown_state', 'other_device', 'busy', 'format', 'failed', 'stale', 'blank')
 HUD_CAPTURE_PATHS = ('none', 'texture', 'wrapped', 'target')
 
 
@@ -1704,14 +1704,14 @@ def hud_capture_snapshot(game, address):
         snapshots, pixels = struct.unpack_from('<2Q', raw, 128)
         row_pitch, swap = struct.unpack_from('<2I', raw, 144)
         staged, layer_copies, layer_frames = struct.unpack_from('<3Q', raw, 152)
-        stage_skip = struct.unpack_from('<I', raw, 176)[0]
+        stage_skip, registered = struct.unpack_from('<2I', raw, 176)
         return dict(sequence=sequence, path=HUD_CAPTURE_PATHS[path] if path < len(HUD_CAPTURE_PATHS) else path,
                     found=bool(resource), width=width, height=height, format=fmt, mips=mips, flags=flags,
                     samples=samples, barriers=barriers, executed=executed, other_queue=other, odd=odd,
                     mismatched=mismatched, state=state, known=bool(known), presents=presents, copies=copies,
                     skip=HUD_CAPTURE_SKIPS[skip] if skip < len(HUD_CAPTURE_SKIPS) else skip, refused=refused,
                     snapshots=snapshots, pixels=pixels, row_pitch=row_pitch, swap=bool(swap), staged=staged,
-                    layer_copies=layer_copies, layer_frames=layer_frames,
+                    layer_copies=layer_copies, layer_frames=layer_frames, registered=registered,
                     stage_skip=HUD_CAPTURE_SKIPS[stage_skip] if stage_skip < len(HUD_CAPTURE_SKIPS) else stage_skip)
     return None
 
@@ -2773,7 +2773,7 @@ def session(a, startup):
                         sample['hud_capture'] = {k: capture[k] for k in ('found', 'known', 'copies', 'snapshots',
                                                                          'skip', 'state', 'executed', 'staged',
                                                                          'layer_copies', 'layer_frames',
-                                                                         'stage_skip')}
+                                                                         'stage_skip', 'registered')}
                         if capture['snapshots'] != hud_shot_count and capture['pixels']:
                             hud_shot_count = capture['snapshots']
                             try:

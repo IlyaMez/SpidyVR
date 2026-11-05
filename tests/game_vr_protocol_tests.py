@@ -362,7 +362,7 @@ class ProtocolTests(unittest.TestCase):
         struct.pack_into('<2Q2I', raw, 104, 300, 3, 0, 0)
         struct.pack_into('<2Q2I', raw, 128, 3, 0x40000, 256, 1)
         # STEADY HUD: copies with the pairs, into the layer, frames that showed it; the last pair's state unknown.
-        struct.pack_into('<3QI', raw, 152, 700, 690, 1400, 2)
+        struct.pack_into('<3Q2I', raw, 152, 700, 690, 1400, 2, 5)
         shot = hud_capture_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)
         self.assertEqual((shot['path'], shot['found'], shot['width'], shot['format']), ('wrapped', True, 64, 87))
         self.assertEqual((shot['barriers'], shot['executed'], shot['odd'], shot['mismatched']), (900, 880, 1, 2))
@@ -370,6 +370,14 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual((shot['snapshots'], shot['row_pitch'], shot['swap']), (3, 256, True))
         self.assertEqual((shot['staged'], shot['layer_copies'], shot['layer_frames'], shot['stage_skip']),
                          (700, 690, 1400, 'unknown_state'))
+        self.assertEqual(shot['registered'], 5)
+        # The game stopped drawing into the followed texture: the copy says so.
+        struct.pack_into('<I', raw, 176, 7)
+        self.assertEqual(hud_capture_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)['stage_skip'], 'stale')
+        # The followed texture is empty: the copy says so.
+        struct.pack_into('<I', raw, 176, 8)
+        self.assertEqual(hud_capture_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)['stage_skip'], 'blank')
+        struct.pack_into('<I', raw, 176, 2)
         # Torn the whole time: nothing; too short: nothing.
         self.assertIsNone(hud_capture_snapshot(Reader(*([raw, struct.pack('<Q', 8)] * 8)), 0))
         self.assertIsNone(hud_capture_snapshot(Reader(raw[:40]), 0))

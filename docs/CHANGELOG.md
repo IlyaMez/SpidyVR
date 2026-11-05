@@ -3,6 +3,23 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
+**Next build: STEADY HUD no longer goes empty after the game remakes the HUD.**
+A report with STEADY HUD on (0.8.0): after a death, a checkpoint reload or a short combat cutscene the HUD
+was gone from the headset, but on the monitor, until the game was restarted. The session report showed why: the
+barriers on the followed panel texture stopped (`hud_capture.executed` frozen) while the layer kept copying it.
+The game had made a new texture and Spidy still followed the old, empty one.
+
+- The panel's resource is looked up every frame, not only when the texture object changes: the game may remake
+  the resource and keep the object where it was (`src/native_hud.cpp`, `probeTexture`).
+- A followed texture that gets no barrier for 2 s while its copies are wanted is not copied (`stage_skip: stale`),
+  so the eyes draw the panel again, as when the copies stop.
+- The report counts the times the panel was followed anew (`hud_capture.registered`).
+- **A blank panel is not shown (the first fix did not hold in the reporter's game).** The followed texture is looked at
+  every second (a snapshot, one pixel in 15 for any alpha); two snapshots in a row with nothing on it and the panel is
+  no longer copied (`stage_skip: blank`), so the layer goes and the eyes draw the HUD, as with STEADY HUD off. The
+  layer comes back on its own when the texture has something on it again.
+- Built and tested without MSVC and without the game: the report's decoding is tested; the fix itself is not.
+
 **Latest build (November 3): pull request #58 by vrfloop-lab (vrfloopy) and
 HaNToP - first-person cutscenes.** vrfloopy: "I want to see the cutscenes
 from Spider-Man's eyes", with the head moving as the character's does.
