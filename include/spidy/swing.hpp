@@ -15,6 +15,9 @@ struct MoveResult {
     Vec3 position{}, normal{};
     bool hit{};
 };
+// The longest ray the game's world takes (native_rays::maxDistance): as far as
+// WEB RANGE reaches. A query past it is cut to it.
+constexpr float maxRayDistance = 1000;
 class WorldQueries {
   public:
     virtual ~WorldQueries() = default;

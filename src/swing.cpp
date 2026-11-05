@@ -100,6 +100,9 @@ bool Swing::thin(const RayHit& hit, const WorldQueries& world) const {
 }
 std::optional<RayHit> Swing::solid(Vec3 from, Vec3 way, float reach, const WorldQueries& world,
                                    int* passed) const {
+    // The body's clear line to an open-air anchor WEB RANGE (up to 1000 m) from
+    // the hand is longer than that by the hand's reach: the world takes 1000 m.
+    reach = std::min(reach, maxRayDistance);
     auto hit = world.raycast(from, way, reach);
     if (!config_.arcade)
         return hit;

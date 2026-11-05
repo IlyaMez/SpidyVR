@@ -8562,6 +8562,42 @@ int main() {
         bad=c; bad.rays[0].distance=1001; check(!native_rays::valid(bad),"excessive range accepted");
         c.count=0; c.leaseMs=0; check(native_rays::valid(c),"cancel command rejected");
     });
+    test("a visitor's ray the world does not take is cut to 1000 m or missed, never the end of VR", [] {
+        static_assert(maxRayDistance==native_rays::maxDistance);
+        const auto cut=native_rays::usable({1,2,3},{0,0,-1},1000.3f);
+        check(cut && cut->distance==native_rays::maxDistance,"a ray past 1000 m was not cut to it");
+        native_rays::Command c; c.serial=1; c.count=1; c.rays[0]=*cut;
+        check(native_rays::valid(c),"a cut ray is still one the world does not take");
+        const auto unit=native_rays::usable({1,2,3},{0,-2,0},50);
+        check(unit && std::abs(length(unit->direction)-1)<1e-6f && unit->distance==50,"a long direction kept");
+        check(!native_rays::usable({1,2,3},{},50),"a ray without a direction was cast");
+        check(!native_rays::usable({1,2,3},{0,-1,0},-1),"a negative length was cast");
+        check(!native_rays::usable({1,2,3},{0,-1,0},std::nanf("")),"a length that is no number was cast");
+        check(!native_rays::usable({std::numeric_limits<float>::infinity(),0,0},{0,-1,0},5),
+              "an infinite origin was cast");
+    });
+    test("WEB RANGE 1000 m: a web into open sky asks the world only for rays it takes", [] {
+        // November 4: the body's clear line to an open-air anchor 1000 m from
+        // the hand came out 1000.9 m long, and the ray module ended VR (2105).
+        struct Strict : TestWorld {
+            mutable unsigned asked=0, refused=0;
+            std::optional<RayHit> raycast(Vec3 o,Vec3 d,float distance) const override {
+                ++asked;
+                native_rays::Command c; c.serial=1; c.count=1; c.rays[0]={o,distance,d,0};
+                refused+=!native_rays::valid(c);
+                return {};
+            }
+        } world;
+        Swing s(inert());
+        s.webTravel(1000,0);
+        auto in=aimed();
+        in.hands[0].aim.position={0,2,0};
+        const Body body{{0,1,0},{},false};
+        s.predictNativeStep(.01f,in,world,body);
+        check(s.webs()[0].attached && s.webs()[0].airAnchor,"the sky shot did not hold");
+        near(length(s.webs()[0].anchor-in.hands[0].aim.position),1000,.01f);
+        check(world.asked && !world.refused,"a ray the world does not take was asked for");
+    });
     test("controller rays retain hand identity and disappear on tracking loss", [] {
         Input in;
         in.hands[0].tracked=true; in.hands[0].aim={{1,2,3},{}};

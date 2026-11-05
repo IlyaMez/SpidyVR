@@ -540,8 +540,9 @@ void visit(const native_rays::QueryContext& world) {
                     continue;
                 const Vec3 from = in.hands[i].aim.position, end = web.end();
                 const Vec3 line = end - from;
+                const float reach = std::min(length(line) + .3f, maxRayDistance);
                 if (finite(from) && finite(end) && length(line) > 1)
-                    if (const auto hit = world.raycast(from, normalized(line), length(line) + .3f);
+                    if (const auto hit = world.raycast(from, normalized(line), reach);
                         hit && hit->fixed && finite(hit->point) && length(hit->point - from) > .8f) {
                         h.wallWeb = true;
                         h.anchor = hit->point;

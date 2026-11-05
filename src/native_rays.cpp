@@ -24,6 +24,8 @@ bool created{};
 std::atomic<bool> enabled{};
 std::atomic<unsigned> active{};
 std::atomic<uint64_t> calls{};
+// Visitors' rays the world did not take as asked (usable()); Data::malformed.
+std::atomic<uint32_t> malformed{};
 std::atomic<Visitor> visitor{};
 SRWLOCK lifecycle = SRWLOCK_INIT, requests = SRWLOCK_INIT, output = SRWLOCK_INIT;
 // At most one batch runs at a time, even when several game ray workers enter.
@@ -202,13 +204,22 @@ class Context final : public QueryContext {
     std::optional<RayHit> castOne(Vec3 origin, Vec3 direction, float distance, bool body) const {
         if (distance >= 0 && distance < .01f)
             return {};
+        if (!enabled || GetTickCount64() >= deadline) {
+            error_ = 2105;
+            return {};
+        }
         Command check;
         check.count = 1;
         check.serial = 1;
         check.rays[0] = {origin, distance, direction, 0};
-        if (!valid(check) || !enabled || GetTickCount64() >= deadline) {
-            error_ = 2105;
-            return {};
+        // A ray the world does not take as asked is cut to what it takes, or
+        // missed: counted, never the end of VR (usable()).
+        if (!valid(check)) {
+            malformed.fetch_add(1, std::memory_order_relaxed);
+            const auto ray = usable(origin, direction, distance);
+            if (!ray)
+                return {};
+            check.rays[0] = *ray;
         }
         Hit hit;
         if (const auto code = queryOne(world_, query_, check.rays[0], hit, body)) {
@@ -282,6 +293,7 @@ void cast(void* world, const void* nativeQuery, void* nativeCollector) {
         d.world = address;
         d.count = count;
         d.thread = GetCurrentThreadId();
+        d.malformed = malformed.load(std::memory_order_relaxed);
         std::memcpy(d.hits, results, sizeof(results));
         InterlockedIncrement64(&d.sequence);
         ReleaseSRWLockExclusive(&output);
@@ -357,6 +369,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyRayStart(void* input) {
         // after the first answered 1000 and left the rays dead: a second VR
         // session in one game, or a second probe. Switch it on again instead,
         // as the pad does (game_pad::install).
+        malformed = 0; // counted for each start: one session's report
         if (created) {
             config = next;
             deadline = config.durationMs ? GetTickCount64() + config.durationMs : UINT64_MAX;
@@ -462,6 +475,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyRayStop(void*) {
     InterlockedIncrement64(&SpidyRayData.sequence);
     SpidyRayData.status = result ? 4 : 3;
     SpidyRayData.error = result;
+    SpidyRayData.malformed = malformed.load(std::memory_order_relaxed);
     InterlockedIncrement64(&SpidyRayData.sequence);
     ReleaseSRWLockExclusive(&output);
     ReleaseSRWLockExclusive(&lifecycle);
