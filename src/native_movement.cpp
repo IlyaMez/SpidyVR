@@ -3,6 +3,7 @@
 // Owned steps also discard the native mover's duplicate gravity accumulator.
 #include "spidy/native_movement.hpp"
 #include <MinHook.h>
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <intrin.h>
@@ -12,6 +13,9 @@ using namespace spidy::native_movement;
 extern "C" {
 __declspec(dllexport) Data SpidyMotionData;
 __declspec(dllexport) DrivenData SpidyMotionDriven;
+// The support on a web line (Command::support): [0] 1 once its hook is in,
+// [1] the steps it answered supported.
+__declspec(dllexport) uint64_t SpidyMotionSupport[2];
 }
 namespace {
 using Method = uintptr_t (*)(void*);
@@ -30,6 +34,23 @@ Config config{};
 Command command{};
 void* hooks[4]{};
 unsigned hookCount{};
+// The mover's contact classification (its vtable's +0x90, 1fbd460: the mover
+// alone, in rcx; 0 supported, 1 sliding, 2 airborne), which the step stores at
+// +6ee (1fbeea3) and from which it keeps its time on the ground or off it
+// (+6b4) and plays the landing's and the leaving's sounds (16d5e80, as it
+// changes). Read off this build's code (November 4). Hooked for the
+// player's mover alone: asked for support (a web line under him), it answers
+// supported, and the game takes him as standing - its own stance and walk.
+// Writing the contact around the step did nothing: the step stores this
+// answer after it (the 12:47 session: airborne at every step on the line).
+// Answering supported skips the probe inside 1fbd460. The step then keeps the
+// last real surface at +1a0 and reels the body down onto it at 7 m/s (13:33:
+// contact 0 the whole drop, the line asking +6 up, the body at -7 until the
+// floor). The answer now plants that surface where he is first.
+using Classify = int (*)(void*);
+Classify classify{};
+void* supportHook{};
+bool supportHooked{};
 uint32_t handle{};
 std::atomic<bool> enabled{};
 // Set when the module follows the player to another mover: the next step's
@@ -233,6 +254,44 @@ uintptr_t queryDriven(void* self) {
     ReleaseSRWLockExclusive(&telemetry);
     return result;
 }
+int classifyContact(void* self) {
+    Guard guard;
+    if (enabled && GetTickCount64() < deadline && reinterpret_cast<uintptr_t>(self) == config.mover) {
+        // Support with or without the drive: on a line the game walks him itself
+        // (game_swing's GameWalk), its own legs, the ground still under him.
+        const auto c = leased();
+        if (c.support) {
+            // Returning supported skips this function's probe, and the step
+            // then reels the body down to the last real surface stored at
+            // +1a0 at 7 m/s (13:33: contact 0 the whole drop, Y from the line
+            // ~80 onto the floor ~67, velocity.y == -7 until it met that
+            // surface). Plant that surface where he is (+294 copied to +1a0)
+            // so the separation the step stores at +6b8 (1fbeef8) is 0, and
+            // give it an upward normal at +1b8. Do not write +1ac (unread in
+            // the dump; it may be a world point). The step still stores 0 at
+            // +6ee itself (1fbeea3).
+            const auto mover = reinterpret_cast<uintptr_t>(self);
+            float here[3]{};
+            if (read(mover + 0x294, here, sizeof(here))) {
+                // At the line's height if the swing gave it (version 3): the
+                // step then reels the body to it, his feet on the line.
+                float height{};
+                Vec3 actor{};
+                if (supportHeight(c, height) && read(pointer(config.record) + 0x30, &actor, 12) && finite(actor))
+                    here[1] += height - actor.y;
+                std::memcpy(reinterpret_cast<void*>(mover + 0x1a0), here, sizeof(here));
+                const float up[3] = {0.f, 1.f, 0.f};
+                std::memcpy(reinterpret_cast<void*>(mover + 0x1b8), up, sizeof(up));
+                auto* valid = reinterpret_cast<uint8_t*>(mover + 0x238);
+                if (*valid == 0)
+                    *valid = 1;
+            }
+            InterlockedIncrement64(reinterpret_cast<volatile LONG64*>(&SpidyMotionSupport[1]));
+            return 0;
+        }
+    }
+    return classify(self);
+}
 uintptr_t query(void* self) {
     Guard guard;
     if (!enabled || GetTickCount64() >= deadline)
@@ -302,6 +361,8 @@ DWORD disable() {
     // taken off the queue too.
     for (unsigned i = 0; i < hookCount; ++i)
         MH_QueueDisableHook(hooks[i]);
+    if (supportHooked)
+        MH_QueueDisableHook(supportHook);
     if (const auto s = MH_ApplyQueued(); s != MH_OK)
         result = 1400 + s;
     const auto until = GetTickCount64() + 2000;
@@ -378,6 +439,20 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionStart(void* input) {
             if (result)
                 break;
         }
+        // The support's hook: only on this build's classification (its entry,
+        // and the player's mover's vtable pointing at it); without it the rest
+        // runs as before.
+        if (!supportHooked) {
+            constexpr uint8_t k[] = {0x48, 0x8b, 0xc4, 0x48, 0x89, 0x58, 0x08, 0x57,
+                                     0x48, 0x81, 0xec, 0xd0, 0,    0,    0};
+            uintptr_t table{}, slot{};
+            if (signature(0x1fbd460, k, sizeof(k)) && read(config.mover, &table, 8) &&
+                read(table + 0x90, &slot, 8) && slot == config.base + 0x1fbd460) {
+                supportHook = reinterpret_cast<void*>(config.base + 0x1fbd460);
+                supportHooked = MH_CreateHook(supportHook, reinterpret_cast<void*>(classifyContact),
+                                              reinterpret_cast<void**>(&classify)) == MH_OK;
+            }
+        }
         request = reinterpret_cast<Request>(config.base + 0x1fc2e10);
         setTarget = reinterpret_cast<SetTarget>(config.base + 0x1fb88d0);
         timestep = reinterpret_cast<Timestep>(config.base + 0x16769f0);
@@ -386,8 +461,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionStart(void* input) {
         // Under one freeze of the game's threads (stereo_probe.cpp says why).
         for (unsigned i = 0; i < hookCount && s == MH_OK; ++i)
             s = MH_QueueEnableHook(hooks[i]);
+        if (s == MH_OK && supportHooked && MH_QueueEnableHook(supportHook) != MH_OK)
+            supportHooked = false;
         if (s == MH_OK)
             s = MH_ApplyQueued();
+        SpidyMotionSupport[0] = supportHooked ? 1u : 0u;
         if (s != MH_OK)
             result = 1300 + s;
     } while (false);
@@ -436,7 +514,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyMotionSubmit(void* input) {
     if (!read(reinterpret_cast<uintptr_t>(input), &c, sizeof(c)) || c.magic != 0x534d564d ||
         !validCommandVersion(c) || c.bytes != sizeof(c) || !c.serial || c.enabled > 1 || c.leaseMs > 250 ||
         (c.enabled && !c.leaseMs) || !finite(c.velocity) || length(c.velocity) > config.maxSpeed ||
-        c.reserved)
+        c.support > 1)
         return 2001;
     AcquireSRWLockExclusive(&control);
     DWORD result{};

@@ -129,6 +129,54 @@ struct TieRope {
 void submitTies(const TieRope* ropes, uint32_t count, uint32_t leaseMs);
 // A bit per tie (in submitTies' order) the game draws now.
 uint32_t tiesDrawn();
+// Web lines (web_line.hpp), in the game's own rope material: from `start`
+// to `end`, both on surfaces, each rope kept for its line (`id`). The hero
+// rope manager starts a rope at one of two hand points (Start, Grip, Grip2,
+// End at 7d60.. +12 per hand), and a line lasts while the player uses both
+// hands. So the update's ropes are laid with their hand's points set for
+// each in turn: before the update for the first rope on a hand, and in the
+// hand points the game asks for each rope (95f9c0) for the next one there,
+// in slot order. Whether the game draws a line from its start, not from the
+// hand, is seen after each update (its rope's third point within
+// lineRopeTolerance of the line, once lineRopeSettle updates old); one drawn
+// from the hand lineRopeBadRun updates in a row is let go and made again
+// once a hand is free, the overlay drawing it meanwhile. Until November 3 a
+// hand's Start was set in the hand points for the rope being laid: 679dc0
+// reads it before, and lines came from the player's hand.
+// The lines' ropes and the strands of the thugs hung from them, ten at most
+// (a hero rope manager has 16 ropes, the hands', their trailing ones and the
+// ties' among them); past that the overlay draws a strand. A line's rope with
+// its strands laid in it (November 3, 19:00) crashed the game past 8 points
+// and drew the line twice (November 4).
+constexpr unsigned maxLineRopes = 10;
+constexpr float lineRopeTolerance = .3f;
+constexpr uint32_t lineRopeSettle = 30, lineRopeBadRun = 6;
+// A rope may carry two strands when ropes run short: laid from the first's
+// head up to its top (via), along the line to the second's top (start), and
+// down to its head (end) - three points laid, well within a rope's 8.
+struct LineRope {
+    Vec3 start{}, end{};
+    uint32_t id{};
+    uint32_t viaCount{};
+    Vec3 via[2]{};
+};
+void submitLines(const LineRope* ropes, uint32_t count, uint32_t leaseMs);
+// A bit for each line (in submitLines' order) the game draws now.
+uint32_t linesDrawn();
+// The line ropes' telemetry (export SpidyLineRopeData): ropes made and let
+// go, those let go because they were drawn from the hand (hidden), the
+// updates a line's rope was checked in, and in how many it lay on the line
+// (good) or off it (bad), of the bad those while its hand's own web or a
+// tie's was drawn too (shared); the hand points set for a rope (moves); the
+// last and worst distance off the line.
+// Version 2 (November 3): hidden; ropes kept by line, checked by their third point.
+struct LineRopeData {
+    uint32_t magic = 0x534c5250, version = 2, bytes = sizeof(LineRopeData), status{};
+    int64_t sequence{};
+    uint64_t made{}, released{}, hidden{}, checks{}, good{}, bad{}, moves{}, shared{};
+    float lastOff{}, worstOff{};
+};
+static_assert(sizeof(LineRopeData) == 96);
 // True while the game draws this hand's web, so the overlay must not.
 bool drawing(unsigned hand);
 // The game draws a web held in both hands from wrist to wrist (Request::held):

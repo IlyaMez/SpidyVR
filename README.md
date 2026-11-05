@@ -70,6 +70,12 @@ one **START VR** button.
   a crate) and the other on him, bring your hands together and click the
   right stick: he is pulled onto it and stays stuck there until the fight is
   over ([web tie](docs/WEB-TIE.md)).
+- **Web lines.** With **WEB LINES** on (EXPERIMENTAL in the SPIDY VR
+  settings), put one web on a wall and the other on another, bring your hands
+  together and click the right stick: a taut line of web between them. Hold
+  the right stick's click to aim at a line and let go to zip onto it; walk
+  along it, jump and dodge on it, swing from it, and with WEB TIE on too,
+  hang webbed-up enemies under it ([web lines](docs/WEB-LINE.md)).
 - **Punch across the room.** A fast fist into an enemy lands the game's own
   melee hit, harder the faster you swing. Throw one at an enemy up to 10 m
   away and you fly in and strike. Uppercut an enemy into the air and keep

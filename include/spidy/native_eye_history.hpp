@@ -35,6 +35,16 @@ struct NativeEyeFrame {
     uint32_t tieCount{};
     // A bit per tie the game draws in its own rope (native_webs::tiesDrawn).
     uint32_t tiesByGame{};
+    // Web lines (game_lines::LineData), and a bit for each the game draws.
+    std::array<TieStrand, 8> lines{};
+    uint32_t lineCount{}, linesByGame{};
+    // The strands of thugs hung from them, and each one's line (in `lines`).
+    std::array<TieStrand, 16> strands{};
+    std::array<uint8_t, 16> strandLine{};
+    uint32_t strandCount{};
+    // The zip's marker on a web line (0: none in view).
+    Vec3 lineTarget{};
+    uint32_t lineTargetId{};
     // What each hand's grip press would do (game_swing::AimKind none while
     // the aim markers are off).
     std::array<game_swing::Aim, 2> aims{};

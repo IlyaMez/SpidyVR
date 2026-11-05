@@ -1845,6 +1845,12 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "and click the right stick: he is stuck to the wall. On, a webbed enemy comes to you only "
                "when you yank him.",
                S(42), [&] { tabToggle("##webtie", Item::webTie); });
+        option("Web lines (experimental)",
+               "Put one web on a wall and the other on another, bring your hands together and click the "
+               "right stick: a taut line of web between them. Hold the right stick's click to aim at a line "
+               "and let go to zip onto it; walk, jump and dodge on it. With Web tie on too, enemies hang "
+               "under it.",
+               S(42), [&] { tabToggle("##weblines", Item::webLines); });
     });
     group(0, "Moving", [&] {
         option("Swing speed limit", "How fast a swing can carry you.", S(150), [&] {

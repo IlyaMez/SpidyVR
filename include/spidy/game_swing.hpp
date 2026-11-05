@@ -134,11 +134,14 @@ struct Command {
     // (a zip to a point), its Y (a web strike; a car's in a chase), a
     // prompt's button - and the swing lets it have the hero once it takes
     // him (AirYield). Zero until October 18, when it was `reserved`.
-    // Bit 1: the right thumbstick's click alone, in VR play with WEB TIE on,
-    // when the game does not name its R3 (game_pad::NamedPress) and the pad
-    // layer is off: the web tie's click (web_tie.hpp). No change of layout
-    // or version: an older swing module refuses such a command (asks > 1),
-    // and both come in one package.
+    // Bit 1: the right thumbstick's click alone, in VR play with WEB TIE or
+    // WEB LINES on, when the game does not name its R3 (game_pad::NamedPress)
+    // and the pad layer is off: the web tie's and a web line's click, and
+    // held, the aim of the zip to a web line (web_line.hpp). Bit 2: of bit 0's
+    // moves, the game's zip to a point: the one that takes the player off a
+    // web line. Bit 3: the dodge's button (B) held: on a web line, a dash
+    // along it. No change of layout or version: an older swing module refuses
+    // such a command (asks > 1), and both come in one package.
     uint32_t asks{};
     uint64_t sampleTimeNs = 1;
     // Version 3: a flip's tilt of the tracking space (Input::tilt). Version 2
@@ -242,6 +245,8 @@ inline bool momentumWallDrive(bool requested, bool fresh, const Data& d) {
 // arcade: arcade webs (the VR settings' WEB STYLE: ARCADE; SwingConfig::
 // arcade). Version 6 (settingsBytesV6) ends before it and leaves the webs'
 // style as it is.
+// Version 24 appends webLines (off by default): web lines (WEB LINES;
+// web_line.hpp).
 // Version 23 appends webTie (off by default): the web tie's gesture, and a
 // webbed enemy who comes only on the yank (WEB TIE; web_tie.hpp).
 // Version 22 appends singleHandYankPercent: 50 to 300, how much speed a fast
@@ -268,7 +273,7 @@ inline bool momentumWallDrive(bool requested, bool fresh, const Data& d) {
 // Version 8 appends handClimb without changing the upstream phone or arcade
 // fields. Older official settings keep their original layout and meaning.
 struct Settings {
-    uint32_t magic = 0x53575354, version = 23, bytes = sizeof(Settings), grab = 1;
+    uint32_t magic = 0x53575354, version = 24, bytes = sizeof(Settings), grab = 1;
     float maxSpeed = 32;
     uint32_t airWebs = 1;
     float gravity = 6;
@@ -292,14 +297,15 @@ struct Settings {
     uint32_t halfPunchDamage{};
     uint32_t singleHandYankPercent = 100;
     uint32_t webTie{};
+    uint32_t webLines{};
 };
 constexpr uint32_t settingsBytesV3 = 28, settingsBytesV4 = 32, settingsBytesV5 = 36, settingsBytesV6 = 40,
                    settingsBytesV7 = 44, settingsBytesV8 = 48, settingsBytesV9 = 52, settingsBytesV10 = 56,
                    settingsBytesV11 = 60, settingsBytesV12 = 64, settingsBytesV13 = 68,
                    settingsBytesV14 = 72, settingsBytesV15 = 76, settingsBytesV16 = 80, settingsBytesV17 = 84,
                    settingsBytesV18 = 88, settingsBytesV19 = 92, settingsBytesV20 = 96,
-                   settingsBytesV21 = 100, settingsBytesV22 = 104;
-static_assert(sizeof(Settings) == 108 && offsetof(Settings, walls) == settingsBytesV3 &&
+                   settingsBytesV21 = 100, settingsBytesV22 = 104, settingsBytesV23 = 108;
+static_assert(sizeof(Settings) == 112 && offsetof(Settings, walls) == settingsBytesV3 &&
               offsetof(Settings, physical) == settingsBytesV4 &&
               offsetof(Settings, noBlows) == settingsBytesV5 &&
               offsetof(Settings, arcade) == settingsBytesV6 &&
@@ -318,7 +324,8 @@ static_assert(sizeof(Settings) == 108 && offsetof(Settings, walls) == settingsBy
               offsetof(Settings, webSpeed) == settingsBytesV19 &&
               offsetof(Settings, halfPunchDamage) == settingsBytesV20 &&
               offsetof(Settings, singleHandYankPercent) == settingsBytesV21 &&
-              offsetof(Settings, webTie) == settingsBytesV22);
+              offsetof(Settings, webTie) == settingsBytesV22 &&
+              offsetof(Settings, webLines) == settingsBytesV23);
 // SpidyWebFlightSample: each hand's web in flight (WEB SPEED). phases: 0 no
 // web, 1 flying, 2 just arrived and catching softly, 3 holding.
 struct WebFlightData {
@@ -459,7 +466,8 @@ inline bool validSettings(const Settings& s) {
          (s.version == 20 && s.bytes == settingsBytesV20) ||
          (s.version == 21 && s.bytes == settingsBytesV21) ||
          (s.version == 22 && s.bytes == settingsBytesV22) ||
-         (s.version == 23 && s.bytes == sizeof(Settings))) &&
+         (s.version == 23 && s.bytes == settingsBytesV23) ||
+         (s.version == 24 && s.bytes == sizeof(Settings))) &&
         s.grab <= 1 && std::isfinite(s.maxSpeed) && s.maxSpeed > 0 && s.maxSpeed <= motionSpeedLimit &&
         s.airWebs <= 1 && std::isfinite(s.gravity) && s.gravity >= 0 && s.gravity <= maxGravity &&
         s.walls <= 4 && s.physical <= 1 && s.noBlows <= 3 && s.arcade <= 1 && s.handClimb <= 1 &&
@@ -469,7 +477,7 @@ inline bool validSettings(const Settings& s) {
         s.ropeSteering <= 1 && std::isfinite(s.webRange) && s.webRange >= 10 && s.webRange <= 1000 &&
         s.webSpeed <= 3 && s.halfPunchDamage <= 1 &&
         (s.version < 22 || (s.singleHandYankPercent >= 50 && s.singleHandYankPercent <= 300)) &&
-        s.webTie <= 1;
+        s.webTie <= 1 && s.webLines <= 1;
 }
 static_assert(sizeof(WebState) == 28 && sizeof(Data) == 272 && offsetof(Data, wall) == 240);
 // The player is in the air: Spidy's own flight, or the game's jump or fall,
@@ -523,7 +531,7 @@ inline bool valid(const Command& c) {
           (c.version == 6 && c.bytes == sizeof(c))) ||
         !std::isfinite(c.leap) || c.leap < 0 || c.leap > 1 || !finite(c.look) || length(c.look) > 1.01f ||
         !c.serial || c.focused > 1 || c.jump > 1 || c.leaseMs > 250 || (c.focused && !c.leaseMs) ||
-        !finite(c.move) || length(c.move) > 1.001f || !std::isfinite(c.trackingYaw) || c.asks > 3 ||
+        !finite(c.move) || length(c.move) > 1.001f || !std::isfinite(c.trackingYaw) || c.asks > 15 ||
         !std::isfinite(c.sampleSeconds) || c.sampleSeconds <= 0 || c.sampleSeconds > .1f ||
         (c.focused && !c.sampleTimeNs) || !std::isfinite(tilt) || tilt < .99f || tilt > 1.01f)
         return false;
