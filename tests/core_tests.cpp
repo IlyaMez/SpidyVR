@@ -8399,6 +8399,14 @@ int main() {
         HandPoser fight;thrown.fighting=true;
         for(int i=0;i<5;++i)pose=fight.update(dt,thrown);
         near(pose.shoot,0,.001f);near(pose.fist,1,.001f);
+        // November 5: an open hand moved fast with nobody to punch stays open ("if I don't do anything
+        // they just spam a grab motion"); with somebody to punch it is a fist.
+        HandPoser waving;HandPoseInput waved;waved.tracked=true;waved.speed=3;
+        for(int i=0;i<5;++i)pose=waving.update(dt,waved);
+        near(pose.fist,0,.001f);near(pose.shoot,0,.001f);
+        HandPoser punching;waved.fighting=true;
+        for(int i=0;i<5;++i)pose=punching.update(dt,waved);
+        near(pose.fist,1,.001f);
         // An untracked hand is neither.
         thrown.tracked=false;pose=fight.update(dt,thrown);
         near(pose.fist,0);near(pose.shoot,0);

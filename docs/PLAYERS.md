@@ -233,9 +233,9 @@ Your body and fists
   Take the other hand's  that hand closes into a fist on the web
   web
   Squeeze a grip ....... otherwise closes that hand into a fist (the grip
-                         when the trigger is your web button), and so does a
-                         hand moving fast; with an enemy marked or within
-                         reach a fast hand is a fist even while it shoots
+                         when the trigger is your web button); with an enemy
+                         marked or within reach a hand moving fast is a fist
+                         too, even while it shoots
   T-pose, both triggers  calibrates your body (when the panel asks): his
                          height and arms become yours. B skips it
 

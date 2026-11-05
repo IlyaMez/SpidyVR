@@ -444,8 +444,8 @@ hand in the XR worker):
 | Its own web holds (hanging from something, or holding a thug or a prop it caught) | the whole pose for 0.15 s after the web took hold, while the shot is on its way (`connectSeconds`); then the pose goes in 0.2 s and the hand closes on the web, a fist as far as the button is down, with the trigger as the web button too. The first build kept the pose 0.3 s and then closed the hand on the web ("the web shooting pose turns almost immidiatly to a fist"); the second kept it as long as the button was held, swinging too ("when web connects and held lets change the hand to fist and not keep the horn pose", October 15) |
 | The hand on the other hand's web (the tick), and while it holds that web | no pose: the button closes a fist on the strand, with the trigger as the web button too, where the grip is open |
 | A web ball leaving the hand | the whole pose for 0.5 s |
-| The hand moving faster than 1.2 m/s against the head | a fist, as before, under the pose: it shows as the pose goes |
-| The same with an enemy marked (the ring) or within a fist's reach | the fist wins: the pose is scaled down by how fast the hand is, to nothing at 2.5 m/s |
+| The hand moving faster than 1.2 m/s against the head, an enemy marked (the ring) or within a fist's reach | a fist, and the fist wins: the pose is scaled down by how fast the hand is, to nothing at 2.5 m/s |
+| The same with nobody to punch | nothing: the hand stays as it is. Until November 5 it closed into a fist all the same, and a player's idle hands kept closing and opening after a fight or a launch ("they just spam a grab motion") |
 
 Checked: the solver's angles and the thumb's place on Spider-Man's hand, from
 an open hand, over a fist and half way (two tests); the timing above (two
