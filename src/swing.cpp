@@ -1565,7 +1565,11 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             }
         } else if (w.flightTotal > 0)
             w.engageAge += dt;
-        if (w.catching)
+        // ELASTIC WEB: the spring is the soft catch. Its web keeps the length
+        // it arrived with and stretches from there; grown with the body, it
+        // never stretched, damping alone held him above the catch's 0.5 m/s,
+        // the catch never ended, and he sank on a web that paid out.
+        if (w.catching && !elasticWeb_)
             w.length = std::max(w.length, length(hold(i) - body_.position));
     }
     std::array<float, 2> rates{};

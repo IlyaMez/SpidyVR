@@ -743,6 +743,29 @@ int main() {
         s.elasticWeb = 4;
         check(!game_swing::validSettings(s), "a fifth elastic level accepted");
     });
+    test("an elastic web that flew (WEB SPEED) ends its catch and holds the body", [] {
+        // November 5: with ELASTIC WEB and WEB SPEED on, the web grew with the
+        // falling body while it caught him, so it never stretched; its damping
+        // alone left him above the catch's 0.5 m/s, and he sank on a web that
+        // paid out for as long as it was held.
+        for (int strength = 1; strength <= 3; ++strength) {
+            TestWorld world;
+            auto config = inert();
+            config.gravity = 9.81f;
+            Swing solver(config);
+            solver.elasticWeb(strength);
+            solver.webTravel(500, 3);
+            auto input = aimed();
+            input.hands[0].trigger = 0;
+            Body body{{0, 0, 0}, {}, false};
+            for (int frame = 0; frame < 400; ++frame) {
+                const auto result = solver.predictNativeStep(.01f, input, world, body);
+                body = {result.target, result.velocity, false};
+            }
+            check(solver.webs()[0].ready() && !solver.webs()[0].catching, "the elastic web never ended its catch");
+            check(body.position.y > -1, "an elastic web that flew let the body sink");
+        }
+    });
     test("soft release carries a bounded fading pull then returns to free flight", [] {
         TestWorld world;
         auto config = inert();
