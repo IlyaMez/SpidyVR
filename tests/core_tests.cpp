@@ -4695,6 +4695,74 @@ int main() {
         for (const Vec3 way : {Vec3{1, 0, 0}, normalized(Vec3{1, 1, 0}), normalized(Vec3{.3f, 1, 0})})
             squeeze(way, false);
     });
+    test("hand climbing: while a hand holds the wall neither hand starts a web, with either web button", [] {
+        // Adrian's pull request 24: a hand on the wall keeps the other hand's
+        // press from webbing until it lets go. From October 22 to November 5
+        // a squeeze that missed the wall (pointed up it) shot a web there.
+        constexpr float dt = 1.f / 60;
+        for (const bool triggerWebs : {false, true})
+            for (int holding = 0; holding < 2; ++holding) {
+                const int free = 1 - holding;
+                Building w;
+                Swing s(walled());
+                s.allowHandClimb(true);
+                Input in;
+                Body body{{4.1f, 10, 0}, {1, 0, 0}, false};
+                const auto advance = [&] {
+                    const auto motion = s.predictNativeStep(dt, in, w, body);
+                    body = {motion.target, motion.velocity, false};
+                };
+                // As trackedSwingInput and game_xr give them: the physical grip is
+                // wallGrip, and the web button `grip` is that grip, or with WEB
+                // BUTTON TRIGGER the trigger (the grip then the reel, `trigger`).
+                const auto squeeze = [&](HandInput& h, float v) {
+                    h.wallGrip = v;
+                    (triggerWebs ? h.trigger : h.grip) = v;
+                };
+                const auto web = [&](HandInput& h, float v) {
+                    h.grip = v;
+                    if (!triggerWebs)
+                        h.wallGrip = v;
+                };
+                advance();
+                check(s.wall().on, "the test body did not reach the wall");
+                auto &hold = in.hands[holding], &f = in.hands[free];
+                for (auto* h : {&hold, &f}) {
+                    h->tracked = true;
+                    h->wallPosition = {4.9f, 10, 0};
+                }
+                // The holding hand reaches into the wall; the free one points up it.
+                hold.aim = {hold.wallPosition, arc({0, 0, -1}, {1, 0, 0})};
+                f.aim = {f.wallPosition, arc({0, 0, -1}, normalized(Vec3{.1f, 1, 0}))};
+                advance();
+                // No hand on the wall: the free hand webs up it (October 22),
+                // and keeps that web while the other hand takes the wall.
+                web(f, 1);
+                advance();
+                check(s.webs()[free].attached, "with no hand on the wall a press shot no web");
+                squeeze(hold, 1);
+                advance();
+                check(s.climbingHands() == (1u << holding), "the other hand did not take the wall");
+                check(s.webs()[free].attached, "taking the wall let go of the free hand's web");
+                web(f, 0);
+                advance();
+                check(!s.webs()[free].attached, "letting go of the web button kept the web");
+                // A hand on the wall: the free hand's press starts no web.
+                web(f, 1);
+                advance();
+                check(!s.webs()[free].attached, "a press beside a hand on the wall shot a web");
+                // Let go of the wall with that press still held: nothing either.
+                squeeze(hold, 0);
+                advance();
+                check(!s.webs()[free].attached, "letting go of the wall fired a held press");
+                // A fresh press with no hand on the wall webs again.
+                web(f, 0);
+                advance();
+                web(f, 1);
+                advance();
+                check(s.webs()[free].attached, "with no hand on the wall again a fresh press shot no web");
+            }
+    });
     test("a web shot from a wall at rest takes the body off it to swing; one up the wall keeps it there", [] {
         constexpr float dt = 1.f / 60;
         for (const bool out : {true, false}) {

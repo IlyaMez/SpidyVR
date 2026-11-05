@@ -1042,7 +1042,11 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
             s.sample = false;
             continue;
         }
-        const bool shoot = held && !s.held;
+        // HAND WALL CLIMBING: while the other hand holds the wall, this one
+        // starts no web (Adrian's pull request 24; from October 22 to
+        // November 5 a squeeze that missed the wall shot one). The press still
+        // counts as held, so one held on as the wall is let go of shoots nothing.
+        const bool shoot = held && !s.held && !climbingHands();
         s.held = held;
         if (w.attached && (!held || (!w.airAnchor && !world.exists(w.surface))))
             release(i);

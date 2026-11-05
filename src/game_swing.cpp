@@ -495,6 +495,11 @@ void visit(const native_rays::QueryContext& world) {
             wallHands |= 1u << i;
             in.hands[i].grip = in.hands[i].trigger = 0;
         }
+    // While either hand holds the wall, neither starts a web (Adrian's pull
+    // request 24): no grab here, no shot (Swing::inputs), no web ball (the
+    // shooter's busy below). Refused, not zeroed, so a button held on as the
+    // wall is let go of fires nothing; webs already out keep their buttons.
+    const unsigned noNewWebs = wallHands ? 3u : 0u;
     game_warp::observe(steppedView | (focused ? 2u : 0u), false);
     const Body player{at + Vec3{0, 1, 0}, fresh ? motion.achievedVelocity : Vec3{}, motion.grounded != 0};
     // The grab takes every input sample as it comes, so the swing never sees
@@ -505,7 +510,7 @@ void visit(const native_rays::QueryContext& world) {
         // A press with the hand on the other hand's web takes hold of that
         // web, whatever the hand points at.
         const unsigned onStrand = (solver.onStrand(0) ? 1u : 0u) | (solver.onStrand(1) ? 2u : 0u);
-        game_grab::claim(sampleSeconds, in, world, player, onStrand);
+        game_grab::claim(sampleSeconds, in, world, player, onStrand | noNewWebs);
         // The web tie: the click (Command::asks bit 1) with the hands together,
         // one on a web stuck to a surface, the other on a webbed-up enemy.
         // Both webs go to the tie, which draws him over to the surface and
@@ -654,8 +659,8 @@ void visit(const native_rays::QueryContext& world) {
                 const auto grab = game_grab::data();
                 uint32_t busy{};
                 for (unsigned i = 0; i < 2; ++i)
-                    if (grab.hands[i].phase || solver.webs()[i].attached ||
-                        ((solver.climbingHands() | crawlHands.hands()) & (1u << i)))
+                    if (grab.hands[i].phase || solver.webs()[i].attached || solver.climbingHands() ||
+                        crawlHands.hands())
                         busy |= 1u << i;
                 game_shooter::update(seconds, in, busy, config.record, feet, world);
             }
