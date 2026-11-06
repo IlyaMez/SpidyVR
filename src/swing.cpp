@@ -100,6 +100,9 @@ bool Swing::thin(const RayHit& hit, const WorldQueries& world) const {
 }
 std::optional<RayHit> Swing::solid(Vec3 from, Vec3 way, float reach, const WorldQueries& world,
                                    int* passed) const {
+    // The body's clear line to an open-air anchor WEB RANGE (up to 1000 m) from
+    // the hand is longer than that by the hand's reach: the world takes 1000 m.
+    reach = std::min(reach, maxRayDistance);
     auto hit = world.raycast(from, way, reach);
     if (!config_.arcade)
         return hit;
@@ -1039,7 +1042,11 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
             s.sample = false;
             continue;
         }
-        const bool shoot = held && !s.held;
+        // HAND WALL CLIMBING: while the other hand holds the wall, this one
+        // starts no web (Adrian's pull request 24; from October 22 to
+        // November 5 a squeeze that missed the wall shot one). The press still
+        // counts as held, so one held on as the wall is let go of shoots nothing.
+        const bool shoot = held && !s.held && !climbingHands();
         s.held = held;
         if (w.attached && (!held || (!w.airAnchor && !world.exists(w.surface))))
             release(i);
@@ -1562,7 +1569,11 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             }
         } else if (w.flightTotal > 0)
             w.engageAge += dt;
-        if (w.catching)
+        // ELASTIC WEB: the spring is the soft catch. Its web keeps the length
+        // it arrived with and stretches from there; grown with the body, it
+        // never stretched, damping alone held him above the catch's 0.5 m/s,
+        // the catch never ended, and he sank on a web that paid out.
+        if (w.catching && !elasticWeb_)
             w.length = std::max(w.length, length(hold(i) - body_.position));
     }
     std::array<float, 2> rates{};

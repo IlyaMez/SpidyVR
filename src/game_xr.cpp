@@ -760,6 +760,10 @@ DWORD WINAPI run(void*) {
         players.start(config.base);
         game_player::Player player{};
         uint64_t playerChanges{}, playersFound{};
+        // Who the player is (game_fp::otherCharacter), from the skeleton last
+        // read off his entity: Spider-Man until a body says otherwise.
+        uint64_t playerBody{};
+        bool spiderMan = true;
         // Menus are played with a virtual Xbox controller (game_pad).
         padInstalled = !game_pad::install();
         uint64_t padRetryMs = GetTickCount64() + 1000;
@@ -1621,6 +1625,27 @@ DWORD WINAPI run(void*) {
                         playerChanges = changes;
                         attach(found);
                     }
+                    // Spider-Man, or a character the game gives the player in his
+                    // place (Peter out of the suit, MJ, Miles): told by the skeleton
+                    // of the player's entity, kept while there is none to read (a
+                    // load, a spawn). That character plays with the game's own
+                    // controls: no web, web ball, grab, yank, web strike, punch,
+                    // wall, leap, gadget wheel or slow motion of Spidy's (November
+                    // 5: MJ webbed up passers-by in her own mission).
+                    if (uintptr_t entity{}; player.hero && read(player.record, &entity, sizeof(entity))) {
+                        uint64_t asset{};
+                        unsigned joints{};
+                        if (game_fp::skeleton(entity, asset, joints) && asset != playerBody) {
+                            playerBody = asset;
+                            spiderMan = !game_fp::otherCharacter(asset);
+                            char line[160];
+                            std::snprintf(line, sizeof(line),
+                                          "Player character: body %016llX (%u joints), %s",
+                                          static_cast<unsigned long long>(asset), joints,
+                                          spiderMan ? "Spider-Man" : "not Spider-Man: the game's controls");
+                            message(3, 0, line);
+                        }
+                    }
                     bridge::Data game{};
                     check(sampleBridge(&game), "Gameplay sample");
                     LARGE_INTEGER now{};
@@ -1717,10 +1742,14 @@ DWORD WINAPI run(void*) {
                     }
                     // Both hands at the chest with both triggers pulled is the
                     // game's suit power (its L3 + R3, which VR play had no way
-                    // to), and those triggers shoot nothing meanwhile.
+                    // to), and those triggers shoot nothing meanwhile. A hand
+                    // whose web is out reels with its trigger instead.
                     {
                         const float triggers[2]{frame.hands[0].trigger, frame.hands[1].trigger};
-                        suitPress.update(frame.seconds, gesturesPlay, frame.head, grips, gripsTracked, triggers);
+                        const bool webs[2]{swingState.webs[0].attached != 0,
+                                           swingState.webs[1].attached != 0};
+                        suitPress.update(frame.seconds, gesturesPlay, frame.head, grips, gripsTracked,
+                                         triggers, webs);
                         for (unsigned i = 0; i < 2; ++i)
                             if (suitPress.hands() & (1u << i))
                                 controller.hands[i].trigger = 0;
@@ -2422,7 +2451,8 @@ DWORD WINAPI run(void*) {
                             hand.trigger = hand.grip = 0;
                     }
                     // Slow motion: the left thumbstick's click, in VR play outside the calibration.
-                    const bool slowAllowed = immersive && calibration.phase() == CalibrationPhase::idle;
+                    const bool slowAllowed =
+                        immersive && calibration.phase() == CalibrationPhase::idle && spiderMan;
                     // A click the game names (its L3, its R3) is not slow motion.
                     const uint32_t clicksNamed = namedPress.claimed();
                     const bool slowLeft =
@@ -2522,7 +2552,7 @@ DWORD WINAPI run(void*) {
                         game_swing::Command input;
                         input.wallRotate = motion.wallRotate;
                         input.serial = ++serial;
-                        input.focused = motion.active && !flatScreen && controlsVisible;
+                        input.focused = motion.active && !flatScreen && controlsVisible && spiderMan;
                         input.sampleTimeNs = frame.predictedDisplayTime > 0 ? frame.predictedDisplayTime : 1;
                         input.sampleSeconds =
                             std::isfinite(frame.seconds) && frame.seconds > 0 && frame.seconds <= .1f
@@ -3171,7 +3201,7 @@ DWORD WINAPI run(void*) {
                     const bool standing = steering && padInstalled && swingState.status && swingState.grounded &&
                                           !swingState.owned && !mounting && !swingState.takeoff &&
                                           !swingState.takeoffPhase && !swingState.webs[0].attached &&
-                                          !swingState.webs[1].attached && !calibrationInput;
+                                          !swingState.webs[1].attached && !calibrationInput && spiderMan;
                     const auto leap = chargeJump.update(
                         frame.seconds, (keys & swingJumpKey) && !swingState.takeoff, standing);
                     if (!swingState.takeoff)
@@ -3641,7 +3671,7 @@ DWORD WINAPI run(void*) {
                                 if (listed.gadgets[g].place < gadgetPlaces)
                                     places |= static_cast<uint8_t>(1u << listed.gadgets[g].place);
                             const bool offered = wheelShooter && shooterStarted && !listed.gadgetError &&
-                                                 mapping == game_pad::Mapping::gameplay;
+                                                 mapping == game_pad::Mapping::gameplay && spiderMan;
                             const bool x = (buttons.buttons & buttonX) != 0;
                             if (offered)
                                 buttons.buttons &= ~static_cast<uint32_t>(buttonX);

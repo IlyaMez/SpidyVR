@@ -233,9 +233,9 @@ Your body and fists
   Take the other hand's  that hand closes into a fist on the web
   web
   Squeeze a grip ....... otherwise closes that hand into a fist (the grip
-                         when the trigger is your web button), and so does a
-                         hand moving fast; with an enemy marked or within
-                         reach a fast hand is a fist even while it shoots
+                         when the trigger is your web button); with an enemy
+                         marked or within reach a hand moving fast is a fist
+                         too, even while it shoots
   T-pose, both triggers  calibrates your body (when the panel asks): his
                          height and arms become yours. B skips it
 
@@ -424,12 +424,15 @@ Moving
                          it holds for as long as you hold the trigger. No
                          web ball from that pull
   Both hands at your ... the game's suit power (its L3 + R3, which nothing
-  chest, both triggers   sent in VR before): both hands before your chest,
-                         pull both triggers together (within half a second
-                         or so). No web balls from those pulls. The game uses
+  chest, both triggers   sent in VR before): both hands together before your
+                         chest, a fist's width apart, pull both triggers at
+                         once. No web balls from those pulls. The game uses
                          its power when its meter is full, as in the flat game.
                          Both hands buzz as it goes out. Builds before
-                         October 23 buzzed but sent the game nothing
+                         October 23 buzzed but sent the game nothing. Builds
+                         before November 5 kept any trigger pulled near the
+                         chest for it, so webs, web balls and the reel failed
+                         with the hands at rest there
   Menu button .......... pause
   Hold both sticks in .. pause too, after a moment (both hands buzz). Under
                          SteamVR the Quest's menu button is SteamVR's own:

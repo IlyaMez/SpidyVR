@@ -20,8 +20,10 @@ def snapshot(game, address):
             raise RuntimeError('Native ray protocol mismatch')
         if struct.unpack_from('<Q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
-        result = dict(zip(('serial', 'qpc', 'calls', 'batches', 'world', 'count', 'error', 'thread'),
-                          struct.unpack_from('<5Q3I', raw, 24)))
+        # malformed: rays the swing's and the grab's world asked for that were cut to the
+        # world's 1000 m or missed (native_rays::usable), not taken as asked.
+        result = dict(zip(('serial', 'qpc', 'calls', 'batches', 'world', 'count', 'error', 'thread',
+                           'malformed'), struct.unpack_from('<5Q4I', raw, 24)))
         result['status'] = struct.unpack_from('<I', raw, 12)[0]
         if result['count'] > 8:
             raise RuntimeError('Native ray sample overflow')

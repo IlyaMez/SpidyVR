@@ -2104,4 +2104,14 @@ void release() {
     wanted = false;
     hero(heroObject.load());
 }
+bool skeleton(uintptr_t instance, uint64_t& asset, unsigned& joints) {
+    return classifyNow(instance, asset, joints);
+}
+bool otherCharacter(uint64_t asset) {
+    // The named characters of the cycle (cycleCharacter) that are not Spider-Man: Peter's apartment
+    // body and his civilian and City Hall ones, and the two of Miles and MJ. Not the stand-ins of
+    // scenes (Aunt May's, the suit-ups): Spider-Man's, and never the player's entity in play.
+    return asset == peterBody || asset == 0x80C52396F2470510ULL || asset == 0x8CDBDBE3D4F0C56FULL ||
+           asset == 0x9A1B2EE486D6B6DEULL || asset == 0xAF3AC54D239CD584ULL;
+}
 } // namespace spidy::game_fp

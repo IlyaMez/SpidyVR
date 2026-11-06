@@ -145,8 +145,8 @@ void probeTexture(uintptr_t texture, uintptr_t target) {
     }
     const auto resource = object ? pointer(pointer(object + 0x38)) : 0;
     // The game remakes the panel's texture (a death, a checkpoint, a scene's end) and may leave the texture
-    // object where it was: the object alone does not say the resource is the one followed. A resource followed
-    // that the game no longer draws into shows the layer an empty panel for the rest of the session.
+    // object where it was: the object alone does not say the resource is the one followed. A resource
+    // followed that the game no longer draws into shows the layer an empty panel for the rest of the session.
     if (texture == seen && resource == seenResource)
         return;
     seen = texture;

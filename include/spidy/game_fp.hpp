@@ -63,6 +63,13 @@ bool onCamera();
 // The render thread, once per game frame before the views are placed: the
 // player's entity object this frame (0: none).
 void hero(uintptr_t instance);
+// An entity object's skeleton: its asset id and joint count. False while there is none to read (no
+// entity, one still spawning). Any thread.
+bool skeleton(uintptr_t instance, uint64_t& asset, unsigned& joints);
+// A body the game gives the player in place of Spider-Man's, known by its asset: Peter's (out of the
+// suit), MJ's and Miles's, the characters the first-person scenes know. Spider-Man's own body, and any
+// body not known here (a suit nobody has looked at), is not one: they keep Spidy's webs.
+bool otherCharacter(uint64_t asset);
 // The render thread, once per game frame: the game's own camera of the frame (the scene's, before the eyes
 // are put on a head), so that the character in the shot can be told from one that is not. The tangents are
 // half the width and half the height of its picture (0: not known; a wide cone then stands for it).

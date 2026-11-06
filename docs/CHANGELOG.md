@@ -3,24 +3,105 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Next build: STEADY HUD no longer goes empty after the game remakes the HUD.**
-A report with STEADY HUD on (0.8.0): after a death, a checkpoint reload or a short combat cutscene the HUD
-was gone from the headset, but on the monitor, until the game was restarted. The session report showed why: the
-barriers on the followed panel texture stopped (`hud_capture.executed` frozen) while the layer kept copying it.
-The game had made a new texture and Spidy still followed the old, empty one.
+**Latest build (November 6): pull request #78 by vrfloop-lab (vrfloopy) -
+STEADY HUD no longer goes empty after the game remakes the HUD.** A report
+with STEADY HUD on (0.8.0): after a death, a checkpoint reload or a short
+combat cutscene the HUD was gone from the headset, but on the monitor, until
+the game was restarted. The session report showed why: the barriers on the
+followed panel texture stopped (`hud_capture.executed` frozen) while the
+layer kept copying it. The game had made a new texture and Spidy still
+followed the old, empty one.
 
-- The panel's resource is looked up every frame, not only when the texture object changes: the game may remake
-  the resource and keep the object where it was (`src/native_hud.cpp`, `probeTexture`).
-- A followed texture that gets no barrier for 2 s while its copies are wanted is not copied (`stage_skip: stale`),
-  so the eyes draw the panel again, as when the copies stop.
-- The report counts the times the panel was followed anew (`hud_capture.registered`).
-- **A blank panel is not shown (the first fix did not hold in the reporter's game).** The followed texture is looked at
-  every second (a snapshot, one pixel in 15 for any alpha); two snapshots in a row with nothing on it and the panel is
-  no longer copied (`stage_skip: blank`), so the layer goes and the eyes draw the HUD, as with STEADY HUD off. The
-  layer comes back on its own when the texture has something on it again.
-- Built and tested without MSVC and without the game: the report's decoding is tested; the fix itself is not.
+- The panel's resource is looked up every frame, not only when the texture
+  object changes: the game may remake the resource and keep the object where
+  it was (`src/native_hud.cpp`, `probeTexture`).
+- A followed texture that gets no barrier for 2 s while its copies are
+  wanted is not copied (`stage_skip: stale`), so the eyes draw the panel
+  again, as when the copies stop.
+- The report counts the times the panel was followed anew
+  (`hud_capture.registered`).
+- **A blank panel is not shown (the first fix did not hold in the reporter's
+  game).** The followed texture is looked at every second (a snapshot, one
+  pixel in 15 for any alpha; every 5 s before); two snapshots in a row with
+  nothing on it and the panel is no longer copied (`stage_skip: blank`), so
+  the layer goes and the eyes draw the HUD, as with STEADY HUD off. The layer
+  comes back on its own when the texture has something on it again.
+- Only with STEADY HUD on; off, nothing of it runs. Tested by the reporter in
+  the game: the HUD no longer vanishes. Review: built on 0.8.1, core and
+  protocol tests pass; not run here in the game.
 
-**Latest build (November 3): pull request #58 by vrfloop-lab (vrfloopy) and
+**Earlier build (November 5): fixes from the players' reports on 0.8.0.**
+You: "check the latest set of issues on discord from last update, fix what
+you have enough info to fix, ask for whats missing".
+
+- **VR no longer ends as a hand points at open sky with WEB RANGE at
+  1000 M.** Players lost VR seconds into play, "as soon as I shoot the
+  webs"; the sessions sent (mASTRU's on 0.7.0 and 0.8.0, Kevino's) end on
+  swing error 2105. An open-air web's anchor is WEB RANGE from the hand, and
+  the body's clear-line ray to it (`Swing::shot`) was that plus the hand's
+  reach, 1000.3 m and more, past the 1000 m the game's world takes; the ray
+  module made such a ray an error that faulted the swing, and VR stopped.
+  mASTRU's sessions held a 999 m web. `Swing::solid` now cuts its rays to
+  `maxRayDistance` (as WEB TIE's line to its anchor), and a visitor's ray the
+  world does not take is cut to 1000 m or missed (`native_rays::usable`),
+  never the end of VR; the report's `rays.malformed` counts them.
+- **The suit power no longer takes a trigger pulled near the chest.** A
+  trigger pulled with its hand within 22 cm of the chest point was the
+  gesture's until let go, though the power needs both hands: a hand at rest
+  is there most of the time (Jupiter's October 28 session: the right hand
+  85% of play, 38 suit powers by accident, and in WEB BUTTON TRIGGER not one
+  web from a trigger). Now a trigger is the gesture's only with both hands
+  together on the chest (each within 12 cm of the point, 20 cm apart at most),
+  never from a hand whose web is out; it waits 0.15 s for the other trigger
+  and is the web's again after that, still held. Leon: "the chest zone needs
+  to be reduced by... a lot"; Hicks613's failing web shooter in Fisk's
+  office fits it too.
+- **MJ, Miles and Peter out of the suit play with the game's controls.**
+  Armie's clip: MJ in her mission webbed passers-by, shot web balls and was
+  pulled along the floor by webs. The player's entity's skeleton names the
+  character (`game_fp::otherCharacter`: Peter's apartment, civilian and City
+  Hall bodies, Miles's and MJ's, as the first-person scenes know them; any
+  other body, a suit nobody has looked at too, stays Spider-Man's). For
+  another character the swing's input is unfocused, as in a pause: no web,
+  web ball, grab, yank, web strike, punch, wall or leap, and no gadget wheel,
+  charged jump or slow motion. The console says who you are ("Player
+  character: body ..."). MJ unseen in the eyes is the first-person view: the
+  player's model is hidden there and the body is Spider-Man's alone.
+- **An ELASTIC WEB that flew (WEB SPEED on) ends its catch.** While a web
+  that has flown catches the body its length grows with him; an elastic one
+  then never stretched, its damping alone left him falling faster than the
+  catch's 0.5 m/s, and the catch never ended: the web paid out, he sank, and
+  the reel was off (an Index player: "the webs shoot out but they just fall
+  out of my hand"; not confirmed as his case). The elastic web now keeps the
+  length it arrived with and stretches from there.
+- **A fast hand is a fist only with somebody to punch.** Ricky: "if I don't
+  do anything they just spam a grab motion". A hand moving 1.2 m/s against
+  the head (1.3 cm in a frame) closed into a fist with nobody there; replayed
+  on his report, idle hands closed 16 to 31 times a minute.
+- **HAND WALL CLIMBING: a hand on the wall stops new webs again.** AdrianGE:
+  "if one hand is grip it shouldn't let you throw a web, I added that so you
+  don't have accidental webs while climbing"; cookiejar825 angled the hand
+  forward to stop them. His rule went with October 22's webs off a wall
+  (c51148b: the roll now needs both hands on the wall, and a squeeze not aimed
+  into it webs), so a squeeze that missed the wall beside a holding hand shot
+  a web. You chose to restore it: while a hand holds the wall neither hand
+  starts a web, a grab or a web ball (`Swing::inputs`, `noNewWebs`, the
+  shooter's busy); refused rather than zeroed, so a web already out keeps its
+  button and a press held on as the wall is let go of fires nothing. Webbing
+  off a wall you stand on, no hand on it, works as on October 22.
+- **Checked:** the core tests (782; new: a ray past 1000 m cut and a bad
+  one missed; a WEB RANGE 1000 m sky shot asks only for rays the world takes,
+  which failed before the fix; an elastic web that flew ends its catch, which
+  failed before the fix; the chest gesture with the hands apart, one hand
+  away and a hand on a web; a fast open hand with nobody to punch; a press
+  beside a hand on the wall, with either WEB BUTTON, which failed on main in
+  a scratch build), the launcher tests, the six Python protocol suites (the
+  ray data's new count).
+  Not run: the game or a headset. The player-character check rests on the
+  bodies the first-person scenes logged; no MJ, Miles or Peter mission was
+  played with it.
+
+**Earlier build (November 3): pull request #58 by vrfloop-lab (vrfloopy) and
 HaNToP - first-person cutscenes.** vrfloopy: "I want to see the cutscenes
 from Spider-Man's eyes", with the head moving as the character's does.
 

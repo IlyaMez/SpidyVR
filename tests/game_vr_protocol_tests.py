@@ -1063,11 +1063,13 @@ class ProtocolTests(unittest.TestCase):
 
     def test_ray_geometry_serial_and_body_generation_boundaries(self):
         raw = bytearray(784)
-        struct.pack_into('<4IQ5Q4I', raw, 0, 0x53525944, 2, 784, 2, 4, 9, 10, 100, 8, 0xabc, 1, 0, 7, 0)
+        struct.pack_into('<4IQ5Q4I', raw, 0, 0x53525944, 2, 784, 2, 4, 9, 10, 100, 8, 0xabc, 1, 0, 7, 5)
         struct.pack_into('<7fI7f7I', raw, 80, 10, 20, 30, 100, 0, -1, 0, 90,
                          10, 14, 30, .06, 0, 1, 0, 3, 0x30008f3, 1087, 1, 1, 0, 0xa0000104)
         result = ray_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual((result['serial'], result['count'], result['thread']), (9, 1, 7))
+        # Rays a visitor asked for that the world did not take as asked (cut or missed).
+        self.assertEqual(result['malformed'], 5)
         hit = result['hits'][0]
         self.assertEqual((hit['position'], hit['tag'], hit['body_id']), ((10, 14, 30), 90, 0x30008f3))
         self.assertTrue(hit['body_matches'])

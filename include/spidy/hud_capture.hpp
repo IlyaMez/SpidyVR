@@ -30,16 +30,16 @@ enum Skip : uint32_t {
     skipBusy = 4,   // the last copy is still on the GPU
     skipFormat = 5, // not a format the probe reads back
     skipFailed = 6, // a D3D12 call failed
-    skipStale = 7,  // the game stopped drawing into the followed texture (it remade it): the eyes show the panel
-    skipBlank = 8,  // the followed texture is empty (alpha 0 everywhere) for two snapshots: the eyes show the panel
+    skipStale = 7,  // the game stopped drawing into the followed texture (remade): the eyes show the panel
+    skipBlank = 8,  // the followed texture is empty (alpha 0) for two snapshots: the eyes show the panel
 };
-// The followed texture got no barrier for this long while its copies were wanted: the game draws the panel into
-// another texture, and the copy would show the layer an empty panel.
+// The followed texture got no barrier for this long while its copies were wanted: the game draws the panel
+// into another texture, and the copy would show the layer an empty panel.
 inline constexpr uint64_t staleMs = 2000;
 // Snapshots taken at most this often. Each is also looked at (below): a panel that stays empty is not copied.
 inline constexpr uint64_t snapshotMs = 1000;
-// Whether a snapshot of 8-bit colour (4 bytes a pixel, alpha last) has any pixel that is not transparent. Looks at
-// every 5th pixel of every 3rd row: a panel with something on it has far more than that.
+// Whether a snapshot of 8-bit colour (4 bytes a pixel, alpha last) has any pixel that is not transparent.
+// Looks at every 5th pixel of every 3rd row: a panel with something on it has far more than that.
 inline bool anyAlpha(const uint8_t* pixels, uint32_t width, uint32_t height, uint32_t rowBytes) {
     for (uint32_t y = 0; y < height; y += 3)
         for (uint32_t x = 0; x < width; x += 5)
@@ -47,7 +47,8 @@ inline bool anyAlpha(const uint8_t* pixels, uint32_t width, uint32_t height, uin
                 return true;
     return false;
 }
-// Snapshots in a row that found nothing before the panel counts as empty (a HUD fading out for a moment is not).
+// Snapshots in a row that found nothing before the panel counts as empty (a HUD fading out for a
+// moment is not).
 inline constexpr uint32_t blankScans = 2;
 inline bool snapshotDue(uint64_t nowMs, uint64_t lastMs, bool taken) {
     return !taken || nowMs - lastMs >= snapshotMs;

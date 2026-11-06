@@ -449,9 +449,9 @@ hud_capture::Skip stageHud(ID3D12GraphicsCommandList* list) { // submission and 
     // draws into another texture now (registerHud follows it), and this one would show an empty panel.
     if (GetTickCount64() - hud.executedMs > hud_capture::staleMs)
         return hud_capture::skipStale;
-    // The followed texture is empty although the HUD is wanted (the game's panel drew somewhere else, or nowhere,
-    // after a death, a checkpoint or a scene): its copy would show the layer nothing, and the eyes would leave the
-    // panel out. Not copied, the eyes draw it, as with STEADY HUD off.
+    // The followed texture is empty although the HUD is wanted (the game's panel drew somewhere else, or
+    // nowhere, after a death, a checkpoint or a scene): its copy would show the layer nothing, and the eyes
+    // would leave the panel out. Not copied, the eyes draw it, as with STEADY HUD off.
     if (hud.emptyScans >= hud_capture::blankScans)
         return hud_capture::skipBlank;
     const auto desc = hud.resource->GetDesc();

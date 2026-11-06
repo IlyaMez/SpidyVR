@@ -1,9 +1,13 @@
 #pragma once
 #include "math.hpp"
 #include <cstdint>
+#include <optional>
 
 namespace spidy::native_rays {
 constexpr unsigned capacity = 8;
+// The longest ray the game's world is asked for: as far as WEB RANGE reaches
+// (150 m before it).
+constexpr float maxDistance = 1000;
 struct Config {
     uint32_t magic = 0x53525943, version = 1, bytes = sizeof(Config), pid{};
     uint64_t base{};
@@ -34,11 +38,13 @@ struct Hit {
     uint32_t bodyId = 0xffffffff, filter{}, bodyFlags{}, bodyMatches{};
     uint32_t motionId = 0xffffffff, broadPhaseId = 0xffffffff;
 };
+// malformed: the rays a visitor (QueryContext) asked for that the world does
+// not take as asked (usable()), since the module started.
 struct Data {
     uint32_t magic = 0x53525944, version = 2, bytes = sizeof(Data), status{};
     int64_t sequence{};
     uint64_t serial{}, qpc{}, calls{}, batches{}, world{};
-    uint32_t count{}, error{}, thread{}, reserved{};
+    uint32_t count{}, error{}, thread{}, malformed{};
     Hit hits[capacity];
 };
 static_assert(sizeof(Config) == 32 && sizeof(Ray) == 32 && sizeof(Command) == 288);
@@ -90,9 +96,23 @@ inline bool valid(const Command& c) {
         const float magnitude = length(ray.direction);
         if (!finite(ray.origin) || length(ray.origin) > 100000 || !finite(ray.direction) ||
             magnitude < .999f || magnitude > 1.001f || !std::isfinite(ray.distance) || ray.distance < .01f ||
-            ray.distance > 1000) // as far as WEB RANGE reaches (150 m before it)
+            ray.distance > maxDistance)
             return false;
     }
     return true;
+}
+// A visitor's ray (QueryContext::raycast) the world does not take as asked,
+// made one it takes: its direction a unit one, its length cut to maxDistance.
+// None when it cannot be cast at all (not finite, no direction, no length,
+// out of the world): a miss. Such a ray used to end VR (2105). On November 4
+// three players lost VR as soon as a hand pointed at open sky: with WEB RANGE
+// at 1000 m an open-air web's anchor is 1000 m from the hand, and the body's
+// clear-line ray to it came out 1000.3 m long.
+inline std::optional<Ray> usable(Vec3 origin, Vec3 direction, float distance) {
+    const float magnitude = finite(direction) ? length(direction) : 0.f;
+    if (!finite(origin) || length(origin) > 100000 || !(magnitude > 1e-6f) || !std::isfinite(distance) ||
+        distance < .01f)
+        return {};
+    return Ray{origin, std::min(distance, maxDistance), direction / magnitude, 0};
 }
 } // namespace spidy::native_rays

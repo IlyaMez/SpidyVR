@@ -743,6 +743,29 @@ int main() {
         s.elasticWeb = 4;
         check(!game_swing::validSettings(s), "a fifth elastic level accepted");
     });
+    test("an elastic web that flew (WEB SPEED) ends its catch and holds the body", [] {
+        // November 5: with ELASTIC WEB and WEB SPEED on, the web grew with the
+        // falling body while it caught him, so it never stretched; its damping
+        // alone left him above the catch's 0.5 m/s, and he sank on a web that
+        // paid out for as long as it was held.
+        for (int strength = 1; strength <= 3; ++strength) {
+            TestWorld world;
+            auto config = inert();
+            config.gravity = 9.81f;
+            Swing solver(config);
+            solver.elasticWeb(strength);
+            solver.webTravel(500, 3);
+            auto input = aimed();
+            input.hands[0].trigger = 0;
+            Body body{{0, 0, 0}, {}, false};
+            for (int frame = 0; frame < 400; ++frame) {
+                const auto result = solver.predictNativeStep(.01f, input, world, body);
+                body = {result.target, result.velocity, false};
+            }
+            check(solver.webs()[0].ready() && !solver.webs()[0].catching, "the elastic web never ended its catch");
+            check(body.position.y > -1, "an elastic web that flew let the body sink");
+        }
+    });
     test("soft release carries a bounded fading pull then returns to free flight", [] {
         TestWorld world;
         auto config = inert();
@@ -4672,6 +4695,74 @@ int main() {
         for (const Vec3 way : {Vec3{1, 0, 0}, normalized(Vec3{1, 1, 0}), normalized(Vec3{.3f, 1, 0})})
             squeeze(way, false);
     });
+    test("hand climbing: while a hand holds the wall neither hand starts a web, with either web button", [] {
+        // Adrian's pull request 24: a hand on the wall keeps the other hand's
+        // press from webbing until it lets go. From October 22 to November 5
+        // a squeeze that missed the wall (pointed up it) shot a web there.
+        constexpr float dt = 1.f / 60;
+        for (const bool triggerWebs : {false, true})
+            for (int holding = 0; holding < 2; ++holding) {
+                const int free = 1 - holding;
+                Building w;
+                Swing s(walled());
+                s.allowHandClimb(true);
+                Input in;
+                Body body{{4.1f, 10, 0}, {1, 0, 0}, false};
+                const auto advance = [&] {
+                    const auto motion = s.predictNativeStep(dt, in, w, body);
+                    body = {motion.target, motion.velocity, false};
+                };
+                // As trackedSwingInput and game_xr give them: the physical grip is
+                // wallGrip, and the web button `grip` is that grip, or with WEB
+                // BUTTON TRIGGER the trigger (the grip then the reel, `trigger`).
+                const auto squeeze = [&](HandInput& h, float v) {
+                    h.wallGrip = v;
+                    (triggerWebs ? h.trigger : h.grip) = v;
+                };
+                const auto web = [&](HandInput& h, float v) {
+                    h.grip = v;
+                    if (!triggerWebs)
+                        h.wallGrip = v;
+                };
+                advance();
+                check(s.wall().on, "the test body did not reach the wall");
+                auto &hold = in.hands[holding], &f = in.hands[free];
+                for (auto* h : {&hold, &f}) {
+                    h->tracked = true;
+                    h->wallPosition = {4.9f, 10, 0};
+                }
+                // The holding hand reaches into the wall; the free one points up it.
+                hold.aim = {hold.wallPosition, arc({0, 0, -1}, {1, 0, 0})};
+                f.aim = {f.wallPosition, arc({0, 0, -1}, normalized(Vec3{.1f, 1, 0}))};
+                advance();
+                // No hand on the wall: the free hand webs up it (October 22),
+                // and keeps that web while the other hand takes the wall.
+                web(f, 1);
+                advance();
+                check(s.webs()[free].attached, "with no hand on the wall a press shot no web");
+                squeeze(hold, 1);
+                advance();
+                check(s.climbingHands() == (1u << holding), "the other hand did not take the wall");
+                check(s.webs()[free].attached, "taking the wall let go of the free hand's web");
+                web(f, 0);
+                advance();
+                check(!s.webs()[free].attached, "letting go of the web button kept the web");
+                // A hand on the wall: the free hand's press starts no web.
+                web(f, 1);
+                advance();
+                check(!s.webs()[free].attached, "a press beside a hand on the wall shot a web");
+                // Let go of the wall with that press still held: nothing either.
+                squeeze(hold, 0);
+                advance();
+                check(!s.webs()[free].attached, "letting go of the wall fired a held press");
+                // A fresh press with no hand on the wall webs again.
+                web(f, 0);
+                advance();
+                web(f, 1);
+                advance();
+                check(s.webs()[free].attached, "with no hand on the wall again a fresh press shot no web");
+            }
+    });
     test("a web shot from a wall at rest takes the body off it to swing; one up the wall keeps it there", [] {
         constexpr float dt = 1.f / 60;
         for (const bool out : {true, false}) {
@@ -8376,6 +8467,14 @@ int main() {
         HandPoser fight;thrown.fighting=true;
         for(int i=0;i<5;++i)pose=fight.update(dt,thrown);
         near(pose.shoot,0,.001f);near(pose.fist,1,.001f);
+        // November 5: an open hand moved fast with nobody to punch stays open ("if I don't do anything
+        // they just spam a grab motion"); with somebody to punch it is a fist.
+        HandPoser waving;HandPoseInput waved;waved.tracked=true;waved.speed=3;
+        for(int i=0;i<5;++i)pose=waving.update(dt,waved);
+        near(pose.fist,0,.001f);near(pose.shoot,0,.001f);
+        HandPoser punching;waved.fighting=true;
+        for(int i=0;i<5;++i)pose=punching.update(dt,waved);
+        near(pose.fist,1,.001f);
         // An untracked hand is neither.
         thrown.tracked=false;pose=fight.update(dt,thrown);
         near(pose.fist,0);near(pose.shoot,0);
@@ -8561,6 +8660,42 @@ int main() {
         check(!native_rays::valid(bad),"infinite origin accepted");
         bad=c; bad.rays[0].distance=1001; check(!native_rays::valid(bad),"excessive range accepted");
         c.count=0; c.leaseMs=0; check(native_rays::valid(c),"cancel command rejected");
+    });
+    test("a visitor's ray the world does not take is cut to 1000 m or missed, never the end of VR", [] {
+        static_assert(maxRayDistance==native_rays::maxDistance);
+        const auto cut=native_rays::usable({1,2,3},{0,0,-1},1000.3f);
+        check(cut && cut->distance==native_rays::maxDistance,"a ray past 1000 m was not cut to it");
+        native_rays::Command c; c.serial=1; c.count=1; c.rays[0]=*cut;
+        check(native_rays::valid(c),"a cut ray is still one the world does not take");
+        const auto unit=native_rays::usable({1,2,3},{0,-2,0},50);
+        check(unit && std::abs(length(unit->direction)-1)<1e-6f && unit->distance==50,"a long direction kept");
+        check(!native_rays::usable({1,2,3},{},50),"a ray without a direction was cast");
+        check(!native_rays::usable({1,2,3},{0,-1,0},-1),"a negative length was cast");
+        check(!native_rays::usable({1,2,3},{0,-1,0},std::nanf("")),"a length that is no number was cast");
+        check(!native_rays::usable({std::numeric_limits<float>::infinity(),0,0},{0,-1,0},5),
+              "an infinite origin was cast");
+    });
+    test("WEB RANGE 1000 m: a web into open sky asks the world only for rays it takes", [] {
+        // November 4: the body's clear line to an open-air anchor 1000 m from
+        // the hand came out 1000.9 m long, and the ray module ended VR (2105).
+        struct Strict : TestWorld {
+            mutable unsigned asked=0, refused=0;
+            std::optional<RayHit> raycast(Vec3 o,Vec3 d,float distance) const override {
+                ++asked;
+                native_rays::Command c; c.serial=1; c.count=1; c.rays[0]={o,distance,d,0};
+                refused+=!native_rays::valid(c);
+                return {};
+            }
+        } world;
+        Swing s(inert());
+        s.webTravel(1000,0);
+        auto in=aimed();
+        in.hands[0].aim.position={0,2,0};
+        const Body body{{0,1,0},{},false};
+        s.predictNativeStep(.01f,in,world,body);
+        check(s.webs()[0].attached && s.webs()[0].airAnchor,"the sky shot did not hold");
+        near(length(s.webs()[0].anchor-in.hands[0].aim.position),1000,.01f);
+        check(world.asked && !world.refused,"a ray the world does not take was asked for");
     });
     test("controller rays retain hand identity and disappear on tracking loss", [] {
         Input in;
@@ -9069,13 +9204,32 @@ int main() {
         check(!power.hands(),"released triggers are still the gesture's");
         triggers[0]=triggers[1]=1;
         check(power.update(dt,true,head,grips,both,triggers)&&power.powers()==2,"a second gesture asked for nothing");
-        // Half a second apart: none, though each trigger at the chest stays the gesture's.
+        // Half a second apart: none, and the first trigger is the web's again after `together`, still held.
         SuitPowerPress slow;
         float late[2]{1,0};
-        for(int i=0;i<46;++i)slow.update(dt,true,head,grips,both,late);
+        check(!slow.update(dt,true,head,grips,both,late)&&slow.hands()==1,"a trigger at the chest did not wait");
+        for(int i=0;i<45;++i)slow.update(dt,true,head,grips,both,late);
+        check(!slow.hands(),"a lone trigger at the chest stayed the gesture's");
         late[1]=1;
-        check(!slow.update(dt,true,head,grips,both,late)&&!slow.powers()&&slow.hands()==3,
+        check(!slow.update(dt,true,head,grips,both,late)&&!slow.powers()&&slow.hands()==2,
               "triggers half a second apart were the suit power");
+        // November 5: one hand at the chest, the other away, is a web at once (the
+        // other hand on the web's trigger, a player at rest, never waits).
+        SuitPowerPress alone;
+        Pose spread[2]{{{-.06f,1.33f,-.15f},{}},{{.3f,1.1f,-.3f},{}}};
+        float single[2]{1,0};
+        check(!alone.update(dt,true,head,spread,both,single)&&!alone.hands(),"one hand at the chest held its trigger");
+        // Both at the chest but 22 cm apart (an October 28 player at rest): no gesture.
+        SuitPowerPress wide;
+        Pose wideGrips[2]{{{-.11f,1.33f,-.15f},{}},{{.11f,1.33f,-.15f},{}}};
+        float bothPulled[2]{1,1};
+        check(!wide.update(dt,true,head,wideGrips,both,bothPulled)&&!wide.hands()&&!wide.powers(),
+              "hands 22 cm apart were the suit power");
+        // A hand whose web is out reels with its trigger: never the gesture's.
+        SuitPowerPress reel;
+        const bool webOut[2]{true,false};
+        check(!reel.update(dt,true,head,grips,both,bothPulled,webOut)&&reel.hands()==2&&!reel.powers(),
+              "the trigger of a hand on a web was the gesture's");
         // Hands at the belt are not at the chest; a turned head's chest is where it looks, level.
         SuitPowerPress low;
         Pose belt[2]{{{-.06f,1.f,-.15f},{}},{{.06f,1.f,-.15f},{}}};
