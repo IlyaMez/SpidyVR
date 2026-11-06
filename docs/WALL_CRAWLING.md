@@ -23,7 +23,8 @@ EXPERIMENTAL. Turn it off to use the ordinary game movement.
   toward the other side, and touch that hand against the wall again.
   Looking around or holding an unchanged contact does not request a turn.
   Use the same departure/recontact gesture to turn back.
-- A jumps away. Existing web-button rules still apply while climbing.
+- A jumps away. While a hand holds the wall, neither hand shoots a new web or
+  web ball: let go of the wall to web (a web already out stays).
 
 ## Body and surfaces
 

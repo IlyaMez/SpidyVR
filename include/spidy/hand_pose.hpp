@@ -10,8 +10,10 @@
 // holds, the hand closes on it, a fist for as long as the button keeps it. A
 // web that missed leaves the shooting hand for as long as the button is held.
 // A web ball makes the pose for a moment. A hand that takes hold of the other
-// hand's web grips it: a fist. A fast hand is a fist too, as before, but stays
-// the shooting hand while it shoots, unless there is somebody to punch.
+// hand's web grips it: a fist. A fast hand is a fist too, a punch, but only
+// with somebody to punch, and stays the shooting hand while it shoots unless
+// there is. With nobody there it closed all the same until November 5: "if I
+// don't do anything they just spam a grab motion" after a fight or a launch.
 // Until October 12 a squeezed grip was a fist and nothing else, so every web
 // left a clenched hand; the first build with the pose kept it 0.3 s ("the web
 // shooting pose turns almost immidiatly to a fist"), the next for as long as
@@ -69,7 +71,8 @@ class HandPoser {
         const float dt = std::isfinite(seconds) ? std::clamp(seconds, 0.f, .1f) : 0.f;
         const auto share = [](float v) { return std::isfinite(v) ? std::clamp(v, 0.f, 1.f) : 0.f; };
         const float web = share(in.web), squeeze = share(in.squeeze);
-        const float punch = share((in.speed - t_.slowSpeed) / (t_.fistSpeed - t_.slowSpeed));
+        const float punch =
+            in.fighting ? share((in.speed - t_.slowSpeed) / (t_.fistSpeed - t_.slowSpeed)) : 0.f;
         pressed_ = pressed_ ? web > t_.release : web > t_.press;
         ball_ = in.shot ? t_.ballSeconds : std::max(0.f, ball_ - dt);
         // On a web: the other hand's, or its own once the shot got there.

@@ -1881,7 +1881,7 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "say, else along the controller. Off: along the controller, as before.",
                S(42), [&] { tabToggle("##wristshooters", Item::wristShooters); });
         option("Palm shooters",
-               "The old wrist shooters (before v6): webs leave square to the hand, out of the palm side. "
+               "Webs leave square to your hand, out of the palm side, rather than along the forearm. "
                "Off by default.",
                S(42), [&] { tabToggle("##palmshooters", Item::palmShooters); });
         option("Web aim (experimental)",
@@ -1894,11 +1894,11 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "With web aim MODEL FOREARM: how much of the forearm's line the webs take, from 0% (the "
                "controller's) to 100% (the forearm's). 100% by default.",
                S(150), [&] { tabCombo("##forearmblend", Item::forearmBlend); });
-        option("Forearm aim limit",
-               "How far web aim MODEL FOREARM and wrist shooters may turn your webs off the controller's line "
-               "onto the forearm. NO LIMIT by default (v5 had 35 degrees, which kept the webs near the "
-               "controller).",
-               S(150), [&] { tabCombo("##forearmaimlimit", Item::forearmAimLimit); });
+        option(
+            "Forearm aim limit",
+            "How far web aim MODEL FOREARM and wrist shooters may turn your webs off the controller's line "
+            "onto the forearm. NO LIMIT by default; 35 degrees keeps the webs near the controller.",
+            S(150), [&] { tabCombo("##forearmaimlimit", Item::forearmAimLimit); });
         option(
             "Dodge tumble (experimental)",
             "When the game takes your dodge, the view leans (LEAN, 24 degrees, under half a second) or rolls "
@@ -1948,8 +1948,9 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "go 20 points under it. 70%, as before.",
                S(150), [&] { tabCombo("##nativerunatpercent", Item::nativeRunAt); });
         option("Run logs",
-               "Writes how fast you run, land and leap to the session's log, for sending back. Changes "
-               "nothing in play.",
+               "Writes how you run, land, leap and jump, the frame rate and how far VR got to the "
+               "console (diag lines) and a -diag.log file beside the session report, for sending back. "
+               "Off, none of it is written. Changes nothing in play.",
                S(42), [&] { tabToggle("##runlogs", Item::runLogs); });
         option("Running leap (experimental)",
                "A charged leap (hold A on the ground) keeps the speed you run at along its way and adds its "
@@ -2000,8 +2001,8 @@ void App::options(ImVec2 origin, ImVec2 size) {
                S(42), [&] { tabToggle("##combatresponsive", Item::combatResponsive); });
         option("Spidy run jump",
                "A during Spidy run or the web-landing carry is a jump at once that keeps your speed, made by "
-               "the mod rather than waiting for the game to take the body back. On by default; off: v5's "
-               "jump (up to 0.2 s later).",
+               "the mod rather than waiting for the game to take the body back. On by default; off: the "
+               "game's own jump once it has you back (up to 0.2 s later).",
                S(42), [&] { tabToggle("##spidyrunjump", Item::spidyRunJump); });
     });
     group(0, "Flips", [&] {

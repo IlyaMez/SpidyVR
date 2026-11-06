@@ -343,8 +343,8 @@ constexpr uint32_t settingsBytesV3 = 28, settingsBytesV4 = 32, settingsBytesV5 =
                    settingsBytesV11 = 60, settingsBytesV12 = 64, settingsBytesV13 = 68,
                    settingsBytesV14 = 72, settingsBytesV15 = 76, settingsBytesV16 = 80, settingsBytesV17 = 84,
                    settingsBytesV18 = 88, settingsBytesV19 = 92, settingsBytesV20 = 96,
-                   settingsBytesV21 = 100, settingsBytesV22 = 104, settingsBytesV23 = 108, settingsBytesV24 = 112,
-                   settingsBytesV25 = 120, settingsBytesV26 = 124,
+                   settingsBytesV21 = 100, settingsBytesV22 = 104, settingsBytesV23 = 108,
+                   settingsBytesV24 = 112, settingsBytesV25 = 120, settingsBytesV26 = 124,
                    settingsBytesV27 = 128, settingsBytesV28 = 132, settingsBytesV29 = 136;
 static_assert(sizeof(Settings) == 144 && offsetof(Settings, walls) == settingsBytesV3 &&
               offsetof(Settings, physical) == settingsBytesV4 &&

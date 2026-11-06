@@ -1678,7 +1678,7 @@ def save_eye_snapshot(game, address, shot, folder, name, view=544, crop=512):
 
 
 HUD_SHOTS = 6
-HUD_CAPTURE_SKIPS = ('copied', 'no_resource', 'unknown_state', 'other_device', 'busy', 'format', 'failed')
+HUD_CAPTURE_SKIPS = ('copied', 'no_resource', 'unknown_state', 'other_device', 'busy', 'format', 'failed', 'stale', 'blank')
 HUD_CAPTURE_PATHS = ('none', 'texture', 'wrapped', 'target')
 
 
@@ -1704,14 +1704,14 @@ def hud_capture_snapshot(game, address):
         snapshots, pixels = struct.unpack_from('<2Q', raw, 128)
         row_pitch, swap = struct.unpack_from('<2I', raw, 144)
         staged, layer_copies, layer_frames = struct.unpack_from('<3Q', raw, 152)
-        stage_skip = struct.unpack_from('<I', raw, 176)[0]
+        stage_skip, registered = struct.unpack_from('<2I', raw, 176)
         return dict(sequence=sequence, path=HUD_CAPTURE_PATHS[path] if path < len(HUD_CAPTURE_PATHS) else path,
                     found=bool(resource), width=width, height=height, format=fmt, mips=mips, flags=flags,
                     samples=samples, barriers=barriers, executed=executed, other_queue=other, odd=odd,
                     mismatched=mismatched, state=state, known=bool(known), presents=presents, copies=copies,
                     skip=HUD_CAPTURE_SKIPS[skip] if skip < len(HUD_CAPTURE_SKIPS) else skip, refused=refused,
                     snapshots=snapshots, pixels=pixels, row_pitch=row_pitch, swap=bool(swap), staged=staged,
-                    layer_copies=layer_copies, layer_frames=layer_frames,
+                    layer_copies=layer_copies, layer_frames=layer_frames, registered=registered,
                     stage_skip=HUD_CAPTURE_SKIPS[stage_skip] if stage_skip < len(HUD_CAPTURE_SKIPS) else stage_skip)
     return None
 
@@ -1897,7 +1897,7 @@ def controller_buttons(bits):
 
 # SESSION DIAGNOSTICS (diag_log.hpp, SpidyDiagData): the build, the feature settings and the features' own lines
 # (RUN LOGS' "run log:", WEB AIM's "forearm aim:", DODGE TUMBLE's, the state changes on and off the ground).
-# Until v4 they reached only the report's timeline; now the console and reports/<session>-diag.log get them.
+# With RUN LOGS on the console and reports/<session>-diag.log get them; off, the module publishes none.
 DIAG_MAGIC, DIAG_VERSION = 0x47414944, 1
 DIAG_MAIN, DIAG_AIM, DIAG_CHARS, DIAG_BUILD = 128, 16, 240, 96
 DIAG_MAIN_AT = 120
@@ -1907,7 +1907,12 @@ DIAG_BYTES = DIAG_AIM_AT + 8 + DIAG_AIM*DIAG_CHARS
 
 def diag_snapshot(game, address):
     """The diagnostics' two rings as they stand: {'build', 'main': (written, slots), 'aim': (written, slots)},
-    a protocol mismatch reported (never raised: these are diagnostics), or None while it is being written."""
+    a protocol mismatch reported (never raised: these are diagnostics), or None while it is being written or
+    before anything was published (RUN LOGS off: only the header is read)."""
+    head = game.read(address, 24)
+    if len(head) == 24 and struct.unpack_from('<3I', head) == (DIAG_MAGIC, DIAG_VERSION, DIAG_BYTES) and \
+            struct.unpack_from('<Q', head, 16)[0] == 0:
+        return None
     for _ in range(8):
         raw = game.read(address, DIAG_BYTES)
         if len(raw) != DIAG_BYTES:
@@ -2874,7 +2879,7 @@ def session(a, startup):
                         sample['hud_capture'] = {k: capture[k] for k in ('found', 'known', 'copies', 'snapshots',
                                                                          'skip', 'state', 'executed', 'staged',
                                                                          'layer_copies', 'layer_frames',
-                                                                         'stage_skip')}
+                                                                         'stage_skip', 'registered')}
                         if capture['snapshots'] != hud_shot_count and capture['pixels']:
                             hud_shot_count = capture['snapshots']
                             try:

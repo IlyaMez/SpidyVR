@@ -18,10 +18,19 @@ SRWLOCK lock = SRWLOCK_INIT;
 diag_log::Ring<diag_log::mainLines> mainRing;
 diag_log::Ring<diag_log::aimLines> aimRing;
 ULONGLONG firstTick{};
+std::atomic<bool> on{};
 } // namespace
 
+void diag_log::enable(bool wanted) {
+    on.store(wanted, std::memory_order_relaxed);
+}
+
+bool diag_log::enabled() {
+    return on.load(std::memory_order_relaxed);
+}
+
 void diag_log::write(const char* text) {
-    if (!text)
+    if (!text || !on.load(std::memory_order_relaxed))
         return;
     char line[lineChars];
     AcquireSRWLockExclusive(&lock);

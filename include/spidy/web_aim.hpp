@@ -74,8 +74,8 @@ enum class Source : int { controller = 0, forearm = 1 };
 // had the forearm 35-77 degrees off the controller in 267 of its 394 active
 // samples, so the webs stayed clamped near the controller ("they keep
 // tracking my palm"): v6 takes the limit from the setting, none by default.
-constexpr float forearmClampDegrees = 35, forearmLimitDefault = 180, forearmSmoothSeconds = .08f, forearmFallbackSeconds = .15f,
-                forearmMiss = .1f;
+constexpr float forearmClampDegrees = 35, forearmLimitDefault = 180, forearmSmoothSeconds = .08f,
+                forearmFallbackSeconds = .15f, forearmMiss = .1f;
 // A sample this many VR frames without a new solve is stale (v3-v5: 2; the
 // V5 session fell back as stale in 164 lines, mostly at 3; the forearm is
 // carried on the grip now, so a solve 100 ms old still points right).
@@ -164,7 +164,7 @@ struct ForearmAimLine {
     bool right{}, active{}, modelForearm{}, wristShooters{}, clamped{}, tilted{};
     const char* reason = "";
     float turnDegrees{}, targetDegrees{}, limitDegrees{}, weight{}, handError{}, offDegrees{}, lagDegrees{},
-          palmX{}, jitterDegrees{};
+        palmX{}, jitterDegrees{};
     int blend{};
     unsigned stale{};
 };
@@ -173,12 +173,14 @@ inline int formatForearmAimLine(char* out, std::size_t size, const ForearmAimLin
         return 0;
     return std::snprintf(
         out, size,
-        "forearm aim: %s %s (%s), %s, turn %.1f deg (target %.1f), limit %.0f deg%s, weight %.2f, blend %d%%, "
+        "forearm aim: %s %s (%s), %s, turn %.1f deg (target %.1f), limit %.0f deg%s, weight %.2f, blend "
+        "%d%%, "
         "wrist miss %.3f, stale %u, forearm vs controller %.1f deg, grip lag %.1f deg, palm.x %+.2f, jitter "
         "%.2f deg%s",
         l.right ? "R" : "L", l.reason ? l.reason : "",
         l.active ? "active: the forearm's line" : "fallback: the controller's line",
-        l.modelForearm ? (l.wristShooters ? "MODEL FOREARM + WRIST SHOOTERS" : "MODEL FOREARM") : "WRIST SHOOTERS",
+        l.modelForearm ? (l.wristShooters ? "MODEL FOREARM + WRIST SHOOTERS" : "MODEL FOREARM")
+                       : "WRIST SHOOTERS",
         static_cast<double>(l.turnDegrees), static_cast<double>(l.targetDegrees),
         static_cast<double>(l.limitDegrees), l.clamped ? ", clamped" : ", not clamped",
         static_cast<double>(l.weight), l.blend, static_cast<double>(l.handError), l.stale,

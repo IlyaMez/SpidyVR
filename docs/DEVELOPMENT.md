@@ -594,7 +594,9 @@ wall when the palm is at it;
 the body then moves by that hand's motion relative to the head, turned into
 the world and flattened onto the wall, two hands averaged, at most 3 m/s
 (`climbInputs`, `wallMotion`). A held hand shoots no web and grabs nothing
-(`Swing::wallHand`, `game_swing.cpp`'s `wallHands`). The swing command's
+(`Swing::wallHand`, `game_swing.cpp`'s `wallHands`), and while a hand holds
+the wall the other starts no web, grab or web ball either (`Swing::inputs`'
+`climbingHands()`, `noNewWebs`); its web already out stays. The swing command's
 version 5 carries each grip's place and the controller's own squeeze
 (`wallPositions`, `wallGrips`), whichever button WEB BUTTON gave the webs, and
 `wallRotate` while both grips turn the view. `SpidyClimbSample`

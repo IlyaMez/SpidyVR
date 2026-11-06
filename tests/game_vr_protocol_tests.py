@@ -362,7 +362,7 @@ class ProtocolTests(unittest.TestCase):
         struct.pack_into('<2Q2I', raw, 104, 300, 3, 0, 0)
         struct.pack_into('<2Q2I', raw, 128, 3, 0x40000, 256, 1)
         # STEADY HUD: copies with the pairs, into the layer, frames that showed it; the last pair's state unknown.
-        struct.pack_into('<3QI', raw, 152, 700, 690, 1400, 2)
+        struct.pack_into('<3Q2I', raw, 152, 700, 690, 1400, 2, 5)
         shot = hud_capture_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)
         self.assertEqual((shot['path'], shot['found'], shot['width'], shot['format']), ('wrapped', True, 64, 87))
         self.assertEqual((shot['barriers'], shot['executed'], shot['odd'], shot['mismatched']), (900, 880, 1, 2))
@@ -370,6 +370,14 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual((shot['snapshots'], shot['row_pitch'], shot['swap']), (3, 256, True))
         self.assertEqual((shot['staged'], shot['layer_copies'], shot['layer_frames'], shot['stage_skip']),
                          (700, 690, 1400, 'unknown_state'))
+        self.assertEqual(shot['registered'], 5)
+        # The game stopped drawing into the followed texture: the copy says so.
+        struct.pack_into('<I', raw, 176, 7)
+        self.assertEqual(hud_capture_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)['stage_skip'], 'stale')
+        # The followed texture is empty: the copy says so.
+        struct.pack_into('<I', raw, 176, 8)
+        self.assertEqual(hud_capture_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)['stage_skip'], 'blank')
+        struct.pack_into('<I', raw, 176, 2)
         # Torn the whole time: nothing; too short: nothing.
         self.assertIsNone(hud_capture_snapshot(Reader(*([raw, struct.pack('<Q', 8)] * 8)), 0))
         self.assertIsNone(hud_capture_snapshot(Reader(raw[:40]), 0))
@@ -1055,11 +1063,13 @@ class ProtocolTests(unittest.TestCase):
 
     def test_ray_geometry_serial_and_body_generation_boundaries(self):
         raw = bytearray(784)
-        struct.pack_into('<4IQ5Q4I', raw, 0, 0x53525944, 2, 784, 2, 4, 9, 10, 100, 8, 0xabc, 1, 0, 7, 0)
+        struct.pack_into('<4IQ5Q4I', raw, 0, 0x53525944, 2, 784, 2, 4, 9, 10, 100, 8, 0xabc, 1, 0, 7, 5)
         struct.pack_into('<7fI7f7I', raw, 80, 10, 20, 30, 100, 0, -1, 0, 90,
                          10, 14, 30, .06, 0, 1, 0, 3, 0x30008f3, 1087, 1, 1, 0, 0xa0000104)
         result = ray_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual((result['serial'], result['count'], result['thread']), (9, 1, 7))
+        # Rays a visitor asked for that the world did not take as asked (cut or missed).
+        self.assertEqual(result['malformed'], 5)
         hit = result['hits'][0]
         self.assertEqual((hit['position'], hit['tag'], hit['body_id']), ((10, 14, 30), 90, 0x30008f3))
         self.assertTrue(hit['body_matches'])
@@ -2051,6 +2061,11 @@ class ProtocolTests(unittest.TestCase):
                          'game-vr-20261103-101500-diag.log')
         raw = bytearray(DIAG_BYTES)
         struct.pack_into('<3I', raw, 0, 0x47414944, 1, DIAG_BYTES)
+        game = Mock()
+        game.read = lambda address, size: bytes(raw[address-0x1000:address-0x1000+size])
+        # Never published (RUN LOGS off): nothing, and only the header read.
+        self.assertIsNone(diag_snapshot(game, 0x1000))
+        struct.pack_into('<Q', raw, 16, 2)
         raw[24:24+len(b'Spidy 0.7.0 (commit abc1234)')] = b'Spidy 0.7.0 (commit abc1234)'
 
         def put(at, count, lines):
@@ -2061,8 +2076,6 @@ class ProtocolTests(unittest.TestCase):
                 raw[slot:slot+len(line)] = line.encode()
         put(DIAG_MAIN_AT, 128, ['[   1.000] run log: touchdown at 12.0 m/s across'])
         put(DIAG_AIM_AT, 16, [f'[   {i}.000] forearm aim: L none' for i in range(20)])
-        game = Mock()
-        game.read = lambda address, size: bytes(raw[address-0x1000:address-0x1000+size])
         printed = []
         with tempfile.TemporaryDirectory() as folder:
             log = DiagLog(pathlib.Path(folder)/'game-vr-x-diag.log', echo=printed.append)

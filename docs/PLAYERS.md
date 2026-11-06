@@ -233,9 +233,9 @@ Your body and fists
   Take the other hand's  that hand closes into a fist on the web
   web
   Squeeze a grip ....... otherwise closes that hand into a fist (the grip
-                         when the trigger is your web button), and so does a
-                         hand moving fast; with an enemy marked or within
-                         reach a fast hand is a fist even while it shoots
+                         when the trigger is your web button); with an enemy
+                         marked or within reach a hand moving fast is a fist
+                         too, even while it shoots
   T-pose, both triggers  calibrates your body (when the panel asks): his
                          height and arms become yours. B skips it
 
@@ -424,12 +424,15 @@ Moving
                          it holds for as long as you hold the trigger. No
                          web ball from that pull
   Both hands at your ... the game's suit power (its L3 + R3, which nothing
-  chest, both triggers   sent in VR before): both hands before your chest,
-                         pull both triggers together (within half a second
-                         or so). No web balls from those pulls. The game uses
+  chest, both triggers   sent in VR before): both hands together before your
+                         chest, a fist's width apart, pull both triggers at
+                         once. No web balls from those pulls. The game uses
                          its power when its meter is full, as in the flat game.
                          Both hands buzz as it goes out. Builds before
-                         October 23 buzzed but sent the game nothing
+                         October 23 buzzed but sent the game nothing. Builds
+                         before November 5 kept any trigger pulled near the
+                         chest for it, so webs, web balls and the reel failed
+                         with the hands at rest there
   Menu button .......... pause
   Hold both sticks in .. pause too, after a moment (both hands buzz). Under
                          SteamVR the Quest's menu button is SteamVR's own:
@@ -973,8 +976,7 @@ VR settings
                    Spider-Man's shooters (and the films' natural webs) do:
                    along the forearm of the body you see when it can say,
                    else along the controller. WEB ANGLE tilts that line.
-                   (Before v6 this sent webs square out of the palm side:
-                   that was wrong, and is now PALM SHOOTERS.)
+                   (Square out of the palm side is PALM SHOOTERS.)
   PALM SHOOTERS    (off until you switch it on) the old WRIST SHOOTERS:
                    webs leave square to your hand, out of the palm side.
   DODGE TUMBLE     (OFF until you pick one) when the game dodges, your
@@ -987,18 +989,19 @@ VR settings
   NATIVE RUN AT    how far the stick tilts before NATIVE RUN holds the
                    game's RT, 50% to 90%; it lets go 20 points under it.
                    70%, as before.
-  RUN LOGS         (off until you switch it on) writes how fast you run,
-                   land and take off to the session's log, for sending
-                   back. Changes nothing in play. These lines (and WEB AIM's
-                   and DODGE TUMBLE's) show in the launcher's window as
+  RUN LOGS         (off until you switch it on) writes how you run, land,
+                   leap and jump, the frame rate and how far VR got
+                   ("stage: ..."), and WEB AIM's and DODGE TUMBLE's lines,
+                   for sending back. They show in the launcher's window as
                    "diag ..." and are saved in reports\ as
                    game-vr-<time>-diag.log, which starts with the build and
-                   your settings: that file is the one to send back.
-                   It also says how far VR got ("stage: ...") and, when
-                   the game crashed, "The game crashed (exit code ...)":
-                   send that file with the game's newest log from
+                   your settings: that file is the one to send back. Off,
+                   none of it is written. Changes nothing in play.
+                   Whatever this setting, a crashed game says so in the
+                   launcher's window ("The game crashed (exit code ...)"):
+                   send that with the game's newest log from
                    Documents\Marvel's Spider-Man Remastered.
-  RUNNING LEAP    (off until you switch it on) a charged leap (hold A on
+  RUNNING LEAP     (off until you switch it on) a charged leap (hold A on
                    the ground) keeps the speed you run at and adds its
                    charge on top; a full one from a fast run is a long
                    jump, further and flatter. Off: as before.
@@ -1031,14 +1034,13 @@ VR settings
                    say (body off, a cutscene, an arm it cannot reach) they
                    go back to the controller's line. WEB ANGLE and WRIST
                    SHOOTERS still turn on top; punches keep the controller.
-                   Since v6 the line is the forearm's own (elbow to wrist),
-                   no longer held within 35 degrees of the controller, and
-                   a flip's tilt no longer drops it.
+                   The line is the forearm's own (elbow to wrist); FOREARM
+                   AIM LIMIT can hold it nearer the controller.
   FOREARM BLEND    (100% until you change it) how much of the forearm's
                    line MODEL FOREARM takes, from 0% (the controller's).
   FOREARM AIM LIMIT (NO LIMIT until you change it) how far MODEL FOREARM
                    and WRIST SHOOTERS may turn your webs off the
-                   controller's line: 35 DEG (v5's), 60, 90 or NO LIMIT.
+                   controller's line: 35 DEG, 60, 90 or NO LIMIT.
   SMOOTH WEB LANDING (off until you switch it on) land while you hold a
                    web, slower than WEB LANDING IMPACT, and your fall eases
                    over the last metres, your speed carries on across the
@@ -1060,10 +1062,16 @@ VR settings
                    smooth web landing carries you on the ground (no web
                    held) is a jump the moment you press it, keeping your
                    run's speed; you fly on as after letting go of a web.
-                   Off: v5's jump, the game's, up to 0.2 s later.
+                   Off: the game's own jump once it has you back (up to
+                   0.2 s later).
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, RUN FROM STANDING, WEB AIM, FOREARM BLEND, SMOOTH WEB LANDING, WEB LANDING IMPACT, STEADY STATES, COMBAT RESPONSIVE, SPIDY RUN JUMP, FOREARM AIM LIMIT, PALM SHOOTERS, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR
+  SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN
+  AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, RUN FROM
+  STANDING, WEB AIM, FOREARM BLEND, SMOOTH WEB LANDING, WEB LANDING IMPACT,
+  STEADY STATES, COMBAT RESPONSIVE, SPIDY RUN JUMP, FOREARM AIM LIMIT, PALM
+  SHOOTERS, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches

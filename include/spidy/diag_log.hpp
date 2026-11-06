@@ -7,6 +7,9 @@
 // four sessions). Now each also goes into SpidyDiagData, which run_game_vr.py
 // reads with the rest of a session, prints to the console and appends to
 // reports/<session>-diag.log. The report's timeline is as before.
+// Only with RUN LOGS on (enable; the review of pull request #77): off, no line
+// is kept, the VR worker publishes none and starts no watchdog, and the
+// console and the diagnostics file stay as they were.
 //
 // Two rings, so the frequent lines cannot push out the rare ones: `main` for
 // everything, `aim` for "forearm aim:" alone. Each line is numbered by the
@@ -103,11 +106,16 @@ class Stages {
     enum Stage : int { none, headset, views, firstFrame, running };
     static const char* name(int stage) {
         switch (stage) {
-        case headset: return "headset active, the eye views not started";
-        case views: return "eye views started, waiting for the first eye images";
-        case firstFrame: return "frames reaching the headset";
-        case running: return "running (300 frames submitted)";
-        default: return "starting OpenXR";
+        case headset:
+            return "headset active, the eye views not started";
+        case views:
+            return "eye views started, waiting for the first eye images";
+        case firstFrame:
+            return "frames reaching the headset";
+        case running:
+            return "running (300 frames submitted)";
+        default:
+            return "starting OpenXR";
         }
     }
     int stage() const {
@@ -129,6 +137,13 @@ class Stages {
     }
     void beat(uint64_t now) {
         beat_ = now;
+    }
+    // A new session: nothing reached yet (SpidyXrStart; the game may start VR
+    // again in the same process).
+    void reset() {
+        stage_ = none;
+        beat_ = headsetAt_ = lastFrame_ = frames_ = 0;
+        warned_ = 0;
     }
     // A frame OpenXR accepted; the stage for its count, or none.
     int submitted(uint64_t now) {
@@ -169,9 +184,14 @@ class Stages {
     std::atomic<uint64_t> beat_{}, headsetAt_{}, lastFrame_{}, frames_{};
     uint64_t warned_{}; // the watchdog thread's own
 };
+// Whether lines are kept (RUN LOGS; the VR worker sets it with the settings).
+// Off by default: write() keeps nothing.
+void enable(bool on);
+bool enabled();
 // A line for the diagnostics (and only there: the report's timeline is
-// game_prompts::note's, which calls this too). Stamped with the seconds since
-// the session's first line. Thread-safe. In the stereo module (diag_log.cpp).
+// game_prompts::note's, which calls this too), while enabled. Stamped with the
+// seconds since the session's first line. Thread-safe. In the stereo module
+// (diag_log.cpp).
 void write(const char* text);
 // Formatted, as printf.
 void writef(const char* format, ...);

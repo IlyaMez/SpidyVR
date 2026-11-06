@@ -172,10 +172,10 @@ void recentCalls(Calls&);
 // available at the moment a button arrived - the question left after October
 // 13, when the game announced an interact 8 times, took 12 presses of its own
 // Y from a wall, and did nothing.
-// Since v4 each line goes into the session's diagnostics as well (diag_log:
-// the launcher's console and reports/<session>-diag.log), whole, unless
-// `diagnostics` is false (WEB AIM's "forearm aim:", which goes there only as
-// it changes).
+// With RUN LOGS on each line goes into the session's diagnostics as well
+// (diag_log: the launcher's console and reports/<session>-diag.log), whole,
+// unless `diagnostics` is false (WEB AIM's "forearm aim:", which goes there
+// only as it changes).
 void note(const char* text, bool diagnostics = true);
 // One of the game's localized texts, from game_menu's hook on the lookup.
 // Returns the text to show in its place: the same pointer, or in VR play

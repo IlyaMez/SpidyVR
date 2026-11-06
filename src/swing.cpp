@@ -101,6 +101,9 @@ bool Swing::thin(const RayHit& hit, const WorldQueries& world) const {
 }
 std::optional<RayHit> Swing::solid(Vec3 from, Vec3 way, float reach, const WorldQueries& world,
                                    int* passed) const {
+    // The body's clear line to an open-air anchor WEB RANGE (up to 1000 m) from
+    // the hand is longer than that by the hand's reach: the world takes 1000 m.
+    reach = std::min(reach, maxRayDistance);
     auto hit = world.raycast(from, way, reach);
     if (!config_.arcade)
         return hit;
@@ -1000,7 +1003,8 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
         standHold_ = 0;
         ++jumpCancels_;
         if (!webbed && in.runJump && finite(across)) {
-            runJumpVelocity_ = limited(Vec3{across.x, 0, across.z}, speedLimit()) + Vec3{0, config_.leapUp, 0};
+            runJumpVelocity_ =
+                limited(Vec3{across.x, 0, across.z}, speedLimit()) + Vec3{0, config_.leapUp, 0};
             runJump_ = runJumpSeconds;
         }
         if (!webbed)
@@ -1065,7 +1069,11 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
             s.sample = false;
             continue;
         }
-        const bool shoot = held && !s.held;
+        // HAND WALL CLIMBING: while the other hand holds the wall, this one
+        // starts no web (Adrian's pull request 24; from October 22 to
+        // November 5 a squeeze that missed the wall shot one). The press still
+        // counts as held, so one held on as the wall is let go of shoots nothing.
+        const bool shoot = held && !s.held && !climbingHands();
         s.held = held;
         if (w.attached && (!held || (!w.airAnchor && !world.exists(w.surface))))
             release(i);
@@ -1550,7 +1558,8 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
         if (body_.grounded && landCarry_ > 0) {
             // SMOOTH WEB LANDING: the landing's speed carried, decaying to a
             // jog, steered as on the ground, in place of the ground's brake.
-            landAlong_ = web_landing::carryStep(landAlong_ + steering * (config_.groundAcceleration * dt), dt);
+            landAlong_ =
+                web_landing::carryStep(landAlong_ + steering * (config_.groundAcceleration * dt), dt);
             body_.velocity.x = landAlong_.x;
             body_.velocity.z = landAlong_.z;
         } else if (body_.grounded) {
@@ -1646,7 +1655,11 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             }
         } else if (w.flightTotal > 0)
             w.engageAge += dt;
-        if (w.catching)
+        // ELASTIC WEB: the spring is the soft catch. Its web keeps the length
+        // it arrived with and stretches from there; grown with the body, it
+        // never stretched, damping alone held him above the catch's 0.5 m/s,
+        // the catch never ended, and he sank on a web that paid out.
+        if (w.catching && !elasticWeb_)
             w.length = std::max(w.length, length(hold(i) - body_.position));
     }
     std::array<float, 2> rates{};
@@ -1911,7 +1924,8 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     // speed and faster across than the carry's floor, keeps that speed
     // across the ground for a moment (the caller drives meanwhile). It ends
     // off the ground, on a wall, a mount, SPIDY RUN, or with the setting.
-    if (landCarry_ > 0 && (!webLandSmooth_ || !actual.grounded || wall_.on || mounting_ || mount_ > 0 || groundRun_))
+    if (landCarry_ > 0 &&
+        (!webLandSmooth_ || !actual.grounded || wall_.on || mounting_ || mount_ > 0 || groundRun_))
         endLandCarry();
     if (webLandSmooth_ && touchdown && webHeld && !groundRun_ && !wall_.on && !mounting_ && mount_ <= 0 &&
         !fighting && web_landing::gentle(flown, webLandImpact_)) {

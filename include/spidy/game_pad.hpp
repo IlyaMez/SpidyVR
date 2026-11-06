@@ -248,10 +248,12 @@ class ChargeJump {
         const float dt = std::isfinite(seconds) ? std::clamp(seconds, 0.f, .1f) : 0.f;
         const bool pressed = held && !down_;
         down_ = held;
-        if (pressed)
-            phase_ = ground && !(early_ == 2 && running) && !atOnce ? Phase::waiting : Phase::plain, time_ = 0;
-        else
+        if (pressed) {
+            phase_ = ground && !(early_ == 2 && running) && !atOnce ? Phase::waiting : Phase::plain;
+            time_ = 0;
+        } else {
             time_ += dt;
+        }
         switch (phase_) {
         case Phase::plain:
             if (!held)
@@ -490,20 +492,27 @@ class TemplePress {
 // hit trigger like the scan"): VR play had no way to it at all, as clicking
 // both sticks is the pad layer and only the game screen sent the game its L3
 // + R3. The chest: a point `below` the headset and `ahead` of it, level with
-// where it looks; a hand counts within `reach` of it as its trigger goes down,
-// and the two triggers must go down within `together` of each other. Each
-// such trigger is the gesture's alone until it is let go: no web ball, no
-// reel (hands()). Outside VR play nothing holds, and a trigger held through
-// that must be let go first.
+// where it looks. A trigger is the gesture's (hands(): no web, web ball or
+// reel meanwhile) only if it goes down with both hands there, each within
+// `reach` of the point and no more than `apart` from the other, and with no
+// web out of its hand. It waits `together` for the other trigger; not joined,
+// it is the web's again, still held: a press that much late. Both down within
+// `together` of each other are the power, and both triggers are its until let
+// go. Until November 5 one trigger pulled within 22 cm of the point was the
+// gesture's until let go: a player's hands at rest were 13 to 19 cm from it,
+// and his October 28 session made 38 suit powers and not one web from its
+// triggers. Outside VR play nothing holds, and a trigger held through that
+// must be let go first.
 class SuitPowerPress {
   public:
-    static constexpr float below = .38f, ahead = .15f, reach = .22f, together = .4f, pressed = .6f,
-                           released = .3f, holdSeconds = .15f;
+    static constexpr float below = .38f, ahead = .15f, reach = .12f, apart = .2f, together = .15f,
+                           pressed = .6f, released = .3f, holdSeconds = .15f;
     // seconds: since the previous update. play: the controllers play VR.
     // head and grips: the headset's and each hand's grip pose, in one space;
-    // tracked and triggers: each hand's. Returns the game's L3 + R3: down or not.
+    // tracked and triggers: each hand's; webs: each hand's web is out (none:
+    // neither). Returns the game's L3 + R3: down or not.
     bool update(float seconds, bool play, const Pose& head, const Pose grips[2], const bool tracked[2],
-                const float triggers[2]) {
+                const float triggers[2], const bool webs[2] = nullptr) {
         const float dt = std::isfinite(seconds) ? std::clamp(seconds, 0.f, .1f) : 0.f;
         left_ = std::max(0.f, left_ - dt);
         Vec3 chest{};
@@ -515,6 +524,12 @@ class SuitPowerPress {
             chest = head.position + Vec3{0, -below, 0} + look * ahead;
             placed = finite(chest);
         }
+        // Both hands at the chest, together.
+        bool at[2]{};
+        for (unsigned i = 0; i < 2; ++i)
+            at[i] = placed && tracked[i] && finite(grips[i].position) &&
+                    length(grips[i].position - chest) <= reach;
+        const bool posed = at[0] && at[1] && length(grips[0].position - grips[1].position) <= apart;
         for (unsigned i = 0; i < 2; ++i) {
             const float trigger = std::isfinite(triggers[i]) ? triggers[i] : 0.f;
             const bool down = tracked[i] && trigger > (down_[i] ? released : pressed);
@@ -526,7 +541,7 @@ class SuitPowerPress {
                 hands_ &= ~bit;
                 continue;
             }
-            if (press && placed && finite(grips[i].position) && length(grips[i].position - chest) <= reach) {
+            if (press && posed && !(webs && webs[i])) {
                 hands_ |= bit;
                 since_[i] = 0;
                 spent_ &= ~bit;
@@ -539,6 +554,10 @@ class SuitPowerPress {
             ++powers_;
             left_ = holdSeconds;
         }
+        // A trigger the other did not join in time is the web's again.
+        for (unsigned i = 0; i < 2; ++i)
+            if ((hands_ & (1u << i)) && !(spent_ & (1u << i)) && since_[i] > together)
+                hands_ &= ~(1u << i);
         if (!play)
             left_ = 0;
         held_ = left_ > 0;

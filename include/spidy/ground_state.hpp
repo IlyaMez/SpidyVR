@@ -60,18 +60,18 @@ class RiseDelay {
 };
 // What one frame says about the player.
 struct Sample {
-    bool fresh{};          // the swing's sample is recent
-    bool grounded{};       // the game's ground contact (SpidySwingData)
-    bool owned{};          // the swing drives the body
-    bool webbed{};         // a web holds
-    unsigned wall{};       // game_swing::Surface
-    unsigned mount{};      // the swing's mount (1 on its way, 2 from the crawl)
-    unsigned takeoff{};    // the takeoff's phase (0 idle)
-    bool gameGround{};     // game_swing::gameOwnsGround
-    bool runRt{};          // NATIVE RUN holds the game's RT
-    bool fighting{};       // a fight (combat camera, or an enemy in reach lately)
-    bool dodging{};        // a dodge asked for
-    Vec3 velocity{};       // the swing's idea of the body's
+    bool fresh{};       // the swing's sample is recent
+    bool grounded{};    // the game's ground contact (SpidySwingData)
+    bool owned{};       // the swing drives the body
+    bool webbed{};      // a web holds
+    unsigned wall{};    // game_swing::Surface
+    unsigned mount{};   // the swing's mount (1 on its way, 2 from the crawl)
+    unsigned takeoff{}; // the takeoff's phase (0 idle)
+    bool gameGround{};  // game_swing::gameOwnsGround
+    bool runRt{};       // NATIVE RUN holds the game's RT
+    bool fighting{};    // a fight (combat camera, or an enemy in reach lately)
+    bool dodging{};     // a dodge asked for
+    Vec3 velocity{};    // the swing's idea of the body's
 };
 class StateLog {
   public:
@@ -123,8 +123,9 @@ class StateLog {
             if (from == to)
                 return;
             char part[96];
-            std::snprintf(part, sizeof part, "%s%s %d->%d%s%s%s", changes.empty() ? "" : ", ", name, from ? 1 : 0,
-                          to ? 1 : 0, why && *why ? " (" : "", why ? why : "", why && *why ? ")" : "");
+            std::snprintf(part, sizeof part, "%s%s %d->%d%s%s%s", changes.empty() ? "" : ", ", name,
+                          from ? 1 : 0, to ? 1 : 0, why && *why ? " (" : "", why ? why : "",
+                          why && *why ? ")" : "");
             changes += part;
         };
         const auto number = [&](const char* name, unsigned from, unsigned to) {
@@ -134,7 +135,9 @@ class StateLog {
             std::snprintf(part, sizeof part, "%s%s %u->%u", changes.empty() ? "" : ", ", name, from, to);
             changes += part;
         };
-        const char* landWhy = !s.grounded ? (s.takeoff ? "takeoff" : s.webbed ? "web" : "off the ground")
+        const char* landWhy = !s.grounded ? (s.takeoff  ? "takeoff"
+                                             : s.webbed ? "web"
+                                                        : "off the ground")
                               : s.owned   ? "touchdown, the swing driving"
                               : s.webbed  ? "touchdown with a web held"
                                           : "touchdown";
@@ -156,7 +159,8 @@ class StateLog {
         last_ = s;
         if (changes.empty())
             return nullptr;
-        std::snprintf(line_, sizeof line_, "state: %s; %.1f m/s across, %.1f m/s up; owned %d, webbed %d, fight %d",
+        std::snprintf(line_, sizeof line_,
+                      "state: %s; %.1f m/s across, %.1f m/s up; owned %d, webbed %d, fight %d",
                       changes.c_str(), std::hypot(s.velocity.x, s.velocity.z), s.velocity.y, s.owned ? 1 : 0,
                       s.webbed ? 1 : 0, s.fighting ? 1 : 0);
         return line_;
