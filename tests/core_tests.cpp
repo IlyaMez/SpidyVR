@@ -24754,6 +24754,13 @@ int main() {
         check(snapshotDue(100, 0, false), "no first snapshot");
         check(!snapshotDue(100 + snapshotMs - 1, 100, true) && snapshotDue(100 + snapshotMs, 100, true),
               "snapshots not every few seconds");
+        {
+            // An empty panel is told from one with a little on it (the stale-texture reports: all alpha 0).
+            std::vector<uint8_t> panel(64 * 4 * 12, 0);
+            check(!anyAlpha(panel.data(), 64, 12, 64 * 4), "an empty panel had alpha");
+            panel[(3 * 64 + 10) * 4 + 3] = 255; // row 3, column 10: on the grid
+            check(anyAlpha(panel.data(), 64, 12, 64 * 4), "a panel with a mark was empty");
+        }
         bool swap{};
         check(readableBytes(DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, swap) == 4 && !swap, "RGBA not read");
         check(readableBytes(DXGI_FORMAT_B8G8R8A8_UNORM, swap) == 4 && swap, "BGRA not swapped");

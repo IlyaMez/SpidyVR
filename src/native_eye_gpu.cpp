@@ -151,7 +151,9 @@ struct HudProbe {
     D3D12_RESOURCE_STATES state{};
     bool known{};
     uint64_t barriers{}, executed{}, otherQueue{}, odd{}, mismatched{}, presents{}, copies{}, snapshots{};
-    uint32_t skip{}, refused{};
+    uint64_t executedMs{}; // when a barrier on the followed texture last executed (or it was registered)
+    uint32_t skip{}, refused{}, registered{};
+    uint32_t emptyScans{}; // snapshots in a row with no alpha at all; hud_capture::blankScans of them: blank
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout{};
     uint32_t shotWidth{}, shotHeight{}, shotBytes{};
     bool shotSwap{}, pending{}, taken{};
@@ -202,6 +204,7 @@ void publishHud() { // recording held by caller
     d.layerCopies = hud.layerCopies;
     d.layerFrames = hud.layerFrames;
     d.stageSkip = hud.stageSkip;
+    d.registered = hud.registered;
     InterlockedIncrement64(&d.sequence);
 }
 void publishScreen(uint32_t status, const void* rows, uint32_t rowBytes) {
@@ -442,6 +445,15 @@ hud_capture::Skip stageHud(ID3D12GraphicsCommandList* list) { // submission and 
         return hud_capture::skipNoResource;
     if (!hud.known)
         return hud_capture::skipUnknownState;
+    // The game draws the panel every frame, each time through barriers on its texture. None for this long: it
+    // draws into another texture now (registerHud follows it), and this one would show an empty panel.
+    if (GetTickCount64() - hud.executedMs > hud_capture::staleMs)
+        return hud_capture::skipStale;
+    // The followed texture is empty although the HUD is wanted (the game's panel drew somewhere else, or
+    // nowhere, after a death, a checkpoint or a scene): its copy would show the layer nothing, and the eyes
+    // would leave the panel out. Not copied, the eyes draw it, as with STEADY HUD off.
+    if (hud.emptyScans >= hud_capture::blankScans)
+        return hud_capture::skipBlank;
     const auto desc = hud.resource->GetDesc();
     if (!rgba8CopyTarget(desc))
         return hud_capture::skipFormat;
@@ -627,6 +639,7 @@ void STDMETHODCALLTYPE execute(ID3D12CommandQueue* q, UINT count, ID3D12CommandL
             for (const auto& e : found->second) {
                 if (e.hud) {
                     ++hud.executed;
+                    hud.executedMs = GetTickCount64();
                     if (e.flags != D3D12_RESOURCE_BARRIER_FLAG_NONE ||
                         (e.transition.Subresource != D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES &&
                          (e.transition.Subresource != 0 || hud.mips != 1))) {
@@ -1033,6 +1046,11 @@ void readHud() { // submission and recording held by caller
     hud.rowPitch = rowBytes;
     hud.swap = hud.shotSwap;
     ++hud.snapshots;
+    // (An 8-bit colour format is all the probe reads back: alpha is the 4th byte, RGBA or BGRA.)
+    if (hud.shotBytes == 4)
+        hud.emptyScans = hud_capture::anyAlpha(hud.pixels.data(), hud.shotWidth, hud.shotHeight, rowBytes)
+                             ? 0
+                             : hud.emptyScans + 1;
 }
 void captureHud(IDXGISwapChain* swapchain) {
     ComPtr<IDXGISwapChain3> chain;
@@ -1361,6 +1379,9 @@ void registerHud(ID3D12Resource* resource, uint32_t path) {
     if (hud.resource)
         hud.retired.push_back({hud.resource, GetTickCount64() + 3000});
     hud.resource = resource;
+    ++hud.registered;
+    hud.emptyScans = 0; // the new texture is looked at anew
+    hud.executedMs = GetTickCount64();
     hud.path = path;
     hud.mips = desc.MipLevels;
     hud.known = false;

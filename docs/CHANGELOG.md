@@ -3,7 +3,34 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (November 5): fixes from the players' reports on 0.8.0.**
+**Latest build (November 6): pull request #78 by vrfloop-lab (vrfloopy) -
+STEADY HUD no longer goes empty after the game remakes the HUD.** A report
+with STEADY HUD on (0.8.0): after a death, a checkpoint reload or a short
+combat cutscene the HUD was gone from the headset, but on the monitor, until
+the game was restarted. The session report showed why: the barriers on the
+followed panel texture stopped (`hud_capture.executed` frozen) while the
+layer kept copying it. The game had made a new texture and Spidy still
+followed the old, empty one.
+
+- The panel's resource is looked up every frame, not only when the texture
+  object changes: the game may remake the resource and keep the object where
+  it was (`src/native_hud.cpp`, `probeTexture`).
+- A followed texture that gets no barrier for 2 s while its copies are
+  wanted is not copied (`stage_skip: stale`), so the eyes draw the panel
+  again, as when the copies stop.
+- The report counts the times the panel was followed anew
+  (`hud_capture.registered`).
+- **A blank panel is not shown (the first fix did not hold in the reporter's
+  game).** The followed texture is looked at every second (a snapshot, one
+  pixel in 15 for any alpha; every 5 s before); two snapshots in a row with
+  nothing on it and the panel is no longer copied (`stage_skip: blank`), so
+  the layer goes and the eyes draw the HUD, as with STEADY HUD off. The layer
+  comes back on its own when the texture has something on it again.
+- Only with STEADY HUD on; off, nothing of it runs. Tested by the reporter in
+  the game: the HUD no longer vanishes. Review: built on 0.8.1, core and
+  protocol tests pass; not run here in the game.
+
+**Earlier build (November 5): fixes from the players' reports on 0.8.0.**
 You: "check the latest set of issues on discord from last update, fix what
 you have enough info to fix, ask for whats missing".
 
