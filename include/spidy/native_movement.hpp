@@ -1,7 +1,7 @@
 #pragma once
 #include "math.hpp"
-#include <cstring>
 #include <cstdint>
+#include <cstring>
 
 namespace spidy::native_movement {
 struct Config {

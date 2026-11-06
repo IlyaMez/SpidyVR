@@ -3,7 +3,563 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (November 5): fixes from the players' reports on 0.8.0.**
+**Latest build (November 6): pull request #79 by HaNToP - WEB LINES, a
+taut web between two walls.** WEB LINES (SPIDY VR > EXPERIMENTAL after WEB
+TIE, off by default; `web_lines` in spidy_vr.ini and profiles; the
+launcher's Webs card): one web on a wall and the other on another (a post, a
+crane, another line), hands together, click the right stick: a line of web
+between them, drawn in the game's own rope, six at most. Hold the right
+stick's click to aim at a line (a turning ring marks the point) and let go to
+zip onto it; walk along it with the game's own walk and legs, jump and land
+on it again, B dashes along it, swing from it; a web, the game's zip and a
+web strike take you off it. With WEB TIE on too, webbed-up enemies hang
+under a line on strands and fall when it goes. How it works:
+[WEB-LINE.md](WEB-LINE.md). HaNToP played it on a Quest 3 over Virtual
+Desktop, with session reports and videos.
+
+- **Review (November 6): off, nothing of it runs.** The line's support hooks
+  the mover's contact classification (1fbd460) so the game takes the player
+  as standing on a line; that hook went in at every motion start, for every
+  player. It is made and enabled now only at the first command that asks for
+  support (a player on a line), once a start, and disabled at the stop
+  (`native_movement.cpp` `requestSupport`).
+- **WEB TIE as before with WEB LINES off.** The tie's gesture looked along
+  every web on a surface (a ray per web, every step) and no longer took a web
+  under a metre long as its wall; with lines off it looks only along the web
+  beside a webbed-up enemy again, and a short web's end counts as before.
+- **After pull request #77.** Swing settings version 31 (`webLines`; 24 in
+  the pull request), `Command::asks` bits 4 (the game's zip from a line) and
+  5 (B on a line; 2 and 3 in the pull request, which #77's COMBAT
+  RESPONSIVE and SPIDY RUN JUMP had taken), the row before EYE AIM, the
+  Item and the keys after #77's. The session report gains `line_samples`,
+  `line_ropes`, `support` and STEADY HUD's `hud_coverage`; the tie data is
+  version 5 (thugs hung from lines).
+
+**Earlier build (November 6): pull request #77 by tyronmiller55-spec -
+running, landing, jumping and web aim, 22 new rows, all off by default.** The
+pull request is the contributor's stacked #59-#76 in one: NATIVE RUN (the
+game's RT for its sprint, vaults and wall runs), RUN CURVE, NATIVE RUN AT,
+RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN (with RUN FROM STANDING and
+SPIDY RUN JUMP), SMOOTH WEB LANDING (with WEB LANDING IMPACT), STEADY STATES,
+COMBAT RESPONSIVE, AIR SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, PALM SHOOTERS,
+WEB AIM: MODEL FOREARM (with FOREARM BLEND and FOREARM AIM LIMIT), DODGE
+TUMBLE and RUN LOGS, in SPIDY VR > EXPERIMENTAL and the launcher's Options.
+Its own entries follow, newest first; "v1" to "v6" in them are the
+contributor's test builds, played on a Quest 3S over Link.
+
+- **Review (November 6): with the new rows off, play is as on 0.8.1.** The
+  A relay of JUMP ALWAYS and SPIDY RUN JUMP (`game_pad::JumpRelay`) acted on
+  every A pressed while the swing owned the body on the ground with no web,
+  as it can for a moment after any landing it flew, and with SPIDY RUN JUMP
+  on by default it swallowed that press; it now acts only with SPIDY RUN or
+  SMOOTH WEB LANDING on, the only runs it is for.
+- **SESSION DIAGNOSTICS only with RUN LOGS on.** The console's `diag` lines
+  and `reports/<session>-diag.log` (the build and settings, `stage:`,
+  `jump:`, `state:` and `perf:` lines, the features' own) and the watchdog
+  thread came with every session; off, the module publishes none, the
+  console prints none and no thread starts. A game that crashed is still
+  named in the console for everyone (`crash_advice`).
+- **NATIVE RUN and RUN CURVE are Spider-Man's**: MJ, Miles and Peter out of
+  the suit keep the game's own controls, as 0.8.1 has them.
+- **Player texts** (the tab's help, the launcher, PLAYERS.md) no longer name
+  the contributor's test builds ("v5's jump", "before v6").
+
+**No crash a second into VR with WEB AIM: MODEL FOREARM or WRIST SHOOTERS; startup stages and a watchdog in the diagnostics.**
+
+- **Before (November 3, Quest 3S over Link, commit 78a43ed4f5, three
+  sessions).** "The game starts, then the headset view freezes." Each time
+  the game had crashed: `[Crash] Unhandled exception at address
+  0x00000000daeb571d (code: 0xc0000005): "Access violation"`, 10-11 s after
+  the game's `Request save type 2`, a second after `VR active` and the first
+  `forearm aim:` lines, at the same address all three times. Those lines
+  showed the cause: `blend 0%, wrist miss 0.000, stale 100` with FOREARM
+  BLEND 100 - every field two along. The `forearm aim:` snprintf passed the
+  turn and the target twice; the last `%s` read palm.x's double as a
+  pointer: 0.0 untracked (printed nothing harmful), about +-1.0 at the first
+  solved forearm: the access violation. The headset kept its last picture.
+- **The line** is `web_aim::formatForearmAimLine` from named fields
+  (`ForearmAimLine`), tested with palm.x +-1.
+- **STARTUP STAGES** (`diag_log::Stages`): `stage:` lines in the diagnostics
+  (headset active; the eye views started; the first frame OpenXR accepted,
+  with what it showed; 300 frames), and a watchdog thread writing `watchdog:`
+  when no frame reached the headset 10 s after it went active, or the VR
+  worker has not come round for 5 s, with the stage and the frame count. It
+  publishes the diagnostics itself, so they arrive though the worker is
+  stuck.
+- **A crashed game says so** (run_game_vr.py `crash_advice`): with an exit
+  code of 0xC0000000 or above the console and the diagnostics file get `The
+  game crashed (exit code 0xC0000005, an access violation) at stage: ...`
+  and where the game's log and minidump are.
+
+**SPIDY RUN JUMP, and webs parallel to the forearm.**
+
+- **Before (V5 session, Quest 3S, commit 340f8815c0).** A in SPIDY RUN
+  ended the run and the game's A waited for the hand-back (0.2 s at most):
+  `140.297 jump: a press the game never got as A (the swing running on the
+  ground, owned, running, fight 0)`, then a second press at 140.406 and off
+  the ground at 140.500, about 0.2 s after the first. MODEL FOREARM: of 1134
+  `forearm aim:` lines only 394 were active; 492 fell back for `flip tilt`
+  and 164 for `stale`; and 267 of the 394 active ones had the forearm more
+  than 35 degrees off the controller, held to 35 (`turn 35.0 deg (target
+  35.0) ... forearm vs controller 40.4 deg`): the webs stayed near the
+  controller ("they keep tracking my palm"). WRIST SHOOTERS turned the webs
+  square out of the palm, which is not how the shooters fire.
+- **SPIDY RUN JUMP** (`spidy_run_jump`, ON by default, after COMBAT
+  RESPONSIVE): A with no web while the swing runs the body on the ground
+  (SPIDY RUN, the landing carry) is the swing's own jump on the press's own
+  step: the run's speed across, up at the leap's 9 m/s (`Swing::runJump_`,
+  held up to 0.3 s until the body is seen off the ground; game_swing drives
+  meanwhile; no new run or carry starts). The game gets no A for that press
+  (`JumpRelay` swallows it; in the air A is its zip). The flight after it is
+  the swing's, as after letting go of a web. `Command::asks` bit 3 ->
+  `Input::runJump` (`valid` takes asks up to 15). Off: v5's JUMP ALWAYS.
+  `jump: SPIDY RUN JUMP off the ground N ms after the press` lines.
+- **WRIST SHOOTERS** now fires parallel to the forearm (the MODEL FOREARM
+  turns, all of them; the controller's line when the body cannot say). The
+  old palm-side quarter turn is **PALM SHOOTERS** (`palm_shooters`, off;
+  sent as `wristShooters` 2, valid up to 2). WEB ANGLE tilts on top.
+- **MODEL FOREARM**: **FOREARM AIM LIMIT** (`forearm_aim_limit`, 35/60/90/180,
+  default 180 = none; v3-v5 had 35); a flip's tilt is no fallback (the solve
+  turns the body back with it; the wrist miss check stays); stale after 8
+  VR frames without a solve, not 2. `forearm aim:` lines say active or
+  fallback, the mode, the limit and whether it clamped, and `flip tilt`.
+
+**COMBAT RESPONSIVE, and perf: lines in the diagnostics.**
+
+- **Before.** SPIDY RUN and SMOOTH WEB LANDING's carry had no fight stop
+  (the swing module has no fight flag): in the November 3 session SPIDY RUN
+  began 18 times in a fight (`state: owned 0->1 (the swing drives on the
+  ground) ... fight 1`), for 0.01 to 0.31 s each, and while the swing owns a
+  grounded body the game's blows and dodges cannot move it. 9 dodges asked
+  for got no dodge of the game's within 500 ms, most of them in the fight
+  of 416-449 s around those runs. Nothing recorded the frame rate or the
+  mod's own time per frame.
+- **COMBAT RESPONSIVE** (EXPERIMENTAL, the tab's COMBAT RESPONSIVE after
+  STEADY STATES; `combat_responsive`; off by default): in a fight (the combat
+  camera, or an enemy in reach within 3 s) the swing starts no SPIDY RUN, RUN
+  FROM STANDING or landing carry and ends one going on (`Command::asks` bit
+  2 -> `Input::fighting`, as WEB TIE has bit 1; no layout change, `valid`
+  accepts asks up to 7);
+  NATIVE RUN holds no RT (as STEADY STATES does); and A is the game's jump at
+  once, no charge (`ChargeJump::update`'s atOnce). Off: as before.
+- **perf: lines** (always; changes nothing): every 5 s and as a fight begins
+  and ends, the VR loop's frames (count, fps, longest, how many over 33 ms)
+  and the mod's own work per frame up to the pad, in ms. jump: lines now go
+  to the diagnostics only, not the session JSON's 32-line timeline.
+- **Validation.** Core checks: no run or carry in a fight (landing, from
+  standing, one going on), asks bit 2 valid and read, A at once in a fight,
+  the row and the key, the perf line's timing; default-settings text and row
+  counts updated; launcher 38/38. Not played in a headset.
+
+**JUMP ALWAYS, A that reaches the game while running.**
+
+- **Before.** With SPIDY RUN (or SMOOTH WEB LANDING's carry) the swing owns
+  the body on the ground, and the game's mover follows the swing: the game's
+  A went nowhere, and the swing's own jump was never followed by a grounded
+  body. In the November 3 session (Quest 3S, 0.7.0 commit 20dc673f17) runs of
+  4.71, 4.99, 5.61 and 9.21 s left the ground only by a web, never by a jump
+  (the user: "jump is disabling when I run"). EARLY JUMP's RUNNING counted
+  only NATIVE RUN's RT, which that session never held at a take-off
+  (`NATIVE RUN 0` on every `off the ground` line), so a press while running
+  on the game's ground still waited for its release, or charged a leap.
+- **JUMP ALWAYS** (always on, a bug fix): a press of A while the swing runs
+  the body on the ground ends that run (`Swing::jumpCancels`; with a web held
+  the press stays the takeoff's too, as before), and the game's A waits for
+  the game to have the body back, 0.2 s at most, then goes out as a fresh
+  press (`game_pad::JumpRelay`): held while A is held, or a pulse if it was a
+  tap. EARLY JUMP = RUNNING (2) now also counts the stick's run (tilt 0.5 or
+  more) as running. A tap's pulse of A (ChargeJump's and the relay's) lasts 3
+  frames at least, so under 33 fps it is no longer 1 or 2 frames.
+- **jump: lines in the diagnostics** (always): each press of A in play, where
+  it was (the swing running on the ground, standing, in the air, owned,
+  running, webbed, fight) and the milliseconds until the game's A went out,
+  or that it never did (a charged leap, in the air).
+- **Unchanged.** Swinging, webs, wall run and crawl, takeoffs with a web,
+  the air (A from the air still waits, it is the game's web zip), the pad
+  layer and the menus. ChargeJump's hold to charge on the game's ground.
+- **Validation.** Core checks for the relay (held, tapped, 0.2 s cap), the
+  20 fps pulse, and a press during SPIDY RUN; the ChargeJump, EARLY JUMP,
+  SPIDY RUN and SMOOTH WEB LANDING checks unchanged. Not played in a headset.
+
+**STEADY STATES, and every leave and land in the diagnostics.**
+
+- **Before.** NATIVE RUN's RT was gated each frame on what the swing last
+  said (`game_swing::gameOwnsGround`: fresh, not owned, grounded, no wall,
+  web, mount or takeoff) and on the hands and prompts
+  (`game_pad::nativeRunAllowed`), with no hysteresis: any of them flickering
+  for a frame (the ground contact over a kerb, a prompt shown and hidden, the
+  vent crawl's flag, `owned` as a landing is handed over) dropped RT and
+  raised it the next frame, and RT was held in a fight too. Nothing recorded
+  how the ground, the air, the swing's ownership and a fight changed.
+- **STEADY STATES** (EXPERIMENTAL, the tab's STEADY STATES after WEB LANDING
+  IMPACT; `steady_states` in `spidy_vr.ini` and profiles; off by default):
+  RT comes back only once everything has allowed it for 0.15 s
+  (`ground_state::RiseDelay`; it still goes at once, as RT off the ground is
+  the game's web swing), and it is never held in a fight (the combat camera,
+  or an enemy in reach within 3 s). Off: as before.
+- **State changes in the diagnostics** (always; changes nothing): a
+  `state:` line at each change of the game's ground contact, the swing's
+  ownership, a web, the wall, the mount, the takeoff, the game's ground (the
+  gate), RT, a fight and a dodge, from -> to, why where it can be told
+  (touchdown with the swing driving or with a web held, the game's on the
+  ground, a takeoff...), with the speed across and up. At most 12 a second; a
+  second with 4 or more changes of the ground or the owner is summed up as
+  flapping.
+- **Validation.** Core checks for the delay, the fight gate (off and on),
+  the state lines, the cap and the summary, the row and the key; launcher
+  checks the profile key. Not played in a headset yet.
+
+**SMOOTH WEB LANDING, a landing with a web held that keeps its speed.**
+
+- **Before.** A landing with a web held went to the game in the very step
+  the feet touched: `game_swing.cpp`'s `drive` needs the body off the ground,
+  so the swing let go at once and the game's mover took the body at the fall
+  speed the swing had flown it at (its air handler reads that speed from the
+  swing's own displacement, `native_movement.cpp` `readEvent`), with its own
+  ground speed (0 to a jog) and its hard-land lock. SOFT LANDING and SPIDY RUN
+  both leave web-held landings alone. The swing's ground prediction braked
+  what speed was left at exp(-5 t). And a ground contact that flickered for a
+  step (`groundedContact`, read raw) handed the body to the game and straight
+  back. That is the "janky and sticky" landing.
+- **SMOOTH WEB LANDING** (EXPERIMENTAL, the tab's SMOOTH WEB LANDING after
+  FOREARM BLEND; `web_landing_smooth` in `spidy_vr.ini` and profiles; off by
+  default) and **WEB LANDING IMPACT** (`web_landing_impact_speed`, 12 to 40
+  m/s, 24 by default): a landing with a web held, slower than the impact
+  speed (all of its speed), (1) eases its fall to 4 m/s over its last 3 m (or
+  0.35 s), so the game lands it lightly; (2) carries its speed across the
+  ground with the swing still driving, decaying toward 5 m/s (time constant
+  0.3 s, 0.6 s at most), steered by the stick, then the game's run takes over
+  (the stick goes to the game meanwhile, no RT); (3) with a web held or a
+  carry on, takes the ground only after 0.05 s of contact and the air only
+  after 0.08 s without (`web_landing::Contact`), so a flicker no longer flips
+  the owner. A carry the body does not follow (under half the asked speed for
+  0.25 s, SPIDY RUN's check) ends and the game has the body. At the impact
+  speed or faster nothing of this happens. Swing settings version 30.
+- **Validation.** Core checks for the eased fall, the carry, the impact
+  speed, the contact's hysteresis, the swing with a web held (eased and
+  carried with it on, as before with it off or over the impact speed), the
+  packet, the rows and the keys; launcher checks the profile keys. Not played
+  in a headset yet.
+
+**SESSION DIAGNOSTICS in the console and their own file.**
+
+- **Before.** RUN LOGS' `run log:`, WEB AIM's `forearm aim:` and DODGE
+  TUMBLE's `dodge tumble:` lines went only into the session report's
+  timeline (`game_prompts::note`: 32 lines of 128 characters, cut at 100),
+  never into the launcher's console; `forearm aim:` every 2 s per hand pushed
+  everything else out of the timeline in seconds. The November 2 logs (four
+  sessions, up to 22 minutes) had not one such line, and nothing said which
+  build or which settings were tested.
+- **Now** every such line also goes, whole (up to 240 characters) and
+  stamped with the seconds since the session's first, into `SpidyDiagData`
+  (`diag_log.hpp`). `run_game_vr.py` reads it with the rest of the session,
+  prints each new line to the console (`diag [  12.345] run log: ...`) and
+  appends it to `reports\<session>-diag.log` beside the report, and says at
+  the end where that file is. Two rings: 128 lines for everything, 16 for
+  `forearm aim:` alone, so those cannot push out the rest; a reader that fell
+  behind writes how many it lost. In the diagnostics `forearm aim:` is
+  written only as it changes (its fallback, a turn of 5 degrees or more, at
+  most once in 0.5 s) and every 10 s otherwise. The session starts with the
+  build (`Spidy 0.7.0 (commit <hash>)`, or when it was built where git was
+  not there) and the feature settings (the tab-only keys, swing speed and
+  weight), and the settings again whenever they change. The report's
+  timeline is as before. Nothing in play changes.
+- **Validation.** Core checks for the rings, the forearm aim filter and the
+  build id; a protocol check for the reader (the console, the file, lines
+  lost, a mismatched layout reported, never raised).
+
+**SPIDY RUN FROM STANDING, the mod's run from a stand.**
+
+- **Before.** SPIDY RUN started only from a landing faster than 10 m/s
+  across; from a stand or a walk the game's run (and NATIVE RUN) was all
+  there was.
+- **SPIDY RUN FROM STANDING** (EXPERIMENTAL, the tab's RUN FROM STANDING
+  after SPIDY RUN; `spidy_run_from_standing` in `spidy_vr.ini` and profiles;
+  off by default; it does nothing unless SPIDY RUN is on too): on the ground,
+  off any wall, with no web and no mount, the stick held past 90% of its tilt
+  for 0.3 s starts SPIDY RUN from the body's own speed across (a stand, a
+  walk or the game's run). While the stick stays past 90% the run builds to
+  the sprint at 24 m/s a second and on past it at 3 m/s a second to 14 m/s,
+  with no decay (`run_update::standRunStep`); the turn rate and the brake are
+  SPIDY RUN's. Eased under 90% it is SPIDY RUN from a landing: it decays to
+  the sprint (at once, under it) and the game's run takes over; a second
+  without the stick ends it as well. After a run from standing ends, the stick
+  has to come back under 50% before another starts, so a run the game takes
+  back (combat, a prompt, a vent) does not start again every frame. It reuses
+  SPIDY RUN's failure fallback unchanged: a body under half the speed asked
+  for 0.25 s ends the run, and three such ends switch SPIDY RUN (both ways in)
+  off until the settings change. Swing settings version 29.
+- **Validation.** Core checks cover the build to the sprint and past it, the
+  cap, the unheld step being SPIDY RUN's exactly, the turn rate, the hold
+  time, either switch off, a walk, the air, ending when eased off, the re-arm,
+  switching it off, the packet and the row; launcher checks the profile key.
+  Not played in a headset yet.
+
+**WEB AIM: MODEL FOREARM, webs along the arm you see.**
+
+- **Before.** Every web left along the controller's line (its aim pose's -Z),
+  turned only by WEB ANGLE and WRIST SHOOTERS, whatever the forearm of the
+  body you see did; with a normal grip that forearm points 10-20 degrees off
+  the controller.
+- **WEB AIM** (EXPERIMENTAL, after SPIDY RUN; `web_aim_source` in
+  `spidy_vr.ini` and profiles: 0 CONTROLLER, 1 MODEL FOREARM; CONTROLLER by
+  default) and **FOREARM BLEND** (`forearm_blend`, 0-100 percent, 100 by
+  default). At the end of each hero pose job the body solved,
+  `native_body.cpp` publishes each arm: the elbow (lower arm joint) and
+  wrist (hand joint), the palm's normal and the controller grip the solve was
+  given (`native_body::Forearms`, also exported as `SpidyForearms` for
+  `tools/probe_game_body.py`). With MODEL FOREARM the VR worker keeps the
+  forearm as a turn in the grip's frame and puts it on the controller's pose
+  of this frame (`web_aim::forearmTurn`), so the line moves with the
+  controller at once and only the elbow's bend is a solve behind; the turn
+  is smoothed over about 80 ms, held to 35 degrees off the controller's line,
+  and goes back to the controller's line over 0.15 s whenever the body cannot
+  say: the body off or `-NoBody`, VIEW: GAME SCREEN or the game's camera, an
+  untracked hand, a solve that failed, a wrist 0.1 m or more from its
+  target, a sample not new for more than two frames, or a flip's tilt
+  (`web_aim::ForearmAim`). The swing gets the turns through a new optional
+  export, `SpidySwingWebTurns` (`game_swing::WebTurns`; turns older than
+  250 ms are ignored), and puts them on the webs' line alone: the swing, the
+  grab, the web balls and the aim previews; the aim markers take the same
+  turn. WEB ANGLE stays a tilt on top, WRIST SHOOTERS a quarter turn about
+  the forearm. Where a web leaves from is unchanged; the fists, the walls and
+  the vents keep the controller's aim. Every 2 s while it is on, a
+  `forearm aim:` line per hand goes to the session's timeline (reason, turn,
+  weight, wrist miss, staleness, the forearm against the controller, the
+  solve's grip lag, the palm's side and the jitter). No swing settings
+  version change: CONTROLLER sends nothing, and the swing aims exactly as
+  before.
+- **Validation.** Core checks cover no turn along the controller, following
+  the forearm, carrying it on the current grip, the aim frame's offset, the
+  35-degree clamp, mirrored hands, the 80 ms smoothing, FOREARM BLEND, the
+  0.15 s fallback, WEB ANGLE and WRIST SHOOTERS on top, the identity turn
+  being the old aim exactly, the rows, the ini keys and the packets; launcher
+  checks the profile keys. Not played in a headset yet.
+
+**SPIDY RUN, the wall run's momentum on the ground.**
+
+- **Before.** Every landing was the game's: the swing let go of the body the
+  step it touched the ground, and the game's mover went on from its own
+  ground speed (about a jog or a sprint), whatever speed the swing landed at.
+- **SPIDY RUN** (EXPERIMENTAL, after SOFT LANDING; `spidy_run` in
+  `spidy_vr.ini` and profiles; off by default): a landing faster than 10 m/s
+  across, with no web attached and off any wall, is the swing's own run on
+  the ground, the wall run's rules on the ground plane
+  (`run_update::groundRunEntry`, `groundRunStep`): the landing's speed across
+  kept (a fall into the ground adds 15% of it at most, as `wallCarry` does on
+  walls; 30 m/s at most); the stick turns it at 540 degrees a second at rest
+  down to 180 at 30 m/s, keeping its speed; a stick held back brakes it;
+  over the sprint (9 m/s) it decays 4 m/s a second (6 more with no stick).
+  At the sprint, a second without the stick, leaving the ground, a web, a
+  wall or a mount's way up one, it ends and the game has the body again
+  (NATIVE RUN takes over from there). A jump keeps its speed. A wall ahead
+  is the existing wall run, unchanged (the run ends as the mount begins).
+  The swing drives the body on the ground through the same lease it flies
+  with (`game_swing.cpp`'s `drive`, extended by the run alone); the game gets
+  the left stick for its run's look and no RT, so its vaults do not fight it.
+  If the body goes under half the speed asked for a quarter of a second
+  (the game's mover not taking the command on the ground, which no session
+  has measured yet), the run ends at once, and after three such ends no run
+  starts again until the settings change. RUN LOGS records each mod-driven
+  run on the ground: when it began, how fast the body went against what was
+  asked, and how it ended. Swing settings version 28.
+- **Validation.** Core checks cover the entry, the decay to the sprint, the
+  turn rate keeping the speed, braking, a landing through the swing with it
+  off and on, a slow landing, leaving the ground, the stick idle, switching
+  it off, the packet, the row and RUN LOGS' lines; launcher checks the
+  profile key. Not played in a headset yet.
+
+**SOFT LANDING, a fall that eases off just above the ground.**
+
+- **Before.** A fall the swing flies (after a release, a leap, a wall jump)
+  met the ground at its full speed, 20-30 m/s down after a long swing, and
+  the game's mover took over from there with its own landing.
+- **SOFT LANDING** (EXPERIMENTAL, after EARLY JUMP; `soft_landing` in
+  `spidy_vr.ini` and profiles; off by default): with no web attached and off
+  any wall, a fall faster than 9 m/s eases toward 9 m/s down (8 a second of
+  the difference) once the ground below is within 3 m of the feet or 0.35 s
+  of the fall (one ray down a native step, `Swing::predictNativeStep`;
+  `run_update::softLandVertical`). The speed across is not touched; a web, a
+  wall, the swing itself and anything slower are as before. While such a
+  fall lasts (faster than 4 m/s down) the game gets the left stick too, as
+  on the ground, so its first step there is the run asked for (in flight it
+  otherwise gets none); the swing still moves the body, and NATIVE RUN's RT
+  is not sent before the touchdown (RT in the air is the game's web swing). The game's own air history (time and height in the
+  air), which may still choose a hard landing, is not touched: its fields
+  are not known yet (RUN LOGS records each touchdown's speeds and the speed
+  0.3 s after it, to find out). Swing settings version 27.
+- **Validation.** Core checks cover the ease (far above, slow, no ground,
+  near, converging on 9 m/s), a fall through the swing with it off and on
+  (speed across kept, 40 m up untouched), the packet and the row; launcher
+  checks the profile key. Not played in a headset yet.
+
+**RUNNING LEAP and EARLY JUMP, running jumps that keep the run.**
+
+- **Before.** A charged leap (A held on the ground) set the body's velocity
+  from rest: up by its charge, and at most 12 m/s along the stick whatever
+  the run's speed, so a sprint ended in a slower leap. A tap of A reached the
+  game only as it was let go, up to 0.18 s after the press.
+- **RUNNING LEAP** (EXPERIMENTAL, after RUN LOGS; `running_leap` in
+  `spidy_vr.ini` and profiles; off by default): the leap keeps all of the
+  run's speed along its way (the stick's, or the run's with the stick at
+  rest) and half of the speed across it, and adds 60% of the charge's own
+  push, 30 m/s across at most. Charged past 0.6 from a run faster than
+  6 m/s it is a long jump: 1.3 times further ahead at 0.8 of the height
+  (`run_update::leapVelocity`; `Leap{}` is the leap as before, checked for
+  every charge, stick and run). The run's speed is the game's own, measured
+  (the solver starts each step from the mover's achieved velocity on the
+  ground). Swing settings version 26.
+- **EARLY JUMP** (`early_jump`: OFF, QUICK TAP, RUNNING; OFF by default):
+  QUICK TAP takes a tap let go within 0.1 s for the jump (0.18 s before) and
+  starts the charge there; RUNNING does that, and while NATIVE RUN holds RT
+  the press is the game's A at once, held as long as A is (no charged leap
+  while sprinting; stop or slow under NATIVE RUN's release to charge one).
+  OFF is ChargeJump exactly as before.
+- **Validation.** Core checks cover the old leap reproduced by `Leap{}`, the
+  run kept, no stick, backwards, sideways, the long jump, the caps, a leap
+  through the swing with the setting off and on, every EARLY JUMP mode, the
+  packet and the rows; launcher checks the profile keys. Not played in a
+  headset yet.
+
+**RUN CURVE, NATIVE RUN AT and RUN LOGS, the run update's first part.**
+
+- **Before.** On the ground the stick's tilt went to the game as it was, so
+  the full run needed the stick all the way over; NATIVE RUN held the game's
+  RT past 70% of it and let go under 50%, fixed.
+- **RUN CURVE** (EXPERIMENTAL, after DODGE TUMBLE; `run_curve` in
+  `spidy_vr.ini` and profiles; off by default): only where the game has the
+  player on his feet (NATIVE RUN's ground), the stick past its dead zone is
+  stretched so 80% of its tilt is a full one, and bent (0.7) to give more of
+  the run early (`run_update::curveStick`). Its way is kept. The air, webs,
+  walls, vents and the pad layer get the stick as before.
+- **NATIVE RUN AT** (`native_run_at_percent`, 50 to 90%, 70 by default): the
+  tilt past which NATIVE RUN holds RT; it lets go 20 points under it (70 and
+  50, as before).
+- **RUN LOGS** (`run_logs`, off by default): lines in the session's timeline
+  (`run log: ...`) with the ground speed measured from the body's position
+  each half second (and its top), the swing's own idea of it, the stick as
+  read and as sent, how much of the time NATIVE RUN held RT and how much the
+  mod drove the body on the ground (and at what speed it asked); each
+  touchdown's speeds and the speed 0.3 s after it; each takeoff's. Nothing
+  moves differently. They answer what the run update could not measure
+  without the game: the native sprint's speed, whether the swing's ground
+  velocity follows it, and whether a body driven on the ground goes where it
+  is sent.
+- **Validation.** Core checks cover the curve (unchanged while off, a full run
+  at 80%, rising, its way kept), the thresholds (70 as before), the log's
+  lines and the rows and keys; launcher checks the profile keys. Not played
+  in a headset yet.
+
+**DODGE TUMBLE, a view you can tell a dodge by.**
+
+- **Before.** A dodge moved Spider-Man while the headset view stayed level,
+  so it was hard to tell a dodge happened.
+- **DODGE TUMBLE** (EXPERIMENTAL, after WRIST SHOOTERS; OFF, LEAN or ROLL;
+  `dodge_tumble` in `spidy_vr.ini` and profiles; OFF by default). When the
+  game starts a dodge (`HeroDodgeManager` kind 4 or 5, read by
+  `game_dodge.cpp` and exported as `SpidyDodgeLive`), the eyes alone turn
+  about the head: LEAN tips 24 degrees toward the dodge and back in 0.45 s;
+  ROLL turns a full roll in 0.6 s for a sideways dodge (ahead and back
+  dodges lean). Hands, aim and the body are never turned. It never runs on
+  the flat screen, in calibration, on a web or while the game owns the
+  camera, and a stopped tumble fades out. It does not lock the camera to the
+  head bone: no reader for that bone exists yet. Diagnostics go to the log.
+- **Validation.** Core checks cover the tumble curves, the direction, the
+  eye-only turn, the export layout and the rows and `spidy_vr.ini` key;
+  launcher checks the profile key. Not played in a headset yet.
+
+**WEB ANGLE and WRIST SHOOTERS, which way the webs
+leave the hands.**
+
+- **Before.** A web always left along the controller's aim line.
+- **WEB ANGLE** (EXPERIMENTAL, after AIR SLINGSHOT; DOWN 45 to UP 45 in
+  15-degree steps; `web_angle_degrees` in `spidy_vr.ini` and profiles; 0 by
+  default, as before) tilts that line up or down. **WRIST SHOOTERS** (next;
+  `wrist_shooters`; off by default) turns it a quarter turn onto the palm
+  side, square to the hand and forearm, as the comics' wrist shooters fire;
+  WEB ANGLE then tilts that line. `web_aim::shooterAim` turns only the line,
+  never where a web starts. The native module (`game_swing.cpp`) gives the
+  turned aim to all that shoots a web: the swing, the web grab, web balls and
+  the aim previews, and the headset's aim markers follow it; the fists, the
+  palms on walls and the vents keep the controller's own aim, as they had it.
+  Swing settings version 25.
+- **Validation.** Core checks cover the default leaving the aim unchanged,
+  up and down, the 45-degree limit, each palm's side, the turn following the
+  controller, the settings packet, the rows and their `spidy_vr.ini` keys;
+  launcher checks the profile keys. Not played in a headset yet.
+
+**AIR SLINGSHOT, the web slingshot in the air.**
+
+- **Before.** The web slingshot (WEB SLINGSHOT: two webs, both grips held,
+  both arms drawn until the hands buzz, then let go) worked only standing on
+  the ground; in the air letting go of two webs only let go.
+- **AIR SLINGSHOT** (EXPERIMENTAL, after NATIVE RUN; the launcher's Moving
+  card; `air_slingshot` in `spidy_vr.ini` and profiles; off by default): the
+  same draw in the air, when both webs hold real surfaces at least 1.5 m
+  apart and both are under tension (`Swing::slingshotTaut`: a pull over the
+  last step, or stretched to their length). The hands buzz with the charge
+  as on the ground; letting go of both within 0.2 s launches along the two
+  webs, never slower than the player already goes that way. A slack line
+  holds the charge; a landing, a wall, A, a charged leap, a snap turn or a
+  lost hand cancels it. While a drawn air slingshot buzzes, a one-hand yank
+  and the two-hand zip wait. Its own switch: WEB SLINGSHOT on the ground is
+  unchanged with it on or off. Swing settings version 24.
+- **Validation.** Core checks cover the air draw and launch, the speed kept,
+  an undrawn release, a landing mid-draw, slack lines, the ground slingshot
+  unchanged, the settings packet, the row and its `spidy_vr.ini` key;
+  launcher checks the profile key. Not played in a headset yet.
+
+**NATIVE RUN, the game's own sprint, vaults and
+wall runs on foot.**
+
+- **Before.** On the ground the left stick only jogged: the game's RT, its
+  parkour run, went out on the game's wall crawl alone, so on foot there was
+  no sprint, no automatic vault over a car or a rail, no wall run and no
+  running leap.
+- **NATIVE RUN** (EXPERIMENTAL, after STEADY HUD; the launcher's Moving
+  card; `native_run` in `spidy_vr.ini` and profiles; off by default, the
+  stick jogs as before): on the ground the left stick past 70% holds the
+  game's RT (`game_pad::NativeRun`) until it falls under 50%, so a walk
+  stays a walk. Only where the game, not the swing, has the player on his
+  feet (`game_swing::gameOwnsGround`: fresh, grounded, not owned, no web, no
+  wall or crawl, no mount or takeoff, not in the game's air state), with no
+  grip or trigger in use and none of the game's A, Y, zip, aim, pull, heal or
+  a prompt's buttons going out. RT is never held in the air, where it would be
+  the game's own web swing; swinging, the webs, web balls, the charged leap
+  and the crawl's RT + A are as they were.
+- **Validation.** Core checks cover the hysteresis, the thresholds, RT alone
+  on the pad, every state `gameOwnsGround` refuses, the row, its default and
+  its `spidy_vr.ini` key; launcher checks the profile key. Not played in a
+  headset yet.
+
+**Earlier build (November 6): pull request #78 by vrfloop-lab (vrfloopy) -
+STEADY HUD no longer goes empty after the game remakes the HUD.** A report
+with STEADY HUD on (0.8.0): after a death, a checkpoint reload or a short
+combat cutscene the HUD was gone from the headset, but on the monitor, until
+the game was restarted. The session report showed why: the barriers on the
+followed panel texture stopped (`hud_capture.executed` frozen) while the
+layer kept copying it. The game had made a new texture and Spidy still
+followed the old, empty one.
+
+- The panel's resource is looked up every frame, not only when the texture
+  object changes: the game may remake the resource and keep the object where
+  it was (`src/native_hud.cpp`, `probeTexture`).
+- A followed texture that gets no barrier for 2 s while its copies are
+  wanted is not copied (`stage_skip: stale`), so the eyes draw the panel
+  again, as when the copies stop.
+- The report counts the times the panel was followed anew
+  (`hud_capture.registered`).
+- **A blank panel is not shown (the first fix did not hold in the reporter's
+  game).** The followed texture is looked at every second (a snapshot, one
+  pixel in 15 for any alpha; every 5 s before); two snapshots in a row with
+  nothing on it and the panel is no longer copied (`stage_skip: blank`), so
+  the layer goes and the eyes draw the HUD, as with STEADY HUD off. The layer
+  comes back on its own when the texture has something on it again.
+- Only with STEADY HUD on; off, nothing of it runs. Tested by the reporter in
+  the game: the HUD no longer vanishes. Review: built on 0.8.1, core and
+  protocol tests pass; not run here in the game.
+
+**Earlier build (November 5): fixes from the players' reports on 0.8.0.**
 You: "check the latest set of issues on discord from last update, fix what
 you have enough info to fix, ask for whats missing".
 

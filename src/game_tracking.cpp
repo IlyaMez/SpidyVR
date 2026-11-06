@@ -887,7 +887,13 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     if (handClimb_ && holds && (!wallRun || !joystickRunCamera_))
         climbView_ = unbankedHead.orientation;
     for (unsigned i = 0; i < 2; ++i) {
-        out.eyes[i] = worldPose(placed.toWorld(f.eyes[i].pose));
+        // DODGE TUMBLE: the eyes alone turn about the head (viewTurn).
+        const Pose eye = placed.toWorld(f.eyes[i].pose);
+        const bool tumbling = viewTurn_.x != 0 || viewTurn_.y != 0 || viewTurn_.z != 0;
+        out.eyes[i] =
+            worldPose(tumbling ? Pose{head.position + viewTurn_.rotate(eye.position - head.position),
+                                      viewTurn_ * eye.orientation}
+                               : eye);
         out.fovs[i] = f.eyes[i].fov;
         if (handValid(f.hands[i])) {
             // The mesh's fingers point along -Z. A controller's grip pose is

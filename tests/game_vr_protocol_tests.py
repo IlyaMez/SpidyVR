@@ -362,7 +362,7 @@ class ProtocolTests(unittest.TestCase):
         struct.pack_into('<2Q2I', raw, 104, 300, 3, 0, 0)
         struct.pack_into('<2Q2I', raw, 128, 3, 0x40000, 256, 1)
         # STEADY HUD: copies with the pairs, into the layer, frames that showed it; the last pair's state unknown.
-        struct.pack_into('<3QI', raw, 152, 700, 690, 1400, 2)
+        struct.pack_into('<3Q2I', raw, 152, 700, 690, 1400, 2, 5)
         shot = hud_capture_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)
         self.assertEqual((shot['path'], shot['found'], shot['width'], shot['format']), ('wrapped', True, 64, 87))
         self.assertEqual((shot['barriers'], shot['executed'], shot['odd'], shot['mismatched']), (900, 880, 1, 2))
@@ -370,6 +370,14 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual((shot['snapshots'], shot['row_pitch'], shot['swap']), (3, 256, True))
         self.assertEqual((shot['staged'], shot['layer_copies'], shot['layer_frames'], shot['stage_skip']),
                          (700, 690, 1400, 'unknown_state'))
+        self.assertEqual(shot['registered'], 5)
+        # The game stopped drawing into the followed texture: the copy says so.
+        struct.pack_into('<I', raw, 176, 7)
+        self.assertEqual(hud_capture_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)['stage_skip'], 'stale')
+        # The followed texture is empty: the copy says so.
+        struct.pack_into('<I', raw, 176, 8)
+        self.assertEqual(hud_capture_snapshot(Reader(raw, struct.pack('<Q', 6)), 0)['stage_skip'], 'blank')
+        struct.pack_into('<I', raw, 176, 2)
         # Torn the whole time: nothing; too short: nothing.
         self.assertIsNone(hud_capture_snapshot(Reader(*([raw, struct.pack('<Q', 8)] * 8)), 0))
         self.assertIsNone(hud_capture_snapshot(Reader(raw[:40]), 0))
@@ -2042,6 +2050,78 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(reachable_in_play(0x40 | 0x80))
         self.assertTrue(reachable_in_play(0x20))
         self.assertIn("The game is asking for Back - in VR: the phone's MENU.", prompts_line(0x20))
+
+    def test_session_diagnostics_reach_the_console_and_their_file(self):
+        """SpidyDiagData (diag_log.hpp): every new line goes to the console and reports/<session>-diag.log,
+        the build first; a reader that fell behind says how many it lost; forearm aim has its own ring.
+        November 2: four sessions' consoles had not one feature line, all of them in the report's timeline."""
+        from run_game_vr import diag_snapshot, DiagLog, diag_path, DIAG_BYTES, DIAG_MAIN_AT, DIAG_AIM_AT, DIAG_CHARS
+        self.assertEqual(DIAG_BYTES, 34696)
+        self.assertEqual(diag_path(pathlib.Path('reports/game-vr-20261103-101500.json')).name,
+                         'game-vr-20261103-101500-diag.log')
+        raw = bytearray(DIAG_BYTES)
+        struct.pack_into('<3I', raw, 0, 0x47414944, 1, DIAG_BYTES)
+        game = Mock()
+        game.read = lambda address, size: bytes(raw[address-0x1000:address-0x1000+size])
+        # Never published (RUN LOGS off): nothing, and only the header read.
+        self.assertIsNone(diag_snapshot(game, 0x1000))
+        struct.pack_into('<Q', raw, 16, 2)
+        raw[24:24+len(b'Spidy 0.7.0 (commit abc1234)')] = b'Spidy 0.7.0 (commit abc1234)'
+
+        def put(at, count, lines):
+            struct.pack_into('<Q', raw, at, len(lines))
+            for index, line in enumerate(lines):
+                slot = at+8+(index % count)*DIAG_CHARS
+                raw[slot:slot+DIAG_CHARS] = bytes(DIAG_CHARS)
+                raw[slot:slot+len(line)] = line.encode()
+        put(DIAG_MAIN_AT, 128, ['[   1.000] run log: touchdown at 12.0 m/s across'])
+        put(DIAG_AIM_AT, 16, [f'[   {i}.000] forearm aim: L none' for i in range(20)])
+        printed = []
+        with tempfile.TemporaryDirectory() as folder:
+            log = DiagLog(pathlib.Path(folder)/'game-vr-x-diag.log', echo=printed.append)
+            log.take(diag_snapshot(game, 0x1000))
+            self.assertIn('build Spidy 0.7.0 (commit abc1234)', printed[0])
+            self.assertIn('diag [   1.000] run log: touchdown at 12.0 m/s across', printed)
+            self.assertTrue(any('4 aim lines lost' in line for line in printed), printed)
+            self.assertEqual(sum('forearm aim' in line for line in printed), 16)
+            log.take(diag_snapshot(game, 0x1000))  # nothing new: nothing again
+            self.assertEqual(len(printed), log.lines)
+            written = (pathlib.Path(folder)/'game-vr-x-diag.log').read_text(encoding='utf-8').splitlines()
+            self.assertEqual(written, printed)
+        # A layout of another version is reported, never raised.
+        struct.pack_into('<I', raw, 4, 2)
+        self.assertIn('protocol_mismatch', diag_snapshot(game, 0x1000))
+
+    def test_a_crashed_game_says_so_with_its_last_stage(self):
+        """November 3: three sessions 'froze' in the headset; the game had crashed (0xC0000005) a second
+        after VR became active, and only the game's own log said so. The console and the diagnostics file now
+        say it, with the last "stage:" line (diag_log::Stages)."""
+        from run_game_vr import crash_advice, DiagLog
+        self.assertIsNone(crash_advice(None))
+        self.assertIsNone(crash_advice(0))
+        self.assertIsNone(crash_advice(1))
+        text = crash_advice(0xC0000005, 'frames reaching the headset - the eye images')
+        self.assertIn('0xC0000005, an access violation', text)
+        self.assertIn('at stage: frames reaching the headset', text)
+        self.assertIn('.mdmp', text)
+        with tempfile.TemporaryDirectory() as folder:
+            log = DiagLog(pathlib.Path(folder)/'x-diag.log', echo=lambda line: None)
+            raw = {'build': 'b', 'main': (2, ['[   1.000] stage: headset active, the eye views not started',
+                                              '[   2.000] stage: frames reaching the headset - the eye images']
+                                          + ['']*126), 'aim': (0, ['']*16)}
+            log.take(raw)
+            self.assertEqual(log.stage, 'frames reaching the headset - the eye images')
+
+    def test_the_forearm_aim_line_is_formatted_from_named_fields(self):
+        """v6 (78a43ed) passed two arguments more than its format to the forearm aim: snprintf; the last %s
+        read palm.x's double as a pointer and the game crashed at the first solved forearm. The line is
+        web_aim::formatForearmAimLine's now; no long printf of it is left in the worker."""
+        root = pathlib.Path(__file__).resolve().parents[1]
+        worker = (root/'src/game_xr.cpp').read_text(encoding='utf-8')
+        self.assertIn('web_aim::formatForearmAimLine(line, sizeof(line), fields);', worker)
+        self.assertNotIn('"forearm aim: %s', worker)
+        self.assertIn('startupStages.beat(', worker)
+        self.assertIn('stageLine(diag_log::Stages::headset)', worker)
 
     def test_every_gesture_the_worker_keeps_reaches_the_games_controller(self):
         """A gesture's held() must be read where the XR worker builds the controller, and every field of

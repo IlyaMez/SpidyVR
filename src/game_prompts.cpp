@@ -1,5 +1,6 @@
 // The game's prompt texts on their way to its markup resolver (game_prompts.hpp).
 #include "spidy/game_prompts.hpp"
+#include "spidy/diag_log.hpp"
 #include <MinHook.h>
 #include <algorithm>
 #include <atomic>
@@ -656,8 +657,14 @@ void game_prompts::promptHidden(unsigned kind) {
     ReleaseSRWLockExclusive(&demandLock);
 }
 
-void game_prompts::note(const char* text) {
-    if (!text || !reading.load(std::memory_order_relaxed))
+void game_prompts::note(const char* text, bool diagnostics) {
+    if (!text)
+        return;
+    // The session's diagnostics too (diag_log.hpp): the console and the
+    // diagnostics file, whole and whether or not the prompts are being read.
+    if (diagnostics)
+        diag_log::write(text);
+    if (!reading.load(std::memory_order_relaxed))
         return;
     char line[callChars];
     sprintf_s(line, ">> %.100s", text);

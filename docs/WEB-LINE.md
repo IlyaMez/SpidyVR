@@ -3,7 +3,7 @@
 A straight, taut web between two surfaces, as Spider-Man 2's: made, drawn in
 the game's own rope, zipped to, walked and jumped on, swung from, enemies
 hung under it. **WEB LINES** in the SPIDY VR settings' EXPERIMENTAL section
-(`web_lines`, swing settings version 24), off by default: off, nothing of it
+(`web_lines`, swing settings version 31), off by default: off, nothing of it
 runs, and switched off the lines there are go (a player on one with them).
 Hanging enemies under a line is a web tie (WEB-TIE.md): it needs WEB TIE on
 as well.
@@ -153,7 +153,7 @@ strike from the line, it bugs").
 
 ## On the line: webs, flips, ties, the dodge
 
-The dodge's button (B, `Command::asks` bit 3) on a line dashes you along it
+The dodge's button (B, `Command::asks` bit 5) on a line dashes you along it
 (11 m/s for 0.3 s, the way the stick goes along it, or the look), and the
 game's own dodge answers the blows it warns of while you are on a line, as
 it does for a player a web carries. A zip on a web (the solver's), or a jump
@@ -201,7 +201,7 @@ under Web tie: Web lines (experimental). Laid in its line's own rope instead
 the 8 points a rope is laid and the game crashed, and the line was drawn
 twice (November 4).
 
-While on a line only the game's zip (the stick up, `Command::asks` bit 2,
+While on a line only the game's zip (the stick up, `Command::asks` bit 4,
 held into the game's aim mode too) takes you off it, and the line holds you
 still until the game's zip has you (AirYield; 0.8 s after the last ask at
 most): let go at once, the player dropped for the 0.3-0.9 s the game takes

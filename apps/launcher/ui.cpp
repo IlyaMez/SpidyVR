@@ -1873,6 +1873,44 @@ void App::options(ImVec2 origin, ImVec2 size) {
         option("Slingshot speed",
                "How fast a full draw launches you: under the swing speed limit, or at a speed of its own.",
                S(150), [&] { tabCombo("##slingshotspeed", Item::slingshotSpeed); });
+        option("Air slingshot (experimental)",
+               "In the air with two taut webs: hold both grips, draw both arms back until the hands buzz, "
+               "then let go to launch along the webs. Off: letting go in the air only releases, as before.",
+               S(42), [&] { tabToggle("##airslingshot", Item::airSlingshot); });
+        option("Web angle",
+               "Tilts the line your webs leave your hands along, up or down from the controller's, 15 to 45 "
+               "degrees. 0: along the controller, as before. Punches keep the controller's own.",
+               S(150), [&] { tabCombo("##webangle", Item::webAngle); });
+        option("Wrist shooters",
+               "Webs leave parallel to your forearm, out past the wrist toward the fingers, as Spider-Man's "
+               "shooters do (and the films' natural webs): along the forearm of the body you see when it can "
+               "say, else along the controller. Off: along the controller, as before.",
+               S(42), [&] { tabToggle("##wristshooters", Item::wristShooters); });
+        option("Palm shooters",
+               "Webs leave square to your hand, out of the palm side, rather than along the forearm. "
+               "Off by default.",
+               S(42), [&] { tabToggle("##palmshooters", Item::palmShooters); });
+        option("Web aim (experimental)",
+               "MODEL FOREARM: your webs leave along the forearm of the Spider-Man body you see, rather than "
+               "along the controller, and go back to the controller's line whenever the body cannot say "
+               "(body off, a cutscene, an arm it cannot reach). Web angle and wrist shooters still turn on "
+               "top. Punches, walls and vents keep the controller. CONTROLLER: as before.",
+               S(150), [&] { tabCombo("##webaimsource", Item::webAimSource); });
+        option("Forearm blend",
+               "With web aim MODEL FOREARM: how much of the forearm's line the webs take, from 0% (the "
+               "controller's) to 100% (the forearm's). 100% by default.",
+               S(150), [&] { tabCombo("##forearmblend", Item::forearmBlend); });
+        option(
+            "Forearm aim limit",
+            "How far web aim MODEL FOREARM and wrist shooters may turn your webs off the controller's line "
+            "onto the forearm. NO LIMIT by default; 35 degrees keeps the webs near the controller.",
+            S(150), [&] { tabCombo("##forearmaimlimit", Item::forearmAimLimit); });
+        option(
+            "Dodge tumble (experimental)",
+            "When the game takes your dodge, the view leans (LEAN, 24 degrees, under half a second) or rolls "
+            "a whole turn (ROLL, 0.6 s) the way you dodged; ahead or back it only leans. The HUD and your "
+            "hands stay put. Off: the view stays level, as before.",
+            S(150), [&] { tabCombo("##dodgetumble", Item::dodgeTumble); });
         option("Better climbing", "Take one web in both hands, then pull hand over hand to keep climbing it.",
                S(42), [&] { tabToggle("##betterclimbing", Item::betterClimbing); });
         option("Single hand yank strength",
@@ -1902,6 +1940,76 @@ void App::options(ImVec2 origin, ImVec2 size) {
                S(42), [&] { tabToggle("##joystickruncamera", Item::joystickRunCamera); });
         option("Wall Run Camera Tilt", "Gently bank with the body on horizontal momentum wall runs.", S(42),
                [&] { tabToggle("##wallruncameratilt", Item::wallRunCameraTilt); });
+        option(
+            "Native run (experimental)",
+            "On the ground, the left stick past 70% holds the game's RT: its sprint, vaults and wall runs. "
+            "Under 50% it jogs again. Never in the air, on webs or on walls. Off: the stick jogs, as before.",
+            S(42), [&] { tabToggle("##nativerun", Item::nativeRun); });
+        option("Run curve (experimental)",
+               "On the ground the left stick reaches the game's full run at 80% of its tilt, with more of "
+               "its speed early. Off: the stick as it is, as before.",
+               S(42), [&] { tabToggle("##runcurve", Item::runCurve); });
+        option("Native run at",
+               "How far the left stick tilts before NATIVE RUN holds the game's RT for its sprint; it lets "
+               "go 20 points under it. 70%, as before.",
+               S(150), [&] { tabCombo("##nativerunatpercent", Item::nativeRunAt); });
+        option("Run logs",
+               "Writes how you run, land, leap and jump, the frame rate and how far VR got to the "
+               "console (diag lines) and a -diag.log file beside the session report, for sending back. "
+               "Off, none of it is written. Changes nothing in play.",
+               S(42), [&] { tabToggle("##runlogs", Item::runLogs); });
+        option("Running leap (experimental)",
+               "A charged leap (hold A on the ground) keeps the speed you run at along its way and adds its "
+               "charge on top; a full one from a fast run is a long jump. Off: the leap starts from rest, as "
+               "before.",
+               S(42), [&] { tabToggle("##runningleap", Item::momentumLeap); });
+        option("Early jump (experimental)",
+               "QUICK TAP: a tap of A jumps if let go within 0.1 s instead of 0.18 s. RUNNING: that, and "
+               "while NATIVE RUN sprints A jumps the moment it is pressed (no charged leap while sprinting). "
+               "OFF: as before.",
+               S(150), [&] { tabCombo("##earlyjump", Item::earlyJump); });
+        option("Soft landing (experimental)",
+               "Falling with no web, your fall eases to 9 m/s over the last 3 m (or 0.35 s) before the "
+               "ground, so the game lands you lightly; your speed across is kept. Off: you land as fast as "
+               "you fall, as before.",
+               S(42), [&] { tabToggle("##softlanding", Item::softLanding); });
+        option("Spidy run (experimental)",
+               "Land faster than the game's sprint (a swing let go of near the street) and the mod runs you "
+               "on at that speed, as its wall run does on walls: the stick steers without losing speed, "
+               "which eases to a sprint in a few seconds, and the game's run (NATIVE RUN) takes over. A wall "
+               "ahead is the usual wall run. Off: the game takes every landing, as before.",
+               S(42), [&] { tabToggle("##spidyrun", Item::spidyRun); });
+        option("Spidy run from standing (experimental)",
+               "With Spidy run on: hold the stick all the way for a moment on the ground and the mod's run "
+               "starts from a stand or a walk, building past the game's sprint while you hold it; ease off "
+               "and it slows to the sprint and the game's run takes over. Off: Spidy run starts only from a "
+               "fast landing, as before.",
+               S(42), [&] { tabToggle("##spidyrunfromstanding", Item::spidyRunFromStanding); });
+        option("Smooth web landing (experimental)",
+               "Landing while you hold a web, slower than the web landing impact: your fall eases over the "
+               "last metres, your speed carries on across the ground for a moment and eases to a jog before "
+               "the game's run takes over, and a foot brushing the ground no longer stops and restarts the "
+               "swing. Faster than that it is the game's heavy landing. Off: as before.",
+               S(42), [&] { tabToggle("##weblandingsmooth", Item::webLandingSmooth); });
+        option("Web landing impact",
+               "With smooth web landing: a landing this fast or faster (m/s, all of its speed) is the game's "
+               "heavy one. 24 m/s by default.",
+               S(150), [&] { tabCombo("##weblandingimpact", Item::webLandingImpact); });
+        option("Steady states (experimental)",
+               "Native run's RT comes back only once nothing has stopped it for 0.15 s, so a kerb, a prompt "
+               "or a vent flickering for a frame no longer drops and raises it, and it stays off in a fight. "
+               "Off: as before.",
+               S(42), [&] { tabToggle("##steadystates", Item::steadyStates); });
+        option("Combat responsive (experimental)",
+               "In a fight the game moves you for every blow and dodge: Spidy run and the landing carry "
+               "neither start nor go on, native run holds no RT, and A is the game's jump at once. "
+               "Off: as before.",
+               S(42), [&] { tabToggle("##combatresponsive", Item::combatResponsive); });
+        option("Spidy run jump",
+               "A during Spidy run or the web-landing carry is a jump at once that keeps your speed, made by "
+               "the mod rather than waiting for the game to take the body back. On by default; off: the "
+               "game's own jump once it has you back (up to 0.2 s later).",
+               S(42), [&] { tabToggle("##spidyrunjump", Item::spidyRunJump); });
     });
     group(0, "Flips", [&] {
         option("Flips (experimental)",

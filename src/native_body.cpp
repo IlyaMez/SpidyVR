@@ -20,6 +20,7 @@ using native_body::Status;
 extern "C" {
 __declspec(dllexport) Status SpidyBodyData;
 __declspec(dllexport) native_body::Poses SpidyBodyPoses;
+__declspec(dllexport) native_body::Forearms SpidyForearms;
 }
 namespace {
 // The pose job's writer and the local-to-model conversion it calls
@@ -33,7 +34,7 @@ void* writerHook{};
 bool hooked{};
 std::atomic<bool> enabled{};
 SRWLOCK lifecycle = SRWLOCK_INIT, commandLock = SRWLOCK_INIT, solveLock = SRWLOCK_INIT,
-        statusLock = SRWLOCK_INIT;
+        statusLock = SRWLOCK_INIT, forearmLock = SRWLOCK_INIT;
 Command command{};
 uint64_t commandDeadline{};
 // The probe's joint roles for a rig of `overrideJoints` joints (0: none).
@@ -486,6 +487,32 @@ void solveHero(float* out, uintptr_t job, uintptr_t instance) {
         lastSolve = now;
         body::Pose pose(out, static_cast<int>(joints));
         result = body::solve(pose, cache.ik, lastTargets, config, state, on, dt, scale, armScale);
+        // MODEL FOREARM: each arm as this solve left it, in world axes.
+        native_body::Forearms arms;
+        for (int i = 0; i < 2; ++i) {
+            const auto& a = cache.ik.arms[i];
+            auto& f = arms.arms[i];
+            if (!result.solved || !on || a.lower < 0 || a.hand < 0 || a.lower >= static_cast<int>(joints) ||
+                a.hand >= static_cast<int>(joints))
+                continue;
+            f.elbow = toWorld.rotate(pose.position(a.lower));
+            f.wrist = toWorld.rotate(pose.position(a.hand));
+            const Vec3 palm = cache.ik.handPalm[i];
+            f.palm = length(palm) > .5f ? normalized(toWorld.rotate(pose.direction(a.hand, palm))) : Vec3{};
+            f.grip = wanted.hands[i].orientation;
+            f.handError = result.handError[i];
+            f.valid = wanted.hands[i].tracked && finite(f.elbow) && finite(f.wrist) &&
+                      length(f.wrist - f.elbow) > 1e-3f;
+        }
+        const Quat tilt = wanted.tilt;
+        arms.tilted = tilt.x != 0 || tilt.y != 0 || tilt.z != 0;
+        AcquireSRWLockExclusive(&forearmLock);
+        InterlockedIncrement64(&SpidyForearms.sequence);
+        arms.sequence = SpidyForearms.sequence;
+        arms.job = SpidyForearms.job + 1;
+        SpidyForearms = arms;
+        InterlockedIncrement64(&SpidyForearms.sequence);
+        ReleaseSRWLockExclusive(&forearmLock);
     } else {
         lastSolve = now;
     }
@@ -655,6 +682,12 @@ bool native_body::drawn() {
     // coming through the body (another writer, a paused job, a rig it cannot
     // use) shows the head.
     return enabled.load(std::memory_order_relaxed) && latestSolved.load() && GetTickCount64() - lastDrawn.load() < 150;
+}
+native_body::Forearms native_body::forearms() {
+    AcquireSRWLockShared(&forearmLock);
+    auto out = SpidyForearms;
+    ReleaseSRWLockShared(&forearmLock);
+    return out;
 }
 native_body::Status native_body::status() {
     AcquireSRWLockShared(&statusLock);

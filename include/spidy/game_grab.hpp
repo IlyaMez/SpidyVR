@@ -173,7 +173,8 @@ uint64_t heldLately(unsigned hand);
 // strand of web from it (TieData::hangs), the game's stick asked there on that
 // body (the line has none of its own) as on a wall facing the player.
 constexpr float lineHang = 1.8f;
-bool tie(unsigned hand, Vec3 anchor, Vec3 normal, uint32_t lineSurface = 0, Vec3 lineAlong = {}, uint32_t line = 0);
+bool tie(unsigned hand, Vec3 anchor, Vec3 normal, uint32_t lineSurface = 0, Vec3 lineAlong = {},
+         uint32_t line = 0);
 // The web lines there are now: a thug hung from one that is gone falls.
 void keepLines(const uint32_t* ids, uint32_t count);
 // The gesture is ready now (TieGesture::armed), for the telemetry.

@@ -49,6 +49,19 @@ struct Data {
     float lastSpeed{};
 };
 static_assert(sizeof(Data) == 128);
+// SpidyDodgeLive, for DODGE TUMBLE (dodge_tumble.hpp): the hero's dodge as
+// his manager has it each game frame (the hook's, after the game's update):
+// its kind now (0 none), the dodges begun so far (the kind from 0 to another;
+// written after lastKind, the latest one's kind), whether the one on is
+// Spidy's own web dodge, and the frames read. Version 1. A frame of the
+// game's in which the swing has not named the hero (carry) is not read.
+struct Live {
+    uint32_t magic = 0x5344474c, version = 1, bytes = sizeof(Live), kind{};
+    uint64_t starts{};
+    uint32_t lastKind{}, ours{};
+    uint64_t frames{};
+};
+static_assert(sizeof(Live) == 40);
 // A carry sample stands this long without a new one.
 constexpr uint32_t leaseMs = 250;
 // Checks this game build's dodge manager (9201 another build) and hooks its

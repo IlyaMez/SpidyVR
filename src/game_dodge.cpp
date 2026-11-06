@@ -14,6 +14,7 @@ using namespace spidy;
 using namespace spidy::game_dodge;
 extern "C" {
 __declspec(dllexport) Data SpidyDodgeData;
+__declspec(dllexport) Live SpidyDodgeLive;
 }
 
 namespace {
@@ -66,6 +67,22 @@ bool ours{};
 double oursStarted{};
 LARGE_INTEGER lastFrame{}, frequency{};
 uint32_t cutShortSeen{};
+// SpidyDodgeLive's last kind, for its starts.
+uint32_t liveKind{};
+// The hero's dodge now, for DODGE TUMBLE (SpidyDodgeLive). The main thread's
+// alone writes it; lastKind goes out before the start it counts.
+void publishLive(uint32_t kind, bool spidys) {
+    volatile Live& live = SpidyDodgeLive;
+    if (kind && !liveKind) {
+        live.lastKind = kind;
+        MemoryBarrier();
+        live.starts = live.starts + 1;
+    }
+    liveKind = kind;
+    live.kind = kind;
+    live.ours = spidys ? 1u : 0u;
+    live.frames = live.frames + 1;
+}
 
 template <class F> void publish(F change) {
     InterlockedIncrement64(&SpidyDodgeData.sequence);
@@ -149,6 +166,10 @@ void frame(uintptr_t manager) {
     // The player's manager alone.
     if (!c.hero || record != c.hero)
         return;
+    {
+        const uint32_t kind = value<uint32_t>(manager + kindAt);
+        publishLive(kind, ours && kind == webKind && value<double>(manager + startedAt) == oursStarted);
+    }
     LARGE_INTEGER now{};
     QueryPerformanceCounter(&now);
     const float seconds =

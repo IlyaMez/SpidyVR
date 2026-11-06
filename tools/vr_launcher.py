@@ -82,6 +82,14 @@ def alive(game):
     return bool(game.handle and _exit_code(game.handle,c.byref(code)) and code.value==259)
 
 
+def exit_status(game):
+    """The game's exit code once it has ended (0xC0000005: it crashed), else None."""
+    code=w.DWORD()
+    if not game.handle or not _exit_code(game.handle,c.byref(code)) or code.value==259:
+        return None
+    return code.value
+
+
 class NeedsAdministrator(RuntimeError):
     """The game runs as administrator and this session does not, so Windows refuses every way into the
     game. Nothing but starting Spidy as administrator, or the game without, changes that."""

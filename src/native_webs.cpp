@@ -153,7 +153,8 @@ void handPoints(void* manager, uint8_t* rope, float dt, int32_t* count) {
                 break;
             }
         for (int p = 0; p < 4; ++p)
-            std::memcpy(reinterpret_cast<void*>(mgr + 0x7d60 + p * 0x18 + r.hand * 12), &next[p], sizeof(Vec3));
+            std::memcpy(reinterpret_cast<void*>(mgr + 0x7d60 + p * 0x18 + r.hand * 12), &next[p],
+                        sizeof(Vec3));
         ++startMoves;
         if (r.line && count) {
             const uint32_t via = std::min<uint32_t>(r.viaCount, 2);
@@ -407,7 +408,8 @@ void update(void* manager, float dt) {
                 if (hand < 0 && !rope->hidden)
                     hand = 0;
                 uint32_t handle{};
-                if (hand >= 0 && ensure(manager, &handle, swingRope, static_cast<uint32_t>(hand), nullptr, 0, 0) &&
+                if (hand >= 0 &&
+                    ensure(manager, &handle, swingRope, static_cast<uint32_t>(hand), nullptr, 0, 0) &&
                     get(manager, handle)) {
                     rope->handle = handle;
                     rope->hand = static_cast<uint32_t>(hand);
@@ -537,7 +539,8 @@ void update(void* manager, float dt) {
                     if (const auto slot = get(manager, rope.handle); slot && n < ropeStarts.size()) {
                         RopeStart r{slot, hand, {}, false};
                         for (int p = 0; p < 4; ++p)
-                            r.points[p] = handAfter[hand][p]; // as set above: the wrist, or the last edge laid
+                            r.points[p] =
+                                handAfter[hand][p]; // as set above: the wrist, or the last edge laid
                         ropeStarts[n++] = r;
                     }
             }
@@ -595,8 +598,8 @@ void update(void* manager, float dt) {
                 if (!used || tieHand[hand])
                     continue; // a tie's hand was set back above
                 for (int p = 1; p < 4; ++p)
-                    std::memcpy(reinterpret_cast<void*>(mgr + 0x7d60 + p * 0x18 + hand * 12), &handAfter[hand][p],
-                                sizeof(Vec3));
+                    std::memcpy(reinterpret_cast<void*>(mgr + 0x7d60 + p * 0x18 + hand * 12),
+                                &handAfter[hand][p], sizeof(Vec3));
                 const Vec3 back = wrote[hand] ? starts[hand] : handAfter[hand][0];
                 std::memcpy(reinterpret_cast<void*>(mgr + 0x7d60 + hand * 12), &back, sizeof(Vec3));
             }
@@ -623,7 +626,8 @@ void update(void* manager, float dt) {
             const Vec3 ab = want->end - want->start;
             const float span = dot(ab, ab);
             const Vec3 nearest =
-                span > 1e-6f ? want->start + ab * std::clamp(dot(third - want->start, ab) / span, 0.f, 1.f) : want->start;
+                span > 1e-6f ? want->start + ab * std::clamp(dot(third - want->start, ab) / span, 0.f, 1.f)
+                             : want->start;
             const float off = length(third - nearest);
             if (rope.age < native_webs::lineRopeSettle) {
                 // Still being shot out: the game's web is there, so the

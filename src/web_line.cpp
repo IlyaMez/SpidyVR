@@ -63,14 +63,15 @@ void LineGesture::reset() {
     since_ = 1e9f;
     armed_ = false;
 }
-std::optional<LineRequest> LineGesture::update(float seconds, bool click, const std::array<LineHand, 2>& hands) {
+std::optional<LineRequest> LineGesture::update(float seconds, bool click,
+                                               const std::array<LineHand, 2>& hands) {
     const float dt = std::isfinite(seconds) ? std::clamp(seconds, 0.f, .1f) : 0.f;
     const auto& a = hands[0];
     const auto& b = hands[1];
     const float span = finite(a.anchor) && finite(b.anchor) ? length(b.anchor - a.anchor) : 0.f;
-    armed_ = a.tracked && b.tracked && a.wallWeb && b.wallWeb && !a.grabbing && !b.grabbing && finite(a.grip) &&
-             finite(b.grip) && length(a.grip - b.grip) <= config_.handsNear && span >= config_.minLength &&
-             span <= config_.maxLength;
+    armed_ = a.tracked && b.tracked && a.wallWeb && b.wallWeb && !a.grabbing && !b.grabbing &&
+             finite(a.grip) && finite(b.grip) && length(a.grip - b.grip) <= config_.handsNear &&
+             span >= config_.minLength && span <= config_.maxLength;
     if (armed_) {
         last_ = LineRequest{a.anchor, b.anchor};
         since_ = 0;
@@ -115,7 +116,8 @@ void WebLines::prune() {
         for (auto it = lines_.begin(); it != lines_.end(); ++it) {
             bool held = true;
             for (const auto on : it->on)
-                if (on && std::none_of(lines_.begin(), lines_.end(), [&](const WebLineSpan& l) { return l.id == on; }))
+                if (on && std::none_of(lines_.begin(), lines_.end(),
+                                       [&](const WebLineSpan& l) { return l.id == on; }))
                     held = false;
             if (!held) {
                 lines_.erase(it);
@@ -134,7 +136,8 @@ bool WebLines::add(Vec3 start, Vec3 end, std::uint32_t startOn, std::uint32_t en
         return false;
     // Only on lines there are.
     for (auto* on : {&startOn, &endOn})
-        if (*on && std::none_of(lines_.begin(), lines_.end(), [&](const WebLineSpan& l) { return l.id == *on; }))
+        if (*on &&
+            std::none_of(lines_.begin(), lines_.end(), [&](const WebLineSpan& l) { return l.id == *on; }))
             *on = 0;
     while (lines_.size() >= config_.maxLines) {
         // The oldest that may go: not the kept one, nor a line it is on, nor
@@ -164,9 +167,9 @@ void WebLines::step(float dt, Vec3 player, std::uint32_t keep) {
                                     l.age += dt;
                                     if (kept(l.id, keep))
                                         return false;
-                                    const bool far = finite(player) &&
-                                                     length(nearestOnSegment(l.start, l.end, player) - player) >
-                                                         config_.reach;
+                                    const bool far =
+                                        finite(player) && length(nearestOnSegment(l.start, l.end, player) -
+                                                                 player) > config_.reach;
                                     return l.age > config_.seconds || far;
                                 }),
                  lines_.end());
@@ -225,10 +228,10 @@ std::optional<LineTarget> lineTarget(const std::vector<WebLineSpan>& lines, Vec3
 }
 LineZip::LineZip(LineZipConfig config) : config_(config) {
     const auto& c = config_;
-    const float positive[] = {c.cone,      c.nearest,   c.farthest, c.speed,       c.accel,       c.ease,
-                              c.arrive,    c.hold,      c.holdSpeed, c.maxSeconds, c.waitSeconds, c.walkSpeed,
-                              c.jumpSpeed, c.gravity,   c.catchRadius, c.catchHeight, c.dropBelow,
-                              c.catchMargin, c.walkSlack, c.speedBase, c.pullAccel};
+    const float positive[] = {
+        c.cone,        c.nearest,     c.farthest,   c.speed,       c.accel,     c.ease,      c.arrive,
+        c.hold,        c.holdSpeed,   c.maxSeconds, c.waitSeconds, c.walkSpeed, c.jumpSpeed, c.gravity,
+        c.catchRadius, c.catchHeight, c.dropBelow,  c.catchMargin, c.walkSlack, c.speedBase, c.pullAccel};
     for (float v : positive)
         if (!std::isfinite(v) || v <= 0)
             throw std::invalid_argument("Invalid line zip configuration");
@@ -301,8 +304,8 @@ bool LineZip::gameWalk(Vec3 position, Vec3 move, const WebLineSpan& line) const 
     const Vec3 on = line.start + ab * std::clamp(t, 0.f, 1.f);
     return length(feet - on) <= config_.walkSlack;
 }
-LineZip::Step LineZip::step(float dt, Vec3 position, Vec3 velocity, bool waiting, const WebLineSpan* line, Vec3 move,
-                            bool jump) {
+LineZip::Step LineZip::step(float dt, Vec3 position, Vec3 velocity, bool waiting, const WebLineSpan* line,
+                            Vec3 move, bool jump) {
     Step out;
     const bool pressed = jump && !jumped_;
     jumped_ = jump;
@@ -351,7 +354,8 @@ LineZip::Step LineZip::step(float dt, Vec3 position, Vec3 velocity, bool waiting
             // Its path bows up over a far zip, the lift fading as he nears.
             const float lift = std::min(c.farLift * zipSpan_, c.liftMost) *
                                std::sqrt(std::clamp(left / std::max(zipSpan_, 1e-3f), 0.f, 1.f));
-            const Vec3 aim = perch_ + Vec3{0, lift * std::min(1.f, (left - c.ease) / std::max(c.ease, 1e-3f)), 0};
+            const Vec3 aim =
+                perch_ + Vec3{0, lift * std::min(1.f, (left - c.ease) / std::max(c.ease, 1e-3f)), 0};
             const Vec3 way = aim - position;
             const float reach = std::max(length(way), 1e-3f);
             const float top = std::min(c.speed, c.speedBase + c.speedPerMetre * zipSpan_);
@@ -381,7 +385,8 @@ LineZip::Step LineZip::step(float dt, Vec3 position, Vec3 velocity, bool waiting
         const Vec3 under = line->start + ab * t;
         Vec3 across = feet - under;
         across.y = 0;
-        if (jumping_.y <= 0 && length(across) <= c.catchRadius && std::abs(feet.y - under.y) <= c.catchHeight) {
+        if (jumping_.y <= 0 && length(across) <= c.catchRadius &&
+            std::abs(feet.y - under.y) <= c.catchHeight) {
             // Down on the line again.
             phase_ = Phase::Perched;
             along_ = t;

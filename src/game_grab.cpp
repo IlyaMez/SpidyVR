@@ -1316,7 +1316,8 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
                         native_bodies::markState(t->who.machine, tie.anchor, normal, t->position, 1);
                         if (finishing.size() < 32)
                             finishing.push_back({record, t->who.machine, tie.anchor, normal});
-                        if (const auto line = lineTies.find(record); line != lineTies.end() && hangs.size() < 64) {
+                        if (const auto line = lineTies.find(record);
+                            line != lineTies.end() && hangs.size() < 64) {
                             hangs.erase(std::remove_if(hangs.begin(), hangs.end(),
                                                        [&](const Hang& h) { return h.record == record; }),
                                         hangs.end());
@@ -1615,7 +1616,8 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
             continue;
         const auto line = lineTies.find(tie.target);
         SpidyTieData.lines[SpidyTieData.count++] = {
-            line != lineTies.end() ? line->second.point : tie.anchor, t->position, length(tie.place - t->position),
+            line != lineTies.end() ? line->second.point : tie.anchor, t->position,
+            length(tie.place - t->position),
             (t->flying ? 1u : 0u) | (t->steering ? 2u : 0u) | (tie.arrived ? 4u : 0u) |
                 (t->tieContact >= 0 ? 8u : 0u) | (game_targets::up(base, t->who) ? 0u : 16u)};
     }
@@ -1731,7 +1733,8 @@ uint64_t game_grab::heldLately(unsigned hand) {
         return g.kind == TargetKind::Character ? g.target : 0;
     return lately[hand].since <= heldGrace ? lately[hand].target : 0;
 }
-bool game_grab::tie(unsigned hand, Vec3 anchor, Vec3 normal, uint32_t lineSurface, Vec3 lineAlong, uint32_t line) {
+bool game_grab::tie(unsigned hand, Vec3 anchor, Vec3 normal, uint32_t lineSurface, Vec3 lineAlong,
+                    uint32_t line) {
     const bool onLine = line != 0;
     // Under a web line: carried to his hang, lineHang under it - the tie's
     // place, its normal down, overheadReach + gap under its anchor. Clear of

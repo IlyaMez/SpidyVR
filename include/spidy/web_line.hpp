@@ -72,7 +72,7 @@ struct WebLineSpan {
 };
 struct LineHit {
     std::uint32_t id{};
-    Vec3 point{};   // on the line's axis, nearest the ray
+    Vec3 point{};     // on the line's axis, nearest the ray
     float distance{}; // along the ray
 };
 class WebLines {
@@ -82,7 +82,8 @@ class WebLines {
     // surface); false when it is too short, too long or not finite. Past
     // maxLines the oldest gives way - never `keep` (the line the player is on)
     // nor a line it is on - and the lines on it with it.
-    bool add(Vec3 start, Vec3 end, std::uint32_t startOn = 0, std::uint32_t endOn = 0, std::uint32_t keep = 0);
+    bool add(Vec3 start, Vec3 end, std::uint32_t startOn = 0, std::uint32_t endOn = 0,
+             std::uint32_t keep = 0);
     // Ages the lines and lets go of those too old or too far from `player`
     // (never `keep`, nor a line it is on), and of the lines on them.
     void step(float dt, Vec3 player, std::uint32_t keep = 0);
