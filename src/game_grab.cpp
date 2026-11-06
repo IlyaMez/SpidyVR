@@ -352,6 +352,16 @@ class Glance final : public TargetQueries {
     }
 } glance;
 
+// A ray the game takes (native_rays::valid: a finite origin, a unit way, 1 cm
+// to 1 km): any other one the swing's world refuses with error 2105, and the
+// swing stops - VR with it (November 4, 10:59: a gone thug's position read
+// as the world's origin, a ray from there over a kilometre long).
+std::optional<RayHit> safeRay(const WorldQueries& world, Vec3 from, Vec3 way, float distance) {
+    if (!finite(from) || !finite(way) || !std::isfinite(distance) || length(way) < .5f || distance < .02f ||
+        distance > 200 || length(from) < 1e-3f)
+        return {};
+    return world.raycast(from, normalized(way), distance);
+}
 // Rays stand in for the collision a non-sweeping mover skips: the velocity
 // loses what goes into a wall ahead, and the centre stays its lift above the
 // ground. Returns whether the target stands on the ground.
@@ -360,7 +370,7 @@ bool guard(const Tracked& t, Vec3& v, float dt, const WorldQueries& world) {
     const float travel = length(v) * dt;
     if (travel > 1e-4f) {
         const Vec3 direction = v / length(v);
-        if (const auto hit = world.raycast(t.position, direction, travel + s.radius); hit && hit->fixed) {
+        if (const auto hit = safeRay(world, t.position, direction, travel + s.radius); hit && hit->fixed) {
             const Vec3 n = normalized(hit->normal);
             const float into = dot(v, n);
             if (into < 0)
@@ -368,7 +378,7 @@ bool guard(const Tracked& t, Vec3& v, float dt, const WorldQueries& world) {
         }
     }
     const float reach = s.lift + std::max(0.f, -v.y * dt) + .1f;
-    const auto ground = world.raycast(t.position, {0, -1, 0}, reach);
+    const auto ground = safeRay(world, t.position, {0, -1, 0}, reach);
     if (!ground || !ground->fixed)
         return false;
     const float height = t.position.y - ground->point.y;
@@ -647,6 +657,50 @@ void encase(Tracked& t, const Tie& tie) {
 // status) defeats him the game's own way, its events and counts with it;
 // finishCheck after it, if the blow took him off his surface, the stick is
 // asked again (finishResticks times), and the state log is told how it went.
+// Ties to web lines, by their bot's record: the body at one of the line's
+// ends, the line's direction, its id, the point of it he hangs from, and where
+// his centre hangs (game_grab::lineHang under it). Hung from it once stuck
+// (Hang), on a strand of web, until the line goes. Until November 3 (17:30)
+// he was stuck under the line itself, as under a beam: in the way of a
+// player walking on it, and not hanging as a cocoon does from a web.
+struct LineTie {
+    uint32_t surface{}, line{};
+    Vec3 along{}, point{}, hang{};
+};
+std::unordered_map<uint64_t, LineTie> lineTies;
+struct Hang {
+    uint64_t record{}, machine{};
+    uint32_t line{};
+    Vec3 top{};
+    // Since the game stopped holding him there (GetTickCount64; 0: it holds).
+    uint64_t loose{};
+};
+// A hung thug the game no longer holds stuck this long has fallen off his
+// line (pushed off by one hung too near, November 4, 11:47): his strand goes,
+// and he lies where he falls, defeated. His strand stayed on his falling body
+// until then, and with several fallen the strands tangled (with a video).
+constexpr uint64_t hangLooseMs = 300;
+std::vector<Hang> hangs;
+// Asks the game's stick of a thug at his hang under a web line: as on a wall
+// (pose 6) facing the player, his back to it, on the body at the line's end.
+bool stickOnLine(uint64_t machine, uint64_t record, const LineTie& line) {
+    if (!line.surface)
+        return false;
+    Vec3 along = line.along;
+    along.y = 0;
+    Vec3 facing = finite(heroBody.position) ? heroBody.position - line.hang : Vec3{};
+    facing.y = 0;
+    if (length(along) > .3f) {
+        const Vec3 a = normalized(along);
+        facing = facing - a * dot(facing, a);
+        if (length(facing) < .3f)
+            facing = cross(Vec3{0, 1, 0}, a);
+    }
+    if (length(facing) < .3f)
+        facing = {0, 0, 1};
+    const Vec3 n = normalized(facing);
+    return native_bodies::stick(machine, record, line.surface, line.hang - n * .45f, n, Vec3{0, 1, 0}, 6);
+}
 struct Finish {
     uint64_t record{}, machine{};
     Vec3 anchor{}, normal{};
@@ -667,9 +721,9 @@ bool askStickAt(uint64_t machine, uint64_t record, Vec3 position, Vec3 anchor, V
     std::optional<RayHit> hit;
     const Vec3 to = anchor - position;
     if (const float reach = length(to); reach > .05f)
-        hit = world.raycast(position, to / reach, reach + .6f);
+        hit = safeRay(world, position, to / reach, reach + .6f);
     if (!hit || !hit->fixed)
-        hit = world.raycast(position, normal * -1.f, 2.f);
+        hit = safeRay(world, position, normal * -1.f, 2.f);
     if (!hit || !hit->fixed || !finite(hit->point) || !finite(hit->normal) || length(hit->normal) < .5f)
         return false;
     Vec3 n = normalized(hit->normal);
@@ -699,8 +753,13 @@ bool askStick(Tracked& t, const Tie& tie, const WorldQueries& world) {
     const Vec3 out = tie.place - tie.anchor;
     const Vec3 normal = length(out) > .01f ? normalized(out) : Vec3{0, 1, 0};
     uint32_t surface{};
-    if (!askStickAt(t.who.machine, t.who.record, t.position, tie.anchor, normal, world, surface))
+    if (const auto line = lineTies.find(t.who.record); line != lineTies.end()) {
+        if (!stickOnLine(t.who.machine, t.who.record, line->second))
+            return false;
+        surface = line->second.surface;
+    } else if (!askStickAt(t.who.machine, t.who.record, t.position, tie.anchor, normal, world, surface)) {
         return false;
+    }
     t.tieAsked = 0;
     ++t.tieSticks;
     native_bodies::markState(t.who.machine, tie.anchor, normal, t.position, 2, surface);
@@ -1086,6 +1145,8 @@ uint32_t game_grab::start(uintptr_t gameBase, Call drive, Call driven, uint32_t 
     finishes = 0;
     cocoonSeen.clear();
     lately[0] = lately[1] = {};
+    lineTies.clear();
+    hangs.clear();
     if (offered)
         watch.start(base, offered);
     stepped = botsLanded = 0;
@@ -1255,6 +1316,13 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
                         native_bodies::markState(t->who.machine, tie.anchor, normal, t->position, 1);
                         if (finishing.size() < 32)
                             finishing.push_back({record, t->who.machine, tie.anchor, normal});
+                        if (const auto line = lineTies.find(record);
+                            line != lineTies.end() && hangs.size() < 64) {
+                            hangs.erase(std::remove_if(hangs.begin(), hangs.end(),
+                                                       [&](const Hang& h) { return h.record == record; }),
+                                        hangs.end());
+                            hangs.push_back({record, t->who.machine, line->second.line, line->second.point});
+                        }
                     }
         for (int list = 0; list < 2; ++list)
             for (const auto record : list ? down : stuck) {
@@ -1289,7 +1357,8 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
                         return true;
                     f.age += dt;
                     Vec3 at{};
-                    game_targets::position(*c, at);
+                    if (!game_targets::position(*c, at) || !finite(at))
+                        return true; // gone: nothing to finish, no ray from nowhere
                     const bool stuckNow = game_targets::wallStuck(base, *c);
                     if (!f.struck) {
                         if (f.age < finishAfter)
@@ -1325,7 +1394,10 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
                         f.age >= finishCheck + .4f * f.resticks) {
                         ++f.resticks;
                         uint32_t surface{};
-                        askStickAt(f.machine, f.record, at, f.anchor, f.normal, world, surface);
+                        if (const auto line = lineTies.find(f.record); line != lineTies.end())
+                            stickOnLine(f.machine, f.record, line->second);
+                        else
+                            askStickAt(f.machine, f.record, at, f.anchor, f.normal, world, surface);
                     }
                     if (f.age >= finishEnd) {
                         if (stuckNow && !game_targets::up(base, *c))
@@ -1542,13 +1614,95 @@ void game_grab::step(float dt, const WorldQueries& world, uint64_t player) {
         const auto* t = track(tie.target);
         if (!t || t->gone || SpidyTieData.count >= std::size(SpidyTieData.lines))
             continue;
+        const auto line = lineTies.find(tie.target);
         SpidyTieData.lines[SpidyTieData.count++] = {
-            tie.anchor, t->position, length(tie.place - t->position),
+            line != lineTies.end() ? line->second.point : tie.anchor, t->position,
+            length(tie.place - t->position),
             (t->flying ? 1u : 0u) | (t->steering ? 2u : 0u) | (tie.arrived ? 4u : 0u) |
                 (t->tieContact >= 0 ? 8u : 0u) | (game_targets::up(base, t->who) ? 0u : 16u)};
     }
+    // Thugs hung under web lines, each on its strand: gone ones let go of.
+    SpidyTieData.hangCount = 0;
+    hangs.erase(std::remove_if(hangs.begin(), hangs.end(),
+                               [&](Hang& h) {
+                                   const game_targets::Candidate* c{};
+                                   for (const auto& each : candidates)
+                                       if (each.record == h.record)
+                                           c = &each;
+                                   Vec3 at{};
+                                   if (!c || !game_targets::position(*c, at) || !finite(at)) {
+                                       lineTies.erase(h.record);
+                                       return true;
+                                   }
+                                   const auto tick = GetTickCount64();
+                                   if (game_targets::wallStuck(base, *c))
+                                       h.loose = 0;
+                                   else if (!h.loose)
+                                       h.loose = tick;
+                                   if (h.loose && tick - h.loose >= hangLooseMs) {
+                                       // Fallen off: still standing, he is finished as the stick
+                                       // would have finished him; no knock, he falls as he is.
+                                       if (game_targets::up(base, *c)) {
+                                           float points{};
+                                           game_targets::health(*c, points);
+                                           native_bodies::Damage d;
+                                           d.victim = h.record;
+                                           d.damager = hero;
+                                           d.point = at;
+                                           d.direction = {0, -1, 0};
+                                           d.normal = {0, 1, 0};
+                                           d.amount = std::max(points, 1.f) + finishExtra;
+                                           d.type = 20; // kWebImpact
+                                           d.knockback = 0;
+                                           d.knockbackAmount = 0;
+                                           d.impulse = 0;
+                                           native_bodies::damage(d);
+                                       }
+                                       lineTies.erase(h.record);
+                                       return true;
+                                   }
+                                   if (h.loose)
+                                       return false; // a moment loose: no strand drawn to him meanwhile
+                                   if (SpidyTieData.hangCount < std::size(SpidyTieData.hangs)) {
+                                       float id{};
+                                       std::memcpy(&id, &h.line, sizeof(id));
+                                       SpidyTieData.hangs[SpidyTieData.hangCount++] = {
+                                           h.top, at + Vec3{0, shape(*c).lift + .55f, 0}, id,
+                                           static_cast<uint32_t>(h.record >> 4)};
+                                   }
+                                   return false;
+                               }),
+                hangs.end());
     InterlockedIncrement64(&SpidyTieData.sequence);
     ReleaseSRWLockExclusive(&output);
+}
+void game_grab::keepLines(const uint32_t* ids, uint32_t count) {
+    // A line that went: who hung from it falls (out of his stick into the
+    // game's flight, at rest).
+    hangs.erase(std::remove_if(hangs.begin(), hangs.end(),
+                               [&](const Hang& h) {
+                                   for (uint32_t i = 0; ids && i < count; ++i)
+                                       if (ids[i] == h.line)
+                                           return false;
+                                   // Stuck and defeated, the game's flight alone does not move
+                                   // him (he stayed in the air, November 3, 19:00): a blow
+                                   // down that knocks him off too.
+                                   native_bodies::fling(h.machine, h.record, {0, -1, 0});
+                                   native_bodies::Damage d;
+                                   d.victim = h.record;
+                                   d.damager = hero;
+                                   d.point = h.top - Vec3{0, lineHang, 0};
+                                   d.direction = {0, -1, 0};
+                                   d.normal = {0, 1, 0};
+                                   d.amount = 1;
+                                   d.type = 7;      // kKinetic
+                                   d.knockback = 5; // kFlyBack
+                                   d.knockbackAmount = 1;
+                                   native_bodies::damage(d);
+                                   lineTies.erase(h.record);
+                                   return true;
+                               }),
+                hangs.end());
 }
 bool game_grab::cocooned(uint64_t record) {
     if (!offered || !allowed || !record)
@@ -1579,7 +1733,39 @@ uint64_t game_grab::heldLately(unsigned hand) {
         return g.kind == TargetKind::Character ? g.target : 0;
     return lately[hand].since <= heldGrace ? lately[hand].target : 0;
 }
-bool game_grab::tie(unsigned hand, Vec3 anchor, Vec3 normal) {
+bool game_grab::tie(unsigned hand, Vec3 anchor, Vec3 normal, uint32_t lineSurface, Vec3 lineAlong,
+                    uint32_t line) {
+    const bool onLine = line != 0;
+    // Under a web line: carried to his hang, lineHang under it - the tie's
+    // place, its normal down, overheadReach + gap under its anchor. Clear of
+    // the thugs already hung from it (hangSpacing apart along it): two hung
+    // closer pushed each other off it (November 4, 10:59).
+    Vec3 linePoint = anchor;
+    if (onLine && finite(lineAlong) && length(lineAlong) > .5f) {
+        constexpr float hangSpacing = 1.1f;
+        const Vec3 a = normalized(lineAlong);
+        const auto clear = [&](Vec3 at) {
+            for (const auto& h : hangs)
+                if (h.line == line && length(h.top - at) < hangSpacing)
+                    return false;
+            for (const auto& held : lineTies)
+                if (held.second.line == line && length(held.second.point - at) < hangSpacing)
+                    return false;
+            return true;
+        };
+        for (int k = 0; k <= 8; ++k) {
+            const float shift = (k + 1) / 2 * hangSpacing * (k % 2 ? 1.f : -1.f);
+            if (clear(anchor + a * shift)) {
+                linePoint = anchor + a * shift;
+                break;
+            }
+        }
+    }
+    if (onLine) {
+        const auto& config = ties.config();
+        anchor = linePoint - Vec3{0, lineHang - config.overheadReach - config.gap, 0};
+        normal = {0, -1, 0};
+    }
     if (!offered || !allowed || !tiesAllowed || hand > 1 || !finite(anchor))
         return false;
     // Its web's target now, or the one it held lately (a yanked thug at the hand).
@@ -1603,6 +1789,10 @@ bool game_grab::tie(unsigned hand, Vec3 anchor, Vec3 normal) {
     lately[hand] = {};
     // The state log follows tied bots from the first tie on.
     native_bodies::logStates();
+    if (onLine)
+        lineTies[t->who.record] = {lineSurface, line, lineAlong, linePoint, linePoint - Vec3{0, lineHang, 0}};
+    else
+        lineTies.erase(t->who.record);
     t->snatched = false;
     t->tieContact = t->tieWebbed = -1;
     t->tieWebs = 0;

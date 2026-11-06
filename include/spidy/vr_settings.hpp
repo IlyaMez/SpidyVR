@@ -89,6 +89,10 @@ struct Values {
     // and a webbed enemy who comes to the player only on the yank
     // (GrabConfig::yankOnlyCharacters). Off by default: both as before.
     bool webTie = false;
+    // Web lines (the tab's WEB LINES; web_line.hpp, docs/WEB-LINE.md): a taut
+    // web between two surfaces by the hands together and the right stick's
+    // click, zipped to, walked on, thugs tied under it. Off by default.
+    bool webLines = false;
     // The wall-floor camera transition during HAND WALL CLIMBING's joystick
     // runs (the tab's JOYSTICK WALL RUN CAMERA), as before pull request #38;
     // off, the left stick drives the momentum wall run's view and gait.
@@ -451,8 +455,9 @@ enum class Item : uint8_t {
     spidyRunJump,
     forearmAimLimit,
     palmShooters,
+    webLines,
 };
-inline constexpr Item lastItem = Item::palmShooters;
+inline constexpr Item lastItem = Item::webLines;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -475,7 +480,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 93>& rows();
+const std::array<Row, 94>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

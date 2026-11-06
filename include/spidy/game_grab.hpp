@@ -134,16 +134,23 @@ struct TieLine {
 // that knocked a tied enemy into the game's flight. stuck: ties that ended
 // with the game sticking him to a surface (BotStateWallStuck); webs: the
 // tie's webbing hits as he arrived.
+// hangs: thugs hung under web lines, each its strand (from the line to his
+// head; `distance` the line's id, as a float's bits; `flags` his record's
+// bits 4..35, a stable id for the strand's rope).
 // Version 2 (October 31): the counters of how ties ended and the lines'
-// distances and flags. Version 3 (November 2): stuck and webs.
+// distances and flags. Version 3 (November 2): stuck and webs. Version 4
+// (November 3): hangs. Version 5: sixteen of them (six: the seventh hung had
+// no strand).
 struct TieData {
-    uint32_t magic = 0x53544945, version = 3, bytes = sizeof(TieData), status{};
+    uint32_t magic = 0x53544945, version = 5, bytes = sizeof(TieData), status{};
     int64_t sequence{};
     uint64_t made{}, ended{}, taken{}, gone{}, down{}, knocks{}, stuck{}, webs{};
     uint32_t count{}, armed{};
     TieLine lines[8]{};
+    uint32_t hangCount{}, reserved{};
+    TieLine hangs[16]{};
 };
-static_assert(sizeof(TieLine) == 32 && sizeof(TieData) == 352);
+static_assert(sizeof(TieLine) == 32 && sizeof(TieData) == 872);
 // Whether the bot this record names is an enemy the game has webbed up
 // (game_targets::cocooned), or Spidy's web balls lately did (game_shooter::webbedUp),
 // or was seen so within cocoonMemory and is still up: a yank flings him out
@@ -160,7 +167,16 @@ uint64_t heldLately(unsigned hand);
 // Ties the enemy this hand's web holds to the surface at `anchor` (its normal
 // `normal`, out of it): the hand's web is handed over to the tie. False when
 // it holds no bot.
-bool tie(unsigned hand, Vec3 anchor, Vec3 normal);
+// A tie to a web line (web_line.hpp) when `line` is its id: `lineSurface` the
+// body at one of its ends (0: none found), `lineAlong` its direction. He
+// hangs under the line in his cocoon, lineHang below it (his centre), on a
+// strand of web from it (TieData::hangs), the game's stick asked there on that
+// body (the line has none of its own) as on a wall facing the player.
+constexpr float lineHang = 1.8f;
+bool tie(unsigned hand, Vec3 anchor, Vec3 normal, uint32_t lineSurface = 0, Vec3 lineAlong = {},
+         uint32_t line = 0);
+// The web lines there are now: a thug hung from one that is gone falls.
+void keepLines(const uint32_t* ids, uint32_t count);
 // The gesture is ready now (TieGesture::armed), for the telemetry.
 void tieArmed(bool);
 // WEB TIE (vr_settings::Values::webTie): ties are made, and an enemy on a web

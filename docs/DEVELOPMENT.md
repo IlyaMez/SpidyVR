@@ -1890,6 +1890,7 @@ still requires a running game or headset.
 | `src/native_webs.cpp` | The game's own web lines, started at the tracked wrists |
 | `src/web_grab.cpp`, `src/lab_props.cpp` | Web grab: catching, yanking, carrying and throwing props and characters; the lab's props |
 | `src/web_tie.cpp`, `include/spidy/web_tie.hpp` | The web tie (WEB TIE, off by default): a webbed-up enemy stuck to a surface until the fight is over (the gesture, the ties' law; `game_grab.cpp` holds them in the game) - [WEB-TIE.md](WEB-TIE.md) |
+| `src/web_line.cpp`, `include/spidy/web_line.hpp`, `include/spidy/game_lines.hpp` | Web lines (WEB LINES, off by default): a taut web between two surfaces (the gesture, the lines, rays meeting them; `game_swing.cpp` keeps them, `native_webs.cpp` draws them) - [WEB-LINE.md](WEB-LINE.md) |
 | `src/body_ik.cpp`, `src/native_body.cpp` | The player's body: the solver, and the hero's joints turned after the game's pose writer |
 | `src/body_calibration.cpp`, `src/overlay_text.cpp` | The T-pose calibration (the player's eye height and arm length, and its panel in the headset); the overlay's stroke font |
 | `include/spidy/seated.hpp` | Seated play and HEIGHT: the standing eye height (HEIGHT's, a standing calibration's, or a 1.76 m player's), the lift measured from where the player sits (first second of play, again after a recenter), and the frame raised for what the game's world places from it - never the poses the headset's layer is submitted with |

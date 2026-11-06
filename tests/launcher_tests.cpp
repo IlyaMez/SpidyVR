@@ -693,6 +693,7 @@ int main() {
         t.joystickRunCamera = false;
         t.halfPunchDamage = true;
         t.webTie = true;
+        t.webLines = true;
         t.singleHandYankPercent = 200;
         t.uiStyle = 1;
         t.combatVisuals = false;
@@ -760,6 +761,7 @@ int main() {
                   "soft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\n"
                   "forearm_blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\nsteady_states=0\n"
                   "combat_responsive=0\nspidy_run_jump=1\nforearm_aim_limit=180\npalm_shooters=0\n"
+                  "web_lines=0\n"
                   "wall_distance_cm=25\n"
                   "realistic_flips=0\nrotation_strength=50\nrotation_speed=240\nflight_speed_min=3\n"
                   "swing_momentum=1\nrotation_response_ms=500\nhand_momentum=100\nangular_drag_ms=3000\n"

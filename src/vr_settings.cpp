@@ -342,6 +342,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.halfPunchDamage;
     case Item::webTie:
         return &v.webTie;
+    case Item::webLines:
+        return &v.webLines;
     case Item::view:
         return &v.flatScreen;
     case Item::realisticFlips:
@@ -448,9 +450,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 93>& rows() {
+const std::array<Row, 94>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 93> all{{
+    static const std::array<Row, 94> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -599,6 +601,10 @@ const std::array<Row, 93>& rows() {
         {Item::webTie,
          "WEB TIE",
          "Web an enemy up, web a wall: hands together, click the right stick. He sticks.",
+         {}},
+        {Item::webLines,
+         "WEB LINES",
+         "Webs on two walls, hands together, click right stick: a line. Hold it to zip.",
          {}},
         {Item::eyeAim, "EYE AIM",
          "Web balls and zips go where your eyes look. Needs a headset with eye tracking.", eyeAimChoices},
@@ -943,6 +949,7 @@ constexpr TabOnly tabOnly[] = {
     {"spidy_run_jump", &Values::spidyRunJump, nullptr},
     {"forearm_aim_limit", nullptr, &Values::forearmAimLimit},
     {"palm_shooters", &Values::palmShooters, nullptr},
+    {"web_lines", &Values::webLines, nullptr},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {

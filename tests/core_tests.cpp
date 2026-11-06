@@ -33,6 +33,7 @@
 #include "spidy/web_pull.hpp"
 #include "spidy/web_grab.hpp"
 #include "spidy/web_tie.hpp"
+#include "spidy/web_line.hpp"
 #include "spidy/lab_props.hpp"
 #include "spidy/body_ik.hpp"
 #include "spidy/native_body.hpp"
@@ -1836,7 +1837,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 30 && s.bytes == 144 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 31 && s.bytes == 148 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -2499,7 +2500,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 30 && s.bytes == 144 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 31 && s.bytes == 148 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -3855,7 +3856,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 30 && s.bytes == 144, "updated settings did not append the climbing field");
+        check(s.version == 31 && s.bytes == 148, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -9828,7 +9829,7 @@ int main() {
         check(game_swing::valid(c) && !game_swing::input(c).fighting, "the web tie's click (bit 1) taken for a fight");
         c.asks = 7;
         check(game_swing::valid(c), "asks 7 refused");
-        c.asks = 16;
+        c.asks = 64;
         check(!game_swing::valid(c), "an unknown asks bit accepted");
         c.asks = 1;
         check(!game_swing::input(c).fighting, "bit 0 read as a fight");
@@ -9844,9 +9845,9 @@ int main() {
                   !vr_settings::withTabOnly({}, "").combatResponsive,
               "spidy_vr.ini keeps combat_responsive");
         const auto& all = vr_settings::rows();
-        check(all[78].item == vr_settings::Item::combatResponsive &&
-                  std::strcmp(all[78].title, "COMBAT RESPONSIVE") == 0 && all[78].choices.empty() &&
-                  all[78].place == vr_settings::Place::tab,
+        check(all[79].item == vr_settings::Item::combatResponsive &&
+                  std::strcmp(all[79].title, "COMBAT RESPONSIVE") == 0 && all[79].choices.empty() &&
+                  all[79].place == vr_settings::Place::tab,
               "COMBAT RESPONSIVE: a switch in the tab, after STEADY STATES");
         // perf: a line every 5 s, and at a fight's start and end.
         frame_stats::FrameStats f;
@@ -9912,7 +9913,7 @@ int main() {
         c.asks = 8;
         check(game_swing::valid(c) && game_swing::input(c).runJump && !game_swing::input(c).fighting,
               "asks bit 3 refused or lost");
-        c.asks = 16;
+        c.asks = 64;
         check(!game_swing::valid(c), "an unknown asks bit accepted");
         vr_settings::Values values;
         check(values.spidyRunJump && vr_settings::defaultChoice(vr_settings::Item::spidyRunJump) == 1 &&
@@ -9924,8 +9925,8 @@ int main() {
                   vr_settings::withTabOnly({}, "palm_shooters=1\n").palmShooters,
               "spidy_vr.ini's v6 keys");
         const auto& all = vr_settings::rows();
-        check(all[79].item == vr_settings::Item::spidyRunJump && all[80].item == vr_settings::Item::forearmAimLimit &&
-                  all[80].choices.size() == 4 && all[81].item == vr_settings::Item::palmShooters,
+        check(all[80].item == vr_settings::Item::spidyRunJump && all[81].item == vr_settings::Item::forearmAimLimit &&
+                  all[81].choices.size() == 4 && all[82].item == vr_settings::Item::palmShooters,
               "the v6 rows after COMBAT RESPONSIVE");
     });
     test("SOFT LANDING: a fall with no web eases to 9 m/s over its last metres; off, webs or walls, as before", [] {
@@ -10057,7 +10058,7 @@ int main() {
         Swing fresh(inert());
         check(!fresh.webLandingSmoothEnabled() && !fresh.landCarrying(), "SMOOTH WEB LANDING on by default");
         game_swing::Settings packet;
-        check(packet.version == 30 && packet.bytes == 144 && !packet.webLandingSmooth &&
+        check(packet.version == 31 && packet.bytes == 148 && !packet.webLandingSmooth &&
                   packet.webLandingImpact == 24 &&
                   offsetof(game_swing::Settings, webLandingSmooth) == game_swing::settingsBytesV29,
               "SMOOTH WEB LANDING not appended, or on by default");
@@ -10081,11 +10082,11 @@ int main() {
                   !vr_settings::withTabOnly({}, "").webLandingSmooth,
               "spidy_vr.ini keeps web_landing_smooth and web_landing_impact_speed, within range");
         const auto& all = vr_settings::rows();
-        check(all[75].item == vr_settings::Item::webLandingSmooth &&
-                  std::strcmp(all[75].title, "SMOOTH WEB LANDING") == 0 && all[75].choices.empty() &&
-                  all[76].item == vr_settings::Item::webLandingImpact &&
-                  std::strcmp(all[76].title, "WEB LANDING IMPACT") == 0 && all[76].choices.size() == 7 &&
-                  std::strcmp(all[76].choices[3], "24 M/S") == 0,
+        check(all[76].item == vr_settings::Item::webLandingSmooth &&
+                  std::strcmp(all[76].title, "SMOOTH WEB LANDING") == 0 && all[76].choices.empty() &&
+                  all[77].item == vr_settings::Item::webLandingImpact &&
+                  std::strcmp(all[77].title, "WEB LANDING IMPACT") == 0 && all[77].choices.size() == 7 &&
+                  std::strcmp(all[77].choices[3], "24 M/S") == 0,
               "SMOOTH WEB LANDING and WEB LANDING IMPACT: in the tab, after FOREARM BLEND");
     });
     test("SPIDY RUN: the wall run's momentum on the ground - entry, steering, decay to the sprint", [] {
@@ -10211,7 +10212,7 @@ int main() {
         Swing fresh(inert());
         check(!fresh.groundRunEnabled() && !fresh.groundRunning(), "SPIDY RUN on by default");
         game_swing::Settings packet;
-        check(packet.version == 30 && packet.bytes == 144 && !packet.spidyRun &&
+        check(packet.version == 31 && packet.bytes == 148 && !packet.spidyRun &&
                   offsetof(game_swing::Settings, spidyRun) == game_swing::settingsBytesV27,
               "SPIDY RUN not appended, or on by default");
         packet.spidyRun = 2;
@@ -10349,7 +10350,7 @@ int main() {
             check(!sw.groundRunning(), "the air started a run from standing");
         }
         game_swing::Settings packet;
-        check(packet.version == 30 && packet.bytes == 144 && !packet.spidyRunStanding &&
+        check(packet.version == 31 && packet.bytes == 148 && !packet.spidyRunStanding &&
                   offsetof(game_swing::Settings, spidyRunStanding) == game_swing::settingsBytesV28,
               "SPIDY RUN FROM STANDING not appended, or on by default");
         packet.spidyRunStanding = 2;
@@ -22883,7 +22884,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 30 && s.bytes == 144 && s.combatVisuals == 1 &&
+        check(s.version == 31 && s.bytes == 148 && s.combatVisuals == 1 &&
                   offsetof(Settings, combatVisuals) == 56,
               "free combat broke the settings defaults or layout");
         s.combatVisuals = 0;
@@ -22930,7 +22931,7 @@ int main() {
         check(withTabOnly(Values{}, "single_hand_yank_percent=999\n").singleHandYankPercent == 300,
               "saved single-hand yank strength was not clamped");
         game_swing::Settings packet;
-        check(packet.version == 30 && packet.bytes == 144 && !packet.halfPunchDamage &&
+        check(packet.version == 31 && packet.bytes == 148 && !packet.halfPunchDamage &&
                   packet.singleHandYankPercent == 100 &&
                   offsetof(game_swing::Settings, halfPunchDamage) == 96 &&
                   offsetof(game_swing::Settings, singleHandYankPercent) == 100,
@@ -23531,7 +23532,7 @@ int main() {
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
         // The realistic flips' rows come last, after the EXPERIMENTAL rows before them.
-        constexpr size_t firstRealistic = 82;
+        constexpr size_t firstRealistic = 83;
         check(all.size() == firstRealistic + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
             check(all[firstRealistic + i].item == realistic[i], "the realistic flips' rows out of order");
@@ -23543,12 +23544,15 @@ int main() {
         check(all[56].item == Item::webTie && std::strcmp(all[56].title, "WEB TIE") == 0 &&
                   all[56].choices.empty() && all[56].place == Place::tab,
               "WEB TIE: a switch in the tab after HALF PUNCH DAMAGE");
+        check(all[57].item == Item::webLines && std::strcmp(all[57].title, "WEB LINES") == 0 &&
+                  all[57].choices.empty() && all[57].place == Place::tab,
+              "WEB LINES: a switch in the tab after WEB TIE");
         // EYE AIM, before the realistic flips: what the eyes aim, off by default (only a headset that tracks
         // the eyes can).
-        check(all[57].item == Item::eyeAim && std::strcmp(all[57].title, "EYE AIM") == 0 &&
-                  all[57].choices.size() == 4 && std::strcmp(all[57].choices[0], "OFF") == 0 &&
-                  std::strcmp(all[57].choices[1], "WEB BALLS") == 0 && std::strcmp(all[57].choices[2], "ZIPS") == 0 &&
-                  std::strcmp(all[57].choices[3], "BOTH") == 0 && all[57].place == Place::tab,
+        check(all[58].item == Item::eyeAim && std::strcmp(all[58].title, "EYE AIM") == 0 &&
+                  all[58].choices.size() == 4 && std::strcmp(all[58].choices[0], "OFF") == 0 &&
+                  std::strcmp(all[58].choices[1], "WEB BALLS") == 0 && std::strcmp(all[58].choices[2], "ZIPS") == 0 &&
+                  std::strcmp(all[58].choices[3], "BOTH") == 0 && all[58].place == Place::tab,
               "EYE AIM: OFF, WEB BALLS, ZIPS, BOTH, in the tab before the realistic flips");
         {
             Values v;
@@ -23564,8 +23568,8 @@ int main() {
         }
         // FLIP REPROJECTION, after EYE AIM: a switch in the tab, off by default so the headset can compare
         // (the user, October 29), kept in spidy_vr.ini.
-        check(all[58].item == Item::flipReprojection && std::strcmp(all[58].title, "FLIP REPROJECTION") == 0 &&
-                  all[58].choices.empty() && all[58].place == Place::tab,
+        check(all[59].item == Item::flipReprojection && std::strcmp(all[59].title, "FLIP REPROJECTION") == 0 &&
+                  all[59].choices.empty() && all[59].place == Place::tab,
               "FLIP REPROJECTION: a switch in the tab, after EYE AIM");
         {
             Values v;
@@ -23579,8 +23583,8 @@ int main() {
         }
         // STEADY HUD, after EYE AIM: a switch in the tab, off by default to compare, kept in
         // spidy_vr.ini.
-        check(all[59].item == Item::steadyHud && std::strcmp(all[59].title, "STEADY HUD") == 0 &&
-                  all[59].choices.empty() && all[59].place == Place::tab,
+        check(all[60].item == Item::steadyHud && std::strcmp(all[60].title, "STEADY HUD") == 0 &&
+                  all[60].choices.empty() && all[60].place == Place::tab,
               "STEADY HUD: a switch in the tab, after EYE AIM");
         {
             Values v;
@@ -23593,53 +23597,53 @@ int main() {
         }
         // NATIVE RUN, after STEADY HUD and before the realistic flips: a switch in the tab, off by
         // default (the stick jogs as before), kept in spidy_vr.ini as native_run.
-        check(all[60].item == Item::nativeRun && std::strcmp(all[60].title, "NATIVE RUN") == 0 &&
-                  all[60].choices.empty() && all[60].place == Place::tab,
-              "NATIVE RUN: a switch in the tab, after STEADY HUD");
-        check(all[61].item == Item::airSlingshot && std::strcmp(all[61].title, "AIR SLINGSHOT") == 0 &&
+        check(all[61].item == Item::nativeRun && std::strcmp(all[61].title, "NATIVE RUN") == 0 &&
                   all[61].choices.empty() && all[61].place == Place::tab,
+              "NATIVE RUN: a switch in the tab, after STEADY HUD");
+        check(all[62].item == Item::airSlingshot && std::strcmp(all[62].title, "AIR SLINGSHOT") == 0 &&
+                  all[62].choices.empty() && all[62].place == Place::tab,
               "AIR SLINGSHOT: a switch in the tab, after NATIVE RUN");
-        check(all[62].item == Item::webAngle && std::strcmp(all[62].title, "WEB ANGLE") == 0 &&
-                  all[62].choices.size() == 7 && std::strcmp(all[62].choices[3], "0") == 0 &&
-                  all[62].place == Place::tab && all[63].item == Item::wristShooters &&
-                  std::strcmp(all[63].title, "WRIST SHOOTERS") == 0 && all[63].choices.empty() &&
-                  all[63].place == Place::tab,
+        check(all[63].item == Item::webAngle && std::strcmp(all[63].title, "WEB ANGLE") == 0 &&
+                  all[63].choices.size() == 7 && std::strcmp(all[63].choices[3], "0") == 0 &&
+                  all[63].place == Place::tab && all[64].item == Item::wristShooters &&
+                  std::strcmp(all[64].title, "WRIST SHOOTERS") == 0 && all[64].choices.empty() &&
+                  all[64].place == Place::tab,
               "WEB ANGLE and WRIST SHOOTERS: in the tab, after AIR SLINGSHOT");
-        check(all[64].item == Item::dodgeTumble && std::strcmp(all[64].title, "DODGE TUMBLE") == 0 &&
-                  all[64].choices.size() == 3 && std::strcmp(all[64].choices[0], "OFF") == 0 &&
-                  std::strcmp(all[64].choices[2], "ROLL") == 0 && all[64].place == Place::tab,
+        check(all[65].item == Item::dodgeTumble && std::strcmp(all[65].title, "DODGE TUMBLE") == 0 &&
+                  all[65].choices.size() == 3 && std::strcmp(all[65].choices[0], "OFF") == 0 &&
+                  std::strcmp(all[65].choices[2], "ROLL") == 0 && all[65].place == Place::tab,
               "DODGE TUMBLE: OFF, LEAN or ROLL in the tab, after WRIST SHOOTERS");
         // The run update's rows, after DODGE TUMBLE: RUN CURVE, NATIVE RUN AT (50 to 90%, 70 as before),
         // RUN LOGS.
-        check(all[65].item == Item::runCurve && std::strcmp(all[65].title, "RUN CURVE") == 0 &&
-                  all[65].choices.empty() && all[65].place == Place::tab &&
-                  all[66].item == Item::nativeRunAt && std::strcmp(all[66].title, "NATIVE RUN AT") == 0 &&
-                  all[66].choices.size() == 5 && std::strcmp(all[66].choices[2], "70%") == 0 &&
-                  all[66].place == Place::tab && all[67].item == Item::runLogs &&
-                  std::strcmp(all[67].title, "RUN LOGS") == 0 && all[67].choices.empty() &&
-                  all[67].place == Place::tab,
+        check(all[66].item == Item::runCurve && std::strcmp(all[66].title, "RUN CURVE") == 0 &&
+                  all[66].choices.empty() && all[66].place == Place::tab &&
+                  all[67].item == Item::nativeRunAt && std::strcmp(all[67].title, "NATIVE RUN AT") == 0 &&
+                  all[67].choices.size() == 5 && std::strcmp(all[67].choices[2], "70%") == 0 &&
+                  all[67].place == Place::tab && all[68].item == Item::runLogs &&
+                  std::strcmp(all[68].title, "RUN LOGS") == 0 && all[68].choices.empty() &&
+                  all[68].place == Place::tab,
               "RUN CURVE, NATIVE RUN AT and RUN LOGS: in the tab, after DODGE TUMBLE");
-        check(all[68].item == Item::momentumLeap && std::strcmp(all[68].title, "RUNNING LEAP") == 0 &&
-                  all[68].choices.empty() && all[68].place == Place::tab && all[69].item == Item::earlyJump &&
-                  std::strcmp(all[69].title, "EARLY JUMP") == 0 && all[69].choices.size() == 3 &&
-                  std::strcmp(all[69].choices[0], "OFF") == 0 && std::strcmp(all[69].choices[2], "RUNNING") == 0 &&
-                  all[69].place == Place::tab,
+        check(all[69].item == Item::momentumLeap && std::strcmp(all[69].title, "RUNNING LEAP") == 0 &&
+                  all[69].choices.empty() && all[69].place == Place::tab && all[70].item == Item::earlyJump &&
+                  std::strcmp(all[70].title, "EARLY JUMP") == 0 && all[70].choices.size() == 3 &&
+                  std::strcmp(all[70].choices[0], "OFF") == 0 && std::strcmp(all[70].choices[2], "RUNNING") == 0 &&
+                  all[70].place == Place::tab,
               "RUNNING LEAP and EARLY JUMP (OFF, QUICK TAP, RUNNING): in the tab, after RUN LOGS");
-        check(all[70].item == Item::softLanding && std::strcmp(all[70].title, "SOFT LANDING") == 0 &&
-                  all[70].choices.empty() && all[70].place == Place::tab,
-              "SOFT LANDING: a switch in the tab, after EARLY JUMP");
-        check(all[71].item == Item::spidyRun && std::strcmp(all[71].title, "SPIDY RUN") == 0 &&
+        check(all[71].item == Item::softLanding && std::strcmp(all[71].title, "SOFT LANDING") == 0 &&
                   all[71].choices.empty() && all[71].place == Place::tab,
+              "SOFT LANDING: a switch in the tab, after EARLY JUMP");
+        check(all[72].item == Item::spidyRun && std::strcmp(all[72].title, "SPIDY RUN") == 0 &&
+                  all[72].choices.empty() && all[72].place == Place::tab,
               "SPIDY RUN: a switch in the tab, after SOFT LANDING");
-        check(all[72].item == Item::spidyRunFromStanding &&
-                  std::strcmp(all[72].title, "RUN FROM STANDING") == 0 && all[72].choices.empty() &&
-                  all[72].place == Place::tab,
+        check(all[73].item == Item::spidyRunFromStanding &&
+                  std::strcmp(all[73].title, "RUN FROM STANDING") == 0 && all[73].choices.empty() &&
+                  all[73].place == Place::tab,
               "RUN FROM STANDING: a switch in the tab, after SPIDY RUN");
-        check(all[73].item == Item::webAimSource && std::strcmp(all[73].title, "WEB AIM") == 0 &&
-                  all[73].choices.size() == 2 && std::strcmp(all[73].choices[1], "MODEL FOREARM") == 0 &&
-                  all[73].place == Place::tab && all[74].item == Item::forearmBlend &&
-                  std::strcmp(all[74].title, "FOREARM BLEND") == 0 && all[74].choices.size() == 5 &&
-                  std::strcmp(all[74].choices[4], "100%") == 0 && all[74].place == Place::tab,
+        check(all[74].item == Item::webAimSource && std::strcmp(all[74].title, "WEB AIM") == 0 &&
+                  all[74].choices.size() == 2 && std::strcmp(all[74].choices[1], "MODEL FOREARM") == 0 &&
+                  all[74].place == Place::tab && all[75].item == Item::forearmBlend &&
+                  std::strcmp(all[75].title, "FOREARM BLEND") == 0 && all[75].choices.size() == 5 &&
+                  std::strcmp(all[75].choices[4], "100%") == 0 && all[75].place == Place::tab,
               "WEB AIM and FOREARM BLEND: in the tab, after RUN FROM STANDING");
         {
             Values v;
@@ -23739,7 +23743,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 88,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 89,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -23798,6 +23802,31 @@ int main() {
         check(tabOnlyText(v).find("reel_haptics=1\n") != std::string::npos &&
                   withTabOnly({}, "reel_haptics=1\n").reelHaptics && !withTabOnly({}, "reel_haptics=0\n").reelHaptics,
               "spidy_vr.ini does not keep REEL HAPTICS as reel_haptics");
+    });
+    test("WEB LINES: off by default, a switch kept as web_lines, sent in swing settings version 31", [] {
+        using namespace vr_settings;
+        Values v;
+        check(!v.webLines && defaultChoice(Item::webLines) == 0, "web lines on by default");
+        check(choose(Item::webLines, 1, v) && v.webLines && choice(Item::webLines, v) == 1, "not switched on");
+        check(tabOnlyText(v).find("web_lines=1\n") != std::string::npos &&
+                  withTabOnly({}, "web_lines=1\n").webLines && !withTabOnly({}, "web_lines=0\n").webLines &&
+                  !withTabOnly({}, "web_tie=1\n").webLines,
+              "spidy_vr.ini does not keep WEB LINES as web_lines");
+        game_swing::Settings s;
+        check(!s.webLines && offsetof(game_swing::Settings, webLines) == game_swing::settingsBytesV30 &&
+                  s.version == 31 && s.bytes == sizeof(game_swing::Settings),
+              "web lines on in a new packet, or not appended");
+        s.webLines = 1;
+        check(game_swing::validSettings(s), "a packet with web lines refused");
+        s.webLines = 2;
+        check(!game_swing::validSettings(s), "an invalid web lines switch accepted");
+        s = {};
+        s.version = 30;
+        s.bytes = game_swing::settingsBytesV30;
+        check(game_swing::validSettings(s), "a version 30 packet (no web lines) refused");
+        s.version = 23;
+        s.bytes = game_swing::settingsBytesV23;
+        check(game_swing::validSettings(s), "a version 23 packet (no web lines) refused");
     });
     test("WEB TIE: off by default, a switch kept as web_tie, sent in swing settings version 23", [] {
         using namespace vr_settings;
@@ -23998,7 +24027,7 @@ int main() {
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
                   "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
                   "degrees=0\nwrist_shooters=0\n"
-                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\nsteady_states=0\ncombat_responsive=0\nspidy_run_jump=1\nforearm_aim_limit=180\npalm_shooters=0\n",
+                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\nsteady_states=0\ncombat_responsive=0\nspidy_run_jump=1\nforearm_aim_limit=180\npalm_shooters=0\nweb_lines=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;
@@ -26390,12 +26419,340 @@ int main() {
         c.serial = 1;
         c.focused = 1;
         c.tilt = Quat{};
-        for (const uint32_t asks : {0u, 1u, 2u, 3u}) {
+        for (uint32_t asks = 0; asks < 64; ++asks) {
             c.asks = asks;
-            check(game_swing::valid(c), "a command with the tie's click was refused (2001)");
+            check(game_swing::valid(c), "a command with the tie's click, a zip or a dodge was refused (2001)");
         }
-        c.asks = 16;
+        c.asks = 64;
         check(!game_swing::valid(c), "an unknown ask was accepted");
+    });
+    // Web lines (web_line.hpp): both hands' webs on surfaces, hands together, the click.
+    auto lineHands = [](Vec3 a, Vec3 b, float apart) {
+        std::array<LineHand, 2> h{};
+        h[0] = {true, {-apart / 2, -.4f, -.3f}, true, a, false};
+        h[1] = {true, {apart / 2, -.4f, -.3f}, true, b, false};
+        return h;
+    };
+    test("web line: two webs on surfaces, hands together, a click makes a line between them", [&] {
+        LineGesture g;
+        const auto h = lineHands({0, 6, -20}, {3, 2, -1}, .1f);
+        check(!g.update(1 / 90.f, false, h) && g.armed(), "the gesture was not armed");
+        const auto r = g.update(1 / 90.f, true, h);
+        check(r && r->start.z == -20 && r->end.z == -1, "the click made no line");
+        check(!g.update(1 / 90.f, true, h), "a click held made a second line");
+    });
+    test("web line: no line with a target on a web, hands apart, one web in the air, or too short or long", [&] {
+        LineGesture g;
+        auto held = lineHands({0, 6, -20}, {3, 2, -1}, .1f);
+        held[1].grabbing = true;
+        check(!g.update(1 / 90.f, true, held) && !g.armed(), "a line with a target on a web");
+        g.update(1 / 90.f, false, held);
+        check(!g.update(1 / 90.f, true, lineHands({0, 6, -20}, {3, 2, -1}, .6f)), "a line with hands apart");
+        g.update(1 / 90.f, false, held);
+        auto air = lineHands({0, 6, -20}, {3, 2, -1}, .1f);
+        air[0].wallWeb = false;
+        check(!g.update(1 / 90.f, true, air), "a line from a web in the air");
+        g.update(1 / 90.f, false, air);
+        check(!g.update(1 / 90.f, true, lineHands({0, 2, -1}, {.5f, 2, -1}, .1f)), "a line under 1.5 m");
+        g.update(1 / 90.f, false, air);
+        check(!g.update(1 / 90.f, true, lineHands({0, 2, -60}, {0, 2, 0}, .1f)), "a line over 40 m");
+    });
+    test("web line: six at once, the oldest gives way; old or far lines go", [&] {
+        WebLines lines;
+        for (int i = 0; i < 7; ++i)
+            check(lines.add({0, 5, float(-10 * i)}, {10, 5, float(-10 * i)}), "a line was refused");
+        check(lines.lines().size() == 6 && lines.lines()[0].id == 2 && lines.expired() == 1,
+              "the oldest did not give way");
+        check(!lines.add({0, 0, 0}, {.5f, 0, 0}) && !lines.add({0, 0, 0}, {50, 0, 0}), "a bad line was taken");
+        lines.step(3600, {0, 0, 0});
+        lines.step(1, {0, 0, 400});
+        check(lines.lines().size() == 6, "lines went by age, or 400 m away");
+        lines.step(1, {0, 0, 700});
+        check(lines.lines().empty() && lines.made() == 7, "lines 700 m from the player stayed");
+    });
+    test("web line: a line on a line goes with it; the line the player is on never goes", [&] {
+        WebLines lines;
+        lines.add({0, 5, 0}, {10, 5, 0});                  // 1, on walls
+        lines.add({5, 5, 0}, {5, 5, -10}, 1, 0);           // 2, its start on line 1
+        lines.add({5, 5, -6}, {12, 5, -6}, 2, 0);          // 3, on line 2
+        for (int i = 0; i < 3; ++i)
+            lines.add({0, 9, float(-10 * i)}, {10, 9, float(-10 * i)});
+        check(lines.lines().size() == 6, "lines missing");
+        // A seventh: the oldest, line 1, goes, and lines 2 and 3 on it with it.
+        lines.add({0, 12, 0}, {10, 12, 0});
+        check(std::none_of(lines.lines().begin(), lines.lines().end(),
+                           [](const WebLineSpan& l) { return l.id <= 3; }),
+              "a line on a line that went stayed in the air");
+        check(lines.lines().size() == 4 && lines.expired() == 3, "the wrong lines went");
+        // The player on line 9 (on line 8): the limit takes neither, nor do age or distance.
+        WebLines kept;
+        for (int i = 0; i < 6; ++i)
+            kept.add({0, 5, float(-10 * i)}, {10, 5, float(-10 * i)});
+        kept.add({5, 5, 0}, {5, 9, 0}, 1, 0, 1); // line 7, on line 1, the player on 1: 2 goes
+        check(std::any_of(kept.lines().begin(), kept.lines().end(), [](const WebLineSpan& l) { return l.id == 1; }) &&
+                  std::none_of(kept.lines().begin(), kept.lines().end(), [](const WebLineSpan& l) { return l.id == 2; }),
+              "the limit took the line the player was on");
+        kept.step(500, {0, 0, 2000}, 7);
+        check(kept.lines().size() == 2, "age or distance took the line the player was on, or the one it is on");
+    });
+    test("web line: a ray meets a line within its radius, the nearest first", [&] {
+        WebLines lines;
+        lines.add({-5, 3, -10}, {5, 3, -10});
+        lines.add({-5, 3, -6}, {5, 3, -6});
+        const auto hit = lines.raycast({0, 3.05f, 0}, {0, 0, -1}, 30);
+        check(hit && hit->id == 2, "the ray did not meet the nearer line");
+        near(hit->point.z, -6);
+        near(hit->distance, 6);
+        check(!lines.raycast({0, 3.5f, 0}, {0, 0, -1}, 30), "a ray half a metre off met a line");
+        check(!lines.raycast({0, 3, 0}, {0, 0, -1}, 5), "a ray short of the line met it");
+        check(!lines.raycast({6, 3, 0}, {0, 0, -1}, 30), "a ray past a line's end met it");
+        near(nearestOnSegment({0, 0, 0}, {10, 0, 0}, {4, 3, 0}).x, 4);
+        near(nearestOnSegment({0, 0, 0}, {10, 0, 0}, {14, 3, 0}).x, 10);
+    });
+    test("web line zip: the line point the head looks at is the target, within its cone and reach", [&] {
+        WebLines lines;
+        lines.add({-10, 6, -15}, {10, 6, -15});
+        const auto hit = lineTarget(lines.lines(), {0, 1.7f, 0}, normalized(Vec3{.2f, .28f, -1}));
+        check(hit && hit->id == 1, "the line looked at was not the target");
+        near(hit->point.y, 6);
+        check(std::abs(hit->point.x - 3) < .8f, "the target was not where the head looks");
+        check(!lineTarget(lines.lines(), {0, 1.7f, 0}, {0, 0, 1}), "a line behind the head was the target");
+        check(!lineTarget(lines.lines(), {0, 1.7f, 0}, normalized(Vec3{1, 0, -.2f})), "a line far aside was the target");
+        check(!lineTarget(lines.lines(), {0, 1.7f, -80}, {0, 0, 1}), "a line out of reach was the target");
+    });
+    // A body moved by what a zip asks of it, at 60 steps a second.
+    auto zipRun = [&](LineZip& zip, const WebLineSpan& line, Vec3& p, Vec3& v, float seconds, Vec3 move = {},
+                      bool jump = false, bool* arrived = nullptr) {
+        for (float t = 0; t < seconds; t += 1 / 60.f) {
+            const auto s = zip.step(1 / 60.f, p, v, false, &line, move, jump);
+            if (arrived)
+                *arrived = *arrived || s.arrived;
+            if (!s.drive)
+                return;
+            v = s.velocity;
+            p = p + v * (1 / 60.f);
+        }
+    };
+    const WebLineSpan zipLine{1, {-5, 6, -15}, {15, 6, -15}, 0};
+    test("web line zip: off the ground to the line, onto its perch, held there", [&] {
+        LineZip zip;
+        zip.start({1, {3, 6, -15}});
+        Vec3 p{0, 1, 0}, v{};
+        auto s = zip.step(1 / 60.f, p, v, true, &zipLine);
+        check(!s.drive && zip.phase() == LineZip::Phase::Flying, "the zip moved a body still on the ground");
+        float fastest = 0, t = 0;
+        bool arrived = false;
+        for (; t < 3 && !arrived; t += 1 / 60.f) {
+            s = zip.step(1 / 60.f, p, v, false, &zipLine);
+            arrived = s.arrived;
+            v = s.velocity;
+            p = p + v * (1 / 60.f);
+            fastest = std::max(fastest, length(v));
+        }
+        check(arrived && t < 1.6f, "the zip did not arrive in time");
+        check(fastest <= 24.5f, "the zip flew too fast");
+        check(length(p - Vec3{3, 7, -15}) < .35f, "the zip did not end on its perch");
+        p = p + Vec3{0, -.4f, .3f};
+        zipRun(zip, zipLine, p, v, 2);
+        check(zip.phase() == LineZip::Phase::Perched && length(p - Vec3{3, 7, -15}) < .05f,
+              "the perch did not hold the body");
+        check(!zip.step(1 / 60.f, p, v, false, nullptr).drive && zip.phase() == LineZip::Phase::Idle,
+              "a perch on a line that went held on");
+        check(zip.zips() == 1 && zip.perches() == 1, "zips or perches miscounted");
+    });
+    test("web line zip: a far one as a web zip - the web shot first, then an arc onto the line, faster for far", [&] {
+        const WebLineSpan far{2, {-10, 8, -40}, {10, 8, -40}, 0};
+        LineZip zip;
+        zip.start({2, {0, 8, -40}});
+        Vec3 p{0, 1, 0}, v{0, 0, -1};
+        const float dt = 1 / 60.f;
+        float t = 0, highest = -1e9f, fastest = 0;
+        bool arrived = false, heldBack = true;
+        for (; t < 4 && !arrived; t += dt) {
+            const auto s = zip.step(dt, p, v, false, &far);
+            arrived = s.arrived;
+            if (t < .1f)
+                heldBack = heldBack && !s.drive; // the web is still on its way
+            if (s.drive)
+                v = s.velocity;
+            else
+                v = v + Vec3{0, -9.81f * dt, 0};
+            p = p + v * dt;
+            // Above the straight line from the start to the perch (y 1 to 9 over z 0 to -40).
+            const float along = std::clamp(-p.z / 40, 0.f, 1.f);
+            highest = std::max(highest, p.y - (1 + along * 8));
+            fastest = std::max(fastest, length(v));
+        }
+        check(heldBack, "the pull came before its web was out");
+        check(arrived && t < 3.5f, "a far zip did not arrive");
+        check(highest > .8f, "a far zip went straight, with no arc");
+        check(fastest > 18 && fastest <= 24.5f, "a far zip was not faster, or too fast");
+    });
+    test("web line walk: the stick walks along the line, never off its ends, the stick across it nowhere", [&] {
+        LineZip zip;
+        zip.start({1, {3, 6, -15}});
+        Vec3 p{3, 7, -15}, v{};
+        zipRun(zip, zipLine, p, v, .2f);
+        check(zip.phase() == LineZip::Phase::Perched, "not on the line");
+        zipRun(zip, zipLine, p, v, 1, {1, 0, 0});
+        check(p.x > 5.5f && p.x < 7.5f && std::abs(p.y - 7) < .1f && std::abs(p.z + 15) < .1f,
+              "the walk did not go along the line at its height");
+        zipRun(zip, zipLine, p, v, 1, {0, 0, 1});
+        check(std::abs(p.z + 15) < .1f, "the stick across the line took the body off it");
+        zipRun(zip, zipLine, p, v, 6, {1, 0, 0});
+        check(zip.phase() == LineZip::Phase::Perched && p.x < 15 && p.x > 14 && std::abs(p.y - 7) < .1f,
+              "the walk went past the line's end");
+    });
+    test("web line walk by the game: on the line within its slack, not across it, not past an end", [&] {
+        LineZip zip;
+        zip.start({1, {3, 6, -15}});
+        Vec3 p{3, 7, -15}, v{};
+        zipRun(zip, zipLine, p, v, .2f);
+        check(zip.gameWalk(p, {1, 0, 0}, zipLine), "the game may not walk him along the line");
+        check(!zip.gameWalk(p, {0, 0, 1}, zipLine), "the game may walk him across the line");
+        check(!zip.gameWalk(p + Vec3{0, 0, .7f}, {1, 0, 0}, zipLine), "the game may walk him off the line");
+        check(!zip.gameWalk({14.8f, 7, -15}, {1, 0, 0}, zipLine), "the game may walk him past its end");
+        check(zip.gameWalk({14.8f, 7, -15}, {-1, 0, 0}, zipLine), "the game may not walk him back from its end");
+        // Walked by the game, the line follows him, and holds him where he got to.
+        zip.follow({8, 7.05f, -15.1f}, zipLine);
+        p = {8, 7.05f, -15.1f};
+        zipRun(zip, zipLine, p, v, 1);
+        check(std::abs(p.x - 8) < .1f && std::abs(p.z + 15) < .05f && std::abs(p.y - 7) < .05f,
+              "the line did not hold him where the game walked him");
+    });
+    test("web line dodge: a dash along the line, the way it is asked, and on it still", [&] {
+        LineZip zip;
+        zip.start({1, {3, 6, -15}});
+        Vec3 p{3, 7, -15}, v{};
+        zipRun(zip, zipLine, p, v, .2f);
+        zip.dash({-1, 0, .3f});
+        zipRun(zip, zipLine, p, v, .5f);
+        check(p.x < 0.5f && p.x > -2 && std::abs(p.y - 7) < .1f && zip.phase() == LineZip::Phase::Perched,
+              "the dodge did not dash along the line, or left it");
+        zip.dash({1, 0, 0});
+        zipRun(zip, zipLine, p, v, .5f);
+        check(p.x > 1.5f && zip.dashes() == 2, "a second dodge did not dash the other way");
+    });
+    test("web line jump: up and down on the line again; off to the side, a fall", [&] {
+        LineZip zip;
+        zip.start({1, {3, 6, -15}});
+        Vec3 p{3, 7, -15}, v{};
+        zipRun(zip, zipLine, p, v, .2f);
+        bool landed = false;
+        zipRun(zip, zipLine, p, v, 1 / 60.f, {}, true);
+        check(zip.phase() == LineZip::Phase::Jumping, "the jump did not leave the line");
+        float highest = p.y;
+        for (int i = 0; i < 120 && zip.phase() == LineZip::Phase::Jumping; ++i) {
+            zipRun(zip, zipLine, p, v, 1 / 60.f, {}, true, &landed);
+            highest = std::max(highest, p.y);
+        }
+        check(highest > 8 && landed && zip.phase() == LineZip::Phase::Perched && std::abs(p.y - 7) < .45f,
+              "the jump did not come down on the line");
+        zipRun(zip, zipLine, p, v, .5f); // let go of the jump, settle
+        zipRun(zip, zipLine, p, v, 1 / 60.f, {0, 0, 1}, true);
+        for (int i = 0; i < 180 && zip.phase() == LineZip::Phase::Jumping; ++i)
+            zipRun(zip, zipLine, p, v, 1 / 60.f, {0, 0, 1}, true);
+        check(zip.phase() == LineZip::Phase::Idle && zip.jumps() == 2 && zip.landings() == 1,
+              "a jump off to the side did not fall");
+        // Off to the side, the line lets go as soon as the jump comes down with no
+        // line under it - not 0.8 m under it - and it fell at the swing's gravity.
+        LineZip heavy;
+        heavy.setGravity(20);
+        heavy.start({1, {3, 6, -15}});
+        Vec3 q{3, 7, -15}, w{};
+        zipRun(heavy, zipLine, q, w, .2f);
+        float lowest = 1e9f, fastestDown = 0;
+        Vec3 last{};
+        zipRun(heavy, zipLine, q, w, 1 / 60.f, {0, 0, 1}, true);
+        for (int i = 0; i < 180 && heavy.phase() == LineZip::Phase::Jumping; ++i) {
+            last = w;
+            zipRun(heavy, zipLine, q, w, 1 / 60.f, {0, 0, 1}, true);
+            lowest = std::min(lowest, q.y);
+            fastestDown = std::max(fastestDown, -w.y);
+        }
+        check(heavy.phase() == LineZip::Phase::Idle && lowest > 6.4f, "the line held a jump off the side too long");
+        (void)last;
+        (void)fastestDown;
+        // A jump falls at the swing's gravity: its upward speed goes by g a second.
+        LineZip weighed;
+        weighed.setGravity(20);
+        weighed.start({1, {3, 6, -15}});
+        Vec3 r{3, 7, -15}, u{};
+        zipRun(weighed, zipLine, r, u, .2f);
+        zipRun(weighed, zipLine, r, u, 1 / 60.f, {}, true);
+        const float before = u.y;
+        zipRun(weighed, zipLine, r, u, 6 / 60.f, {}, true);
+        near(before - u.y, 20 * 6 / 60.f);
+    });
+    test("web line zip: a flight not there in time lets go", [&] {
+        LineZip zip;
+        zip.start({1, {0, 6, -15}});
+        for (int i = 0; i < 200; ++i)
+            zip.step(1 / 60.f, {0, 1, 0}, {}, false, &zipLine); // the body never moves
+        check(zip.phase() == LineZip::Phase::Idle, "a stuck zip held on");
+        LineZip grounded;
+        grounded.start({1, {0, 6, -15}});
+        for (int i = 0; i < 70; ++i)
+            grounded.step(1 / 60.f, {0, 1, 0}, {}, true, &zipLine); // the jump never comes
+        check(grounded.phase() == LineZip::Phase::Idle, "a zip waiting on a jump that never came held on");
+    });
+    test("web line aim: held it aims, let go it zips; a gesture's click never does, before or after", [&] {
+        LineAim aim;
+        const float dt = 1 / 60.f;
+        auto hold = [&](float seconds, bool armed = false, bool took = false) {
+            LineAim::State last{};
+            for (float t = 0; t < seconds; t += dt)
+                last = aim.update(dt, true, armed, took);
+            return last;
+        };
+        check(!hold(.1f).aiming, "aiming before the hold");
+        check(hold(.3f).aiming, "no aim after the hold");
+        check(aim.update(dt, false, false, false).zip, "no zip on letting go after aiming");
+        check(!aim.update(dt, false, false, false).zip, "a second zip with nothing held");
+        // A short click: no aim, no zip.
+        hold(.1f);
+        check(!aim.update(dt, false, false, false).zip, "a short click zipped");
+        // A gesture's click (made with it): never aims.
+        aim.update(dt, true, false, true);
+        check(!hold(.5f).aiming && !aim.update(dt, false, false, false).zip, "a gesture's click aimed or zipped");
+        // And the next press after it aims as before (November 3, 17:13: after a
+        // line was made, no press aimed again).
+        check(hold(.4f).aiming && aim.update(dt, false, false, false).zip, "no aim after a gesture's click");
+        // Armed as it goes down: the gesture's.
+        aim.update(dt, true, true, false);
+        check(!hold(.5f).aiming, "a press a gesture was armed for aimed");
+        aim.update(dt, false, false, false);
+        check(hold(.4f).aiming, "no aim after an armed press");
+    });
+    test("web line world: webs meet a line before the wall behind it, not one under the feet", [&] {
+        struct Wall final : WorldQueries {
+            std::optional<RayHit> raycast(Vec3 o, Vec3 d, float dist) const override {
+                // A wall at z = -20.
+                if (d.z >= -1e-3f)
+                    return {};
+                const float t = (-20 - o.z) / d.z;
+                if (t < 0 || t > dist)
+                    return {};
+                return RayHit{o + d * t, {0, 0, 1}, 7, true};
+            }
+            bool exists(std::uint64_t s) const override {
+                return s == 7;
+            }
+        } wall;
+        WebLines lines;
+        lines.add({-5, 3, -10}, {5, 3, -10});
+        const LineWorld world(wall, lines);
+        const auto hit = world.raycast({0, 3, 0}, {0, 0, -1}, 50);
+        check(hit && (hit->surface & lineSurfaceMask) == lineSurface && std::abs(hit->point.z + 10) < .01f,
+              "the web went through the line");
+        check(world.exists(hit->surface) && world.exists(7), "a line's or the wall's surface did not exist");
+        check(!world.bodyRaycast({0, 3, 0}, {0, 0, -1}, 15), "the body met a line");
+        const auto past = world.raycast({0, 5, 0}, {0, 0, -1}, 50);
+        check(past && past->surface == 7, "a web over the line did not reach the wall");
+        // Standing on the line: a web aimed down through it goes on.
+        check(!world.raycast({0, 4.3f, -10}, {0, -1, 0}, 30), "a web aimed down met the line under the feet");
+        lines.clear();
+        check(!world.exists(hit->surface), "a line that went still existed");
     });
     test("web tie: hands together on a wall web and a webbed-up enemy, a click ties him", [&] {
         TieGesture g;
@@ -26674,8 +27031,8 @@ int main() {
                   !vr_settings::withTabOnly({}, "").steadyStates,
               "spidy_vr.ini keeps steady_states");
         const auto& all = vr_settings::rows();
-        check(all[77].item == vr_settings::Item::steadyStates && std::strcmp(all[77].title, "STEADY STATES") == 0 &&
-                  all[77].choices.empty() && all[77].place == vr_settings::Place::tab,
+        check(all[78].item == vr_settings::Item::steadyStates && std::strcmp(all[78].title, "STEADY STATES") == 0 &&
+                  all[78].choices.empty() && all[78].place == vr_settings::Place::tab,
               "STEADY STATES: a switch in the tab, after WEB LANDING IMPACT");
     });
     test("state changes: a line at each landing and take-off, why and how fast; a flapping state summed up", [] {

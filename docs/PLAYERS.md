@@ -904,6 +904,16 @@ VR settings
                    Both controllers tick when it is ready. While it is on,
                    a webbed enemy comes to you only when you yank him; off,
                    as before.
+  WEB LINES ...... in EXPERIMENTAL after WEB TIE, off by default. Put one
+                   web on a wall (a post, a crane, another line) and the
+                   other on another, bring your hands together and click
+                   the right stick: a taut line of web between them, six at
+                   most. Hold the right stick's click to aim at a line (a
+                   ring marks the point) and let go to zip onto it; the left
+                   stick walks you along it, A jumps, B dashes along it, and
+                   a web, the game's zip (stick up) or a web strike takes
+                   you off it. With WEB TIE on too, a webbed-up enemy tied to
+                   a line hangs under it.
   EXPERIMENTAL ... FLIPS (off until you switch it on) uses the right stick
                    in the air; release holds the angle and A returns upright.
                    CONTROLLED FLIPS is a separate A-toggle mode, above.
@@ -912,7 +922,8 @@ VR settings
                    uses a fixed wall-camera clearance. EYE AIM (OFF unless
                    you pick WEB BALLS, ZIPS or BOTH; below). FLIP
                    REPROJECTION (off until you switch it on; below).
-                   WEB TIE (off until you switch it on, above).
+                   WEB TIE and WEB LINES (off until you switch them on,
+                   above).
                    REALISTIC FLIPS (off until you switch it on, above) and
                    the ten rows that tune it.
   EYE AIM ........ for a headset whose VR runtime gives games your eyes

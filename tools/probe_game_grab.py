@@ -116,8 +116,52 @@ def web_request(feet, wrist, anchor, attached, attached_at):
     return raw+struct.pack('<2Iq6f', 0, 0, 0, *([0.]*6))+struct.pack('<If3f4x', 0, 0, 0, 0, 0)
 
 
-TIE_SIZE = 352
+TIE_SIZE = 872
 STATE_LOG_SIZE, STATE_ENTRY, STATE_ENTRIES, STATE_MARK, STATE_MARKS = 97840, 488, 192, 64, 64
+
+
+LINE_SIZE, LINE_ROPE_SIZE = 384, 96
+
+
+def line_snapshot(game, address):
+    """Web lines (game_lines::LineData): lines made and gone, the gesture's readiness, and each line."""
+    for _ in range(8):
+        raw = game.read(address, LINE_SIZE)
+        if len(raw) != LINE_SIZE:
+            return None
+        if struct.unpack_from('<3I', raw) != (0x534c494e, 5, LINE_SIZE):
+            raise RuntimeError('Line protocol mismatch')
+        if struct.unpack_from('<q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
+            continue
+        made, expired, zips, perches, jumps, landings = struct.unpack_from('<6Q', raw, 24)
+        count, armed = struct.unpack_from('<2I', raw, 72)
+        lines = []
+        for i in range(min(count, 8)):
+            o = 80 + i*32
+            v = struct.unpack_from('<6f', raw, o)
+            line_id, age = struct.unpack_from('<If', raw, o+24)
+            lines.append(dict(id=line_id, age=round(age, 1), start=[round(x, 2) for x in v[:3]],
+                              end=[round(x, 2) for x in v[3:]]))
+        target = [round(x, 2) for x in struct.unpack_from('<3f', raw, 336)]
+        target_id, phase = struct.unpack_from('<2I', raw, 348)
+        return dict(status=struct.unpack_from('<I', raw, 12)[0], made=made, expired=expired, armed=armed,
+                    zips=zips, perches=perches, jumps=jumps, landings=landings, target=target if target_id else None, target_id=target_id,
+                    phase=phase, lines=lines)
+    return None
+
+
+def line_rope_snapshot(game, address):
+    """The game's ropes for web lines (native_webs::LineRopeData): whether the game drew them from their start."""
+    raw = game.read(address, LINE_ROPE_SIZE)
+    if len(raw) != LINE_ROPE_SIZE:
+        return None
+    if struct.unpack_from('<3I', raw) != (0x534c5250, 2, LINE_ROPE_SIZE):
+        raise RuntimeError('Line rope protocol mismatch')
+    keys = ('made', 'released', 'hidden', 'checks', 'good', 'bad', 'moves', 'shared')
+    d = dict(zip(keys, struct.unpack_from('<8Q', raw, 24)))
+    d['last_off'], d['worst_off'] = (round(x, 3) for x in struct.unpack_from('<2f', raw, 88))
+    d['status'] = struct.unpack_from('<I', raw, 12)[0]
+    return d
 
 
 def state_log_snapshot(game, address):
@@ -164,7 +208,7 @@ def tie_snapshot(game, address):
         raw = game.read(address, TIE_SIZE)
         if len(raw) != TIE_SIZE:
             return None
-        if struct.unpack_from('<3I', raw) != (0x53544945, 3, TIE_SIZE):
+        if struct.unpack_from('<3I', raw) != (0x53544945, 5, TIE_SIZE):
             raise RuntimeError('Tie protocol mismatch')
         if struct.unpack_from('<q', raw, 16)[0] & 1 or raw[16:24] != game.read(address+16, 8):
             continue
@@ -182,6 +226,13 @@ def tie_snapshot(game, address):
                                   distance=round(struct.unpack_from('<f', raw, o+24)[0], 2),
                                   flying=bool(flags & 1), mover=bool(flags & 2), arrived=bool(flags & 4),
                                   touched=bool(flags & 8), down=bool(flags & 16)))
+        hang_count = struct.unpack_from('<I', raw, 352)[0]
+        d['hangs'] = []
+        for i in range(min(hang_count, 16)):
+            o = 360 + i*32
+            d['hangs'].append(dict(top=[round(v, 2) for v in struct.unpack_from('<3f', raw, o)],
+                                   head=[round(v, 2) for v in struct.unpack_from('<3f', raw, o+12)],
+                                   line=struct.unpack_from('<I', raw, o+24)[0]))
         return d
     return None
 

@@ -3,7 +3,39 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (November 6): pull request #77 by tyronmiller55-spec -
+**Latest build (November 6): pull request #79 by HaNToP - WEB LINES, a
+taut web between two walls.** WEB LINES (SPIDY VR > EXPERIMENTAL after WEB
+TIE, off by default; `web_lines` in spidy_vr.ini and profiles; the
+launcher's Webs card): one web on a wall and the other on another (a post, a
+crane, another line), hands together, click the right stick: a line of web
+between them, drawn in the game's own rope, six at most. Hold the right
+stick's click to aim at a line (a turning ring marks the point) and let go to
+zip onto it; walk along it with the game's own walk and legs, jump and land
+on it again, B dashes along it, swing from it; a web, the game's zip and a
+web strike take you off it. With WEB TIE on too, webbed-up enemies hang
+under a line on strands and fall when it goes. How it works:
+[WEB-LINE.md](WEB-LINE.md). HaNToP played it on a Quest 3 over Virtual
+Desktop, with session reports and videos.
+
+- **Review (November 6): off, nothing of it runs.** The line's support hooks
+  the mover's contact classification (1fbd460) so the game takes the player
+  as standing on a line; that hook went in at every motion start, for every
+  player. It is made and enabled now only at the first command that asks for
+  support (a player on a line), once a start, and disabled at the stop
+  (`native_movement.cpp` `requestSupport`).
+- **WEB TIE as before with WEB LINES off.** The tie's gesture looked along
+  every web on a surface (a ray per web, every step) and no longer took a web
+  under a metre long as its wall; with lines off it looks only along the web
+  beside a webbed-up enemy again, and a short web's end counts as before.
+- **After pull request #77.** Swing settings version 31 (`webLines`; 24 in
+  the pull request), `Command::asks` bits 4 (the game's zip from a line) and
+  5 (B on a line; 2 and 3 in the pull request, which #77's COMBAT
+  RESPONSIVE and SPIDY RUN JUMP had taken), the row before EYE AIM, the
+  Item and the keys after #77's. The session report gains `line_samples`,
+  `line_ropes`, `support` and STEADY HUD's `hud_coverage`; the tie data is
+  version 5 (thugs hung from lines).
+
+**Earlier build (November 6): pull request #77 by tyronmiller55-spec -
 running, landing, jumping and web aim, 22 new rows, all off by default.** The
 pull request is the contributor's stacked #59-#76 in one: NATIVE RUN (the
 game's RT for its sprint, vaults and wall runs), RUN CURVE, NATIVE RUN AT,

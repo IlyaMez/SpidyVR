@@ -1,6 +1,7 @@
 #pragma once
 #include "math.hpp"
 #include <cstdint>
+#include <cstring>
 
 namespace spidy::native_movement {
 struct Config {
@@ -13,7 +14,12 @@ struct Config {
 struct Command {
     uint32_t magic = 0x534d564d, version = 1, bytes = sizeof(Command), enabled{};
     uint64_t serial{};
-    uint32_t leaseMs{}, reserved{};
+    // support (bit 0): the mover's contact classification answers supported
+    // (0) for the player's mover, so the game takes him as standing - on a web
+    // line (web_line.hpp), which has no surface of its own: there the game had
+    // him in its fall state, its fall's sound and pose on (November 4). See
+    // native_movement.cpp's classifyContact. Zero until then (`reserved`).
+    uint32_t leaseMs{}, support{};
     Vec3 velocity{};
     uint32_t reserved2{};
 };
@@ -51,8 +57,22 @@ constexpr float farthestStep = 2, boostedStep = 8, maxPlayerSpeed = 300;
 inline float commandDistance(const Command& c) {
     return c.version == 2 && c.reserved2 == 1 ? boostedStep : farthestStep;
 }
+// A command of version 3 with support carries in reserved2 the height (a
+// float's bits) the player's feet (the actor's position) are to stand at on a
+// web line: the ground
+// the support plants under him is there, not wherever he is (November 4: a
+// dodge left his feet in the air over the line, the ground planted where it
+// lifted him).
+inline bool supportHeight(const Command& c, float& height) {
+    if (c.version != 3 || !c.support)
+        return false;
+    std::memcpy(&height, &c.reserved2, sizeof(height));
+    return std::isfinite(height);
+}
 inline bool validCommandVersion(const Command& c) {
-    return (c.version == 1 && !c.reserved2) || (c.version == 2 && c.reserved2 <= 1);
+    float height{};
+    return (c.version == 1 && !c.reserved2) || (c.version == 2 && c.reserved2 <= 1) ||
+           (c.version == 3 && c.support && supportHeight(c, height));
 }
 inline bool drivable(float dt) {
     return std::isfinite(dt) && dt > 0;

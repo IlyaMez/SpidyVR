@@ -2530,13 +2530,13 @@ def session(a, startup):
                                        'SpidyRaySample', 'SpidyRayData', 'SpidySwingData', 'SpidyGrabData',
                                        'SpidyPunchData', 'SpidyStrikeData', 'SpidyShooterData', 'SpidyRopeData',
                                        'SpidySenseData', 'SpidyFocusData', 'SpidySoundData',
-                                       'SpidyDodgeData', 'SpidyTieData', 'SpidyStateLog'))
+                                       'SpidyDodgeData', 'SpidyTieData', 'SpidyStateLog', 'SpidyLineData'))
         # Imported here: probe_game_grab imports from this module.
-        from probe_game_grab import grab_snapshot, tie_snapshot, state_log_snapshot
+        from probe_game_grab import grab_snapshot, tie_snapshot, state_log_snapshot, line_snapshot, line_rope_snapshot
         ray_module = next(m['base'] for m in modules(game.pid) if m['name'].lower() == 'spidy_ray_bridge.dll')
         motion, motion_hash = prepare(game.pid,process,ROOT/'build/windows-ninja/spidy_movement_bridge.dll',
             ROOT/'reports/motion-modules',('SpidyMotionStart','SpidyMotionSubmit','SpidyMotionSample',
-                                         'SpidyMotionStop','SpidyMotionData'))
+                                         'SpidyMotionStop','SpidyMotionData','SpidyMotionSupport'))
         motion_module = next(m['base'] for m in modules(game.pid) if m['name'].lower() == 'spidy_movement_bridge.dll')
         xr, xr_hash = prepare(game.pid, process, ROOT/'build/windows-ninja/spidy_stereo_probe.dll',
             ROOT/'reports/stereo-modules', ('SpidyXrStart', 'SpidyXrStop', 'SpidyXrKeepAlive', 'SpidyXrData',
@@ -2546,7 +2546,7 @@ def session(a, startup):
                                            'SpidySteamData', 'SpidyPromptData', 'SpidyDiagData', 'SpidyImpostorReach',
                                            'SpidyHapticsData', 'SpidyStreamData', 'SpidyPaceData',
                                            'SpidyEyePacing', 'SpidyBlurData',
-                                           'SpidyReprojectData', 'SpidyHudCapture'))
+                                           'SpidyReprojectData', 'SpidyHudCapture', 'SpidyLineRopeData'))
         stage_haptics(xr_hash)
         saved = vr_display.Registry().read(('ScreenSpaceReflections', 'RTReflections'))
         reflections, reflections_line = eye_reflections(saved.get('ScreenSpaceReflections'), a.no_eye_reflections,
@@ -2600,12 +2600,19 @@ def session(a, startup):
         # The state log (research for ties under ceilings): read every 2 s, kept as last read.
         state_log = {}
         state_log_read = [0.0]
+        # Web lines: a sample when one is made or goes, every 2 s while one is up; the game's
+        # ropes for them as last read.
+        line_samples = deque(maxlen=4000)
+        line_ropes = {}
+        # The support on a web line (native_movement's classifyContact): hooked, and steps answered.
+        support = {}
         motion_samples = deque(maxlen=12000)
         eye_shots = deque()
         eye_folder = a.output.with_name(a.output.stem+'-eyes')
         shot_count = 0
         # The steadier-HUD probe's snapshots, the newest few.
         hud_shots = deque()
+        hud_coverage = deque(maxlen=20000)
         hud_folder = a.output.with_name(a.output.stem+'-hud')
         hud_shot_count = 0
         hud_capture = None
@@ -2719,7 +2726,7 @@ def session(a, startup):
                         xr_runtime=runtime, motion_hash=motion_hash,
                         xr_hash=xr_hash, ray_hash=ray_hash, samples=list(samples),
                         swing_samples=list(swing_samples), motion_samples=list(motion_samples),
-                        grab_samples=list(grab_samples), tie_samples=list(tie_samples), state_log=dict(state_log), body=body, punch=punch,
+                        grab_samples=list(grab_samples), tie_samples=list(tie_samples), state_log=dict(state_log), line_samples=list(line_samples), line_ropes=dict(line_ropes), support=dict(support), body=body, punch=punch,
                         punch_samples=list(punch_samples), strikes=strikes, strike_samples=list(strike_samples),
                         focus=focus, sense=sense, sense_samples=list(sense_samples), dodge=dodge,
                         ropes=ropes, steam_guard=steam,
@@ -2732,7 +2739,7 @@ def session(a, startup):
                         stream_stalls=stream_stalls(list(samples)),
                         free_commit_mb=dict(start=start_commit, lowest=lowest_commit),
                         eye_snapshots=list(eye_shots), eye_snapshot_folder=str(eye_folder) if eye_shots else None,
-                        hud_capture=hud_capture, hud_captures=list(hud_shots),
+                        hud_capture=hud_capture, hud_captures=list(hud_shots), hud_coverage=list(hud_coverage),
                         hud_capture_folder=str(hud_folder) if hud_shots else None,
                         frame_rates=frame_rates(list(samples)), freeze=freeze, launcher=launcher_cost(),
                         final=samples[-1] if samples else None, **extra)
@@ -2888,6 +2895,9 @@ def session(a, startup):
                             except OSError:
                                 files = None  # a full disk must not end the session
                             if files:
+                                # The HUD's coverage over the whole session, its images or not: when the
+                                # game stopped drawing it (November 4: the last captures all empty).
+                                hud_coverage.append([sample['seconds'], files.get('covered')])
                                 hud_shots.append(dict(seconds=sample['seconds'], files=files))
                                 while len(hud_shots) > HUD_SHOTS:
                                     for name in ('color', 'alpha'):
@@ -2971,8 +2981,33 @@ def session(a, startup):
                         if not last or last['key'] != key or grab['seconds']-last['seconds'] >= 1:
                             grab['key'] = key
                             grab_samples.append(grab)
+                    try:
+                        raw = game.read(motion['SpidyMotionSupport'], 16)
+                        if len(raw) == 16:
+                            hooked, steps = struct.unpack('<2Q', raw)
+                            support.update(hooked=hooked, steps=steps)
+                    except OSError:
+                        pass
+                    lines_now = line_snapshot(game, rays['SpidyLineData'])
+                    if lines_now and lines_now['status']:
+                        lines_now['seconds'] = round(time.monotonic()-started, 3)
+                        key = [lines_now['made'], lines_now['expired'], lines_now['armed'], lines_now['zips'],
+                               lines_now['perches'], lines_now['jumps'], lines_now['landings'], lines_now['phase'],
+                               bool(lines_now['target_id'])]
+                        last = line_samples[-1] if line_samples else None
+                        if not last or last['key'] != key or (lines_now['lines'] and
+                                                               lines_now['seconds']-last['seconds'] >= 2):
+                            lines_now['key'] = key
+                            line_samples.append(lines_now)
                     if time.monotonic() - state_log_read[0] >= 2:
                         state_log_read[0] = time.monotonic()
+                        try:
+                            rope_now = line_rope_snapshot(game, xr['SpidyLineRopeData'])
+                            if rope_now:
+                                line_ropes.clear()
+                                line_ropes.update(rope_now)
+                        except (OSError, KeyError, NameError):
+                            pass
                         try:
                             log = state_log_snapshot(game, rays['SpidyStateLog'])
                             if log:
@@ -3089,7 +3124,7 @@ def session(a, startup):
             motion_hash=motion_hash, swing_speed=a.swing_speed, vr_settings=settings_start, xr_runtime=runtime,
             game_settings_refused=startup.fields.get('game_settings_refused'),
             swing_samples=list(swing_samples),
-            grab_samples=list(grab_samples), tie_samples=list(tie_samples), state_log=dict(state_log), grab=grab_snapshot(game, rays['SpidyGrabData']),
+            grab_samples=list(grab_samples), tie_samples=list(tie_samples), state_log=dict(state_log), line_samples=list(line_samples), line_ropes=dict(line_ropes), support=dict(support), grab=grab_snapshot(game, rays['SpidyGrabData']),
             body=body_snapshot(game, xr['SpidyBodyData']) or body,
             punch=punch_snapshot(game, rays['SpidyPunchData']) or punch, punch_samples=list(punch_samples),
             strikes=strike_snapshot(game, rays['SpidyStrikeData']) or strikes, strike_samples=list(strike_samples),
@@ -3110,7 +3145,7 @@ def session(a, startup):
             flip_reprojection=reproject_snapshot(game, xr['SpidyReprojectData']) or reprojection,
             hud=hud_snapshot(game, xr['SpidyHudData']),
             hud_capture=hud_capture_snapshot(game, xr['SpidyHudCapture']) or hud_capture,
-            hud_captures=list(hud_shots), hud_capture_folder=str(hud_folder) if hud_shots else None,
+            hud_captures=list(hud_shots), hud_coverage=list(hud_coverage), hud_capture_folder=str(hud_folder) if hud_shots else None,
             prompts=prompt_snapshot(game, xr['SpidyPromptData']),
             eye_jobs=frame_snapshot(game, xr['SpidyStereoFrames']) or eye_jobs,
             render_memory=final_render_memory or render_memory, scene_pool=scene_pool(), render_stop=render_stop,
