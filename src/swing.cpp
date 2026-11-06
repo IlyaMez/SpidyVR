@@ -1,4 +1,5 @@
 #include "spidy/swing.hpp"
+#include "spidy/run_update.hpp"
 #include <stdexcept>
 
 namespace spidy {
@@ -756,6 +757,7 @@ void Swing::reset(Body b) {
         throw std::invalid_argument("Invalid body");
     clearSlingshot();
     body_ = b;
+    endLandCarry();
     webs_ = {};
     hands_ = {};
     climbing_ = {};
@@ -765,6 +767,7 @@ void Swing::reset(Body b) {
     zipSpeed_ = 0;
     zipDirection_ = {};
     jumpHeld_ = jumpQueued_ = false;
+    runJump_ = 0;
     leapQueued_ = 0;
     leapHeld_ = false;
     wall_ = {};
@@ -983,6 +986,30 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
         zipGestureBlock_ = .2f;
     climbSeconds_ = dt;
     climbInputs(in, world);
+    // JUMP ALWAYS: a press while the swing runs the body on the ground
+    // (SPIDY RUN, the landing carry) ends that run; the game has the body
+    // back and makes the jump (the caller holds its A until then:
+    // game_pad::JumpRelay). With a web held the press stays the swing's too,
+    // the takeoff's, as before.
+    if (in.jump && !jumpHeld_ && !wall_.on && (groundRun_ || landCarry_ > 0)) {
+        const bool webbed =
+            webs_[0].attached || webs_[1].attached || climbing_[0].attached || climbing_[1].attached;
+        // SPIDY RUN JUMP (v6): with no web the swing jumps itself, now, with
+        // the run's speed across: no wait for the game to have the body back.
+        const Vec3 across = groundRun_ ? groundAlong_ : landAlong_;
+        endGroundRun();
+        endLandCarry();
+        standArmed_ = false;
+        standHold_ = 0;
+        ++jumpCancels_;
+        if (!webbed && in.runJump && finite(across)) {
+            runJumpVelocity_ =
+                limited(Vec3{across.x, 0, across.z}, speedLimit()) + Vec3{0, config_.leapUp, 0};
+            runJump_ = runJumpSeconds;
+        }
+        if (!webbed)
+            jumpHeld_ = true; // the game's jump (or the run jump's), not queued for the swing's
+    }
     jumpQueued_ |= in.jump && !jumpHeld_;
     const bool leap = std::isfinite(in.leap) && in.leap > 0;
     if (leap && !leapHeld_)
@@ -1135,7 +1162,8 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
             // Head-relative samples remove virtual movement and room-scale translation.
             if (s.sample && !s.zipUsed && bears(i) && !climbingRope &&
                 !(twoHandZip_ && (twoHandTarget() || zipGestureBlock_ > 0)) &&
-                !(slingshotEnabled_ && body_.grounded)) {
+                !(slingshotEnabled_ && body_.grounded) &&
+                !(airSlingshot_ && !body_.grounded && slingshotDrawn())) {
                 const Vec3 delta = trackingTurn(in).rotate(h.gripRelativeToHead - s.previous);
                 const float pull = -dot(delta, normalized(w.anchor - body_.position));
                 if (pull > 0) {
@@ -1207,8 +1235,7 @@ void Swing::gestures(float dt, const Input& in, const WorldQueries&) {
         zipUsed_ = false;
         zipPull_[0] = zipPull_[1] = zipWindow_ = 0;
     }
-    if (twoHandZip_ && twoHandTarget() && !zipUsed_ && fresh && !changed &&
-        !(slingshotEnabled_ && body_.grounded && slingshotCharge_ > .1f)) {
+    if (twoHandZip_ && twoHandTarget() && !zipUsed_ && fresh && !changed && !slingshotDrawn()) {
         const Vec3 target = (webs_[0].end() + webs_[1].end()) * .5f;
         const Vec3 toward = normalized(target - body_.position);
         const Vec3 gaze = length(in.look) > .5f ? normalized(in.look) : toward;
@@ -1272,12 +1299,26 @@ void Swing::clearSlingshot() {
     slingshotPair_ = slingshotReleasing_ = false;
     slingshotCharge_ = slingshotHold_ = slingshotRelease_ = 0;
 }
+bool Swing::slingshotTaut(int i) const {
+    const auto& w = webs_[i];
+    if (!w.ready())
+        return false;
+    // The pull it gave the body over the last step, m/s^2: a hanging body
+    // pulls at a few. Or stretched to its length, at the top of an arc where
+    // it pulls nothing for a moment.
+    return w.tension > .5f || length(body_.position - w.anchor) >= w.length - .1f;
+}
 void Swing::slingshot(float dt, const Input& in, const WorldQueries& world) {
     // Only real arm travel charges it; walking, a snap turn, loss of tracking,
     // or a missing anchor cancels the gesture rather than launching later.
-    if (!slingshotEnabled_ || !in.focused || !body_.grounded || wall_.on || in.jump || in.leap > 0 ||
-        !in.hands[0].tracked || !in.hands[1].tracked || !finite(in.move) || length(in.move) > .2f ||
-        length(body_.velocity) > 2 || !std::isfinite(dt) || dt <= 0 || dt > .1f) {
+    // In the air (AIR SLINGSHOT) the body moves as it swings, so neither its
+    // speed nor the stick counts; a landing or a takeoff starts it over.
+    const bool air = !body_.grounded;
+    const bool on = air ? airSlingshot_ : slingshotEnabled_;
+    if (!on || !in.focused || wall_.on || in.jump || in.leap > 0 || !in.hands[0].tracked ||
+        !in.hands[1].tracked || !std::isfinite(dt) || dt <= 0 || dt > .1f ||
+        (!air && (!finite(in.move) || length(in.move) > .2f || length(body_.velocity) > 2)) ||
+        (slingshotPair_ && slingshotInAir_ != air)) {
         clearSlingshot();
         return;
     }
@@ -1313,9 +1354,15 @@ void Swing::slingshot(float dt, const Input& in, const WorldQueries& world) {
                     direction = normalized(direction);
                     slingshotFlight_ = true;
                     slingshotAirborne_ = false;
-                    body_.velocity = slingshotSpeed_ > 0
-                                         ? direction * (slingshotSpeed_ * (.3f + .7f * charge))
-                                         : limited(direction * (12 + 28 * charge), config_.maxSpeed);
+                    const float speed = slingshotSpeed_ > 0 ? slingshotSpeed_ * (.3f + .7f * charge)
+                                                            : std::min(12 + 28 * charge, config_.maxSpeed);
+                    // In the air it never slows him: what he already goes
+                    // along the launch stays, if that is more; across it, it
+                    // goes, as a launch from the ground has none.
+                    body_.velocity =
+                        air ? limited(direction * std::max(speed, dot(body_.velocity, direction)),
+                                      speedLimit())
+                            : direction * speed;
                     body_.grounded = false;
                     events_.push_back({EventKind::Slingshot, -1, charge});
                 }
@@ -1328,8 +1375,12 @@ void Swing::slingshot(float dt, const Input& in, const WorldQueries& world) {
         clearSlingshot();
         return;
     }
+    // In the air the pair starts only with both lines under tension.
+    if (air && !slingshotPair_ && (!slingshotTaut(0) || !slingshotTaut(1)))
+        return;
     if (!slingshotPair_) {
         slingshotPair_ = true;
+        slingshotInAir_ = air;
         slingshotYaw_ = in.trackingYaw;
         for (unsigned i = 0; i < 2; ++i) {
             slingshotHands_[i] = in.hands[i].gripRelativeToHead;
@@ -1345,6 +1396,11 @@ void Swing::slingshot(float dt, const Input& in, const WorldQueries& world) {
     for (unsigned i = 0; i < 2; ++i) {
         const Vec3 travel = trackingTurn(in).rotate(in.hands[i].gripRelativeToHead - slingshotHands_[i]);
         pull = std::min(pull, -dot(travel, normalized(slingshotEnds_[i] - body_.position)));
+    }
+    // In the air a line gone slack holds the charge where it is.
+    if (air && (!slingshotTaut(0) || !slingshotTaut(1))) {
+        slingshotHold_ = 0;
+        return;
     }
     if (pull > .16f) {
         slingshotHold_ += dt;
@@ -1426,6 +1482,7 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
     if (leapQueued_ > 0) {
         // A charged leap: up, and along the stick. From the ground only.
         if (body_.grounded && !wall_.on) {
+            const Vec3 run = body_.velocity;
             const Vec3 stick = finite(in.move) ? Vec3{in.move.x, 0, in.move.z} : Vec3{};
             const float tilt = std::min(length(stick), 1.f);
             const Vec3 along = tilt > .1f ? stick * (config_.leapForward * (.5f + .5f * leapQueued_) / length(stick) * tilt)
@@ -1433,11 +1490,23 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             body_.velocity = limited(
                 along + Vec3{0, config_.leapUp + (config_.leapUpFull - config_.leapUp) * leapQueued_, 0},
                 config_.maxSpeed);
+            // RUNNING LEAP: the run's speed along the leap's way kept, the charge on top.
+            if (momentumLeap_)
+                body_.velocity = run_update::leapVelocity(run_update::momentumLeap, run, in.move, leapQueued_,
+                                                          config_.leapUp, config_.leapUpFull,
+                                                          config_.leapForward, config_.maxSpeed);
             body_.grounded = false;
             events_.push_back({EventKind::Leap, -1, leapQueued_});
             jumpQueued_ = false;
         }
         leapQueued_ = 0;
+    }
+    // SPIDY RUN JUMP: off the ground with the run's speed, as long as the
+    // body is still seen on it (the command takes a native step to land).
+    if (runJump_ > 0 && body_.grounded && !wall_.on) {
+        body_.velocity = runJumpVelocity_;
+        body_.grounded = false;
+        jumpQueued_ = false;
     }
     if (jumpQueued_) {
         if (wall_.on) {
@@ -1475,11 +1544,25 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
         // On a wall the stick walks it, and gravity does not pull along it.
         wallMotion(dt, in);
         body_.grounded = false;
+    } else if (groundRun_ && body_.grounded) {
+        // SPIDY RUN: the run's own speed across the ground, pressed onto it.
+        groundAlong_ = standRun_ ? run_update::standRunStep(groundAlong_, in.move, dt)
+                                 : run_update::groundRunStep(groundAlong_, in.move, dt);
+        const bool stick = finite(in.move) && std::hypot(in.move.x, in.move.z) > .05f;
+        groundIdle_ = stick ? 0 : groundIdle_ + dt;
+        body_.velocity = limited(groundAlong_ + Vec3{0, -run_update::groundRun.press, 0}, speedLimit());
     } else {
         Vec3 steering = finite(in.move) ? limited(Vec3{in.move.x, 0, in.move.z}, 1) : Vec3{};
         body_.velocity +=
             steering * ((body_.grounded ? config_.groundAcceleration : config_.airAcceleration) * dt);
-        if (body_.grounded) {
+        if (body_.grounded && landCarry_ > 0) {
+            // SMOOTH WEB LANDING: the landing's speed carried, decaying to a
+            // jog, steered as on the ground, in place of the ground's brake.
+            landAlong_ =
+                web_landing::carryStep(landAlong_ + steering * (config_.groundAcceleration * dt), dt);
+            body_.velocity.x = landAlong_.x;
+            body_.velocity.z = landAlong_.z;
+        } else if (body_.grounded) {
             const float damping = std::exp(-5 * dt);
             body_.velocity.x *= damping;
             body_.velocity.z *= damping;
@@ -1508,6 +1591,9 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             crest_ -= dt;
             body_.velocity -= crestNormal_ * (config_.crestPush * dt);
         }
+        if (softGround_ >= 0 && !supported && !wall_.on)
+            body_.velocity.y = webSoft_ ? web_landing::easeFall(body_.velocity.y, softGround_, dt)
+                                        : run_update::softLandVertical(body_.velocity.y, softGround_, dt);
         body_.velocity = limited(body_.velocity, speedLimit());
         body_.grounded = supported;
         if (!supported && !wasGrounded)
@@ -1713,12 +1799,27 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
         !std::isfinite(inputSeconds) || inputSeconds < 0 || !finite(actual.position) ||
         !finite(actual.velocity) || length(actual.velocity) > speedLimit() * 2) {
         releaseAll();
+        endGroundRun();
+        endLandCarry();
+        runJump_ = 0;
         return {};
     }
     // A long step is a slow game, not stale input. Over 50 ms used to be
     // refused here: the caller let go of a swinging player, whom the game
     // then dropped at its own fall speed (October 10 headset report).
     seconds = std::min(seconds, longestNativeStep);
+    // SPIDY RUN JUMP: done once the body is off the ground; given up after
+    // runJumpSeconds, or on a wall, a web or a mount.
+    if (runJump_ > 0) {
+        if (!actual.grounded) {
+            runJump_ = 0;
+            ++runJumps_;
+        } else if ((runJump_ -= seconds) <= 0 || wall_.on || mounting_ || mount_ > 0 || webs_[0].attached ||
+                   webs_[1].attached) {
+            runJump_ = 0;
+        }
+    }
+    const bool touchdown = actual.grounded && !body_.grounded && runJump_ <= 0;
     if (actual.grounded && !body_.grounded)
         sinceLanding_ = 0;
     if (!actual.grounded)
@@ -1731,6 +1832,8 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     }
     if (!actual.grounded)
         gestureTakeoff_ = false;
+    // The swing's own velocity as the last step left it: what a landing came in at.
+    const Vec3 flown = body_.velocity;
     body_ = actual;
     body_.velocity = limited(body_.velocity, speedLimit());
     stepSeconds_ = seconds;
@@ -1754,10 +1857,99 @@ MotionIntent Swing::predictNativeStep(float seconds, const Input& input, const W
     }
     avoidObstacles(seconds, input, world);
     senseWall(seconds, input, world);
+    // SOFT LANDING: the ground under a fall with no web, for its last metres.
+    softGround_ = -1;
+    if (softLanding_ && !actual.grounded && !wall_.on && !webs_[0].attached && !webs_[1].attached &&
+        body_.velocity.y < -run_update::softFall && finite(body_.position)) {
+        const float reach = std::min(run_update::softLandReach(-body_.velocity.y, seconds), config_.maxRange);
+        const auto ground = world.bodyRaycast(body_.position, {0, -1, 0}, reach);
+        if (ground && finite(ground->point) && finite(ground->normal) && normalized(ground->normal).y > .5f)
+            softGround_ = std::max(0.f, body_.position.y - 1 - ground->point.y);
+    }
+    // SMOOTH WEB LANDING: the same for a fall with a web held, below the
+    // impact speed, to web_landing's gentler fall.
+    webSoft_ = false;
+    const bool webHeld = webs_[0].attached || webs_[1].attached;
+    if (webLandSmooth_ && softGround_ < 0 && webHeld && !actual.grounded && !wall_.on &&
+        body_.velocity.y < -web_landing::tuning.fallTarget && finite(body_.position) &&
+        web_landing::gentle(body_.velocity, webLandImpact_)) {
+        const float reach = std::min(web_landing::reach(-body_.velocity.y, seconds), config_.maxRange);
+        const auto ground = world.bodyRaycast(body_.position, {0, -1, 0}, reach);
+        if (ground && finite(ground->point) && finite(ground->normal) && normalized(ground->normal).y > .5f) {
+            softGround_ = std::max(0.f, body_.position.y - 1 - ground->point.y);
+            webSoft_ = true;
+        }
+    }
+    // SPIDY RUN: a landing faster than the sprint goes on at its speed; it
+    // ends off the ground, on a web, a wall or a mount's way up one.
+    const bool webbed =
+        webs_[0].attached || webs_[1].attached || climbing_[0].attached || climbing_[1].attached;
+    // COMBAT RESPONSIVE (Input::fighting): no run of the swing's own on the
+    // ground in a fight, nor its carry; the game's blows and dodges move him.
+    const bool fighting = input.fighting;
+    if (fighting)
+        endLandCarry();
+    if (groundRun_ &&
+        (!spidyRun_ || !actual.grounded || wall_.on || mounting_ || mount_ > 0 || webbed || fighting))
+        endGroundRun();
+    if (spidyRun_ && touchdown && !groundRun_ && !wall_.on && !webbed && !mounting_ && mount_ <= 0 &&
+        !fighting && runJump_ <= 0) {
+        const Vec3 along = run_update::groundRunEntry(body_.velocity);
+        if (length(along) > run_update::groundRun.enterAbove) {
+            groundRun_ = true;
+            groundAlong_ = along;
+            groundIdle_ = 0;
+        }
+    }
+    // SPIDY RUN FROM STANDING: on the ground, the stick held past standTilt
+    // for standHold starts the run from the body's own speed across.
+    if (spidyRun_ && standRunEnabled_ && !groundRun_ && actual.grounded && !touchdown && !wall_.on &&
+        !webbed && !mounting_ && mount_ <= 0 && !fighting && runJump_ <= 0) {
+        const auto& k = run_update::groundRun;
+        const float tilt = finite(input.move) ? std::hypot(input.move.x, input.move.z) : 0.f;
+        if (tilt < k.standRearm)
+            standArmed_ = true;
+        standHold_ = standArmed_ && run_update::standHeld(input.move) ? standHold_ + seconds : 0.f;
+        if (standHold_ >= k.standHold) {
+            const Vec3 across{body_.velocity.x, 0, body_.velocity.z};
+            groundRun_ = standRun_ = true;
+            groundAlong_ = finite(across) ? limited(across, k.entryMax) : Vec3{};
+            groundIdle_ = 0;
+            standHold_ = 0;
+        }
+    } else if (!groundRun_) {
+        standHold_ = 0;
+    }
+    // SMOOTH WEB LANDING: a landing with a web held, below the impact
+    // speed and faster across than the carry's floor, keeps that speed
+    // across the ground for a moment (the caller drives meanwhile). It ends
+    // off the ground, on a wall, a mount, SPIDY RUN, or with the setting.
+    if (landCarry_ > 0 &&
+        (!webLandSmooth_ || !actual.grounded || wall_.on || mounting_ || mount_ > 0 || groundRun_))
+        endLandCarry();
+    if (webLandSmooth_ && touchdown && webHeld && !groundRun_ && !wall_.on && !mounting_ && mount_ <= 0 &&
+        !fighting && web_landing::gentle(flown, webLandImpact_)) {
+        const Vec3 across{flown.x, 0, flown.z};
+        if (length(across) > web_landing::tuning.floor + .05f) {
+            landCarry_ = web_landing::tuning.carryMax;
+            landAlong_ = across;
+        }
+    }
     const auto count = static_cast<unsigned>(std::ceil(seconds / config_.fixedStep));
     const float dt = seconds / count;
     for (unsigned i = 0; i < count; ++i)
         step(dt, input, world, nullptr);
+    // SPIDY RUN: at the sprint, or a second without the stick, it is the game's run again.
+    // A run from standing held past standTilt is still building: not yet.
+    const bool building = standRun_ && run_update::standHeld(input.move);
+    if (groundRun_ &&
+        ((!building && length(groundAlong_) <= run_update::groundRun.sprint + .01f) || groundIdle_ >= 1))
+        endGroundRun();
+    if (landCarry_ > 0) {
+        landCarry_ = std::max(0.f, landCarry_ - seconds);
+        if (landCarry_ <= 0 || length(landAlong_) <= web_landing::tuning.floor + .05f)
+            endLandCarry();
+    }
     MotionIntent result{body_.position, body_.velocity, true};
     // Native collision owns position and ground contact. Do not publish the
     // prediction as if the game had already accepted it.

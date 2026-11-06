@@ -953,9 +953,125 @@ VR settings
                    when the headset shows a picture twice. It lies
                    over everything, your hands too. Needs the HUD on.
                    Off by default, to compare.
+  NATIVE RUN       (off until you switch it on) on the ground, the left
+                   stick pushed past 70% holds the game's RT, its
+                   parkour run: you sprint, vault cars and rails and run
+                   up walls as on a pad. Under 50% you jog again. Never
+                   in the air, on a web or on a wall, and not while a
+                   grip or trigger is held: swinging and the webs are as
+                   they were.
+  AIR SLINGSHOT    (off until you switch it on) the web slingshot in the
+                   air: with both webs attached and pulling (taut), hold
+                   both grips, draw both arms back until the hands buzz,
+                   then let go of both: you launch along the two webs,
+                   never slower than you were going that way. A release
+                   without the draw only lets go, as before. Its own
+                   switch: WEB SLINGSHOT on the ground is as it was.
+  WEB ANGLE        (0 until you change it) tilts the line your webs leave
+                   your hands along, up or down from the controller's, 15
+                   to 45 degrees. The aim markers follow it. Your punches
+                   keep the controller's own line.
+  WRIST SHOOTERS   (off until you switch it on) webs leave parallel to your
+                   forearm, out past the wrist toward your fingers, as
+                   Spider-Man's shooters (and the films' natural webs) do:
+                   along the forearm of the body you see when it can say,
+                   else along the controller. WEB ANGLE tilts that line.
+                   (Square out of the palm side is PALM SHOOTERS.)
+  PALM SHOOTERS    (off until you switch it on) the old WRIST SHOOTERS:
+                   webs leave square to your hand, out of the palm side.
+  DODGE TUMBLE     (OFF until you pick one) when the game dodges, your
+                   view tips toward the dodge (LEAN) or turns a full roll
+                   (ROLL, sideways dodges) so you can tell it dodged. Your
+                   hands stay where they are. Pick LEAN if ROLL is too much.
+  RUN CURVE        (off until you switch it on) on the ground the left
+                   stick reaches the full run at 80% of its tilt, with more
+                   of its speed early. Never in the air, on webs or walls.
+  NATIVE RUN AT    how far the stick tilts before NATIVE RUN holds the
+                   game's RT, 50% to 90%; it lets go 20 points under it.
+                   70%, as before.
+  RUN LOGS         (off until you switch it on) writes how you run, land,
+                   leap and jump, the frame rate and how far VR got
+                   ("stage: ..."), and WEB AIM's and DODGE TUMBLE's lines,
+                   for sending back. They show in the launcher's window as
+                   "diag ..." and are saved in reports\ as
+                   game-vr-<time>-diag.log, which starts with the build and
+                   your settings: that file is the one to send back. Off,
+                   none of it is written. Changes nothing in play.
+                   Whatever this setting, a crashed game says so in the
+                   launcher's window ("The game crashed (exit code ...)"):
+                   send that with the game's newest log from
+                   Documents\Marvel's Spider-Man Remastered.
+  RUNNING LEAP     (off until you switch it on) a charged leap (hold A on
+                   the ground) keeps the speed you run at and adds its
+                   charge on top; a full one from a fast run is a long
+                   jump, further and flatter. Off: as before.
+  EARLY JUMP       (OFF until you pick one) QUICK TAP: a tap of A jumps if
+                   let go within 0.1 s (0.18 s before). RUNNING: that, and
+                   while you run (NATIVE RUN's sprint, or the stick pushed
+                   at least halfway) A jumps the moment you press it (no
+                   charged leap while running).
+                   Always, whatever the setting: A while SPIDY RUN or a
+                   smooth web landing carries you on the ground ends that
+                   run and jumps: with SPIDY RUN JUMP (on) at once, keeping
+                   your speed; with it off it is the game's jump, sent the
+                   moment the game has you back (0.2 s at most).
+  SOFT LANDING     (off until you switch it on) falling with no web, your
+                   fall eases to about 9 m/s over the last 3 m before the
+                   ground; your speed across is kept. Off: as before.
+  SPIDY RUN        (off until you switch it on) land faster than a sprint
+                   (let go of a swing near the street) and you run on at
+                   that speed, steering with the stick without losing it;
+                   it eases to a sprint in a few seconds and the game's
+                   run takes over. A wall ahead is the usual wall run.
+                   Off: the game takes every landing, as before.
+  RUN FROM STANDING (off until you switch it on; needs SPIDY RUN) hold the
+                   stick all the way for a moment on the ground and SPIDY
+                   RUN starts from a stand, building past a sprint while you
+                   hold it; ease off and the game's run takes over.
+  WEB AIM          (CONTROLLER until you pick MODEL FOREARM) MODEL
+                   FOREARM: your webs leave along the forearm of the body
+                   you see, not the controller; whenever the body cannot
+                   say (body off, a cutscene, an arm it cannot reach) they
+                   go back to the controller's line. WEB ANGLE and WRIST
+                   SHOOTERS still turn on top; punches keep the controller.
+                   The line is the forearm's own (elbow to wrist); FOREARM
+                   AIM LIMIT can hold it nearer the controller.
+  FOREARM BLEND    (100% until you change it) how much of the forearm's
+                   line MODEL FOREARM takes, from 0% (the controller's).
+  FOREARM AIM LIMIT (NO LIMIT until you change it) how far MODEL FOREARM
+                   and WRIST SHOOTERS may turn your webs off the
+                   controller's line: 35 DEG, 60, 90 or NO LIMIT.
+  SMOOTH WEB LANDING (off until you switch it on) land while you hold a
+                   web, slower than WEB LANDING IMPACT, and your fall eases
+                   over the last metres, your speed carries on across the
+                   ground and eases to a jog before the game's run takes
+                   over, and a foot brushing the ground no longer stops and
+                   restarts the swing. Off: as before.
+  WEB LANDING IMPACT (24 M/S until you change it) with SMOOTH WEB LANDING, a
+                   landing this fast or faster is the game's heavy one.
+  STEADY STATES    (off until you switch it on) NATIVE RUN's RT waits until
+                   nothing has stopped it for a moment, so a kerb, a prompt
+                   or a vent flickering no longer drops and raises it, and
+                   it stays off in a fight. Off: as before.
+  COMBAT RESPONSIVE (off until you switch it on) in a fight the game moves
+                   you for every blow and dodge: SPIDY RUN and the landing
+                   carry neither start nor go on, NATIVE RUN holds no RT,
+                   and A is the game's jump the moment you press it.
+                   Off: as before.
+  SPIDY RUN JUMP   (ON until you switch it off) A while SPIDY RUN or a
+                   smooth web landing carries you on the ground (no web
+                   held) is a jump the moment you press it, keeping your
+                   run's speed; you fly on as after letting go of a web.
+                   Off: the game's own jump once it has you back (up to
+                   0.2 s later).
   Changes apply at once. The launcher starts your next session with them;
   its options show every one of them but VR VIEW too.
-  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, HEIGHT, SEATED, EYE AIM,
+  NEAR CLIP, RECORDING FOV, UI STYLE, BLOW SOUNDS, PC MEDIA, NATIVE RUN, AIR
+  SLINGSHOT, WEB ANGLE, WRIST SHOOTERS, DODGE TUMBLE, RUN CURVE, NATIVE RUN
+  AT, RUN LOGS, RUNNING LEAP, EARLY JUMP, SOFT LANDING, SPIDY RUN, RUN FROM
+  STANDING, WEB AIM, FOREARM BLEND, SMOOTH WEB LANDING, WEB LANDING IMPACT,
+  STEADY STATES, COMBAT RESPONSIVE, SPIDY RUN JUMP, FOREARM AIM LIMIT, PALM
+  SHOOTERS, HEIGHT, SEATED, EYE AIM,
   SMART ANCHOR, WEB RANGE, WEB SPEED, ELASTIC WEB, SOFT RELEASE, SWING
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches

@@ -132,6 +132,78 @@ struct Walk {
     // controls of their own names (NamedPress).
     prompt_buttons::Demand demand{};
 };
+// NATIVE RUN (vr_settings::Values::nativeRun, off by default): the game's
+// RT, its parkour run, held while the player runs on the ground, so the game
+// sprints, vaults and runs up walls as it does on a pad. Without it the left
+// stick only jogs: the game's RT went out on its wall crawl alone (Walk::
+// parkour). The stick past onAbove of its full tilt holds RT; it stays held
+// until the stick falls under offBelow, so walking stays a walk and a run
+// does not stutter at the edge. Anything but the ground drops it at once and
+// it starts over (allowed false): game_xr allows it only where
+// game_swing::gameOwnsGround holds, no web, grip or trigger is in use and no
+// other of the game's buttons that RT would change goes out.
+class NativeRun {
+  public:
+    static constexpr float defaultOnAbove = .7f, defaultOffBelow = .5f;
+    NativeRun(float onAbove = defaultOnAbove, float offBelow = defaultOffBelow) {
+        thresholds(onAbove, offBelow);
+    }
+    // onAbove within .2..1; offBelow within 0..onAbove.
+    void thresholds(float onAbove, float offBelow) {
+        on_ = std::isfinite(onAbove) ? std::clamp(onAbove, .2f, 1.f) : defaultOnAbove;
+        off_ = std::isfinite(offBelow) ? std::clamp(offBelow, 0.f, on_) : std::min(defaultOffBelow, on_);
+    }
+    float onAbove() const {
+        return on_;
+    }
+    float offBelow() const {
+        return off_;
+    }
+    // allowed: the setting is on and the player runs on the ground (above).
+    // right, forward: the stick the game gets (Walk). Returns RT.
+    bool update(bool allowed, float right, float forward) {
+        const float tilt = std::hypot(right, forward);
+        if (!allowed || !std::isfinite(tilt)) {
+            held_ = false;
+            return false;
+        }
+        held_ = held_ ? tilt >= off_ : tilt > on_;
+        return held_;
+    }
+    bool held() const {
+        return held_;
+    }
+
+  private:
+    float on_{defaultOnAbove}, off_{defaultOffBelow};
+    bool held_{};
+};
+// NATIVE RUN's gate, in one place (game_xr builds it each frame): every
+// state in which the game's RT may go out for its run on the ground. The
+// player's own (setting, playing, not calibrating, not in the pad layer), the
+// body's (the game, not the swing, has him on his feet: gameOwnsGround, from
+// game_swing::gameOwnsGround; no mount, vent, surface or game crawl) and his
+// hands' (no grip or trigger past handBusy, no grab). Then none of the
+// game's buttons that RT turns into something else: A, Y, zip, aim, pull,
+// heal or a prompt's demand (nativeRunAllowed).
+struct NativeRunGate {
+    static constexpr float handBusy = .3f;
+    bool setting{}, playing{}, calibrating{}, padLayer{}, mounting{}, ventCrawl{}, onSurface{}, onCrawl{};
+    bool gameOwnsGround{}, grabbing{};
+    // STEADY STATES (off by default; ground_state.hpp): with `steady`, no RT
+    // in a fight (`fighting`: the combat camera, or an enemy in reach lately).
+    bool steady{}, fighting{};
+    float grips[2]{}, triggers[2]{};
+    bool handsIdle() const {
+        return !grabbing && grips[0] < handBusy && triggers[0] < handBusy && grips[1] < handBusy &&
+               triggers[1] < handBusy;
+    }
+};
+inline bool nativeRunAllowed(const NativeRunGate& g, const Walk& w) {
+    return g.setting && g.playing && !g.calibrating && !g.padLayer && !g.mounting && !g.ventCrawl &&
+           !g.onSurface && !g.onCrawl && g.gameOwnsGround && g.handsIdle() && !w.jump && !w.interact &&
+           !w.zip && !w.aim && !w.pull && !w.heal && !w.demand.any() && !(g.steady && g.fighting);
+}
 // A held on the ground: a charged leap, Spidy's own. The game has one, its
 // Charge Jump ("Hold RT + A while running or standing to build up charge,
 // then release A for a huge leap"), but as a Webslinger skill: a hero
@@ -154,20 +226,34 @@ class ChargeJump {
   public:
     static constexpr float tapSeconds = .18f, pulseSeconds = .09f, fullSeconds = .8f, leastCharge = .15f,
                            leapSeconds = .15f;
+    // EARLY JUMP (vr_settings::Values::earlyJump): 0 as above; 1 a tap is
+    // one let go within quickTapSeconds; 2 that, and a press while the
+    // player runs (update's `running`: NATIVE RUN holds RT) is the game's A
+    // as it is held, at once, with no charge.
+    static constexpr float quickTapSeconds = .1f;
+    static constexpr int pulseFrames = 3;
+    void earlyJump(int mode) {
+        early_ = std::clamp(mode, 0, 2);
+        tap_ = early_ ? quickTapSeconds : tapSeconds;
+    }
     struct Keys {
         bool jump{};  // the game's A
         float leap{}; // a leap let go of: its charge, above 0 up to 1 (Input::leap)
     };
     // seconds: since the previous update. held: the player's A as the game
     // would get it. ground: he stands on the ground in VR play, free to jump.
-    Keys update(float seconds, bool held, bool ground) {
+    // atOnce (COMBAT RESPONSIVE in a fight, v5): a press is the game's A as
+    // it is held, whatever EARLY JUMP is.
+    Keys update(float seconds, bool held, bool ground, bool running = false, bool atOnce = false) {
         const float dt = std::isfinite(seconds) ? std::clamp(seconds, 0.f, .1f) : 0.f;
         const bool pressed = held && !down_;
         down_ = held;
-        if (pressed)
-            phase_ = ground ? Phase::waiting : Phase::plain, time_ = 0;
-        else
+        if (pressed) {
+            phase_ = ground && !(early_ == 2 && running) && !atOnce ? Phase::waiting : Phase::plain;
+            time_ = 0;
+        } else {
             time_ += dt;
+        }
         switch (phase_) {
         case Phase::plain:
             if (!held)
@@ -182,15 +268,19 @@ class ChargeJump {
             if (!held) {
                 phase_ = Phase::pulse;
                 time_ = 0;
+                pulseFrames_ = 1;
                 return {true, 0};
             }
-            if (time_ < tapSeconds)
+            if (time_ < tap_)
                 return {};
             phase_ = Phase::charging;
             ++charges_;
             return {};
         case Phase::pulse:
-            if (time_ < pulseSeconds)
+            // At least pulseFrames updates as well (JUMP ALWAYS, v5): at
+            // under 33 fps 0.09 s is two frames or one, and a game frame can
+            // miss it.
+            if (++pulseFrames_ <= pulseFrames || time_ < pulseSeconds)
                 return {true, 0};
             phase_ = Phase::idle;
             return {};
@@ -226,7 +316,7 @@ class ChargeJump {
     }
     // How far: 0 to 1.
     float charge() const {
-        return phase_ == Phase::charging ? std::clamp((time_ - tapSeconds) / fullSeconds, 0.f, 1.f) : 0.f;
+        return phase_ == Phase::charging ? std::clamp((time_ - tap_) / fullSeconds, 0.f, 1.f) : 0.f;
     }
     // Charges begun so far, and leaps let go of.
     uint32_t charges() const {
@@ -240,8 +330,98 @@ class ChargeJump {
     enum class Phase { idle, plain, waiting, pulse, charging, leaping, spent };
     Phase phase_{};
     bool down_{};
-    float time_{}, leap_{};
+    int early_{};
+    float time_{}, leap_{}, tap_{tapSeconds};
+    int pulseFrames_{};
     uint32_t charges_{}, leaps_{};
+};
+// JUMP ALWAYS (v5, always on): while the swing runs the body on the ground
+// (SPIDY RUN, SMOOTH WEB LANDING's carry: the swing owns a grounded body),
+// the game's mover follows the swing and its jump goes nowhere. The press
+// ends that run in the swing (Swing::jumpCancels), and the game's A waits
+// here until the game has the body back (`swingGround` false), waitSeconds
+// at most, then goes out as a fresh press: held on while the player holds
+// it, or a pulse of pulseSeconds and pulseFrames updates at least if he
+// already let go. Any other press is the game's A as it is held.
+class JumpRelay {
+  public:
+    static constexpr float waitSeconds = .2f, pulseSeconds = .09f;
+    static constexpr int pulseFrames = 3;
+    // swingJumps (SPIDY RUN JUMP, v6): the swing makes that press's jump
+    // itself, at once; the game gets no A for it (in the air A would be its
+    // zip) until the press is let go (swallowed()).
+    bool update(float seconds, bool held, bool swingGround, bool swingJumps = false) {
+        const float dt = std::isfinite(seconds) ? std::clamp(seconds, 0.f, .1f) : 0.f;
+        const bool pressed = held && !down_;
+        down_ = held;
+        if (pressed && swingGround && swingJumps) {
+            phase_ = Phase::swallowed;
+            ++swallowed_;
+            return false;
+        }
+        if (pressed && swingGround) {
+            phase_ = Phase::waiting;
+            time_ = 0;
+            tapped_ = false;
+            ++deferred_;
+            return false;
+        }
+        switch (phase_) {
+        case Phase::waiting:
+            time_ += dt;
+            tapped_ |= !held;
+            if (swingGround && time_ < waitSeconds)
+                return false;
+            waited_ = time_;
+            ++relayed_;
+            if (held && !tapped_) {
+                phase_ = Phase::idle;
+                return true;
+            }
+            phase_ = Phase::pulse;
+            time_ = 0;
+            frames_ = 1;
+            return true;
+        case Phase::pulse:
+            time_ += dt;
+            if (++frames_ <= pulseFrames || time_ < pulseSeconds)
+                return true;
+            phase_ = Phase::idle;
+            return held;
+        case Phase::swallowed:
+            if (held)
+                return false;
+            phase_ = Phase::idle;
+            return false;
+        case Phase::idle:
+            break;
+        }
+        return held;
+    }
+    uint32_t swallowed() const {
+        return swallowed_;
+    }
+    bool waiting() const {
+        return phase_ == Phase::waiting;
+    }
+    // Presses held back so far, those sent on, and how long the last one waited.
+    uint32_t deferred() const {
+        return deferred_;
+    }
+    uint32_t relayed() const {
+        return relayed_;
+    }
+    float waited() const {
+        return waited_;
+    }
+
+  private:
+    enum class Phase { idle, waiting, pulse, swallowed };
+    Phase phase_{};
+    bool down_{}, tapped_{};
+    int frames_{};
+    float time_{}, waited_{};
+    uint32_t deferred_{}, relayed_{}, swallowed_{};
 };
 // A hand at the temple with its trigger pulled: the game's R3, its scan of
 // the surroundings, for as long as the trigger stays pulled (minSeconds at

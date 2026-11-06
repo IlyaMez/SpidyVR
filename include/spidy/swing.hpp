@@ -1,6 +1,8 @@
 #pragma once
 #include "math.hpp"
+#include "web_landing.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -232,6 +234,15 @@ struct Input {
     // (game_shooter, Shooter::aim) instead of along the hand.
     Vec3 gazeOrigin{}, gaze{};
     bool gazeShots{};
+    // COMBAT RESPONSIVE (off unless the caller sets it; v5): the player
+    // fights now. SPIDY RUN and SMOOTH WEB LANDING's carry neither start nor
+    // go on: the game moves the body for its blows and dodges.
+    bool fighting{};
+    // SPIDY RUN JUMP (v6; on unless the caller clears it): A while the swing
+    // runs the body on the ground (SPIDY RUN, the landing carry), with no
+    // web, is the swing's own jump at once, the run's speed kept, instead of
+    // ending the run and leaving the jump to the game (v5's hand-back wait).
+    bool runJump{};
 };
 // The tracking space's orientation in the world (Rig::orientation): hand
 // motion relative to the head turns into the world with it.
@@ -372,6 +383,140 @@ class Swing {
     }
     bool slingshotEnabled() const {
         return slingshotEnabled_;
+    }
+    // AIR SLINGSHOT (off until set): the same draw and release in the air,
+    // from two webs both under tension (slingshotTaut), launching along them.
+    // Its own switch: the ground's WEB SLINGSHOT stays as it is either way.
+    // RUNNING LEAP (off until set): a charged leap keeps the speed the body
+    // runs at along its way, the charge's push on top (run_update::
+    // momentumLeap). Off: the leap as it was, from rest.
+    // SOFT LANDING (off until set): a fall the swing flies with no web
+    // holding and off any wall eases to run_update::softFall down just above
+    // the ground (run_update::softLandVertical). Off: as before.
+    // SPIDY RUN (off until set): a landing faster than the game's sprint,
+    // with no web and off any wall, is the swing's own run on the ground
+    // (groundRunning; run_update::groundRunStep) until it eases to the sprint,
+    // the stick idles a second, the body leaves the ground, a web, a wall or
+    // a mount comes, or the caller ends it (endGroundRun). The caller drives
+    // the body while it runs. Off: every landing is the game's, as before.
+    void allowGroundRun(bool on) {
+        spidyRun_ = on;
+        if (!on)
+            endGroundRun();
+    }
+    bool groundRunEnabled() const {
+        return spidyRun_;
+    }
+    // SPIDY RUN FROM STANDING (off until set; only with allowGroundRun): the
+    // run also starts on the ground from any speed, the stick held past
+    // run_update::GroundRun::standTilt for standHold seconds, and builds past
+    // the sprint while it stays held (run_update::standRunStep). Off: the run
+    // starts only from a fast landing, as before.
+    void allowGroundRunFromStanding(bool on) {
+        standRunEnabled_ = on;
+        standHold_ = 0;
+        standArmed_ = true;
+        if (!on && standRun_)
+            endGroundRun();
+    }
+    bool groundRunFromStandingEnabled() const {
+        return standRunEnabled_;
+    }
+    // The run now began standing (not from a landing).
+    bool groundRunFromStanding() const {
+        return groundRun_ && standRun_;
+    }
+    bool groundRunning() const {
+        return groundRun_;
+    }
+    // Its velocity across the ground now.
+    Vec3 groundRunVelocity() const {
+        return groundRun_ ? groundAlong_ : Vec3{};
+    }
+    void endGroundRun() {
+        if (standRun_)
+            standArmed_ = false;
+        standRun_ = false;
+        groundRun_ = false;
+        groundAlong_ = {};
+        groundIdle_ = 0;
+    }
+    // SMOOTH WEB LANDING (off until set; web_landing.hpp): below `impact`
+    // m/s a landing with a web held eases its fall over the last metres,
+    // carries its speed across the ground (landCarrying; the caller drives
+    // the body meanwhile) decaying to a jog, and only then is the game's. At
+    // or over `impact`, and off, a landing is as before.
+    void allowWebLandingSmooth(bool on, float impact) {
+        webLandSmooth_ = on;
+        webLandImpact_ = std::isfinite(impact) ? std::clamp(impact, 1.f, 100.f)
+                                               : static_cast<float>(web_landing::impactDefault);
+        if (!on)
+            endLandCarry();
+    }
+    bool webLandingSmoothEnabled() const {
+        return webLandSmooth_;
+    }
+    float webLandingImpact() const {
+        return webLandImpact_;
+    }
+    bool landCarrying() const {
+        return landCarry_ > 0;
+    }
+    // JUMP ALWAYS (v5, always on): presses of the jump that ended SPIDY RUN
+    // or SMOOTH WEB LANDING's carry on the ground so far. Such a press is the
+    // game's jump, not the swing's: its body on the ground never followed the
+    // swing's own jump up (the user, November 3: "jump is disabling when I
+    // run"; the session's runs of 4.7 to 9.2 s left the ground only by a web).
+    std::uint32_t jumpCancels() const {
+        return jumpCancels_;
+    }
+    // SPIDY RUN JUMP (Input::runJump): the swing's own jump out of a run is
+    // under way until the body is seen off the ground (runJumpSeconds at
+    // most); the caller drives meanwhile. runJumps counts those that left
+    // the ground, runJumpVelocity is the jump's launch.
+    static constexpr float runJumpSeconds = .3f;
+    bool runJumping() const {
+        return runJump_ > 0;
+    }
+    std::uint32_t runJumps() const {
+        return runJumps_;
+    }
+    Vec3 runJumpVelocity() const {
+        return runJumpVelocity_;
+    }
+    Vec3 landCarryVelocity() const {
+        return landCarry_ > 0 ? landAlong_ : Vec3{};
+    }
+    void endLandCarry() {
+        landCarry_ = 0;
+        landAlong_ = {};
+    }
+    void allowSoftLanding(bool on) {
+        softLanding_ = on;
+        softGround_ = -1;
+    }
+    bool softLandingEnabled() const {
+        return softLanding_;
+    }
+    void allowMomentumLeap(bool on) {
+        momentumLeap_ = on;
+    }
+    bool momentumLeapEnabled() const {
+        return momentumLeap_;
+    }
+    void allowAirSlingshot(bool on) {
+        if (airSlingshot_ != on) {
+            airSlingshot_ = on;
+            clearSlingshot();
+        }
+    }
+    bool airSlingshotEnabled() const {
+        return airSlingshot_;
+    }
+    // A slingshot drawn far enough to launch now: its charge buzzes the hands
+    // (game_xr), and in the air a hand's yank and the two-hand zip wait.
+    bool slingshotDrawn() const {
+        return slingshotCharge_ > .1f && (body_.grounded ? slingshotEnabled_ : airSlingshot_);
     }
     float slingshotCharge() const {
         return slingshotCharge_;
@@ -642,6 +787,32 @@ class Swing {
     void clearSlingshot();
     void slingshot(float dt, const Input&, const WorldQueries&);
     bool slingshotEnabled_{}, slingshotPair_{}, slingshotReleasing_{};
+    // AIR SLINGSHOT: on; the pair being drawn is the air's (a landing or a
+    // takeoff while drawing starts over). slingshotTaut: web i is under
+    // tension now, pulling the body or stretched to its length.
+    bool airSlingshot_{}, slingshotInAir_{};
+    bool momentumLeap_{};
+    // SOFT LANDING: on; the feet's height over the ground found below this
+    // native step (under 0: none, or no soft landing now).
+    bool softLanding_{};
+    // SPIDY RUN: on; running now, at groundAlong_ across the ground, the stick
+    // idle for groundIdle_.
+    bool spidyRun_{}, groundRun_{};
+    Vec3 groundAlong_{};
+    float groundIdle_{};
+    // SPIDY RUN FROM STANDING: on; this run began standing; how long the
+    // stick has been held for one; whether the stick came back since the last.
+    bool standRunEnabled_{}, standRun_{}, standArmed_{true};
+    float standHold_{};
+    float softGround_{-1};
+    // SMOOTH WEB LANDING: on, and its impact speed; this step's soft ground is
+    // a web landing's (web_landing::easeFall); the carry's time left and its
+    // velocity across the ground.
+    bool webLandSmooth_{}, webSoft_{};
+    float webLandImpact_{static_cast<float>(web_landing::impactDefault)};
+    float landCarry_{};
+    Vec3 landAlong_{};
+    bool slingshotTaut(int i) const;
     Vec3 slingshotHands_[2]{}, slingshotEnds_[2]{};
     uint64_t slingshotSurfaces_[2]{};
     float slingshotCharge_{}, slingshotHold_{}, slingshotRelease_{}, slingshotYaw_{};
@@ -740,6 +911,9 @@ class Swing {
     float sinceZip_ = 100, sinceLanding_ = 100, zipSpeed_{};
     Vec3 zipDirection_{};
     bool jumpHeld_{}, jumpQueued_{};
+    std::uint32_t jumpCancels_{}, runJumps_{};
+    float runJump_{};
+    Vec3 runJumpVelocity_{};
     // A leap's charge waiting for the next step, and whether one is held out.
     float leapQueued_{};
     bool leapHeld_{};

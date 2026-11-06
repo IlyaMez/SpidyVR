@@ -15,6 +15,7 @@
 #include "spidy/native_movement.hpp"
 #include "spidy/native_query_context.hpp"
 #include "spidy/native_rays.hpp"
+#include "spidy/web_aim.hpp"
 #include <atomic>
 #include <cstring>
 #include <windows.h>
@@ -72,6 +73,17 @@ float graspHeight{};
 // the game began on it, the body's height then; a rest the game would not take
 // (not asked again until he walks).
 float restSeconds{}, crawlHeight{};
+// SPIDY RUN (Swing::groundRunning): the velocity the last command asked of a
+// body the swing runs on the ground, how long the body has lagged under half
+// of it, and how many runs ended so. A mover that does not take the swing's
+// command on the ground (unknown before it is played) gives the run back to
+// the game at once, and after three such ends no run starts again until the
+// settings come again.
+Vec3 groundRunAsked{};
+float groundRunLag{};
+uint32_t groundRunRefusals{};
+// SMOOTH WEB LANDING: the game's ground contact, steadied while a web is held (web_landing::Contact).
+web_landing::Contact landingContact;
 uint64_t crawlAskedAt{};
 bool crawlBegun{}, crawlDeclined{};
 // The wall the game's crawl last held the player on, where its own wall run
@@ -118,6 +130,15 @@ std::atomic<bool> combatVisuals{true};
 std::atomic<bool> halfPunchDamage{};
 // WEB TIE (Settings version 23): the web tie's gesture runs only with it on.
 std::atomic<bool> webTie{};
+// WEB ANGLE and WRIST SHOOTERS (web_aim.hpp): the line a hand's webs leave it
+// along; 0 and off as before.
+std::atomic<int> webAngle{};
+std::atomic<bool> wristShooters{};
+// WEB AIM: MODEL FOREARM (SpidySwingWebTurns): each hand's turn and when it
+// came; none (as before) until the VR worker sends one.
+SRWLOCK webTurnsLock = SRWLOCK_INIT;
+WebTurns webTurns{};
+uint64_t webTurnsAt{};
 bool copy(void* destination, const void* source, size_t bytes) {
     __try {
         if (reinterpret_cast<uintptr_t>(source) < 0x10000 ||
@@ -417,6 +438,29 @@ void visit(const native_rays::QueryContext& world) {
         copy(feet, reinterpret_cast<const void*>(transform), sizeof(feet)) && finite({feet[12], feet[13], feet[14]}))
         at = {feet[12], feet[13], feet[14]};
     auto in = focused ? input(c) : Input{};
+    // WEB ANGLE and WRIST SHOOTERS turn the line each hand's webs leave along
+    // (web_aim.hpp), for all that shoots one: the swing, the grab, the web
+    // balls and the aim previews. The fists, the walls and the vents keep the
+    // controller's own aim (controllerAims), as they had it. As before, with
+    // the angle 0 and the shooters off, the two are the same.
+    Pose controllerAim[2]{in.hands[0].aim, in.hands[1].aim};
+    if (focused) {
+        const web_aim::Shooters shooters{webAngle.load(std::memory_order_relaxed),
+                                         wristShooters.load(std::memory_order_relaxed)};
+        AcquireSRWLockShared(&webTurnsLock);
+        const WebTurns turns = webTurns;
+        const uint64_t turnsAt = webTurnsAt;
+        ReleaseSRWLockShared(&webTurnsLock);
+        const bool forearm = turns.active && GetTickCount64() - turnsAt <= webTurnsMaxAgeMs;
+        for (int i = 0; i < 2; ++i)
+            in.hands[i].aim = forearm ? web_aim::shooterAim(in.hands[i].aim, i, shooters, turns.turns[i])
+                                      : web_aim::shooterAim(in.hands[i].aim, i, shooters);
+    }
+    const auto controllerAims = [&](Input with) {
+        for (int i = 0; i < 2; ++i)
+            with.hands[i].aim = controllerAim[i];
+        return with;
+    };
     const float sampleSeconds = focused ? grabInputClock.consume(c) : 0.f;
     const Vec3 currentUp = normalized({feet[4], feet[5], feet[6]});
     const bool supported = focused && !owned && motion.grounded &&
@@ -462,8 +506,8 @@ void visit(const native_rays::QueryContext& world) {
     }
     if (handCrawl) ventMode = true;
     const unsigned webHands = (solver.webs()[0].attached ? 1u : 0u) | (solver.webs()[1].attached ? 2u : 0u);
-    crawlHands.update(handCrawl, sampleSeconds, in, crawlNormal, crawlPoint + crawlNormal * .4f,
-                      world, webHands, crawlPoint);
+    crawlHands.update(handCrawl, sampleSeconds, controllerAims(in), crawlNormal,
+                      crawlPoint + crawlNormal * .4f, world, webHands, crawlPoint);
     if (handCrawl) solver.leaveWall(); // native crawl retains collision and scripted turns
     AcquireSRWLockExclusive(&output);
     if (handCrawl) {
@@ -490,8 +534,8 @@ void visit(const native_rays::QueryContext& world) {
     ReleaseSRWLockExclusive(&output);
     unsigned wallHands{};
     for (unsigned i = 0; i < 2; ++i)
-        if (focused && (in.wallRotate ||
-                        (handCrawl ? (crawlHands.hands() & (1u << i)) : solver.wallHand(i, in, world)))) {
+        if (focused && (in.wallRotate || (handCrawl ? (crawlHands.hands() & (1u << i))
+                                                    : solver.wallHand(i, controllerAims(in), world)))) {
             wallHands |= 1u << i;
             in.hands[i].grip = in.hands[i].trigger = 0;
         }
@@ -625,7 +669,7 @@ void visit(const native_rays::QueryContext& world) {
             }
             // A web strike is the player's whole motion: the webs let go, and
             // the web that held the one struck with them.
-            const auto opened = game_punch::update(sampleSeconds, in, fighter, world);
+            const auto opened = game_punch::update(sampleSeconds, controllerAims(in), fighter, world);
             if (opened.strike) {
                 solver.releaseAll();
                 takeoffTransition.reset();
@@ -699,9 +743,18 @@ void visit(const native_rays::QueryContext& world) {
     // harness above the supporting surface, while native motion stays in feet coordinates.
     const Vec3 harness = motion.position + Vec3{0, 1, 0};
     // The next command starts where the step in flight ends.
-    const Body body = inFlight.predict(
+    Body sensed = inFlight.predict(
         {motion.steps, motion.serial, harness, motion.achievedVelocity, motion.dt, motion.status == 2},
         motion.grounded != 0);
+    // SMOOTH WEB LANDING (off by default): with a web held, or carrying a
+    // landing, the ground or the air counts once the game's contact has said
+    // so for a moment (web_landing::Contact): a step's flicker handed the
+    // body to the game and back. Off: the contact as it is, as before.
+    sensed.grounded = landingContact.update(
+        motion.dt, sensed.grounded,
+        solver.webLandingSmoothEnabled() &&
+            (solver.webs()[0].attached || solver.webs()[1].attached || solver.landCarrying()));
+    const Body body = sensed;
     if (!initialized) {
         solver.reset(body);
         initialized = true;
@@ -1008,9 +1061,34 @@ void visit(const native_rays::QueryContext& world) {
         mountTakeoff.reset();
     }
     // Nor does the swing take the body the game runs up its wall (gameRun).
+    // SPIDY RUN: the swing's own run on the ground, as long as it lasts.
+    // SMOOTH WEB LANDING's carry across the ground, likewise (off by default).
+    // SPIDY RUN JUMP (v6): the swing's own jump out of the run, until the body is off the ground.
+    const bool groundRun = (solver.groundRunning() || solver.landCarrying() || solver.runJumping()) &&
+                           collidable && !transition.waiting && !mount.waiting;
     const bool drive = !handCrawl && !grasped && !handing && !gameRun && !yielding &&
-                       (striking || (collidable && !body.grounded && !transition.waiting &&
-                                     (attached || owned || transition.resumed || wall.on)));
+                       (striking || groundRun ||
+                        (collidable && !body.grounded && !transition.waiting &&
+                         (attached || owned || transition.resumed || wall.on)));
+    if (solver.groundRunning() || solver.landCarrying()) {
+        // Does the body go where the run sends it? Measured against the last command's speed across.
+        const float asked = std::hypot(groundRunAsked.x, groundRunAsked.z);
+        const float went = std::hypot(motion.achievedVelocity.x, motion.achievedVelocity.z);
+        if (owned && asked > 3 && std::isfinite(went) && went < .5f * asked)
+            groundRunLag += motion.dt;
+        else
+            groundRunLag = std::max(0.f, groundRunLag - motion.dt);
+        if (solver.groundRunning() && (!drive || groundRunLag > .25f)) {
+            if (drive && ++groundRunRefusals >= 3)
+                solver.allowGroundRun(false);
+            solver.endGroundRun();
+        }
+        // A carry the body does not follow, or one the swing may not drive, ends: the game's.
+        if (solver.landCarrying() && (!drive || groundRunLag > .25f))
+            solver.endLandCarry();
+    }
+    if (!solver.groundRunning() && !solver.landCarrying())
+        groundRunAsked = {}, groundRunLag = 0;
     if (drive) {
         native_movement::Command request;
         request.enabled = 1;
@@ -1028,6 +1106,8 @@ void visit(const native_rays::QueryContext& world) {
         // the module moves the body for all of it (native_movement::stepDelta).
         request.leaseMs = motionLeaseMs;
         request.velocity = requested;
+        if (solver.groundRunning() || solver.landCarrying())
+            groundRunAsked = requested;
         if (const auto error = submitMotion(&request)) {
             fault(error);
             return;
@@ -1188,6 +1268,12 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingStart(void* input) {
         combatVisuals = true;
         halfPunchDamage = false;
         webTie = false;
+        webAngle = 0;
+        wristShooters = false;
+        AcquireSRWLockExclusive(&webTurnsLock);
+        webTurns = {};
+        webTurnsAt = 0;
+        ReleaseSRWLockExclusive(&webTurnsLock);
         started = true;
         solver = Swing(physicsConfig(config));
         QueryPerformanceFrequency(&frequency);
@@ -1280,6 +1366,18 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingRetarget(void* input) {
 // thugs, whether they hold in open air, the gravity (weight), whether walls
 // are the swing's own, and the webs' style. All apply from the next step; the
 // visit holds `simulation`.
+// WEB AIM: MODEL FOREARM: the VR worker's turns for each hand's web line
+// (WebTurns). 2001: not a WebTurns.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingWebTurns(void* input) {
+    WebTurns t;
+    if (!input || !copy(&t, input, sizeof(t)) || !validWebTurns(t))
+        return 2001;
+    AcquireSRWLockExclusive(&webTurnsLock);
+    webTurns = t;
+    webTurnsAt = GetTickCount64();
+    ReleaseSRWLockExclusive(&webTurnsLock);
+    return 0;
+}
 extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
     // Version 3 to 6 settings (the probes') are shorter: read as many bytes as they say.
     Settings s;
@@ -1291,7 +1389,10 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
          header[2] != settingsBytesV12 && header[2] != settingsBytesV13 && header[2] != settingsBytesV14 &&
          header[2] != settingsBytesV15 && header[2] != settingsBytesV16 && header[2] != settingsBytesV17 &&
          header[2] != settingsBytesV18 && header[2] != settingsBytesV19 && header[2] != settingsBytesV20 &&
-         header[2] != settingsBytesV21 && header[2] != settingsBytesV22 && header[2] != sizeof(s)) ||
+         header[2] != settingsBytesV21 && header[2] != settingsBytesV22 && header[2] != settingsBytesV23 &&
+         header[2] != settingsBytesV24 && header[2] != settingsBytesV25 && header[2] != settingsBytesV26 &&
+         header[2] != settingsBytesV27 && header[2] != settingsBytesV28 && header[2] != settingsBytesV29 &&
+         header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || !validSettings(s))
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
@@ -1335,6 +1436,19 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
             game_grab::tieArmed(false);
         }
         game_grab::allowTies(tiesOn);
+        solver.allowAirSlingshot(s.version >= 24 && s.airSlingshot != 0);
+        solver.allowMomentumLeap(s.version >= 26 && s.momentumLeap != 0);
+        solver.allowSoftLanding(s.version >= 27 && s.softLanding != 0);
+        solver.allowGroundRun(s.version >= 28 && s.spidyRun != 0);
+        solver.allowGroundRunFromStanding(s.version >= 29 && s.spidyRunStanding != 0);
+        solver.allowWebLandingSmooth(s.version >= 30 && s.webLandingSmooth != 0,
+                                     s.version >= 30 ? s.webLandingImpact
+                                                     : static_cast<float>(web_landing::impactDefault));
+        groundRunRefusals = 0;
+        webAngle = s.version >= 25 ? s.webAngle : 0;
+        // PALM SHOOTERS (v6) arrives as 2: the palm side's quarter turn. 1, WRIST
+        // SHOOTERS, is no turn here: game_xr sends the forearm's (WebTurns).
+        wristShooters = s.version >= 25 && s.wristShooters == 2;
         if (s.version >= 7)
             solver.allowArcade(s.arcade != 0);
         if (s.version >= 8)

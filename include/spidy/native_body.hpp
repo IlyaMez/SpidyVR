@@ -261,6 +261,34 @@ float crawlOutwardWeight();
 bool proportions(body_calibration::Proportions& out);
 uint32_t stop();
 
+// MODEL FOREARM web aim (vr_settings::Values::webAimSource; web_aim::
+// ForearmAim): each arm as the latest hero pose job's solve left it, world
+// axes relative to the hero instance's position (the model's rows turned by
+// its transform; no scale). Filled at the end of every solve the body made
+// while on, so a sample says nothing when the body is off (-NoBody, BODY
+// off), when it did not solve, or once `job` stops advancing. Read by the VR
+// worker (forearms()) and by tools/probe_game_body.py (SpidyForearms, a
+// seqlock like SpidyBodyData). arm 0 is the character's left (the left
+// controller), 1 its right.
+struct Forearm {
+    uint32_t valid{};
+    Vec3 elbow{}, wrist{}; // the lower arm joint and the hand joint
+    Vec3 palm{};           // out of the palm (Rig::handPalm through the hand joint), unit; zero unknown
+    Quat grip{};           // the controller grip orientation the solve was given (Command::hands)
+    float handError = -1;  // the wrist's miss of its target, model units (Result::handError)
+};
+struct Forearms {
+    uint32_t magic = 0x53424641, version = 1, bytes = sizeof(Forearms), reserved{};
+    int64_t sequence{};
+    uint64_t job{};    // counts the solves that published one (stale once it stops)
+    uint32_t tilted{}; // the solve had a flip's tilt (Command::tilt not the identity)
+    uint32_t reserved2{};
+    Forearm arms[2]{};
+};
+static_assert(sizeof(Forearm) == 60 && sizeof(Forearms) == 160);
+// The latest Forearms (a copy); `job` 0 before any.
+Forearms forearms();
+
 // Wire formats of the probe exports (SpidyBodyStart, SpidyBodySubmit,
 // SpidyBodyCapture), which drive the body without the OpenXR worker.
 struct ProbeConfig {

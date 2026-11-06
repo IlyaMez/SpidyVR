@@ -205,6 +205,115 @@ struct Values {
     // The phone's MUSIC plays what the PC plays (the tab's PC MEDIA;
     // phone_pc_media.hpp): Spotify, a browser. Off by default: the Music folder.
     bool pcMedia = false;
+    // NATIVE RUN (the tab's NATIVE RUN; game_pad::NativeRun): on the ground,
+    // the left stick past 70% holds the game's RT, its parkour run - sprint,
+    // vaults, wall runs - until it falls under 50%. Off by default: the stick
+    // jogs as before. Never in the air, on a web or on a wall.
+    bool nativeRun = false;
+    // AIR SLINGSHOT (the tab's AIR SLINGSHOT; Swing::allowAirSlingshot): the
+    // slingshot's draw in the air too - both webs under tension, both grips
+    // held and both arms drawn until the hands buzz, then let go: a launch
+    // along the two webs. Off by default: in the air a release only lets go.
+    bool airSlingshot = false;
+    // WEB ANGLE, degrees (the tab's WEB ANGLE; web_aim.hpp): a hand's webs
+    // tilt up (positive) or down from the controller's line, -45 to 45. And
+    // WRIST SHOOTERS (the tab's WRIST SHOOTERS; redefined in v6): they leave
+    // parallel to the forearm, out past the wrist toward the fingers, as the
+    // comics' and the films' shooters do: along the body's forearm when the
+    // body can say (as MODEL FOREARM), else along the controller's line. The
+    // old palm-side quarter turn is PALM SHOOTERS. 0 and off by default:
+    // along the controller, as before. The fists keep the controller's.
+    int webAngle = 0;
+    bool wristShooters = false;
+    // WEB AIM (the tab's WEB AIM; web_aim::Source): 0 CONTROLLER, the webs
+    // along the controller as before; 1 MODEL FOREARM, along the forearm of
+    // the body the player sees (web_aim::ForearmAim), back to the controller's
+    // line whenever the body cannot say. WEB ANGLE and WRIST SHOOTERS turn on
+    // top of either. CONTROLLER by default. And FOREARM BLEND, percent (the
+    // tab's FOREARM BLEND): how much of the forearm's line MODEL FOREARM takes,
+    // 0 (the controller's) to 100 (the forearm's), 100 by default.
+    int webAimSource = 0;
+    int forearmBlend = 100;
+    // DODGE TUMBLE (the tab's DODGE TUMBLE; dodge_tumble.hpp): 0 OFF, 1 LEAN,
+    // 2 ROLL. The view leans or rolls with a dodge of the game's, so it reads
+    // as one. OFF by default: the view stays level, as before.
+    int dodgeTumble = 0;
+    // RUN CURVE (the tab's RUN CURVE; run_update::curveStick): on the ground
+    // the stick reaches the game's full run at 80% of its tilt, more of it
+    // early. Off by default: the stick as it is, as before.
+    bool runCurve = false;
+    // NATIVE RUN AT, percent of the stick's tilt (the tab's NATIVE RUN AT;
+    // run_update::nativeRunThresholds): past it NATIVE RUN holds the game's
+    // RT, and lets go 20 points under it. 70 by default (70 and 50, as before).
+    int nativeRunPercent = 70;
+    // RUN LOGS (the tab's RUN LOGS; run_update::RunLog): lines in the
+    // session's timeline about running, landing and the mod's ground run, to
+    // send back. Off by default. Nothing moves differently either way.
+    bool runLogs = false;
+    // RUNNING LEAP (the tab's RUNNING LEAP; Swing::allowMomentumLeap,
+    // run_update::leapVelocity): a charged leap keeps the run's speed along
+    // its way and adds the charge on top; a long one from a fast run goes
+    // further and flatter. Off by default: a leap starts from rest, as before.
+    bool momentumLeap = false;
+    // EARLY JUMP (the tab's EARLY JUMP; game_pad::ChargeJump::earlyJump): 0
+    // OFF, a tap of A jumps as it is let go within 0.18 s, as before; 1 QUICK
+    // TAP, within 0.1 s; 2 RUNNING, as QUICK TAP, and while NATIVE RUN holds
+    // RT the game's A goes out as it is pressed (no charge while running).
+    int earlyJump = 0;
+    // SOFT LANDING (the tab's SOFT LANDING; Swing::allowSoftLanding,
+    // run_update::softLandVertical): a fall the swing flies, with no web
+    // holding, eases to 9 m/s down over its last 3 m (or 0.35 s), its speed
+    // across kept. Off by default: it lands at the speed it falls, as before.
+    bool softLanding = false;
+    // SPIDY RUN (the tab's SPIDY RUN; Swing::allowGroundRun, run_update::
+    // groundRunStep): a landing faster than the game's sprint is the mod's
+    // ground run, the wall run's momentum on the ground - its speed kept, the
+    // stick steering it - easing to the sprint and handed back to the game.
+    // Off by default: the game takes every landing, as before.
+    bool spidyRun = false;
+    // SPIDY RUN FROM STANDING (the tab's RUN FROM STANDING; Swing::
+    // allowGroundRunFromStanding, run_update::standRunStep): with SPIDY RUN
+    // on, the stick held fully on the ground for 0.3 s starts the mod's run
+    // from a stand or a walk, and it builds past the sprint while held. Off
+    // by default: SPIDY RUN starts only from a fast landing, as before.
+    bool spidyRunFromStanding = false;
+    // SMOOTH WEB LANDING (the tab's SMOOTH WEB LANDING; Swing::
+    // allowWebLandingSmooth, web_landing.hpp): a landing with a web held,
+    // slower than WEB LANDING IMPACT, eases its fall over the last metres,
+    // keeps its speed across the ground for a moment (decaying to a jog) and
+    // no longer flips between the game and the swing on a flicker of the
+    // ground contact. Off by default: such a landing is the game's at once,
+    // as before.
+    bool webLandingSmooth = false;
+    // WEB LANDING IMPACT, m/s (the tab's WEB LANDING IMPACT): SMOOTH WEB
+    // LANDING's threshold; a landing this fast or faster is the game's, heavy
+    // as before. 24 by default, 12 to 40.
+    int webLandingImpact = 24;
+    // STEADY STATES (the tab's STEADY STATES; ground_state.hpp): NATIVE
+    // RUN's RT comes back only after everything has allowed it for 0.15 s
+    // (a frame's flicker of the ground, a prompt or a vent no longer drops
+    // and raises it), and stays off in a fight. Off by default: as before.
+    bool steadyStates = false;
+    // COMBAT RESPONSIVE (the tab's COMBAT RESPONSIVE; v5): in a fight (the
+    // combat camera, or an enemy in reach within 3 s) the swing starts no
+    // SPIDY RUN or landing carry and ends one going on, so the game moves
+    // the body for its blows and dodges; NATIVE RUN holds no RT; and A is
+    // the game's jump at once, no charge. Off by default: as before.
+    bool combatResponsive = false;
+    // SPIDY RUN JUMP (the tab's SPIDY RUN JUMP; v6; Swing Input::runJump):
+    // A while the swing runs the body on the ground (SPIDY RUN, SMOOTH WEB
+    // LANDING's carry) with no web is the swing's own jump at once, the
+    // run's speed kept. Off: v5's JUMP ALWAYS (the run ends and the game's A
+    // waits up to 0.2 s for the game to have the body back). On by default.
+    bool spidyRunJump = true;
+    // FOREARM AIM LIMIT, degrees (the tab's FOREARM AIM LIMIT; v6): the most
+    // MODEL FOREARM (and WRIST SHOOTERS) turns the webs off the controller's
+    // line onto the forearm. 180 (no limit) by default; v3-v5 had 35.
+    int forearmAimLimit = 180;
+    // PALM SHOOTERS (the tab's PALM SHOOTERS; v6): the old WRIST SHOOTERS of
+    // v2-v5, a quarter turn out of the palm side, square to the hand. Off by
+    // default. WRIST SHOOTERS now shoots parallel to the forearm.
+    bool palmShooters = false;
     // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
     // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
     int singleHandYankPercent = 100;
@@ -320,8 +429,30 @@ enum class Item : uint8_t {
     pcMedia,
     singleHandYankStrength,
     webTie,
+    nativeRun,
+    airSlingshot,
+    webAngle,
+    wristShooters,
+    dodgeTumble,
+    runCurve,
+    nativeRunAt,
+    runLogs,
+    momentumLeap,
+    earlyJump,
+    softLanding,
+    spidyRun,
+    webAimSource,
+    forearmBlend,
+    spidyRunFromStanding,
+    webLandingSmooth,
+    webLandingImpact,
+    steadyStates,
+    combatResponsive,
+    spidyRunJump,
+    forearmAimLimit,
+    palmShooters,
 };
-inline constexpr Item lastItem = Item::webTie;
+inline constexpr Item lastItem = Item::palmShooters;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -344,7 +475,7 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
-const std::array<Row, 71>& rows();
+const std::array<Row, 93>& rows();
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;

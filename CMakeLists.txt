@@ -216,7 +216,19 @@ if(SPIDY_BUILD_XR)
   if(SPIDY_BUILD_OBSERVER)
     target_sources(spidy_stereo_probe PRIVATE src/game_xr.cpp src/game_player.cpp src/game_pad.cpp
                    src/game_menu.cpp src/game_time.cpp src/game_prompts.cpp src/game_steam.cpp
-                   src/phone_music.cpp src/phone_pc_media.cpp)
+                   src/phone_music.cpp src/phone_pc_media.cpp src/diag_log.cpp)
+    # The build's id in the session's diagnostics (diag_log.hpp): the commit where git knows it, and
+    # always when it was configured, so two builds of one version can be told apart.
+    find_package(Git QUIET)
+    set(SPIDY_BUILD_COMMIT "")
+    if(GIT_FOUND)
+      execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --short=10 HEAD
+                      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" OUTPUT_VARIABLE SPIDY_BUILD_COMMIT
+                      OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
+    string(TIMESTAMP SPIDY_BUILD_STAMP "%Y%m%d-%H%MZ" UTC)
+    set_source_files_properties(src/diag_log.cpp PROPERTIES COMPILE_DEFINITIONS
+                                "SPIDY_BUILD_COMMIT=\"${SPIDY_BUILD_COMMIT}\";SPIDY_BUILD_STAMP=\"${SPIDY_BUILD_STAMP}\"")
     target_link_libraries(spidy_stereo_probe PRIVATE spidy_openxr spidy_bhaptics shell32 ole32 uuid runtimeobject)
   endif()
   add_executable(spidy_xr_lab apps/xr_lab.cpp)
