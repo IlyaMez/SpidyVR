@@ -95,13 +95,15 @@ private:
                 bool warning = false);
     // Settings profiles (spidy/launcher_profile.hpp): the Options tab's Profile card and its menu.
     void profileCard(float width);
+    void playProfile(float width, bool running);
+    std::optional<SavedProfile> profileChoices(const ProfileState& state);
     ProfileState profileState();
     spidy::launcher::PlaySettings playSettings() const { return {settings_.options, tabOnly_}; }
     // Reads the saved profiles and the tab's own settings again.
     void refreshProfiles();
     // Puts the profile's settings in place of these: the options, and the tab's own settings in spidy_vr.ini.
     // Settings no profile holds are kept as kPreviousProfile first, so that this can be undone.
-    void useProfile(const Profile& profile, const std::string& name);
+    void useProfile(const Profile& profile, const std::string& name, bool builtIn = false);
     // Saves it under its name; false (and the card says so) when that failed.
     bool keepProfile(const Profile& profile);
     // A profile to import from a text (`source` names where it came from): its preview, or why not.
@@ -157,6 +159,7 @@ private:
     std::vector<Picture> controlsPictures_;
     float scale_ = 1;
     Tab tab_ = Tab::play;
+    int optionPage_ = 0; // category, Profiles, or Diagnostics; navigation is not a saved setting
     Settings settings_;
     Scanner scanner_;
     Scan scan_;

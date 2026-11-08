@@ -63,8 +63,8 @@ PLAY
    both triggers until the bar fills, about a second and a half. Spider-Man
    then has your height and arm length, so his hands sit on your
    controllers. B skips it. The launcher remembers it; "Redo" on its Options
-   tab, or CALIBRATE BODY in SPIDY VR (below), does it again. Rather enter
-   your height? Set HEIGHT (SPIDY VR, or "Height" in the launcher's options).
+   tab, or CALIBRATE BODY in VR SETUP (below), does it again. Rather enter
+   your height? Set HEIGHT (VR SETUP, or "Height" in the launcher's options).
    Playing seated? Switch SEATED on first (below), then calibrate sitting up.
 
 Keep the game window in front on the desktop: the game pauses while another
@@ -114,7 +114,7 @@ the monitor costs the graphics card time the headset could have. "Monitor
 frame rate" in the launcher's options chooses Every frame, 60, 30, 15 or 5 a
 second; 60 makes a smoother recording of the window. On menus, cutscenes
 and the flat screen the window shows the game as usual. For a wider view
-to record, pick an angle for RECORDING FOV (the SPIDY VR tab, DISPLAY): the
+to record, pick an angle for RECORDING FOV (Settings > VR DISPLAY): the
 window then shows the game's own view, that wide across, with none of
 Spidy's marks, every frame whatever the monitor frame rate, and it costs
 frame rate in the headset. RECORDING SMOOTHING softens how that view turns
@@ -139,7 +139,7 @@ the headset: the launcher turns them off for the session, as said above.
 CONTROLS
 --------
 The grip webs and the trigger reels, as below. To shoot webs with the
-trigger instead, set WEB BUTTON to TRIGGER (Settings > SPIDY VR, or "Web
+trigger instead, set WEB BUTTON to TRIGGER (Settings > VR WEBS, or "Web
 button" in the launcher's options): the trigger then shoots and holds a
 web, and the grip reels in and shoots web balls. Fists, the T-pose
 calibration and the game's menus keep the buttons as they are.
@@ -212,7 +212,7 @@ now; the left hand's are blue, the right hand's orange)
   Red cross ............ it would miss (a car, or a wall in your way)
   Ring of three arcs ... it catches that prop or thug (the ring turns, and
                          closes in as it locks on)
-  AIM MARKERS .......... hides or shows the markers: Settings > SPIDY VR, or
+  AIM MARKERS .......... hides or shows the markers: Settings > VR WEBS, or
                          "Aim markers" in the launcher's options (the next
                          session starts as you left it). X no longer
                          switches them: held, it opens the gadget wheel
@@ -243,7 +243,7 @@ Fighting (web strikes: punching across the room, as in Batman: Arkham Shadow)
   Punch a thug ......... a fist that meets him fast lands a blow, as hard as
                          it moved. Every blow kicks in your hand, sounds as
                          the game's own blows do (its hit on him, as hard as
-                         yours was; BLOW SOUNDS in Settings > SPIDY VR picks
+                         yours was; BLOW SOUNDS in Settings > VR HAPTICS picks
                          Spidy's own tones or none instead), bursts where it
                          landed (a comic's star: yellow for a jab, red for a
                          harder blow) and stops time for a moment
@@ -373,7 +373,7 @@ Fighting (web strikes: punching across the room, as in Batman: Arkham Shadow)
 Moving
   Left stick ........... walk and run (with REALISTIC FLIPS and FLIPS on,
                          in the air it steers rotation, below)
-  Right stick .......... flick left or right to turn (30 degrees; SPIDY VR
+  Right stick .......... flick left or right to turn (30 degrees; VR SETUP
                          in Settings sets how far, or turns it off). With
                          SMOOTH TURN on, hold it to turn steadily instead:
                          the further you tilt it, the faster. Basic FLIPS
@@ -639,7 +639,7 @@ Slow motion (as in Blade & Sorcery)
                          itself slows time for). A flurry of blows slows
                          time once, not for every blow
 
-Flips (experimental, off until you switch FLIPS on in Settings > SPIDY VR or
+Flips (experimental, off until you switch FLIPS on in Settings > VR FLIPS or
 in the launcher's options)
   Right stick in the air turns you head over heels about your head, as
                          fast as you tilt it (back a backflip, to a side
@@ -659,10 +659,10 @@ in the launcher's options)
                          Other ground controls resume after stick release
   FLIP SPEED ........... how fast all of it turns you: 180 degrees a second
                          at full tilt unless you change it (90 to 480;
-                         Settings > SPIDY VR or "Flip speed" in the launcher)
+                         Settings > VR FLIPS or "Flip speed" in the launcher)
 
 Controlled flips (separate option, off until CONTROLLED FLIPS is enabled
-in the launcher or Settings > SPIDY VR)
+in the launcher or Settings > VR FLIPS)
   A in the air ......... enables left-stick flip mode; A must be a new press,
                          not held from a jump or menu
   Left stick in mode .. turns you about the tracked head. Let it rest once
@@ -679,8 +679,8 @@ in the launcher or Settings > SPIDY VR)
   FLIP SPEED ........... adjusts this mode too
 
 Realistic flips (experimental, off until you switch REALISTIC FLIPS on in
-Settings > SPIDY VR or "Realistic flips" in the launcher's options, where
-its ten settings show under it; SPIDY VR has six of them, and MINIMUM
+Settings > VR FLIPS or "Realistic flips" in the launcher's options, where
+its ten settings show under it; VR FLIPS has six of them, and MINIMUM
 FLIGHT SPEED, ROTATION RESPONSE, ANGULAR DRAG and MINIMUM HAND SPEED are
 the launcher's alone; while it is on it takes the place of the flips above)
   On a web ............. moving faster than MINIMUM FLIGHT SPEED (3 m/s), your
@@ -704,7 +704,7 @@ the launcher's alone; while it is on it takes the place of the flips above)
   soon a turn gets there.
 
 Hand wall climbing (experimental, off until you switch HAND WALL CLIMBING on
-in Settings > SPIDY VR or "Hand wall climbing" in the launcher's options)
+in Settings > VR MOVEMENT or "Hand wall climbing" in the launcher's options)
   On a wall ............ with the left stick at rest you stay upright beside
                          the wall, a little crouched, your eyes 25 cm from
                          it. Your body crawls on it, its feet planted,
@@ -745,7 +745,7 @@ them once for each of your eyes. So do finishers and the other scenes the game
 plays by itself. The far background lies far behind the screen, and what is
 close to the game's camera comes out of it toward you. Subtitles and prompts
 stay on the screen itself. Menus, hint cards, the map and loading are flat, as
-before. GAME SCREEN 3D in Settings > SPIDY VR (or "Game screen 3D" in the
+before. GAME SCREEN 3D in Settings > VR DISPLAY (or "Game screen 3D" in the
 launcher's options) sets how much: LOW and MEDIUM keep the scene further
 behind the screen, HIGH shows everything as far from you as it is from the
 game's camera, OFF is the flat picture again.
@@ -766,16 +766,47 @@ The game's HUD (health, gadgets, minimap, prompts, subtitles and the game's
 markers) floats 2 m ahead of you, about 60 degrees wide. It stays still while
 your head moves a little, and glides back in front of you when you look
 further away. A marker sits over its target while the target is inside that
-frame; otherwise the game's edge arrow points the way. HUD in Settings > SPIDY
-VR (or "HUD" in the launcher's options) makes it SMALL, MEDIUM or LARGE, or
+frame; otherwise the game's edge arrow points the way. HUD in Settings > VR DISPLAY (or "HUD" in the launcher's options) makes it SMALL, MEDIUM or LARGE, or
 switches it OFF.
 
 VR settings
-  They are a tab of the game's own Settings: pause with the menu button,
-  choose Settings, then SPIDY VR, the last tab (Up from GAME gets there in
-  one press). It works like the game's other tabs: the left stick moves and
-  changes the selected setting, X resets it, Y resets the whole tab, B goes
-  back. Its sections:
+  Pause, choose Settings, then one of the seven VR category tabs after the
+  game's tabs. VR SETUP is first; VR DISPLAY is last (Up from GAME wraps to
+  it). The left stick selects and changes a setting, X resets that setting,
+  Y resets only the current VR category, and B goes back. Other categories,
+  launcher-only tuning and the pause menu's VR VIEW are left as they are.
+
+  VR SETUP ....... turning, body calibration, height and seated play (5 controls).
+  VR WEBS ........ anchors, aiming, web tie and web lines (16 controls).
+  VR SWINGING .... swing feel, slingshots and hand gestures (12 controls).
+  VR MOVEMENT .... running, jumps, landings, walls, combat and run logs (19 controls).
+  VR FLIPS ....... flip controls, momentum, dodge tumble and reprojection (12 controls).
+  VR HAPTICS .... controller/body haptics, blow sounds and music (10 controls).
+  VR DISPLAY ..... screen, HUD, style, near clip and recording (8 controls).
+
+  The launcher's Options sidebar uses the same seven categories. Profiles
+  has save, share, import and the full reset; Diagnostics has run logs and
+  the normal-monitor-camera workaround. Fine rotation tuning is collapsed
+  under Flips. The sidebar stays visible while each page scrolls.
+
+  A greyed-out control keeps its saved value. Turn on its parent feature,
+  or turn off the mode overriding it, to use it again. Examples:
+  - Smooth turn overrides Snap turn.
+  - Open-air webs bypass Smart anchor.
+  - Model forearm and Wrist shooters share forearm aiming. Model forearm
+    adds blend control; Wrist shooters uses 100% when Controller is selected.
+    Palm shooters is an additional rotation, so it can combine with either.
+  - Realistic flips overrides Controlled flips. The basic Flips switch then
+    enables left-stick steering; it is not redundant in that mode.
+  - Native run is the game's sprint; Spidy run preserves landing momentum.
+    Soft landing acts without a web; Smooth web landing acts with one held.
+  - Early jump: Running skips charged leaps during native sprinting, so
+    Running leap cannot add momentum to a charged leap in that situation.
+  - Recording smoothing needs Recording FOV. Normal camera on the monitor
+    in Diagnostics overrides both; turn it off to use the recording view.
+
+  Gameplay defaults, saved keys and shared profiles are unchanged. The
+  reference below describes each feature by topic, rather than tab order.
   WEBS ........... WEB STYLE (REALISTIC or ARCADE, below); the WEB BUTTON
                    (GRIP or TRIGGER: the one that shoots and holds a web;
                    the other reels in and shoots web balls); AIM MARKERS;
@@ -882,7 +913,7 @@ VR settings
                    finisher count. Punch speed, contact and free-hand rules
                    still apply. Sound and vibration still work. Web aim markers and the
                    game's own HUD have their existing separate controls.
-  JOYSTICK WALL RUN CAMERA ... in EXPERIMENTAL under HAND WALL CLIMBING, on
+  JOYSTICK WALL RUN CAMERA ... in VR MOVEMENT under HAND WALL CLIMBING, on
                    by default: a joystick run along a wall turns your view
                    onto the wall, as before. Off: the left stick supplies
                    wall velocity while the game sees a neutral movement
@@ -891,12 +922,12 @@ VR settings
                    clearance is retained; no new body lean or close-view
                    pose is added. WALL RUN CAMERA TILT controls the
                    momentum camera bank.
-  HALF PUNCH DAMAGE ... in EXPERIMENTAL, off by default. On halves VR punch and web-strike
+  HALF PUNCH DAMAGE ... in VR MOVEMENT, off by default. On halves VR punch and web-strike
                    health damage, including uppercuts, smashes, counters and
                    finishers. Launch and smash velocity, knockback, combo
                    rules and punch recognition do not change. Off restores
                    normal damage. This is not a global game damage setting.
-  WEB TIE ........ in EXPERIMENTAL after HALF PUNCH DAMAGE, off by default.
+  WEB TIE ........ in VR WEBS, off by default.
                    Web an enemy up, put one web on a wall (a ceiling, a
                    beam, a crane, a lamp post) and the other on him, bring
                    your hands together and click the right stick: he is
@@ -904,7 +935,7 @@ VR settings
                    Both controllers tick when it is ready. While it is on,
                    a webbed enemy comes to you only when you yank him; off,
                    as before.
-  WEB LINES ...... in EXPERIMENTAL after WEB TIE, off by default. Put one
+  WEB LINES ...... in VR WEBS after WEB TIE, off by default. Put one
                    web on a wall (a post, a crane, another line) and the
                    other on another, bring your hands together and click
                    the right stick: a taut line of web between them, six at
@@ -914,7 +945,7 @@ VR settings
                    a web, the game's zip (stick up) or a web strike takes
                    you off it. With WEB TIE on too, a webbed-up enemy tied to
                    a line hangs under it.
-  EXPERIMENTAL ... FLIPS (off until you switch it on) uses the right stick
+  VR FLIPS ....... FLIPS (off until you switch it on) uses the right stick
                    in the air; release holds the angle and A returns upright.
                    CONTROLLED FLIPS is a separate A-toggle mode, above.
                    FLIP SPEED sets how fast either steering stick turns you.
@@ -1087,7 +1118,7 @@ VR settings
   ASSIST, SLINGSHOT SPEED, SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING, RECORDING
   SMOOTHING, REEL HAPTICS, SWING HAPTICS, the four body haptics switches
   and the
-  CONTROLLED FLIPS and EXPERIMENTAL rows below FLIP SPEED Spidy keeps in
+  CONTROLLED FLIPS and the other opt-in movement settings Spidy keeps in
   %APPDATA%\Spidy\spidy_vr.ini, beside the launcher's own settings; the
   launcher shows realistic flips' ten rows while it is on, and the body
   haptics switches while it plays. Playing
@@ -1102,14 +1133,25 @@ VR settings
   them and bend them round their corners.
   Catching props and thugs, the web shooter, your own body and punching are
   always on.
-  The title screen's Options have no SPIDY VR tab: load your save first, or
+  The title screen's Options have no VR category tabs: load your save first, or
   set them in the launcher.
 
+Gameplay presets (Play > Profile)
+  Arcade: light assisted swings, air webs, no flips.
+  Balanced: real anchors with assistance, softer catches, manual flips.
+  Pro: heavy unassisted momentum, hand climbing and realistic flips.
+  Pick directly on Play with VR stopped; Manage opens Options > Profiles.
+  All 52 gameplay settings change together. Your seated mode, turning,
+  calibration, button/aim setup, haptics, display, graphics and recording stay.
+  No preset is applied automatically. A gameplay edit adds *; Save as a
+  profile keeps your version. Built-ins cannot be overwritten or deleted.
+  Full settings and the community review: docs/GAMEPLAY-PRESETS.md.
+
 Settings profiles (share your settings, or try someone else's)
-  "Profile", at the top of the launcher's Options tab, keeps sets of settings
-  and switches between them. A profile holds every setting of the SPIDY VR
-  tab but RECORDING FOV and SMOOTHING, the ones in spidy_vr.ini too (NEAR CLIP, UI STYLE,
-  BLOW SOUNDS, the body haptics switches, the EXPERIMENTAL rows), and the
+  "Profiles", in the launcher's Options sidebar, keeps sets of settings
+  and switches between them. A profile holds every setting of the VR
+  categories but RECORDING FOV and SMOOTHING, the ones in spidy_vr.ini too (NEAR CLIP, UI STYLE,
+  BLOW SOUNDS, the body haptics switches, the opt-in movement settings), and the
   four realistic flips settings only the launcher shows. Not
   your graphics options (render resolution, upscaling, the game window, the
   monitor and its RECORDING FOV and SMOOTHING, the game's depth of field and sharpening),
@@ -1268,27 +1310,26 @@ IF SOMETHING IS WRONG
   the flat game's distances for detail, people and textures, which the
   headset's wide lens had halved. If it still happens, send a session report
   and say where you were.
-- The aim markers distract you: switch AIM MARKERS off in Settings > SPIDY VR
+- The aim markers distract you: switch AIM MARKERS off in Settings > VR WEBS
   (or "Aim markers" in the launcher's options).
 - Webs shot at the sky hold somewhere you can't see: switch "Webs hold in
-  open air" off in Settings > SPIDY VR or the launcher's options; a web then
+  open air" off in Settings > VR WEBS or the launcher's options; a web then
   needs something within 100 m to hold on to.
 - Web balls fly when you only meant to reel in: the trigger (the grip with
   WEB BUTTON: TRIGGER) reels only while that hand's web is attached;
   otherwise it shoots.
 - You would rather shoot webs with the trigger, as in other VR games: set
-  WEB BUTTON to TRIGGER in Settings > SPIDY VR (or "Web button" in the
+  WEB BUTTON to TRIGGER in Settings > VR WEBS (or "Web button" in the
   launcher's options). The grip then reels in and shoots web balls.
 - Snap turning makes you uneasy, or the vibration is too strong: Settings >
-  SPIDY VR has both.
+  VR SETUP has turning; VR HAPTICS has vibration.
 - Your bHaptics devices stay still: start the bHaptics Player before VR and
   check that it shows them connected; the headset says "Body haptics on:"
-  and names them once Spidy has them. BODY HAPTICS (Settings > SPIDY VR >
-  HAPTICS) must not be OFF, nor the switch of what you expect to feel. Too
+  and names them once Spidy has them. BODY HAPTICS (Settings > VR HAPTICS) must not be OFF, nor the switch of what you expect to feel. Too
   much: turn BODY HAPTICS down, or switch a group off (the wind is WIND
   HAPTICS). A part that plays on the wrong side of you: tell us which
   (spidy_haptics_test.exe map shows each part in turn).
-- Swinging feels floaty, or falls too hard: WEIGHT in Settings > SPIDY VR
+- Swinging feels floaty, or falls too hard: WEIGHT in Settings > VR SWINGING
   (or "Weight" in the launcher's options) sets how heavy you are while
   swinging and after letting go, until you land: 100% is real gravity and
   the default (80% until October 12; a launcher that still had 80% starts on
@@ -1297,7 +1338,7 @@ IF SOMETHING IS WRONG
   it bends round six edges at most, and lets go where it finds no edge to
   bend round. Tell us where it happened.
 - Webs get caught on lamp posts and signs, or swings drag you down to the
-  street: set WEB STYLE to ARCADE in Settings > SPIDY VR (or "Web style" in
+  street: set WEB STYLE to ARCADE in Settings > VR WEBS (or "Web style" in
   the launcher's options).
 - Lowering your arm on a web moves you: with PHYSICAL WEBS the web's length
   is measured to your hand, so a taut web follows it. That is also how you
@@ -1322,17 +1363,17 @@ IF SOMETHING IS WRONG
 - Clicking both sticks no longer shows the flat screen: it is SWITCH TO
   GAME SCREEN in the pause menu now.
 - You would rather turn smoothly than in steps: SMOOTH TURN in Settings >
-  SPIDY VR (or "Smooth turn" in the launcher's options). If it makes you
+  VR SETUP (or "Smooth turn" in the launcher's options). If it makes you
   uneasy, try a slower speed, or OFF for snap turning again.
 - The menu screen is too small or too large: "Game screen size" in Settings
-  > SPIDY VR.
+  > VR DISPLAY.
 - A cutscene's depth strains your eyes, or things come too far out of the
-  screen: GAME SCREEN 3D in Settings > SPIDY VR, LOW or OFF. Too little
+  screen: GAME SCREEN 3D in Settings > VR DISPLAY, LOW or OFF. Too little
   depth: HIGH.
-- The HUD is too small, too large or in the way: HUD in Settings > SPIDY VR
+- The HUD is too small, too large or in the way: HUD in Settings > VR DISPLAY
   (or "HUD" in the launcher's options): SMALL, MEDIUM, LARGE, or OFF.
 - You would like Spidy's marks, gadget wheel and meters to look like the
-  game's own HUD rather than a comic: UI STYLE in Settings > SPIDY VR, TECH.
+  game's own HUD rather than a comic: UI STYLE in Settings > VR DISPLAY, TECH.
 - The game asks for a button and nothing you press does it: press the
   button of the name it shows (WHEN THE GAME ASKS FOR A BUTTON, above). X is
   the game's X while it asks for X, your triggers its LT, LB, RT and RB,
@@ -1404,7 +1445,7 @@ IF SOMETHING IS WRONG
   ended. (On a wall Spidy holds you, which the game counts as the air and
   offers nothing in; the press hands you to its crawl for that one thing.)
 - A flip you did not mean, or flips make you uneasy: switch FLIPS off in
-  Settings > SPIDY VR (or "Flips (experimental)" in the launcher's options).
+  Settings > VR FLIPS (or "Flips (experimental)" in the launcher's options).
   It is off unless you switched it on. Flips too fast or too slow: FLIP
   SPEED, under it (or "Flip speed" in the launcher).
 

@@ -1,23 +1,11 @@
-"""The SPIDY VR tab in the game's own Settings, without a headset: opened, changed and reset as a player would.
+"""Smoke-test the VR category tabs in a running, loaded game (no headset needed).
 
     python tools/probe_menu.py
 
-It needs a started game with a loaded save (tools/probe_menu_pad.py start, then pad a --until-player), in which
-Settings have not been opened yet (the game reopens them on the tab last used), and the game window in front. It starts the tab's hooks with test values (SpidyMenuStart: swing speed 33 m/s, which the tab shows
-as its nearest step, 32; the web shooter off), pauses with Spidy's virtual Xbox controller, moving with its left stick
-as the Touch controllers do, opens Settings, goes Up to SPIDY VR (the list wraps) and opens it. Then, section by
-section (WEBS, SWINGING, COMFORT, DISPLAY, BODY, EXPERIMENTAL), it makes the webs arcade webs (WEB STYLE: ARCADE),
-puts the web button on the trigger (WEB BUTTON: TRIGGER), switches the aim markers off, switches webs in open air off
-and puts them back with X (RESET), steps the swing speed up (from 32 one step is 40), steps the weight up (from 80% one
-step is 100%), steps snap turn up, switches smooth turning on (its first speed, 60 degrees a second), steps body
-haptics down to 75%, steps the HUD down from MEDIUM to SMALL and to OFF, asks for a body calibration (CALIBRATE BODY: ON RESUME; without a headset nothing
-calibrates), switches the experimental flips on, steps the flip speed up (from 180 degrees a second one step is 240),
-and resets the whole tab with Y (RESET ALL, confirmed with A): Spidy's defaults, realistic webs and the grip webbing
-again, the calibration no longer asked for, the HUD back to MEDIUM, the flip speed back to 180 degrees a second, while
-the web shooter, which the tab does not offer, stays off. After each step it reads what the tab holds
-(SpidyMenuSample) and saves a window capture in reports/menu-probe/. Last it backs out to the game, stops the hooks
-(SpidyMenuStop) and checks that each hooked function starts with the game's own bytes again. Writes
-reports/menu-probe.json; exits 1 when a step did not do what it should.
+Requires Settings not yet opened this game session, and the game in front.
+Checks Webs and Swinging navigation, individual reset, category reset isolation,
+and hook cleanup. This script does not launch the game. Other category contents
+and dependencies are covered by the offline core tests.
 """
 import argparse
 import ctypes as c
@@ -137,79 +125,42 @@ def main():
         press('up', 'up')
         press('a', wait=1.2)
         step('settings', tabs=before['tabs']+1, status=0)
-        # Up from GAME wraps to the last tab, SPIDY VR.
-        press('up', wait=.6)
-        step('settings_last_tab')
+        # The seven VR tabs follow the game's tabs. Up from GAME wraps to
+        # Display, then Feedback, Flips, Movement, Swinging and Webs.
+        press('up', 'up', 'up', 'up', 'up', 'up', wait=.6)
         press('a', wait=1.2)
-        step('spidy_vr', dict(arcade_webs=False, trigger_webs=False, aim_markers=True, swing_speed=33.0,
-                              web_shooter=False, weight=80, hud=2, flip_speed=180, stand_on_walls=True))
-        # The first row: WEB STYLE, REALISTIC until stepped to ARCADE.
+        step('vr_webs', dict(arcade_webs=False, trigger_webs=False, aim_markers=True,
+                             swing_speed=33.0, web_shooter=False, weight=80))
         press('right', wait=.8)
-        step('web_style_arcade', dict(arcade_webs=True, trigger_webs=False), changes=1)
-        # WEB BUTTON, GRIP until stepped to TRIGGER.
+        step('web_style_arcade', dict(arcade_webs=True))
         press('down')
         press('right', wait=.8)
-        step('web_button_trigger', dict(trigger_webs=True, arcade_webs=True, aim_markers=True), changes=2)
+        step('web_button_trigger', dict(trigger_webs=True))
         press('down')
         press('right', wait=.8)
-        step('aim_markers_off', dict(aim_markers=False, trigger_webs=True), changes=3)
+        step('aim_markers_off', dict(aim_markers=False))
         press('down')
         press('right', wait=.8)
-        step('air_webs_off', dict(air_webs=False), changes=4)
+        step('air_webs_off', dict(air_webs=False))
         press('x', wait=.8)
-        step('air_webs_reset', dict(air_webs=True), changes=5)
-        # Down past SMART ANCHOR, WEB RANGE, WEB SPEED and the SWINGING heading.
-        press('down', 'down', 'down', 'down')
-        press('right', wait=.8)
-        step('swing_speed_40', dict(swing_speed=40.0), changes=6)
-        press('down')
-        press('right', wait=.8)
-        step('weight_100', dict(weight=100, swing_speed=40.0), changes=7)
-        # Down past ELASTIC WEB, SOFT RELEASE, SWING ASSIST, WEB SLINGSHOT, SLINGSHOT SPEED, BETTER CLIMBING,
-        # SINGLE HAND YANK STRENGTH, TWO HAND WEB ZIP, HAND ROPE STEERING and the COMFORT heading.
-        press('down', 'down', 'down', 'down', 'down', 'down', 'down', 'down', 'down', 'down')
-        press('right', wait=.8)
-        step('snap_turn_45', dict(snap_turn=45, weight=100), changes=8)
-        press('down')
-        press('right', wait=.8)
-        step('smooth_turn_60', dict(smooth_turn=60, snap_turn=45), changes=9)
-        # Down past the HAPTICS heading, the vibration, REEL and SWING HAPTICS, BLOW SOUNDS and PC MEDIA:
-        # BODY HAPTICS, 100% until stepped down to 75%.
-        press('down', 'down', 'down', 'down', 'down', 'down')
-        press('left', wait=.8)
-        step('body_haptics_75', dict(body_haptics=75, smooth_turn=60), changes=10)
-        # Down past the web, wind, combat and movement switches, the DISPLAY heading, the screen size and its depth:
-        # the HUD, MEDIUM until stepped down to SMALL and OFF. (VR VIEW is on the pause menu's first page since
-        # October 15, not here.)
-        press('down', 'down', 'down', 'down', 'down', 'down', 'down')
-        press('left', wait=.8)
-        step('hud_small', dict(hud=1, body_haptics=75), changes=11)
-        press('left', wait=.8)
-        step('hud_off', dict(hud=0), changes=12)
-        # Down past UI STYLE, COMBAT VISUALS, NEAR CLIP, RECORDING FOV, RECORDING SMOOTHING and the BODY
-        # heading: a calibration at the next gameplay.
-        press('down', 'down', 'down', 'down', 'down', 'down')
-        press('right', wait=.8)
-        step('calibrate_on_resume', dict(calibrate=True, hud=0), changes=13)
-        # Down past HEIGHT, SEATED and the EXPERIMENTAL heading: the flips, off until switched on.
-        press('down', 'down', 'down')
-        press('right', wait=.8)
-        step('flips_on', dict(flips=True, calibrate=True), changes=14)
-        # Down past CONTROLLED FLIPS: the flip speed, 180 degrees a second until stepped up to 240.
-        press('down', 'down')
-        press('right', wait=.8)
-        step('flip_speed_240', dict(flip_speed=240, flips=True), changes=15)
+        step('air_webs_reset', dict(air_webs=True))
         press('y', wait=1.2)
-        step('reset_all_asks')
         press('a', wait=1.2)
-        # Spidy's defaults: eleven settings changed back (the web style, the web button, aim markers, swing speed,
-        # snap turn, smooth turn, body haptics, the HUD, the calibration asked for, the flips, the flip speed; the
-        # weight the probe stepped to is Spidy's default, 100%). The web shooter, which the tab does not offer,
-        # stays as the probe started it.
-        step('reset_all', dict(arcade_webs=False, trigger_webs=False, aim_markers=True, air_webs=True,
-                               swing_speed=32.0, weight=100, calibrate=False, snap_turn=30, smooth_turn=0, hud=2,
-                               flips=False, flip_speed=180, web_shooter=False, body=True, body_haptics=100),
-             changes=26)
+        step('reset_webs_only', dict(arcade_webs=False, trigger_webs=False, aim_markers=True,
+                                    air_webs=True, swing_speed=33.0, weight=80, web_shooter=False))
+        # Back to the category list, one down to Swinging.
+        press('b', wait=.8)
+        press('down', wait=.6)
+        press('a', wait=1.2)
+        press('right', wait=.8)
+        step('swing_speed_40', dict(swing_speed=40.0))
+        press('down')
+        press('right', wait=.8)
+        step('weight_100', dict(weight=100))
+        press('y', wait=1.2)
+        press('a', wait=1.2)
+        step('reset_swinging_only', dict(swing_speed=32.0, weight=100, web_shooter=False,
+                                        arcade_webs=False, snap_turn=30, smooth_turn=0, hud=2))
         press('b', wait=.8)
         press('b', wait=.8)
         press('b', wait=1.5)

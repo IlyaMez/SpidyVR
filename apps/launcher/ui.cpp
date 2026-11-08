@@ -462,7 +462,10 @@ bool App::beginCard(const char* id, ImVec2 size, int childFlags) {
     ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 0);
     ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(S(20), S(16)));
-    const bool open = ImGui::BeginChild(id, size, ImGuiChildFlags_Borders | childFlags, ImGuiWindowFlags_NoScrollbar);
+    // Content-sized cards scroll with their parent, including while the mouse is over a control.
+    const int windowFlags = ImGuiWindowFlags_NoScrollbar |
+                            ((childFlags & ImGuiChildFlags_AutoResizeY) ? ImGuiWindowFlags_NoScrollWithMouse : 0);
+    const bool open = ImGui::BeginChild(id, size, ImGuiChildFlags_Borders | childFlags, windowFlags);
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor(2);
     if (open) {
@@ -1056,7 +1059,7 @@ void App::startPanel(ImVec2 size) {
 
     // At the bottom: which options VR starts with, and START VR over it. Between it and the caption: the details,
     // what can be done about it, then the session's three steps.
-    const float lineHeight = S(20);
+    const float lineHeight = S(88);
     const float lineY = max.y - padY - lineHeight;
     const float buttonHeight = S(70);
     const float buttonY = lineY - S(16) - buttonHeight;
@@ -1202,22 +1205,8 @@ void App::startPanel(ImVec2 size) {
         sticker("##stopping", nullptr, "Stopping VR", nullptr, buttonSize, stop, false);
     }
 
-    // Which options VR starts with, and where to change them.
-    const ProfileState profile = profileState();
-    const std::string name = profile.current   ? profile.current->name
-                             : profile.changed ? profile.remembered->name + "*"
-                                               : std::string("Your own");
-    spacedText(draw, fonts_.kicker, S(13), ImVec2(left, lineY + S(3)), col(kPaperDim), "OPTIONS", 0.14f);
-    const float nameX = left + spacedWidth(fonts_.kicker, S(13), "OPTIONS", 0.14f) + S(12);
-    const float changeWidth = measure(fonts_.body, ImGui::GetFontSize(), "Change").x;
-    const float nameRoom = left + innerWidth - changeWidth - S(14) - nameX;
-    draw->PushClipRect(ImVec2(nameX, lineY), ImVec2(nameX + nameRoom, lineY + lineHeight), true);
-    draw->AddText(fonts_.semibold, S(15), ImVec2(nameX, lineY), col(kPaper), name.c_str());
-    draw->PopClipRect();
-    ImGui::SetCursorScreenPos(
-        ImVec2(nameX + std::min(nameRoom, measure(fonts_.semibold, S(15), name.c_str()).x) + S(14), lineY));
-    if (link("Change"))
-        tab_ = Tab::options;
+    ImGui::SetCursorScreenPos(ImVec2(left, lineY));
+    playProfile(innerWidth, running);
     // Behind it all, faint dots rising into the lower right corner: from under the steps to over the line
     // under START VR, wider than high.
     draw->ChannelsSetCurrent(0);
@@ -1732,8 +1721,38 @@ void App::option(const char* title, const char* help, float controlWidth, const 
 }
 
 void App::options(ImVec2 origin, ImVec2 size) {
+    const float navigation = S(168), navigationGap = S(18);
     ImGui::SetCursorScreenPos(origin);
-    ImGui::BeginChild("##optionsScroll", size, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+    ImGui::BeginChild("##optionsNavigation", ImVec2(navigation, size.y), ImGuiChildFlags_None,
+                      ImGuiWindowFlags_NoBackground);
+    ImGui::PushFont(fonts_.semibold, 15);
+    // Buttons keep the label inset and vertically centered inside the whole row.
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(S(12), 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0, 0.5f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, S(3));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, S(4)));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+    for (size_t i = 0; i < spidy::vr_settings::categoryCount + 2; ++i) {
+        const char* title = i < spidy::vr_settings::categoryCount ? spidy::vr_settings::screens()[i].title
+                            : i == spidy::vr_settings::categoryCount ? "Profiles" : "Diagnostics";
+        const bool selected = optionPage_ == static_cast<int>(i);
+        ImGui::PushStyleColor(ImGuiCol_Button,
+                              selected ? ImGui::GetStyleColorVec4(ImGuiCol_Header) : ImVec4(0, 0, 0, 0));
+        if (ImGui::Button(title, ImVec2(ImGui::GetContentRegionAvail().x, S(40))))
+            optionPage_ = static_cast<int>(i);
+        ImGui::PopStyleColor();
+    }
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(5);
+    ImGui::PopFont();
+    ImGui::EndChild();
+    ImGui::SetCursorScreenPos(ImVec2(origin.x + navigation + navigationGap, origin.y));
+    // Each screen keeps its own scroll position; navigation stays visible.
+    ImGui::PushID(optionPage_);
+    ImGui::BeginChild("##optionsScroll", ImVec2(size.x - navigation - navigationGap, size.y),
+                      ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
     const ImVec2 base = ImGui::GetCursorScreenPos();
     const float width = ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize - S(6);
     const float gap = S(18);
@@ -1742,14 +1761,21 @@ void App::options(ImVec2 origin, ImVec2 size) {
     if (running) {
         top += captionBox(ImGui::GetWindowDrawList(), ImVec2(base.x, top + S(4)), width - S(8),
                           "These options apply when VR starts. To change them now, pause in the headset: Settings, "
-                          "then SPIDY VR.",
+                          "then a VR category.",
                           Caption::narrator) +
                S(4) + gap;
     }
+    if (profileWarning_ && !profileStatus_.empty() && ImGui::GetTime() < profileStatusUntil_ &&
+        optionPage_ != static_cast<int>(spidy::vr_settings::categoryCount)) {
+        top += captionBox(ImGui::GetWindowDrawList(), ImVec2(base.x, top), width - S(8),
+                          profileStatus_, Caption::narrator) + gap;
+    }
     ImGui::BeginDisabled(running);
-    ImGui::SetCursorScreenPos(ImVec2(base.x, top));
-    profileCard(width);
-    top = ImGui::GetItemRectMax().y + gap;
+    if (optionPage_ == static_cast<int>(spidy::vr_settings::categoryCount)) {
+        ImGui::SetCursorScreenPos(ImVec2(base.x, top));
+        profileCard(width);
+        top = ImGui::GetItemRectMax().y + gap;
+    }
 
     auto& o = settings_.options;
     bool changed = false;
@@ -1790,11 +1816,33 @@ void App::options(ImVec2 origin, ImVec2 size) {
         if (toggle(id, &on))
             tabChanged |= spidy::vr_settings::choose(item, on ? 1 : 0, tabOnly_);
     };
-    const float columnWidth = (width - gap) * 0.5f;
+    const auto settingOption = [&](Item item, const char* title, const char* help, float controlWidth,
+                                   const std::function<void()>& control) {
+        auto values = tabOnly_;
+        values.smoothTurn = o.smoothTurn;
+        values.airWebs = o.airWebs;
+        values.flips = o.flips;
+        values.haptics = o.haptics;
+        values.bodyHaptics = o.bodyHaptics;
+        values.hud = o.hud;
+        const char* reason = spidy::vr_settings::inactiveReason(item, values);
+        if (o.stockMonitorView && (item == Item::recordingFov || item == Item::recordingSmoothing))
+            reason = "Turn Normal camera on the monitor off in Diagnostics first.";
+        const std::string explanation = reason ? std::string(reason) + " " + help : help;
+        option(title, explanation.c_str(), controlWidth, [&] {
+            ImGui::BeginDisabled(reason != nullptr);
+            control();
+            ImGui::EndDisabled();
+        }, reason != nullptr);
+    };
+    const bool twoColumns = width >= S(950);
+    const float columnWidth = twoColumns ? (width - gap) * 0.5f : width;
     float columnY[2] = {top, top};
-    // A card of options in a column: webs, moving and walls on the left; you, the picture, the screens and
-    // troubleshooting on the right.
-    const auto group = [&](int column, const char* title, const std::function<void()>& rows) {
+    const auto group = [&](int page, int column, const char* title, const std::function<void()>& rows) {
+        if (optionPage_ != page)
+            return;
+        if (!twoColumns)
+            column = 0;
         ImGui::SetCursorScreenPos(ImVec2(base.x + column * (columnWidth + gap), columnY[column]));
         if (beginCard(title, ImVec2(columnWidth, 0), ImGuiChildFlags_AutoResizeY)) {
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(S(10), 0));
@@ -1806,262 +1854,16 @@ void App::options(ImVec2 origin, ImVec2 size) {
         endCard();
         columnY[column] = ImGui::GetItemRectMax().y + gap;
     };
-    group(0, "Webs", [&] {
-        option("Web style", "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", S(150),
-               [&] {
-                   static constexpr int styles[] = {0, 1};
-                   int arcade = o.arcadeWebs ? 1 : 0;
-                   stepCombo("##webStyle", kWebStyles, styles, 2, &arcade);
-                   o.arcadeWebs = arcade != 0;
-               });
-        option("Web button", "Which button shoots and holds a web; the other reels in and shoots web balls.", S(150),
-               [&] {
-                   static constexpr int buttons[] = {0, 1};
-                   int trigger = o.triggerWebs ? 1 : 0;
-                   stepCombo("##webButton", kWebButtons, buttons, 2, &trigger);
-                   o.triggerWebs = trigger != 0;
-               });
-        option("Webs hold in open air",
-               "With nothing in reach, a web still holds as far out as Web range; off, it misses.", S(42),
-               [&] { changed |= toggle("##air", &o.airWebs); });
-        option("Smart anchor",
-               "With webs holding in open air off, a web that just misses still catches the real surface "
-               "nearest it.",
-               S(42), [&] { tabToggle("##smartanchor", Item::smartAnchor); });
-        option("Web range", "How far a web reaches; a web in open air holds this far out.", S(150),
-               [&] { tabCombo("##webrange", Item::webRange); });
-        option("Web speed",
-               "Off, a web sticks at once; or it flies there, visibly, pulls only once it has arrived "
-               "and catches you softly.",
-               S(150), [&] { tabCombo("##webspeed", Item::webSpeed); });
-        option("Aim markers", "Show where each hand's web would land.", S(42),
-               [&] { changed |= toggle("##aim", &o.aimMarkers); });
-        option("Eye aim",
-               "Web balls and zips go where your eyes look. Only where the headset and its VR runtime track "
-               "the eyes (Quest Pro, Varjo, Pimax Crystal...); elsewhere hands and head aim as before.",
-               S(150), [&] { tabCombo("##eyeaim", Item::eyeAim); });
-        option("Web tie (experimental)",
-               "Web an enemy up, put one web on a wall and the other on him, bring your hands together "
-               "and click the right stick: he is stuck to the wall. On, a webbed enemy comes to you only "
-               "when you yank him.",
-               S(42), [&] { tabToggle("##webtie", Item::webTie); });
-        option("Web lines (experimental)",
-               "Put one web on a wall and the other on another, bring your hands together and click the "
-               "right stick: a taut line of web between them. Hold the right stick's click to aim at a line "
-               "and let go to zip onto it; walk, jump and dodge on it. With Web tie on too, enemies hang "
-               "under it.",
-               S(42), [&] { tabToggle("##weblines", Item::webLines); });
-    });
-    group(0, "Moving", [&] {
-        option("Swing speed limit", "How fast a swing can carry you.", S(150), [&] {
-            ImGui::PushFont(fonts_.semibold, 14);
-            changed |= slider("##speed", &o.swingSpeed, 10, 65, "%d m/s");
-            ImGui::PopFont();
-        });
-        option("Weight", "How heavy you are while swinging and after letting go. 100% is real gravity.", S(150), [&] {
-            stepCombo("##weight", kWeights, kWeightValues, static_cast<int>(std::size(kWeightValues)), &o.weight);
-        });
-        option("Elastic web", "Webs stretch under load and catch you more softly; higher is softer.", S(150),
-               [&] { tabCombo("##elasticweb", Item::elasticWeb); });
-        option("Soft release", "A web's last pull fades briefly as you let go; higher lasts longer.", S(150),
-               [&] { tabCombo("##softrelease", Item::softRelease); });
-        option("Swing assist",
-               "Swinging at a wall, you slow down before you hit it; where you go stays yours.", S(42),
-               [&] { tabToggle("##swingassist", Item::swingAssist); });
-        option("Web slingshot", "No auto jump. Draw two fixed webs, hold for vibration, release both to launch.",
-               S(42), [&] { tabToggle("##webslingshot", Item::webSlingshot); });
-        option("Slingshot speed",
-               "How fast a full draw launches you: under the swing speed limit, or at a speed of its own.",
-               S(150), [&] { tabCombo("##slingshotspeed", Item::slingshotSpeed); });
-        option("Air slingshot (experimental)",
-               "In the air with two taut webs: hold both grips, draw both arms back until the hands buzz, "
-               "then let go to launch along the webs. Off: letting go in the air only releases, as before.",
-               S(42), [&] { tabToggle("##airslingshot", Item::airSlingshot); });
-        option("Web angle",
-               "Tilts the line your webs leave your hands along, up or down from the controller's, 15 to 45 "
-               "degrees. 0: along the controller, as before. Punches keep the controller's own.",
-               S(150), [&] { tabCombo("##webangle", Item::webAngle); });
-        option("Wrist shooters",
-               "Webs leave parallel to your forearm, out past the wrist toward the fingers, as Spider-Man's "
-               "shooters do (and the films' natural webs): along the forearm of the body you see when it can "
-               "say, else along the controller. Off: along the controller, as before.",
-               S(42), [&] { tabToggle("##wristshooters", Item::wristShooters); });
-        option("Palm shooters",
-               "Webs leave square to your hand, out of the palm side, rather than along the forearm. "
-               "Off by default.",
-               S(42), [&] { tabToggle("##palmshooters", Item::palmShooters); });
-        option("Web aim (experimental)",
-               "MODEL FOREARM: your webs leave along the forearm of the Spider-Man body you see, rather than "
-               "along the controller, and go back to the controller's line whenever the body cannot say "
-               "(body off, a cutscene, an arm it cannot reach). Web angle and wrist shooters still turn on "
-               "top. Punches, walls and vents keep the controller. CONTROLLER: as before.",
-               S(150), [&] { tabCombo("##webaimsource", Item::webAimSource); });
-        option("Forearm blend",
-               "With web aim MODEL FOREARM: how much of the forearm's line the webs take, from 0% (the "
-               "controller's) to 100% (the forearm's). 100% by default.",
-               S(150), [&] { tabCombo("##forearmblend", Item::forearmBlend); });
-        option(
-            "Forearm aim limit",
-            "How far web aim MODEL FOREARM and wrist shooters may turn your webs off the controller's line "
-            "onto the forearm. NO LIMIT by default; 35 degrees keeps the webs near the controller.",
-            S(150), [&] { tabCombo("##forearmaimlimit", Item::forearmAimLimit); });
-        option(
-            "Dodge tumble (experimental)",
-            "When the game takes your dodge, the view leans (LEAN, 24 degrees, under half a second) or rolls "
-            "a whole turn (ROLL, 0.6 s) the way you dodged; ahead or back it only leans. The HUD and your "
-            "hands stay put. Off: the view stays level, as before.",
-            S(150), [&] { tabCombo("##dodgetumble", Item::dodgeTumble); });
-        option("Better climbing", "Take one web in both hands, then pull hand over hand to keep climbing it.",
-               S(42), [&] { tabToggle("##betterclimbing", Item::betterClimbing); });
-        option("Single hand yank strength",
-               "How much speed a fast one-hand web yank adds. 100% as before; two-hand zips are unchanged.",
-               S(150), [&] { tabCombo("##singlehandyank", Item::singleHandYankStrength); });
-        option("Two hand web zip", "Both webs on one spot: pull both arms back fast to launch at it.",
-               S(42), [&] { tabToggle("##twohandzip", Item::twoHandZip); });
-        option("Hand rope steering",
-               "Hold your web with the free hand too and pull sideways to turn your swing.", S(42),
-               [&] { tabToggle("##ropesteering", Item::ropeSteering); });
-        option("Snap turn", "How far a flick of the right stick turns you.", S(150), [&] {
-            stepCombo("##snap", kSnapTurns, kSnapValues, static_cast<int>(std::size(kSnapValues)), &o.snapTurn);
-        });
-        option("Smooth turn", "Turn steadily while you hold the right stick; off, it snap turns.", S(150), [&] {
+    group(0, 0, "Turning", [&] {
+        settingOption(Item::smoothTurn, "Smooth turn", "Turn steadily while you hold the right stick; off, it snap turns.", S(150), [&] {
             stepCombo("##smooth", kSmoothTurns, kSmoothValues, static_cast<int>(std::size(kSmoothValues)),
                       &o.smoothTurn);
         });
-    });
-    group(0, "Walls", [&] {
-        option("Hand wall climbing (experimental)",
-               "On a wall with the left stick at rest, squeeze a grip near the wall to hold on and pull to "
-               "climb; both grips held roll your view along it.",
-               S(42), [&] { tabToggle("##handclimb", Item::handClimb); });
-        option("Joystick wall run camera",
-               "On: a joystick run turns your view onto the wall, as before. Off: the left stick drives the "
-               "momentum wall run's view and gait.",
-               S(42), [&] { tabToggle("##joystickruncamera", Item::joystickRunCamera); });
-        option("Wall Run Camera Tilt", "Gently bank with the body on horizontal momentum wall runs.", S(42),
-               [&] { tabToggle("##wallruncameratilt", Item::wallRunCameraTilt); });
-        option(
-            "Native run (experimental)",
-            "On the ground, the left stick past 70% holds the game's RT: its sprint, vaults and wall runs. "
-            "Under 50% it jogs again. Never in the air, on webs or on walls. Off: the stick jogs, as before.",
-            S(42), [&] { tabToggle("##nativerun", Item::nativeRun); });
-        option("Run curve (experimental)",
-               "On the ground the left stick reaches the game's full run at 80% of its tilt, with more of "
-               "its speed early. Off: the stick as it is, as before.",
-               S(42), [&] { tabToggle("##runcurve", Item::runCurve); });
-        option("Native run at",
-               "How far the left stick tilts before NATIVE RUN holds the game's RT for its sprint; it lets "
-               "go 20 points under it. 70%, as before.",
-               S(150), [&] { tabCombo("##nativerunatpercent", Item::nativeRunAt); });
-        option("Run logs",
-               "Writes how you run, land, leap and jump, the frame rate and how far VR got to the "
-               "console (diag lines) and a -diag.log file beside the session report, for sending back. "
-               "Off, none of it is written. Changes nothing in play.",
-               S(42), [&] { tabToggle("##runlogs", Item::runLogs); });
-        option("Running leap (experimental)",
-               "A charged leap (hold A on the ground) keeps the speed you run at along its way and adds its "
-               "charge on top; a full one from a fast run is a long jump. Off: the leap starts from rest, as "
-               "before.",
-               S(42), [&] { tabToggle("##runningleap", Item::momentumLeap); });
-        option("Early jump (experimental)",
-               "QUICK TAP: a tap of A jumps if let go within 0.1 s instead of 0.18 s. RUNNING: that, and "
-               "while NATIVE RUN sprints A jumps the moment it is pressed (no charged leap while sprinting). "
-               "OFF: as before.",
-               S(150), [&] { tabCombo("##earlyjump", Item::earlyJump); });
-        option("Soft landing (experimental)",
-               "Falling with no web, your fall eases to 9 m/s over the last 3 m (or 0.35 s) before the "
-               "ground, so the game lands you lightly; your speed across is kept. Off: you land as fast as "
-               "you fall, as before.",
-               S(42), [&] { tabToggle("##softlanding", Item::softLanding); });
-        option("Spidy run (experimental)",
-               "Land faster than the game's sprint (a swing let go of near the street) and the mod runs you "
-               "on at that speed, as its wall run does on walls: the stick steers without losing speed, "
-               "which eases to a sprint in a few seconds, and the game's run (NATIVE RUN) takes over. A wall "
-               "ahead is the usual wall run. Off: the game takes every landing, as before.",
-               S(42), [&] { tabToggle("##spidyrun", Item::spidyRun); });
-        option("Spidy run from standing (experimental)",
-               "With Spidy run on: hold the stick all the way for a moment on the ground and the mod's run "
-               "starts from a stand or a walk, building past the game's sprint while you hold it; ease off "
-               "and it slows to the sprint and the game's run takes over. Off: Spidy run starts only from a "
-               "fast landing, as before.",
-               S(42), [&] { tabToggle("##spidyrunfromstanding", Item::spidyRunFromStanding); });
-        option("Smooth web landing (experimental)",
-               "Landing while you hold a web, slower than the web landing impact: your fall eases over the "
-               "last metres, your speed carries on across the ground for a moment and eases to a jog before "
-               "the game's run takes over, and a foot brushing the ground no longer stops and restarts the "
-               "swing. Faster than that it is the game's heavy landing. Off: as before.",
-               S(42), [&] { tabToggle("##weblandingsmooth", Item::webLandingSmooth); });
-        option("Web landing impact",
-               "With smooth web landing: a landing this fast or faster (m/s, all of its speed) is the game's "
-               "heavy one. 24 m/s by default.",
-               S(150), [&] { tabCombo("##weblandingimpact", Item::webLandingImpact); });
-        option("Steady states (experimental)",
-               "Native run's RT comes back only once nothing has stopped it for 0.15 s, so a kerb, a prompt "
-               "or a vent flickering for a frame no longer drops and raises it, and it stays off in a fight. "
-               "Off: as before.",
-               S(42), [&] { tabToggle("##steadystates", Item::steadyStates); });
-        option("Combat responsive (experimental)",
-               "In a fight the game moves you for every blow and dodge: Spidy run and the landing carry "
-               "neither start nor go on, native run holds no RT, and A is the game's jump at once. "
-               "Off: as before.",
-               S(42), [&] { tabToggle("##combatresponsive", Item::combatResponsive); });
-        option("Spidy run jump",
-               "A during Spidy run or the web-landing carry is a jump at once that keeps your speed, made by "
-               "the mod rather than waiting for the game to take the body back. On by default; off: the "
-               "game's own jump once it has you back (up to 0.2 s later).",
-               S(42), [&] { tabToggle("##spidyrunjump", Item::spidyRunJump); });
-    });
-    group(0, "Flips", [&] {
-        option("Flips (experimental)",
-               "Right stick flips; up zips/aims. Release holds the angle. A returns upright.",
-               S(42), [&] { changed |= toggle("##flips", &o.flips); });
-        option("Controlled Flips",
-               "In air: A enables left-stick flips. Release holds the angle. A again resets and exits. "
-               "Overrides basic Flips; Realistic Flips keeps its controls.",
-               S(42), [&] { tabToggle("##controlledflips", Item::controlledFlips); });
-        option("Flip speed", "How fast the steering stick turns you at full tilt.", S(150), [&] {
-            stepCombo("##flipspeed", kFlipSpeeds, kFlipSpeedValues, static_cast<int>(std::size(kFlipSpeedValues)),
-                      &o.flipSpeed);
+        settingOption(Item::snapTurn, "Snap turn", "How far a flick of the right stick turns you.", S(150), [&] {
+            stepCombo("##snap", kSnapTurns, kSnapValues, static_cast<int>(std::size(kSnapValues)), &o.snapTurn);
         });
-        option("Flip reprojection (experimental)",
-               "The headset's picture turned by your flip, spin or smooth turn since the game drew it, as it "
-               "is for your head: steadier turns. Off: as before, to compare.",
-               S(42), [&] { tabToggle("##flipreprojection", Item::flipReprojection); });
-        option("Realistic flips (experimental)",
-               "Webs and arm swings spin you in the air, and landing brings you upright. While on, it takes "
-               "the place of Flips' turns, and with Flips on too the left stick steers.",
-               S(42), [&] { tabToggle("##realistic", Item::realisticFlips); });
-        // Its tuning, under it while it is on.
-        if (tabOnly_.realisticFlips) {
-            ImGui::Indent(S(16));
-            option("Rotation strength",
-                   "On a web, how strongly your body turns toward its pull. Where you face stays yours.", S(150),
-                   [&] { tabCombo("##strength", Item::automaticStrength); });
-            option("Max rotation speed", "The fastest it turns you, the spin after letting go too.", S(150),
-                   [&] { tabCombo("##maxspeed", Item::automaticSpeed); });
-            option("Minimum flight speed", "A web turns you only while you travel faster than this.", S(150),
-                   [&] { tabCombo("##flightspeed", Item::automaticMinimumSpeed); });
-            option("Swing momentum", "Letting go of the last web keeps the swing's spin.", S(42),
-                   [&] { tabToggle("##momentum", Item::automaticReleaseFlip); });
-            option("Rotation response", "How soon a turn gets up to speed and slows down. Longer is gentler.",
-                   S(150), [&] { tabCombo("##response", Item::automaticResponse); });
-            option("Hand momentum",
-                   "How much swinging your arms in the air turns you; swing them back to slow down.", S(150),
-                   [&] { tabCombo("##handmomentum", Item::automaticHandStrength); });
-            option("Angular drag", "How quickly a spin dies away without more webs or arm swings.", S(150),
-                   [&] { tabCombo("##drag", Item::automaticFalloff); });
-            option("Minimum hand speed", "Arm swings slower than this do not turn you.", S(150),
-                   [&] { tabCombo("##handspeed", Item::automaticHandThreshold); });
-            option("Air rotation brake", "A in the air stops the spin and brings you upright.", S(42),
-                   [&] { tabToggle("##brake", Item::automaticAirBrake); });
-            option("Flips in combat",
-                   "Off: while enemies are near, and 3 s after, arms and webs stop turning you and you come "
-                   "upright.",
-                   S(42), [&] { tabToggle("##combat", Item::automaticCombat); });
-            ImGui::Unindent(S(16));
-        }
     });
-    group(1, "Body and haptics", [&] {
+    group(0, 1, "Your body", [&] {
         // The T-pose calibration made in the headset; Redo forgets it, and the next session asks for it again.
         const bool calibrated = spidy::launcher::calibrated(o);
         const std::string calibration =
@@ -2074,51 +1876,318 @@ void App::options(ImVec2 origin, ImVec2 size) {
                               "and arms.")
                 : std::string("Skipped: your height comes from the headset. Ask again to get the T-pose when VR "
                               "starts.");
-        option("Body calibration", calibration.c_str(), S(116), [&] {
+        settingOption(Item::none, "Body calibration", calibration.c_str(), S(116), [&] {
             if ((calibrated || !o.calibrationPrompt) && button(calibrated ? "Redo" : "Ask again", S(116))) {
                 o.eyeHeightMm = o.armLengthMm = 0;
                 o.calibrationPrompt = true;
                 changed = true;
             }
         });
-        // HEIGHT and SEATED (seated.hpp), kept with the tab's own in spidy_vr.ini.
-        option("Height", "Yours: Spider-Man's size, and how high seated play raises you. Auto: from the "
+        settingOption(Item::height, "Height", "Yours: Spider-Man's size, and how high seated play raises you. Auto: from the "
                          "calibration or the headset.",
                S(150), [&] { tabCombo("##height", Item::height); });
-        option("Seated", "Play sitting down: your view and body rise to your standing height. Recenter the "
+        settingOption(Item::seated, "Seated", "Play sitting down: your view and body rise to your standing height. Recenter the "
                          "headset after you sit down.",
                S(42), [&] { tabToggle("##seated", Item::seated); });
-        option("Controller vibration", "How strongly webs and punches buzz.", S(150), [&] {
+    });
+    group(1, 0, "Webs and anchors", [&] {
+        settingOption(Item::webStyle, "Web style", "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", S(150),
+               [&] {
+                   static constexpr int styles[] = {0, 1};
+                   int arcade = o.arcadeWebs ? 1 : 0;
+                   stepCombo("##webStyle", kWebStyles, styles, 2, &arcade);
+                   o.arcadeWebs = arcade != 0;
+               });
+        settingOption(Item::webButton, "Web button", "Which button shoots and holds a web; the other reels in and shoots web balls.", S(150),
+               [&] {
+                   static constexpr int buttons[] = {0, 1};
+                   int trigger = o.triggerWebs ? 1 : 0;
+                   stepCombo("##webButton", kWebButtons, buttons, 2, &trigger);
+                   o.triggerWebs = trigger != 0;
+               });
+        settingOption(Item::aimMarkers, "Aim markers", "Show where each hand's web would land.", S(42),
+               [&] { changed |= toggle("##aim", &o.aimMarkers); });
+        settingOption(Item::airWebs, "Webs hold in open air",
+               "With nothing in reach, a web still holds as far out as Web range; off, it misses.", S(42),
+               [&] { changed |= toggle("##air", &o.airWebs); });
+        settingOption(Item::smartAnchor, "Smart anchor",
+               "With webs holding in open air off, a web that just misses still catches the real surface "
+               "nearest it.",
+               S(42), [&] { tabToggle("##smartanchor", Item::smartAnchor); });
+        settingOption(Item::webRange, "Web range", "How far a web reaches; a web in open air holds this far out.", S(150),
+               [&] { tabCombo("##webrange", Item::webRange); });
+        settingOption(Item::webSpeed, "Web speed",
+               "Off, a web sticks at once; or it flies there, visibly, pulls only once it has arrived "
+               "and catches you softly.",
+               S(150), [&] { tabCombo("##webspeed", Item::webSpeed); });
+    });
+    group(1, 1, "Aiming", [&] {
+        settingOption(Item::eyeAim, "Eye aim",
+               "Web balls and zips go where your eyes look. Only where the headset and its VR runtime track "
+               "the eyes (Quest Pro, Varjo, Pimax Crystal...); elsewhere hands and head aim as before.",
+               S(150), [&] { tabCombo("##eyeaim", Item::eyeAim); });
+        settingOption(Item::webAimSource, "Web aim (experimental)",
+               "Controller follows your controller. Model forearm follows the visible arm, with the blend "
+               "and angle limit below. Wrist shooters is a shortcut to full forearm aim when Controller is selected.",
+               S(150), [&] { tabCombo("##webaimsource", Item::webAimSource); });
+        settingOption(Item::forearmBlend, "Forearm blend",
+               "With web aim MODEL FOREARM: how much of the forearm's line the webs take, from 0% (the "
+               "controller's) to 100% (the forearm's). 100% by default.",
+               S(150), [&] { tabCombo("##forearmblend", Item::forearmBlend); });
+        settingOption(Item::forearmAimLimit,
+            "Forearm aim limit",
+            "How far web aim MODEL FOREARM and wrist shooters may turn your webs off the controller's line "
+            "onto the forearm. NO LIMIT by default; 35 degrees keeps the webs near the controller.",
+            S(150), [&] { tabCombo("##forearmaimlimit", Item::forearmAimLimit); });
+        settingOption(Item::wristShooters, "Wrist shooters",
+               "Uses full forearm aim when Web aim is Controller. Model forearm already provides this, "
+               "with adjustable blend. If the body cannot supply an arm pose, aiming falls back to the controller.",
+               S(42), [&] { tabToggle("##wristshooters", Item::wristShooters); });
+        settingOption(Item::palmShooters, "Palm shooters",
+               "Adds a palm-side quarter turn to your chosen aim direction. Combines with forearm aim and Web angle.",
+               S(42), [&] { tabToggle("##palmshooters", Item::palmShooters); });
+        settingOption(Item::webAngle, "Web angle",
+               "Tilts the line your webs leave your hands along, up or down from the controller's, 15 to 45 "
+               "degrees. 0: along the controller, as before. Punches keep the controller's own.",
+               S(150), [&] { tabCombo("##webangle", Item::webAngle); });
+    });
+    group(1, 0, "Web tricks", [&] {
+        settingOption(Item::webTie, "Web tie (experimental)",
+               "Web an enemy up, put one web on a wall and the other on him, bring your hands together "
+               "and click the right stick: he is stuck to the wall. On, a webbed enemy comes to you only "
+               "when you yank him.",
+               S(42), [&] { tabToggle("##webtie", Item::webTie); });
+        settingOption(Item::webLines, "Web lines (experimental)",
+               "Put one web on a wall and the other on another, bring your hands together and click the "
+               "right stick: a taut line of web between them. Hold the right stick's click to aim at a line "
+               "and let go to zip onto it; walk, jump and dodge on it. With Web tie on too, enemies hang "
+               "under it.",
+               S(42), [&] { tabToggle("##weblines", Item::webLines); });
+    });
+    group(2, 0, "Swing feel", [&] {
+        settingOption(Item::swingSpeed, "Swing speed limit", "How fast a swing can carry you.", S(150), [&] {
+            ImGui::PushFont(fonts_.semibold, 14);
+            changed |= slider("##speed", &o.swingSpeed, 10, 65, "%d m/s");
+            ImGui::PopFont();
+        });
+        settingOption(Item::weight, "Weight", "How heavy you are while swinging and after letting go. 100% is real gravity.", S(150), [&] {
+            stepCombo("##weight", kWeights, kWeightValues, static_cast<int>(std::size(kWeightValues)), &o.weight);
+        });
+        settingOption(Item::elasticWeb, "Elastic web", "Webs stretch under load and catch you more softly; higher is softer.", S(150),
+               [&] { tabCombo("##elasticweb", Item::elasticWeb); });
+        settingOption(Item::softRelease, "Soft release", "A web's last pull fades briefly as you let go; higher lasts longer.", S(150),
+               [&] { tabCombo("##softrelease", Item::softRelease); });
+        settingOption(Item::swingAssist, "Swing assist",
+               "Swinging at a wall, you slow down before you hit it; where you go stays yours.", S(42),
+               [&] { tabToggle("##swingassist", Item::swingAssist); });
+    });
+    group(2, 1, "Slingshots", [&] {
+        settingOption(Item::webSlingshot, "Web slingshot", "No auto jump. Draw two fixed webs, hold for vibration, release both to launch.",
+               S(42), [&] { tabToggle("##webslingshot", Item::webSlingshot); });
+        settingOption(Item::airSlingshot, "Air slingshot (experimental)",
+               "In the air with two taut webs: hold both grips, draw both arms back until the hands buzz, "
+               "then let go to launch along the webs. Off: letting go in the air only releases, as before.",
+               S(42), [&] { tabToggle("##airslingshot", Item::airSlingshot); });
+        settingOption(Item::slingshotSpeed, "Slingshot speed",
+               "How fast a full draw launches you: under the swing speed limit, or at a speed of its own.",
+               S(150), [&] { tabCombo("##slingshotspeed", Item::slingshotSpeed); });
+    });
+    group(2, 1, "Hand gestures", [&] {
+        settingOption(Item::betterClimbing, "Better climbing", "Take one web in both hands, then pull hand over hand to keep climbing it.",
+               S(42), [&] { tabToggle("##betterclimbing", Item::betterClimbing); });
+        settingOption(Item::singleHandYankStrength, "Single hand yank strength",
+               "How much speed a fast one-hand web yank adds. 100% as before; two-hand zips are unchanged.",
+               S(150), [&] { tabCombo("##singlehandyank", Item::singleHandYankStrength); });
+        settingOption(Item::twoHandZip, "Two hand web zip", "Both webs on one spot: pull both arms back fast to launch at it.",
+               S(42), [&] { tabToggle("##twohandzip", Item::twoHandZip); });
+        settingOption(Item::ropeSteering, "Hand rope steering",
+               "Hold your web with the free hand too and pull sideways to turn your swing.", S(42),
+               [&] { tabToggle("##ropesteering", Item::ropeSteering); });
+    });
+    group(3, 0, "Running", [&] {
+        settingOption(Item::nativeRun, "Native run (experimental)",
+               "The game's sprint, vaults and wall runs. Starts at the stick threshold below; releases "
+               "20 percentage points lower. Spidy run separately preserves fast landing momentum.",
+               S(42), [&] { tabToggle("##nativerun", Item::nativeRun); });
+        settingOption(Item::nativeRunAt, "Native run at",
+               "How far the left stick tilts before NATIVE RUN holds the game's RT for its sprint; it lets "
+               "go 20 points under it. 70%, as before.",
+               S(150), [&] { tabCombo("##nativerunatpercent", Item::nativeRunAt); });
+        settingOption(Item::runCurve, "Run curve (experimental)",
+               "On the ground the left stick reaches the game's full run at 80% of its tilt, with more of "
+               "its speed early. Off: the stick as it is, as before.",
+               S(42), [&] { tabToggle("##runcurve", Item::runCurve); });
+        settingOption(Item::steadyStates, "Steady states (experimental)",
+               "Native run's RT comes back only once nothing has stopped it for 0.15 s, so a kerb, a prompt "
+               "or a vent flickering for a frame no longer drops and raises it, and it stays off in a fight. "
+               "Off: as before.",
+               S(42), [&] { tabToggle("##steadystates", Item::steadyStates); });
+        settingOption(Item::spidyRun, "Spidy run (experimental)",
+               "Land faster than the game's sprint (a swing let go of near the street) and the mod runs you "
+               "on at that speed, as its wall run does on walls: the stick steers without losing speed, "
+               "which eases to a sprint in a few seconds, and the game's run (NATIVE RUN) takes over. A wall "
+               "ahead is the usual wall run. Off: the game takes every landing, as before.",
+               S(42), [&] { tabToggle("##spidyrun", Item::spidyRun); });
+        settingOption(Item::spidyRunFromStanding, "Spidy run from standing (experimental)",
+               "With Spidy run on: hold the stick all the way for a moment on the ground and the mod's run "
+               "starts from a stand or a walk, building past the game's sprint while you hold it; ease off "
+               "and it slows to the sprint and the game's run takes over. Off: Spidy run starts only from a "
+               "fast landing, as before.",
+               S(42), [&] { tabToggle("##spidyrunfromstanding", Item::spidyRunFromStanding); });
+        settingOption(Item::spidyRunJump, "Spidy run jump",
+               "A during Spidy run or the web-landing carry is a jump at once that keeps your speed, made by "
+               "the mod rather than waiting for the game to take the body back. On by default; off: the "
+               "game's own jump once it has you back (up to 0.2 s later).",
+               S(42), [&] { tabToggle("##spidyrunjump", Item::spidyRunJump); });
+    });
+    group(3, 1, "Jumping and landing", [&] {
+        settingOption(Item::momentumLeap, "Running leap (experimental)",
+               "A charged leap (hold A on the ground) keeps the speed you run at along its way and adds its "
+               "charge on top; a full one from a fast run is a long jump. Off: the leap starts from rest, as "
+               "before.",
+               S(42), [&] { tabToggle("##runningleap", Item::momentumLeap); });
+        settingOption(Item::earlyJump, "Early jump (experimental)",
+               "QUICK TAP: a tap of A jumps if let go within 0.1 s instead of 0.18 s. RUNNING: that, and "
+               "while NATIVE RUN sprints A jumps the moment it is pressed (no charged leap while sprinting). "
+               "OFF: as before.",
+               S(150), [&] { tabCombo("##earlyjump", Item::earlyJump); });
+        settingOption(Item::softLanding, "Soft landing (experimental)",
+               "Falling with no web, your fall eases to 9 m/s over the last 3 m (or 0.35 s) before the "
+               "ground, so the game lands you lightly; your speed across is kept. Off: you land as fast as "
+               "you fall, as before.",
+               S(42), [&] { tabToggle("##softlanding", Item::softLanding); });
+        settingOption(Item::webLandingSmooth, "Smooth web landing (experimental)",
+               "Landing while you hold a web, slower than the web landing impact: your fall eases over the "
+               "last metres, your speed carries on across the ground for a moment and eases to a jog before "
+               "the game's run takes over, and a foot brushing the ground no longer stops and restarts the "
+               "swing. Faster than that it is the game's heavy landing. Off: as before.",
+               S(42), [&] { tabToggle("##weblandingsmooth", Item::webLandingSmooth); });
+        settingOption(Item::webLandingImpact, "Web landing impact",
+               "With smooth web landing: a landing this fast or faster (m/s, all of its speed) is the game's "
+               "heavy one. 24 m/s by default.",
+               S(150), [&] { tabCombo("##weblandingimpact", Item::webLandingImpact); });
+    });
+    group(3, 0, "Walls", [&] {
+        settingOption(Item::handClimb, "Hand wall climbing (experimental)",
+               "On a wall with the left stick at rest, squeeze a grip near the wall to hold on and pull to "
+               "climb; both grips held roll your view along it.",
+               S(42), [&] { tabToggle("##handclimb", Item::handClimb); });
+        settingOption(Item::joystickRunCamera, "Joystick wall run camera",
+               "On: a joystick run turns your view onto the wall, as before. Off: the left stick drives the "
+               "momentum wall run's view and gait.",
+               S(42), [&] { tabToggle("##joystickruncamera", Item::joystickRunCamera); });
+        settingOption(Item::wallRunCameraTilt, "Wall Run Camera Tilt", "Gently bank with the body on horizontal momentum wall runs.", S(42),
+               [&] { tabToggle("##wallruncameratilt", Item::wallRunCameraTilt); });
+    });
+    group(3, 1, "Combat", [&] {
+        settingOption(Item::combatResponsive, "Combat responsive (experimental)",
+               "In a fight the game moves you for every blow and dodge: Spidy run and the landing carry "
+               "neither start nor go on, native run holds no RT, and A is the game's jump at once. "
+               "Off: as before.",
+               S(42), [&] { tabToggle("##combatresponsive", Item::combatResponsive); });
+        settingOption(Item::combatVisuals, "Combat visuals",
+               "Show combat effects and guided attacks. Off also allows free uppercuts and smashes; "
+               "Spider-Sense stays on.",
+               S(42), [&] { tabToggle("##combatvisuals", Item::combatVisuals); });
+        settingOption(Item::halfPunchDamage,
+            "Half punch damage",
+            "Punches and web strikes deal half their damage; launches, smashes and knockback stay the same.",
+            S(42), [&] { tabToggle("##halfpunchdamage", Item::halfPunchDamage); });
+    });
+    group(4, 0, "Flip controls", [&] {
+        settingOption(Item::realisticFlips, "Realistic flips (experimental)",
+               "Webs and arm swings spin you in the air, and landing brings you upright. While on, it takes "
+               "the place of Flips' turns, and with Flips on too the left stick steers.",
+               S(42), [&] { tabToggle("##realistic", Item::realisticFlips); });
+        settingOption(Item::flips, "Flips (experimental)",
+               "Basic right-stick flips. With Realistic flips on, this instead enables left-stick steering. "
+               "Controlled flips takes priority when Realistic flips is off.",
+               S(42), [&] { changed |= toggle("##flips", &o.flips); });
+        settingOption(Item::controlledFlips, "Controlled Flips",
+               "In air: A enables left-stick flips. Release holds the angle. A again resets and exits. "
+               "Overrides basic Flips; Realistic Flips keeps its controls.",
+               S(42), [&] { tabToggle("##controlledflips", Item::controlledFlips); });
+        settingOption(Item::flipSpeed, "Flip speed", "How fast the steering stick turns you at full tilt.", S(150), [&] {
+            stepCombo("##flipspeed", kFlipSpeeds, kFlipSpeedValues, static_cast<int>(std::size(kFlipSpeedValues)),
+                      &o.flipSpeed);
+        });
+    });
+    group(4, 1, "Momentum tuning", [&] {
+        settingOption(Item::automaticStrength, "Rotation strength",
+                   "On a web, how strongly your body turns toward its pull. Where you face stays yours.", S(150),
+                   [&] { tabCombo("##strength", Item::automaticStrength); });
+        settingOption(Item::automaticSpeed, "Max rotation speed", "The fastest it turns you, the spin after letting go too.", S(150),
+                   [&] { tabCombo("##maxspeed", Item::automaticSpeed); });
+        settingOption(Item::automaticReleaseFlip, "Swing momentum", "Letting go of the last web keeps the swing's spin.", S(42),
+                   [&] { tabToggle("##momentum", Item::automaticReleaseFlip); });
+        settingOption(Item::automaticHandStrength, "Hand momentum",
+                   "How much swinging your arms in the air turns you; swing them back to slow down.", S(150),
+                   [&] { tabCombo("##handmomentum", Item::automaticHandStrength); });
+        settingOption(Item::automaticAirBrake, "Air rotation brake", "A in the air stops the spin and brings you upright.", S(42),
+                   [&] { tabToggle("##brake", Item::automaticAirBrake); });
+        settingOption(Item::automaticCombat, "Flips in combat",
+                   "Off: while enemies are near, and 3 s after, arms and webs stop turning you and you come "
+                   "upright.",
+                   S(42), [&] { tabToggle("##combat", Item::automaticCombat); });
+    });
+    group(4, 1, "Advanced rotation tuning", [&] {
+        if (ImGui::CollapsingHeader("Show fine tuning")) {
+            settingOption(Item::automaticMinimumSpeed, "Minimum flight speed", "A web turns you only while you travel faster than this.", S(150),
+                   [&] { tabCombo("##flightspeed", Item::automaticMinimumSpeed); });
+            settingOption(Item::automaticResponse, "Rotation response", "How soon a turn gets up to speed and slows down. Longer is gentler.",
+                   S(150), [&] { tabCombo("##response", Item::automaticResponse); });
+            settingOption(Item::automaticFalloff, "Angular drag", "How quickly a spin dies away without more webs or arm swings.", S(150),
+                   [&] { tabCombo("##drag", Item::automaticFalloff); });
+            settingOption(Item::automaticHandThreshold, "Minimum hand speed", "Arm swings slower than this do not turn you.", S(150),
+                   [&] { tabCombo("##handspeed", Item::automaticHandThreshold); });
+        }
+    });
+    group(4, 0, "Camera motion", [&] {
+        settingOption(Item::dodgeTumble,
+            "Dodge tumble (experimental)",
+            "When the game takes your dodge, the view leans (LEAN, 24 degrees, under half a second) or rolls "
+            "a whole turn (ROLL, 0.6 s) the way you dodged; ahead or back it only leans. The HUD and your "
+            "hands stay put. Off: the view stays level, as before.",
+            S(150), [&] { tabCombo("##dodgetumble", Item::dodgeTumble); });
+        settingOption(Item::flipReprojection, "Flip reprojection (experimental)",
+               "The headset's picture turned by your flip, spin or smooth turn since the game drew it, as it "
+               "is for your head: steadier turns. Off: as before, to compare.",
+               S(42), [&] { tabToggle("##flipreprojection", Item::flipReprojection); });
+    });
+    group(5, 0, "Controllers", [&] {
+        settingOption(Item::haptics, "Controller vibration", "How strongly webs and punches buzz.", S(150), [&] {
             stepCombo("##haptics", kHaptics, kHapticValues, static_cast<int>(std::size(kHapticValues)), &o.haptics);
         });
-        option("Reel haptics", "Reeling a web in ticks in that hand like a winch.", S(42),
+        settingOption(Item::reelHaptics, "Reel haptics", "Reeling a web in ticks in that hand like a winch.", S(42),
                [&] { tabToggle("##reelhaptics", Item::reelHaptics); });
-        option("Swing haptics", "Swinging on a taut web ticks softly in that hand, faster as you speed up.",
+        settingOption(Item::swingHaptics, "Swing haptics", "Swinging on a taut web ticks softly in that hand, faster as you speed up.",
                S(42), [&] { tabToggle("##swinghaptics", Item::swingHaptics); });
-        option("PC media",
-               "The phone's MUSIC plays what the PC plays: Spotify, a browser. Off: the Music folder.", S(42),
-               [&] { tabToggle("##pcmedia", Item::pcMedia); });
-        option("Body haptics", "A bHaptics vest, sleeves and visor feel webs, blows, wind and Spider-Sense; the "
+    });
+    group(5, 1, "Body haptics", [&] {
+        settingOption(Item::bodyHaptics, "Body haptics", "A bHaptics vest, sleeves and visor feel webs, blows, wind and Spider-Sense; the "
                                "bHaptics Player has to be running.",
                S(150), [&] {
                    stepCombo("##bodyhaptics", kHaptics, kHapticValues, static_cast<int>(std::size(kHapticValues)),
                              &o.bodyHaptics);
                });
-        // Its groups, under it while it plays.
-        if (o.bodyHaptics > 0) {
-            ImGui::Indent(S(16));
-            option("Web haptics", "Shots, holds, the swing's pull, zips and grabs.", S(42),
+        settingOption(Item::hapticWebs, "Web haptics", "Shots, holds, the swing's pull, zips and grabs.", S(42),
                    [&] { tabToggle("##hapticwebs", Item::hapticWebs); });
-            option("Wind haptics", "The wind when you fly or fall free of webs and walls.", S(42),
+        settingOption(Item::hapticWind, "Wind haptics", "The wind when you fly or fall free of webs and walls.", S(42),
                    [&] { tabToggle("##hapticwind", Item::hapticWind); });
-            option("Combat haptics", "Punches, hits, Spider-Sense, dodges, heals and slow motion.", S(42),
+        settingOption(Item::hapticCombat, "Combat haptics", "Punches, hits, Spider-Sense, dodges, heals and slow motion.", S(42),
                    [&] { tabToggle("##hapticcombat", Item::hapticCombat); });
-            option("Movement haptics", "Landings, walls, wall climbing and charged leaps.", S(42),
+        settingOption(Item::hapticMovement, "Movement haptics", "Landings, walls, wall climbing and charged leaps.", S(42),
                    [&] { tabToggle("##hapticmovement", Item::hapticMovement); });
-            ImGui::Unindent(S(16));
-        }
     });
-    group(1, "Picture", [&] {
+    group(5, 0, "Sound and music", [&] {
+        settingOption(Item::blowSounds, "Blow sounds",
+               "Choose the game's impact sounds, Spidy's tones, or silence.", S(150),
+               [&] { tabCombo("##blowsounds", Item::blowSounds); });
+        settingOption(Item::pcMedia, "PC media",
+               "The phone's MUSIC plays what the PC plays: Spotify, a browser. Off: the Music folder.", S(42),
+               [&] { tabToggle("##pcmedia", Item::pcMedia); });
+    });
+    group(6, 0, "Picture", [&] {
         // Percent of the headset's own size, so no choice looks sharper than it is; with the headset checked,
         // the pixels it makes.
         std::string resolutionHelp = "Of the headset's own, per side. Higher is sharper; lower is faster.";
@@ -2129,7 +2198,7 @@ void App::options(ImVec2 origin, ImVec2 size) {
         }
         if (o.renderScale > 100)
             resolutionHelp += " Costs frame rate and memory.";
-        option("Render resolution", resolutionHelp.c_str(), S(150), [&] {
+        settingOption(Item::none, "Render resolution", resolutionHelp.c_str(), S(150), [&] {
             ImGui::PushFont(fonts_.semibold, 14);
             if (slider("##resolution", &o.renderScale, static_cast<int>(spidy::minimumRenderScale),
                        static_cast<int>(spidy::maximumRenderScale), "%d%%")) {
@@ -2138,6 +2207,8 @@ void App::options(ImVec2 origin, ImVec2 size) {
             }
             ImGui::PopFont();
         });
+    });
+    group(6, 0, "Image quality", [&] {
         // What the scene is rendered at before the game's anti-aliasing brings it to the eye's size; with the
         // headset checked, in pixels.
         std::string upscaleHelp = "The scene is rendered smaller and brought to the eye's size, anti-aliased. Lower "
@@ -2152,92 +2223,91 @@ void App::options(ImVec2 origin, ImVec2 size) {
                                        "is faster and softer.",
                                        scene[0], scene[1], rendered[0], rendered[1]);
         }
-        option("Upscaling", upscaleHelp.c_str(), S(150), [&] {
+        settingOption(Item::none, "Upscaling", upscaleHelp.c_str(), S(150), [&] {
             stepCombo("##upscale", kUpscales, kUpscaleValues, static_cast<int>(std::size(kUpscaleValues)), &o.upscale);
         });
-        option("Game's depth of field",
+        settingOption(Item::none, "Game's depth of field",
                "Off: VR turns the game's Depth of Field off while it runs (its blur is not where you look). On: your "
                "game setting stays.",
                S(42), [&] { changed |= toggle("##dof", &o.gameDepthOfField); });
-        option("Game's sharpening",
+        settingOption(Item::none, "Game's sharpening",
                "Off: VR sets the game's Sharpness to its lowest while it runs. On: your game setting stays.", S(42),
                [&] { changed |= toggle("##sharpen", &o.gameSharpening); });
-        option("Near clip",
+        settingOption(Item::nearClip, "Near clip",
                "How near your eyes things still show. Nearer keeps hands held up before your face in view.", S(150),
                [&] { tabCombo("##nearclip", Item::nearClip); });
     });
-    group(1, "Game screen and HUD", [&] {
-        option("Game screen size", "The headset's screen for menus, cutscenes and flat mode.", S(150), [&] {
+    group(6, 1, "Game screen and cutscenes", [&] {
+        settingOption(Item::screenSize, "Game screen size", "The headset's screen for menus, cutscenes and flat mode.", S(150), [&] {
             static constexpr int sizes[] = {0, 1, 2};
             stepCombo("##screen", kScreenSizes, sizes, 3, &o.screenSize);
         });
-        option("Game screen 3D",
+        settingOption(Item::screenDepth, "Game screen 3D",
                "Cutscenes have depth on that screen; higher brings the scene nearer. Off, they are flat.", S(150), [&] {
                    static constexpr int depths[] = {0, 1, 2, 3};
                    stepCombo("##depth", kScreenDepths, depths, 4, &o.screenDepth);
                });
-        option("First person cutscenes (experimental)",
+        settingOption(Item::none, "First person cutscenes (experimental)",
                "Cutscenes, finishers and car chases play around you, from inside the head of the character "
                "in them. Click the right stick in a scene to switch to the theater screen and back. X on "
                "your left controller swaps between Peter, MJ and Miles when they are there (also if you "
                "are on the wrong Spider-Man model). Expect bugs.",
                S(42), [&] { changed |= toggle("##fpscenes", &o.firstPersonCutscenes); });
-        if (o.firstPersonCutscenes)
-            option("Cutscene head tracking",
-                   "On, your head looks around in the scene. Off, the scene's own camera aims the view and "
+        settingOption(Item::none, "Cutscene head tracking",
+                   "Requires First person cutscenes. On, your head looks around; off, the scene's camera aims and "
                    "the right stick turns it: better if you get motion sick.",
-                   S(42), [&] { changed |= toggle("##fpscenehead", &o.cutsceneHeadTracking); });
-        option("Disable theater screen fully",
+                   S(42), [&] { ImGui::BeginDisabled(!o.firstPersonCutscenes);
+                       changed |= toggle("##fpscenehead", &o.cutsceneHeadTracking);
+                       ImGui::EndDisabled(); });
+        settingOption(Item::none, "Disable theater screen fully",
                "Every scene plays around you in VR, never on the theater screen: from the scene's own "
                "camera, or in first person with first-person cutscenes on (the right stick then switches "
                "between the two).",
                S(42), [&] { changed |= toggle("##notheater", &o.disableTheater); });
-        option("HUD", "How large the game's HUD shows in front of you; off, there is none in VR.", S(150), [&] {
+    });
+    group(6, 1, "HUD and style", [&] {
+        settingOption(Item::hud, "HUD", "How large the game's HUD shows in front of you; off, there is none in VR.", S(150), [&] {
             static constexpr int sizes[] = {0, 1, 2, 3};
             stepCombo("##hud", kHudSizes, sizes, 4, &o.hud);
         });
-        option("Steady HUD (experimental)",
+        settingOption(Item::steadyHud, "Steady HUD (experimental)",
                "The HUD shown by the headset itself, at its own rate, instead of drawn into the game's "
                "picture: it holds still when the game falls behind. Off: as before, to compare.",
                S(42), [&] { tabToggle("##steadyhud", Item::steadyHud); });
-        option("UI style",
+        settingOption(Item::uiStyle, "UI style",
                "Spidy's own marks, gadget wheel and meters: Comic, printed like Spidy's videos, or Tech, like the "
                "game's HUD.",
                S(150), [&] { tabCombo("##uistyle", Item::uiStyle); });
-        option("Combat visuals",
-               "Show punch arrows, target rings, hit effects and KO text. Spider-Sense stays on.",
-               S(42), [&] { tabToggle("##combatvisuals", Item::combatVisuals); });
-        option(
-            "Half punch damage",
-            "Punches and web strikes deal half their damage; launches, smashes and knockback stay the same.",
-            S(42), [&] { tabToggle("##halfpunchdamage", Item::halfPunchDamage); });
     });
-    group(1, "Monitor", [&] {
-        option("Small game window", "Saves GPU time while you play in VR.", S(42),
+    group(6, 0, "Monitor and recording", [&] {
+        settingOption(Item::none, "Small game window", "Saves GPU time while you play in VR.", S(42),
                [&] { changed |= toggle("##small", &o.smallWindow); });
-        option("Monitor frame rate",
+        settingOption(Item::none, "Monitor frame rate",
                "How often the monitor gets your left eye in VR. Each picture costs the graphics card time the "
                "headset could have.",
                S(150), [&] {
                    stepCombo("##monitor", kMonitorRates, kMonitorRateValues,
                              static_cast<int>(std::size(kMonitorRateValues)), &o.monitorRate);
                });
-        option("Recording FOV",
+        settingOption(Item::recordingFov, "Recording FOV",
                "A view of its own on the monitor to record, this wide across, instead of your left eye. "
                "Costs frame rate; Spidy's marks stay in the headset.",
                S(150), [&] { tabCombo("##recordingfov", Item::recordingFov); });
-        option("Recording smoothing",
+        settingOption(Item::recordingSmoothing, "Recording smoothing",
                "How softly the recording view turns with your head; the headset's view is never smoothed.",
                S(150), [&] { tabCombo("##recordingsmoothing", Item::recordingSmoothing); });
     });
-    // A way round a display driver error as VR starts (PLAYERS.md), apart from the monitor's options since
-    // October 25: beside them it read as one of them, and Recording FOV does nothing while it is on.
-    group(1, "Troubleshooting", [&] {
-        option("Normal camera on the monitor",
+    group(8, 0, "Troubleshooting", [&] {
+        settingOption(Item::none, "Normal camera on the monitor",
                "Only for a display driver error as VR starts: the game keeps its own camera, and the "
                "monitor shows it. Costs frame rate; shadows and far detail follow that camera, and "
                "Recording FOV does nothing.",
                S(42), [&] { changed |= toggle("##stock", &o.stockMonitorView); });
+        settingOption(Item::runLogs, "Run logs",
+               "Writes how you run, land, leap and jump, the frame rate and how far VR got to the "
+               "console (diag lines) and a -diag.log file beside the session report, for sending back. "
+               "Off, none of it is written. Changes nothing in play.",
+               S(42), [&] { tabToggle("##runlogs", Item::runLogs); });
     });
     ImGui::EndDisabled();
     if (changed)
@@ -2247,12 +2317,17 @@ void App::options(ImVec2 origin, ImVec2 size) {
     ImGui::SetCursorScreenPos(ImVec2(base.x, std::max(columnY[0], columnY[1]) - gap));
     ImGui::Dummy(ImVec2(width, S(6)));
     ImGui::EndChild();
+    ImGui::PopID();
 }
 
 // --- Profiles ----------------------------------------------------------------------
 
 void App::refreshProfiles() {
-    profiles_ = savedProfiles();
+    profiles_.clear();
+    for (const auto& preset : spidy::launcher::builtInProfiles())
+        profiles_.push_back({preset.profile.name, preset.profile, true});
+    const auto saved = savedProfiles();
+    profiles_.insert(profiles_.end(), saved.begin(), saved.end());
     tabOnly_ = loadTabOnly();
     profilesStale_ = false;
 }
@@ -2266,12 +2341,13 @@ App::ProfileState App::profileState() {
     // that holds them all.
     ProfileState state;
     for (const auto& saved : profiles_)
-        if (saved.name == settings_.profile)
+        if (saved.selectionKey() == settings_.profile)
             state.remembered = &saved;
     if (state.remembered && text::profileMatches(state.remembered->profile, now))
         state.current = state.remembered;
     for (const auto& saved : profiles_)
-        if (!state.current && saved.profile.complete() && text::profileMatches(saved.profile, now))
+        if (!state.current && (saved.builtIn || saved.profile.complete()) &&
+            text::profileMatches(saved.profile, now))
             state.current = &saved;
     state.changed = !state.current && state.remembered;
     return state;
@@ -2291,7 +2367,9 @@ bool App::keepProfile(const Profile& profile) {
     return false;
 }
 
-void App::useProfile(const Profile& profile, const std::string& name) {
+void App::useProfile(const Profile& profile, const std::string& name, bool builtIn) {
+    if (session_.running())
+        return;
     namespace text = spidy::launcher;
     text::PlaySettings settings = playSettings();
     // Previous settings themselves: back to what was used before, and what is used now takes their place,
@@ -2308,10 +2386,6 @@ void App::useProfile(const Profile& profile, const std::string& name) {
                             : std::string(" What you had is kept as ") + kPreviousProfile + ".";
     }
     text::applyProfile(profile, settings);
-    settings_.options = settings.options;
-    // Previous settings are no profile to save changes to.
-    settings_.profile = previous ? std::string() : name;
-    save();
     if (!(settings.tab == tabOnly_)) {
         if (!saveTabOnly(settings.tab)) {
             profileStatus("Spidy could not save the SPIDY VR tab's own settings of " + name + ".", true);
@@ -2319,12 +2393,17 @@ void App::useProfile(const Profile& profile, const std::string& name) {
         }
         tabOnly_ = settings.tab;
     }
+    settings_.options = settings.options;
+    // Previous settings are no profile to save changes to.
+    settings_.profile = previous ? std::string() : builtIn ? text::builtInProfileKey(name) : name;
+    save();
     profileStatus(message);
 }
 
 void App::openImport(std::string_view text, const std::string& fallbackName, const std::string& source) {
     auto profile = spidy::launcher::readProfile(text);
     tab_ = Tab::options;
+    optionPage_ = static_cast<int>(spidy::vr_settings::categoryCount);
     if (!profile) {
         profileStatus(source + " holds no Spidy profile.", true);
         return;
@@ -2344,6 +2423,85 @@ void App::importFile(const std::wstring& path) {
     openImport(readTextFile(path), narrow(file.stem().wstring()), narrow(file.filename().wstring()));
 }
 
+std::optional<SavedProfile> App::profileChoices(const ProfileState& state) {
+    namespace text = spidy::launcher;
+    if (ImGui::IsWindowAppearing())
+        profilesStale_ = true;
+    std::optional<SavedProfile> chosen;
+    const auto now = playSettings();
+    bool builtIns = true;
+    ImGui::SeparatorText("Gameplay presets");
+    for (const auto& saved : profiles_) {
+        if (builtIns && !saved.builtIn) {
+            ImGui::SeparatorText("Your profiles");
+            builtIns = false;
+        }
+        ImGui::PushID(saved.selectionKey().c_str());
+        if (ImGui::Selectable(saved.name.c_str(), &saved == state.current))
+            chosen = saved;
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
+            std::string lines;
+            if (saved.builtIn)
+                lines = std::string(text::builtInProfileDescription(saved.name)) +
+                        "\nPersonal setup stays.\n\n";
+            const auto changes = text::profileChanges(saved.profile, now);
+            lines += changes.empty() ? "These settings are active." : "Using it changes:";
+            for (size_t i = 0; i < changes.size() && i < 12; ++i)
+                lines += "\n" + changes[i].setting + "   " + changes[i].from + " -> " + changes[i].to;
+            if (changes.size() > 12)
+                lines += format("\nand %d more.", static_cast<int>(changes.size() - 12));
+            tip(lines.c_str());
+        }
+        if (saved.builtIn) {
+            ImGui::PushStyleColor(ImGuiCol_Text, vec(kPaperDim));
+            ImGui::TextWrapped("%s", text::builtInProfileDescription(saved.name));
+            ImGui::PopStyleColor();
+        }
+        ImGui::PopID();
+    }
+    return chosen;
+}
+
+void App::playProfile(float width, bool running) {
+    const ProfileState state = profileState();
+    const SavedProfile* active = state.current ? state.current : state.remembered;
+    const std::string name = active ? active->name + (state.changed ? "*" : "") : "Your own";
+    ImGui::PushFont(fonts_.semibold, 15);
+    ImGui::TextUnformatted("Profile");
+    ImGui::SameLine();
+    if (link("Manage")) {
+        tab_ = Tab::options;
+        optionPage_ = static_cast<int>(spidy::vr_settings::categoryCount);
+    }
+    ImGui::SetNextItemWidth(width);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(S(420), 0), ImVec2(S(560), S(450)));
+    std::optional<SavedProfile> chosen;
+    ImGui::BeginDisabled(running);
+    if (ImGui::BeginCombo("##playProfile", name.c_str(), ImGuiComboFlags_HeightLargest)) {
+        chosen = profileChoices(state);
+        ImGui::EndCombo();
+    }
+    ImGui::EndDisabled();
+    if (running && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        tip("Stop VR to change the profile for the next session.");
+    ImGui::PopFont();
+    const bool status = ImGui::GetTime() < profileStatusUntil_;
+    const char* help = running ? "Stop VR to switch profiles."
+                       : status ? profileStatus_.c_str()
+                       : state.changed ? "Modified settings. Manage profiles to save a copy."
+                       : active && active->builtIn ? "Gameplay preset. Your personal setup stays."
+                                                  : "Choose a preset or one of your saved profiles.";
+    ImGui::PushFont(fonts_.body, 12);
+    ImGui::PushStyleColor(ImGuiCol_Text, vec(status && profileWarning_ ? kYellow : kPaperDim));
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+    ImGui::TextUnformatted(help);
+    ImGui::PopTextWrapPos();
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    if (chosen)
+        useProfile(chosen->profile, chosen->name, chosen->builtIn);
+}
+
 void App::profileCard(float width) {
     namespace text = spidy::launcher;
     const ProfileState state = profileState();
@@ -2354,6 +2512,7 @@ void App::profileCard(float width) {
     const bool status = ImGui::GetTime() < profileStatusUntil_;
     const std::string help =
         status    ? profileStatus_
+        : changed && remembered->builtIn ? "Modified preset. Save as a profile to keep your own version."
         : changed ? "Changed since you used " + remembered->name + ". Save changes keeps them in it."
                   : std::string("Save, switch and share sets of these options: copy yours into a Discord message, "
                                 "paste someone else's, or drop a .spidy file on this window.");
@@ -2374,7 +2533,7 @@ void App::profileCard(float width) {
         const float resetWidth = S(170);
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(S(10), 0));
         cardTitle("Profile", resetWidth);
-        if (button("Reset options", resetWidth)) {
+        if (button("Reset all options", resetWidth)) {
             // Your body's measurements are not options: they stay.
             auto& o = settings_.options;
             const SessionOptions kept = o;
@@ -2397,38 +2556,16 @@ void App::profileCard(float width) {
         ImGui::Dummy(ImVec2(0, S(10)));
         ImGui::PopStyleVar();
         ImGui::SetNextItemWidth(S(280));
+        ImGui::SetNextWindowSizeConstraints(ImVec2(S(420), 0), ImVec2(S(560), S(650)));
         ImGui::PushFont(fonts_.semibold, 15);
         if (ImGui::BeginCombo("##profile", preview.c_str(), ImGuiComboFlags_HeightLargest)) {
-            // Profiles put in the folder meanwhile show.
-            if (ImGui::IsWindowAppearing())
-                profilesStale_ = true;
-            // The card has no space between its rows; a menu does.
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(S(10), S(7)));
-            section("Your profiles");
-            if (profiles_.empty()) {
-                ImGui::PushStyleColor(ImGuiCol_Text, vec(kPaperDim));
-                ImGui::TextUnformatted("None yet. Save these options as one.");
-                ImGui::PopStyleColor();
-            }
-            for (const auto& saved : profiles_) {
-                ImGui::PushID(saved.name.c_str());
-                if (ImGui::Selectable(saved.name.c_str(), &saved == current)) {
-                    action = Action::use;
-                    chosen = saved;
-                }
-                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
-                    const auto changes = text::profileChanges(saved.profile, now);
-                    std::string lines = changes.empty() ? "These options." : "Using it changes:";
-                    for (size_t i = 0; i < changes.size() && i < 12; ++i)
-                        lines += "\n" + changes[i].setting + "   " + changes[i].from + "  \xE2\x86\x92  " +
-                                 changes[i].to;
-                    if (changes.size() > 12)
-                        lines += format("\nand %d more.", static_cast<int>(changes.size() - 12));
-                    tip(lines.c_str());
-                }
-                ImGui::PopID();
-            }
-            if (changed && ImGui::Selectable(("Save changes to " + remembered->name).c_str()))
+            chosen = profileChoices(state);
+            if (chosen)
+                action = Action::use;
+            section("Save these settings");
+            if (changed && !remembered->builtIn &&
+                ImGui::Selectable(("Save changes to " + remembered->name).c_str()))
                 action = Action::saveChanges;
             if (ImGui::Selectable("Save as a profile..."))
                 action = Action::saveAs;
@@ -2451,9 +2588,10 @@ void App::profileCard(float width) {
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
                 tip("A .spidy file. Dropping one on this window imports it too.");
             ImGui::Separator();
-            if (ImGui::BeginMenu("Delete a profile", !profiles_.empty())) {
+            if (ImGui::BeginMenu("Delete a profile", std::any_of(profiles_.begin(), profiles_.end(),
+                                [](const SavedProfile& saved) { return !saved.builtIn; }))) {
                 for (const auto& saved : profiles_)
-                    if (ImGui::MenuItem(saved.name.c_str())) {
+                    if (!saved.builtIn && ImGui::MenuItem(saved.name.c_str())) {
                         action = Action::remove;
                         chosen = saved;
                     }
@@ -2479,27 +2617,30 @@ void App::profileCard(float width) {
     endCard();
     // Shared under the name of the profile they are, else none: whoever imports them names them.
     const std::string name = current ? current->name : std::string();
+    const Profile sharing = current && current->builtIn ? current->profile : text::profileOf(now, name);
     switch (action) {
     case Action::none: break;
-    case Action::use: useProfile(chosen->profile, chosen->name); break;
+    case Action::use: useProfile(chosen->profile, chosen->name, chosen->builtIn); break;
     case Action::saveChanges:
         if (keepProfile(text::profileOf(now, remembered->name)))
             profileStatus("Saved " + remembered->name + ".");
         break;
     case Action::saveAs: {
-        const std::string suggested = current ? current->name : remembered ? remembered->name : "My settings";
+        const auto* base = current ? current : remembered;
+        const std::string suggested = base ? base->name + (base->builtIn ? " custom" : "") : "My settings";
         std::snprintf(profileName_.data(), profileName_.size(), "%s", suggested.c_str());
         wantSaveProfile_ = true;
         break;
     }
     case Action::copy:
-        ImGui::SetClipboardText(text::profileMessage(text::profileOf(now, name), kVersion).c_str());
+        ImGui::SetClipboardText(text::profileMessage(sharing, kVersion).c_str());
         profileStatus("Copied. Paste it into a Discord message; others take it with Paste a profile.");
         break;
     case Action::exportFile: {
         const std::string file = text::profileFileName(name.empty() ? "My Spidy settings" : name);
         if (const auto path = browseProfileDestination(window_, widen(file) + L".spidy")) {
-            const Profile exported = text::profileOf(now, name.empty() ? file : name);
+            Profile exported = sharing;
+            exported.name = name.empty() ? file : name;
             if (writeTextFile(*path, text::profileText(exported, kVersion)))
                 profileStatus("Exported " + narrow(std::filesystem::path(*path).filename().wstring()) + ".");
             else

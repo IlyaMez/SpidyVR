@@ -23460,7 +23460,84 @@ int main() {
               "NaN assist accepted");
         check(!bad([](ShooterConfig&) {}), "defaults rejected");
     });
-    test("VR settings tab: seven sections, every setting once, a list's choices one per step", [] {
+    test("VR categories: every control once, bounded screens, stable row numbers", [] {
+        using namespace vr_settings;
+        std::bitset<256> seen;
+        for (const auto& screen : screens()) {
+            check(screen.title && screen.tabTitle && !screen.items.empty(), "empty category");
+            size_t inGame = 0;
+            for (Item item : screen.items) {
+                check(!seen.test(static_cast<size_t>(item)), "duplicate category control");
+                seen.set(static_cast<size_t>(item));
+                const Row* row = rowFor(item);
+                check(row && row->item != Item::none && row->place != Place::page, "invalid category row");
+                inGame += row->place == Place::tab;
+            }
+            check(inGame > 0 && inGame <= 20, "category grew beyond a short screen");
+        }
+        for (const Row& row : rows())
+            check(seen.test(static_cast<size_t>(row.item)) ==
+                      (row.item != Item::none && row.place != Place::page), "missing setting destination");
+        check(rowFor(Item::none) == nullptr, "headings are not settings");
+    });
+    test("VR category reset preserves other screens, hidden tuning and off-grid values", [] {
+        using namespace vr_settings;
+        Values v;
+        v.swingSpeed = 33;
+        v.snapTurn = 45;
+        v.smoothTurn = 60;
+        v.automaticResponse = 750;
+        v.realisticFlips = true;
+        v.flatScreen = true;
+        v.webShooter = false;
+        auto setup = resetCategory(Category::setup, v);
+        auto expected = v;
+        expected.snapTurn = Values{}.snapTurn;
+        expected.smoothTurn = Values{}.smoothTurn;
+        check(setup == expected, "setup reset leaked into another category");
+        auto flips = resetCategory(Category::flips, v);
+        expected = v;
+        expected.realisticFlips = false;
+        check(flips == expected, "flip reset touched hidden tuning or another category");
+        check(resetCategory(Category::count, v) == v, "invalid category changed values");
+    });
+    test("VR dependency hints follow effective modes without changing saved preferences", [] {
+        using namespace vr_settings;
+        Values v;
+        check(inactiveReason(Item::smartAnchor, v), "open-air webs override smart anchor");
+        v.airWebs = false;
+        check(!inactiveReason(Item::smartAnchor, v), "real anchors enable smart anchor");
+        v.smoothTurn = 60;
+        check(inactiveReason(Item::snapTurn, v) && v.snapTurn == 30, "snap preference was lost");
+        v.smoothTurn = 0;
+        check(!inactiveReason(Item::snapTurn, v), "snap did not become available");
+        check(inactiveReason(Item::slingshotSpeed, v), "inactive slingshot speed");
+        v.airSlingshot = true;
+        check(!inactiveReason(Item::slingshotSpeed, v), "air slingshot works independently");
+        v.controlledFlips = true;
+        check(inactiveReason(Item::flips, v), "controlled flips overrides basic flips");
+        v.realisticFlips = true;
+        check(!inactiveReason(Item::flips, v) && inactiveReason(Item::controlledFlips, v),
+              "realistic flips still needs the basic switch for stick steering");
+        v.webAimSource = 1;
+        check(inactiveReason(Item::wristShooters, v) && !inactiveReason(Item::forearmBlend, v),
+              "forearm aim makes wrist shortcut redundant");
+        check(!inactiveReason(Item::palmShooters, v), "palm rotation can compose with forearm aim");
+        check(inactiveReason(Item::nativeRunAt, v) && inactiveReason(Item::steadyStates, v), "native run tuning");
+        v.nativeRun = true;
+        check(!inactiveReason(Item::nativeRunAt, v) && !inactiveReason(Item::steadyStates, v), "native run on");
+        check(inactiveReason(Item::spidyRunFromStanding, v), "standing run requires Spidy run");
+        check(inactiveReason(Item::webLandingImpact, v), "landing threshold requires smooth web landing");
+        v.webLandingSmooth = true;
+        check(!inactiveReason(Item::spidyRunJump, v), "landing carry also uses the run jump");
+        v.haptics = v.bodyHaptics = v.hud = 0;
+        check(inactiveReason(Item::reelHaptics, v) && inactiveReason(Item::hapticWebs, v) &&
+                  inactiveReason(Item::steadyHud, v), "feedback and HUD parent settings");
+        check(inactiveReason(Item::recordingSmoothing, v), "smoothing requires recording view");
+        v.recordingFov = 140;
+        check(!inactiveReason(Item::recordingSmoothing, v), "recording view enables smoothing");
+    });
+    test("VR settings catalog: stable legacy sections, every setting once, a list's choices one per step", [] {
         using namespace vr_settings;
         const auto& all = rows();
         check(all[5].item == Item::smartAnchor && all[4].item == Item::airWebs,

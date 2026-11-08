@@ -505,7 +505,7 @@ const std::array<Row, 94>& rows() {
          "Hold your web with the free hand too and pull sideways to turn your swing.",
          {}},
         {Item::none, "COMFORT", nullptr, {}},
-        {Item::snapTurn, "SNAP TURN", "How far a flick of the right stick turns you. Off: no snap turning.",
+        {Item::snapTurn, "SNAP TURN", "How far the right stick snaps. Used only when SMOOTH TURN is OFF.",
          snapChoices},
         {Item::smoothTurn, "SMOOTH TURN", "Turn steadily while you hold the right stick. Off: it snap turns.",
          smoothChoices},
@@ -574,11 +574,11 @@ const std::array<Row, 94>& rows() {
         {Item::none, "EXPERIMENTAL", nullptr, {}},
         {Item::flips,
          "FLIPS",
-         "Right stick flips; up zips/aims. Release holds the angle. A returns upright.",
+         "Basic stick flips; with REALISTIC FLIPS, adds left-stick steering instead.",
          {}},
         {Item::controlledFlips,
          "CONTROLLED FLIPS",
-         "Air: A enables left-stick flips. Release holds. A again resets and exits.",
+         "A toggles left-stick flips. Overrides FLIPS; REALISTIC FLIPS takes priority.",
          {}},
         {Item::flipSpeed, "FLIP SPEED", "How fast a flip turns you over at full stick tilt.",
          flipSpeedChoices},
@@ -618,7 +618,7 @@ const std::array<Row, 94>& rows() {
          {}},
         {Item::nativeRun,
          "NATIVE RUN",
-         "Ground only: stick past 70% holds the game's RT: sprint, vaults, wall runs.",
+         "Ground sprint, vaults and wall runs. The threshold is set by NATIVE RUN AT.",
          {}},
         {Item::airSlingshot,
          "AIR SLINGSHOT",
@@ -628,7 +628,7 @@ const std::array<Row, 94>& rows() {
          webAngleChoices},
         {Item::wristShooters,
          "WRIST SHOOTERS",
-         "Webs leave parallel to the forearm, past the wrist, as Spider-Man's do.",
+         "Full forearm aim. WEB AIM: MODEL FOREARM already does this, with blend control.",
          {}},
         {Item::dodgeTumble, "DODGE TUMBLE",
          "The view leans or rolls with the game's dodge, so you see it was one.", dodgeTumbleChoices},
@@ -644,7 +644,7 @@ const std::array<Row, 94>& rows() {
          {}},
         {Item::momentumLeap,
          "RUNNING LEAP",
-         "A charged leap keeps your run's speed and adds to it. Off as before.",
+         "Charged leaps keep run speed. EARLY JUMP: RUNNING skips charging in a sprint.",
          {}},
         {Item::earlyJump, "EARLY JUMP",
          "A jumps sooner: a quicker tap, or at once while running. OFF as before.", earlyJumpChoices},
@@ -663,7 +663,7 @@ const std::array<Row, 94>& rows() {
         {Item::webAimSource, "WEB AIM",
          "MODEL FOREARM: webs follow the body's forearm. CONTROLLER as before.", webAimSourceChoices},
         {Item::forearmBlend, "FOREARM BLEND",
-         "How much MODEL FOREARM follows the forearm, from the controller's line.", forearmBlendChoices},
+         "With WEB AIM: MODEL FOREARM, blend from the controller (0%) to forearm (100%).", forearmBlendChoices},
         {Item::webLandingSmooth,
          "SMOOTH WEB LANDING",
          "Holding a web, a landing under WEB LANDING IMPACT is soft and keeps its speed.",
@@ -687,7 +687,7 @@ const std::array<Row, 94>& rows() {
          "How far MODEL FOREARM and WRIST SHOOTERS turn off the controller's line.", forearmAimLimitChoices},
         {Item::palmShooters,
          "PALM SHOOTERS",
-         "Webs out of the palm side, square to the hand, not along the forearm.",
+         "Adds a palm-side quarter turn to your chosen web aim direction.",
          {}},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
@@ -723,6 +723,128 @@ const std::array<Row, 94>& rows() {
          {}},
     }};
     return all;
+}
+const Row* rowFor(Item item) {
+    if (item == Item::none)
+        return nullptr;
+    for (const auto& row : rows())
+        if (row.item == item)
+            return &row;
+    return nullptr;
+}
+const std::array<Screen, categoryCount>& screens() {
+    static constexpr Item setup[] = {
+        Item::smoothTurn, Item::snapTurn, Item::calibrate, Item::height,
+        Item::seated,
+    };
+    static constexpr Item webs[] = {
+        Item::webStyle, Item::webButton, Item::aimMarkers, Item::airWebs,
+        Item::smartAnchor, Item::webRange, Item::webSpeed, Item::eyeAim,
+        Item::webAimSource, Item::forearmBlend, Item::forearmAimLimit, Item::wristShooters,
+        Item::palmShooters, Item::webAngle, Item::webTie, Item::webLines,
+    };
+    static constexpr Item swinging[] = {
+        Item::swingSpeed, Item::weight, Item::elasticWeb, Item::softRelease,
+        Item::swingAssist, Item::webSlingshot, Item::airSlingshot, Item::slingshotSpeed,
+        Item::betterClimbing, Item::singleHandYankStrength, Item::twoHandZip, Item::ropeSteering,
+    };
+    static constexpr Item movement[] = {
+        Item::nativeRun, Item::nativeRunAt, Item::runCurve, Item::steadyStates,
+        Item::spidyRun, Item::spidyRunFromStanding, Item::spidyRunJump, Item::momentumLeap,
+        Item::earlyJump, Item::softLanding, Item::webLandingSmooth, Item::webLandingImpact,
+        Item::handClimb, Item::joystickRunCamera, Item::wallRunCameraTilt, Item::combatResponsive,
+        Item::combatVisuals, Item::halfPunchDamage, Item::runLogs,
+    };
+    static constexpr Item flips[] = {
+        Item::realisticFlips, Item::flips, Item::controlledFlips, Item::flipSpeed,
+        Item::automaticStrength, Item::automaticSpeed, Item::automaticMinimumSpeed, Item::automaticReleaseFlip,
+        Item::automaticResponse, Item::automaticHandStrength, Item::automaticFalloff, Item::automaticHandThreshold,
+        Item::automaticAirBrake, Item::automaticCombat, Item::dodgeTumble, Item::flipReprojection,
+    };
+    static constexpr Item feedback[] = {
+        Item::haptics, Item::reelHaptics, Item::swingHaptics, Item::bodyHaptics,
+        Item::hapticWebs, Item::hapticWind, Item::hapticCombat, Item::hapticMovement,
+        Item::blowSounds, Item::pcMedia,
+    };
+    static constexpr Item display[] = {
+        Item::screenSize, Item::screenDepth, Item::hud, Item::steadyHud,
+        Item::uiStyle, Item::nearClip, Item::recordingFov, Item::recordingSmoothing,
+    };
+    static const std::array<Screen, categoryCount> all{{
+        {"Setup", "VR SETUP", setup},
+        {"Webs", "VR WEBS", webs},
+        {"Swinging", "VR SWINGING", swinging},
+        {"Movement", "VR MOVEMENT", movement},
+        {"Flips", "VR FLIPS", flips},
+        {"Haptics", "VR HAPTICS", feedback},
+        {"Display", "VR DISPLAY", display},
+    }};
+    return all;
+}
+const char* inactiveReason(Item item, const Values& v) {
+    switch (item) {
+    case Item::snapTurn:
+        return v.smoothTurn > 0 ? "Turn Smooth turn off to use Snap turn." : nullptr;
+    case Item::smartAnchor:
+        return v.airWebs ? "Turn Webs hold in open air off to use Smart anchor." : nullptr;
+    case Item::wristShooters:
+        return v.webAimSource == 1 ? "Web aim already follows the model forearm." : nullptr;
+    case Item::forearmBlend:
+        return v.webAimSource != 1 ? "Set Web aim to Model forearm to adjust the blend." : nullptr;
+    case Item::forearmAimLimit:
+        return v.webAimSource != 1 && !v.wristShooters ? "Enable Model forearm or Wrist shooters first." : nullptr;
+    case Item::slingshotSpeed:
+        return !v.webSlingshot && !v.airSlingshot ? "Enable Web slingshot or Air slingshot first." : nullptr;
+    case Item::nativeRunAt:
+    case Item::steadyStates:
+        return !v.nativeRun ? "Enable Native run first." : nullptr;
+    case Item::spidyRunFromStanding:
+        return !v.spidyRun ? "Enable Spidy run first." : nullptr;
+    case Item::spidyRunJump:
+        return !v.spidyRun && !v.webLandingSmooth ? "Enable Spidy run or Smooth web landing first." : nullptr;
+    case Item::webLandingImpact:
+        return !v.webLandingSmooth ? "Enable Smooth web landing first." : nullptr;
+    case Item::controlledFlips:
+        return v.realisticFlips ? "Realistic flips takes priority over Controlled flips." : nullptr;
+    case Item::flips:
+        return v.controlledFlips && !v.realisticFlips ? "Controlled flips takes priority over basic Flips." : nullptr;
+    case Item::flipSpeed:
+        return !v.flips && (!v.controlledFlips || v.realisticFlips) ? "Enable stick flips to use Flip speed." : nullptr;
+    case Item::automaticStrength:
+    case Item::automaticSpeed:
+    case Item::automaticMinimumSpeed:
+    case Item::automaticReleaseFlip:
+    case Item::automaticResponse:
+    case Item::automaticHandStrength:
+    case Item::automaticFalloff:
+    case Item::automaticHandThreshold:
+    case Item::automaticAirBrake:
+    case Item::automaticCombat:
+        return !v.realisticFlips ? "Enable Realistic flips first." : nullptr;
+    case Item::reelHaptics:
+    case Item::swingHaptics:
+        return v.haptics == 0 ? "Raise Controller vibration above zero first." : nullptr;
+    case Item::hapticWebs:
+    case Item::hapticWind:
+    case Item::hapticCombat:
+    case Item::hapticMovement:
+        return v.bodyHaptics == 0 ? "Raise Body haptics above zero first." : nullptr;
+    case Item::steadyHud:
+        return v.hud == 0 ? "Enable the HUD first." : nullptr;
+    case Item::recordingSmoothing:
+        return v.recordingFov == 0 ? "Enable Recording FOV first." : nullptr;
+    default:
+        return nullptr;
+    }
+}
+Values resetCategory(Category category, Values v) {
+    const auto index = static_cast<size_t>(category);
+    if (index >= categoryCount)
+        return v;
+    for (Item item : screens()[index].items)
+        if (const Row* row = rowFor(item); row && row->place == Place::tab)
+            choose(item, defaultChoice(item), v);
+    return v;
 }
 int choice(Item item, const Values& v) {
     if (const bool* on = switchOf(item, v))

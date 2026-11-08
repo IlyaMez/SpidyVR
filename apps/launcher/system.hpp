@@ -3,6 +3,7 @@
 // runs (tools/run_game_vr.py). Long work runs on worker threads; the window
 // reads snapshots.
 #include <spidy/launcher_profile.hpp>
+#include <spidy/launcher_presets.hpp>
 #include <spidy/launcher_text.hpp>
 #include <windows.h>
 #include <array>
@@ -88,6 +89,10 @@ void saveSettings(const Settings& settings);
 struct SavedProfile {
     std::string name; // the file's, without .spidy
     Profile profile;
+    bool builtIn{};
+    std::string selectionKey() const {
+        return builtIn ? spidy::launcher::builtInProfileKey(name) : name;
+    }
 };
 // What the launcher keeps settings no profile holds as before it puts a profile's in their place.
 inline constexpr const char* kPreviousProfile = "Previous settings";

@@ -3,7 +3,24 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (November 6): pull request #79 by HaNToP - WEB LINES, a
+**Unreleased: gameplay presets on Play.** The Play screen now switches directly
+between built-in Arcade, Balanced and Pro presets and saved profiles. The three
+presets explicitly cover 52 gameplay settings while preserving personal setup;
+they are never applied automatically. Custom profiles remain compatible, and
+unsaved settings are backed up before switching. Manage opens the Profiles page.
+The preset definitions and Discord review are in [GAMEPLAY-PRESETS.md](GAMEPLAY-PRESETS.md).
+
+**Unreleased: shorter VR settings screens.** The long settings tab is now
+seven native categories: Setup, Webs, Swinging, Movement, Flips, Haptics
+and Display, with 5 to 19 controls each. Y resets only the current category.
+The launcher has matching sidebar pages, separate Profiles and Diagnostics,
+and collapsible fine rotation tuning. Dependent or overridden controls keep
+their saved values and show when they are inactive. Blow sounds, previously
+missing from the launcher, is available under Haptics. Aiming, flip and
+combat descriptions now explain their actual interactions. No gameplay
+defaults, saved settings keys or profile formats changed.
+
+**Previous build (November 6): pull request #79 by HaNToP - WEB LINES, a
 taut web between two walls.** WEB LINES (SPIDY VR > EXPERIMENTAL after WEB
 TIE, off by default; `web_lines` in spidy_vr.ini and profiles; the
 launcher's Webs card): one web on a wall and the other on another (a post, a

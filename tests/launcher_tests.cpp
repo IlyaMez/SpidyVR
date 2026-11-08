@@ -1,4 +1,5 @@
 #include "spidy/launcher_profile.hpp"
+#include "spidy/launcher_presets.hpp"
 #include "spidy/launcher_text.hpp"
 #include "spidy/launcher_update.hpp"
 #include <functional>
@@ -567,6 +568,104 @@ int main() {
         const auto found = std::find_if(begin, end, [&](const ProfileSetting& s) { return s.key == key; });
         return static_cast<size_t>(found - begin);
     };
+    test("gameplay presets classify every profile setting once and contain only valid values", [&] {
+        for (const auto& setting : profileSettings) {
+            const auto game = std::count_if(std::begin(gameplayPresetSettings), std::end(gameplayPresetSettings),
+                [&](const PresetSetting& p) { return p.key == setting.key; });
+            const auto personal = std::count(std::begin(personalProfileSettings),
+                                             std::end(personalProfileSettings), setting.key);
+            check(game + personal == (setting.retired() ? 0 : 1), std::string(setting.key).c_str());
+        }
+        for (const auto& p : gameplayPresetSettings) {
+            check(at(p.key) < std::size(profileSettings), "unknown gameplay key");
+            const auto& setting = profileSettings[at(p.key)];
+            for (const int value : p.values)
+                check(value >= setting.low && value <= setting.high, std::string(p.key).c_str());
+        }
+        for (const auto key : personalProfileSettings)
+            check(at(key) < std::size(profileSettings), "unknown personal key");
+    });
+    test("presets replace all gameplay, preserve personal setup and survive sharing", [&] {
+        PlaySettings personal;
+        for (const auto& setting : profileSettings)
+            setProfileValue(setting, setting.high, personal);
+        personal.options.eyeHeightMm = 1780;
+        personal.options.armLengthMm = 560;
+        personal.options.calibrationPrompt = false;
+        personal.options.renderScale = 150;
+        personal.options.upscale = 70;
+        personal.options.monitorRate = 15;
+        personal.options.firstPersonCutscenes = true;
+        personal.options.cutsceneHeadTracking = false;
+        personal.options.disableTheater = true;
+        personal.tab.heightCm = 188;
+        personal.tab.eyeAim = 3;
+        personal.tab.recordingFov = 90;
+        personal.tab.recordingSmoothing = 80;
+        personal.tab.flipReprojection = true;
+        personal.tab.steadyHud = true;
+        for (const auto& preset : builtInProfiles()) {
+            const auto& profile = preset.profile;
+            check(profile.count() == std::size(gameplayPresetSettings), "incomplete gameplay preset");
+            check(!profile.complete(), "preset includes personal setup");
+            const auto imported = readProfile(profileText(profile, "test"));
+            check(imported && imported->values == profile.values, "sharing loses the preset's scope");
+            PlaySettings changed = personal;
+            applyProfile(*imported, changed);
+            check(profileMatches(profile, changed), "preset does not match after applying it");
+            for (const auto& setting : profileSettings)
+                if (profile.values[at(setting.key)])
+                    setProfileValue(setting, profileValue(setting, personal), changed);
+            check(changed.options == personal.options && changed.tab == personal.tab,
+                  "preset altered personal setup, calibration, graphics or recording");
+            // Every possible preceding preset and a completely different custom starting point
+            // reach the same gameplay values, including values behind disabled controls.
+            for (const auto& previous : builtInProfiles()) {
+                PlaySettings after = personal, direct;
+                applyProfile(previous.profile, after);
+                applyProfile(profile, after);
+                applyProfile(profile, direct);
+                for (const auto& setting : profileSettings)
+                    if (profile.values[at(setting.key)])
+                        check(profileValue(setting, after) == profileValue(setting, direct),
+                              "previous preset leaked gameplay values");
+                const PlaySettings once = after;
+                applyProfile(profile, after);
+                check(after.options == once.options && after.tab == once.tab, "preset is not idempotent");
+            }
+        }
+    });
+    test("preset identities and controls remain distinct without conflicting modes", [&] {
+        check(builtInProfiles()[0].profile.name == "Arcade" &&
+                  builtInProfiles()[1].profile.name == "Balanced" &&
+                  builtInProfiles()[2].profile.name == "Pro", "preset names missing or duplicated");
+        std::array<PlaySettings, 3> settings;
+        for (size_t i = 0; i < settings.size(); ++i) {
+            const auto& profile = builtInProfiles()[i].profile;
+            check(builtInProfileKey(profile.name) != profileFileName(builtInProfileKey(profile.name)),
+                  "built-in identity can collide with a saved profile filename");
+            applyProfile(profile, settings[i]);
+            const auto& o = settings[i].options;
+            const auto& v = settings[i].tab;
+            check(!(o.airWebs && v.smartAnchor), "air webs override smart anchor");
+            check(int(o.flips) + int(v.controlledFlips) + int(v.realisticFlips) <= 1,
+                  "flip modes override each other");
+            check(!v.spidyRunFromStanding || v.spidyRun, "standing run is inactive");
+            check(!v.automaticCombat && v.combatResponsive && v.automaticAirBrake,
+                  "combat rotation or recovery differs from the preset contract");
+            for (size_t other = 0; other < i; ++other)
+                check(!profileMatches(profile, settings[other]), "two presets play identically");
+        }
+        check(settings[0].options.arcadeWebs && settings[0].options.airWebs && settings[0].tab.swingAssist,
+              "Arcade lacks its forgiving webs");
+        check(!settings[1].options.airWebs && settings[1].tab.smartAnchor && settings[1].tab.controlledFlips,
+              "Balanced lacks real anchors or deliberate manual flips");
+        check(!settings[2].tab.swingAssist && settings[2].tab.realisticFlips && settings[2].tab.handClimb,
+              "Pro lacks physical control");
+        check(settings[0].options.weight < settings[1].options.weight &&
+                  settings[1].options.weight < settings[2].options.weight,
+              "preset weight progression is lost");
+    });
     test("a profile holds every setting of the SPIDY VR tab, the tab's own ones by spidy_vr.ini's keys", [&] {
         // Not VR VIEW (each session starts in VR), CALIBRATE BODY (a request), HEIGHT (the player's own, as a
         // calibration is), RECORDING FOV (the monitor's, which suits one PC, as the graphics options do),

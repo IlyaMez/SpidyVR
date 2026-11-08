@@ -1,5 +1,50 @@
 # Validation — 2026-10-27
 
+## November 8: gameplay presets and Play selector (local, unreleased)
+
+- Added opt-in Arcade, Balanced and Pro built-ins, each explicitly covering
+  52 gameplay values. Twenty-seven other profile keys retain personal setup;
+  graphics, calibration, recording and hardware-only values remain untouched.
+- Release/Observer build and all three CTest suites passed: core 830/830,
+  launcher 41/41, and realistic flips. New checks cover exhaustive key
+  classification, valid ranges, preserved personal settings, export/import
+  scope, all preset switching orders, idempotence, mode conflicts and names.
+- Visual testing caught missing names during aggregate initialization; explicit
+  name assignment fixes it and the name regression check now passes.
+- Isolated launcher preview verified named/described dropdown entries on Play,
+  switching to Balanced and Pro, persisted speed/weight and preset identity,
+  preservation of nondefault seated/height/turning/calibration/haptics/aiming/
+  recording settings, and Previous settings holding the prior configuration.
+  Manage opens Profiles directly; its picker uses the same choices. A saved
+  profile called Arcade applies its own values with a separate identity.
+- Existing custom and partial profile semantics and the .spidy format remain
+  compatible. Built-ins cannot be deleted or updated through Save changes.
+  User settings were not switched; all apply tests used an isolated AppData folder.
+- Community evidence, limitations and every preset value are documented in
+  GAMEPLAY-PRESETS.md. No game/headset session or play-folder deployment was run;
+  these values still need in-headset feel testing.
+
+## November 8: settings categories (local, unreleased)
+
+- Replaced the 89-row native tab with seven categories (82 controls total,
+  5/16/12/19/12/10/8 per category). The legacy catalog retains its setting IDs;
+  defaults, INI keys, profile format and protocol layouts are unchanged.
+- Launcher: persistent category navigation; Profiles and Diagnostics separated;
+  all 95 former controls retained, plus the previously missing Blow sounds.
+  Fine flip tuning is collapsed, inactive controls explain their dependencies,
+  and content-sized cards forward the wheel to their page.
+- Full Release/Observer build passed. CTest passed core (830/830), launcher
+  (38/38) and realistic-flip suites. All six Python protocol suites passed
+  (179 tests). Added category coverage, bounded page size, reset isolation,
+  off-grid value preservation and dependency/precedence regression checks.
+- Visually checked the launcher in a separate preview with isolated settings.
+  Confirmed Setup layout, smooth-turn precedence and retained snap value,
+  Haptics/Blow sounds, persistent navigation and the separate Profiles page.
+- In-game category navigation, dynamic enablement and category reset have not
+  been exercised in the game or a headset. tools/probe_menu.py now checks the
+  Webs/Swinging split and category reset isolation when explicitly run with a
+  loaded game. No game was launched for this review; no play-folder deployment.
+
 ## The far buildings' cone and the texture budget (latest build)
 
 The user: "there is still a bug where buildings and detail on objects is low

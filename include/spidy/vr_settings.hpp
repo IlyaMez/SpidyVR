@@ -7,7 +7,7 @@
 
 // Spidy's VR settings. The launcher (or the command line) gives a session
 // the values it starts with; during play the game's own Settings change
-// them: pause, Settings, then SPIDY VR after the game's last tab (game_menu).
+// them: pause, Settings, then one of the VR categories after the game's last tab (game_menu).
 // The session reports the last ones, and the launcher starts the next
 // session with them. The few no launcher.ini key carries the game module
 // keeps in a file of its own (tabOnlyText), which the launcher's options
@@ -465,7 +465,7 @@ inline constexpr Item lastItem = Item::webLines;
 // and dies away (the user, October 25: "cleanup the redundant"). The tab's
 // RESET ALL leaves the last two alone.
 enum class Place : uint8_t { tab, page, launcher };
-// The SPIDY VR tab, top to bottom: a section's heading (item none) or a
+// The stable row catalog (screens() supplies the display order): a section's heading (item none) or a
 // setting. The sections: WEBS, SWINGING, COMFORT, HAPTICS, DISPLAY, BODY and
 // EXPERIMENTAL (the player, October 19: "sort the options in spidy vr
 // settings ingame into nice sections"; HAPTICS since October 20, the
@@ -480,7 +480,22 @@ struct Row {
     std::span<const char* const> choices{};
     Place place{};
 };
+// Stable row/setting numbers; categories below determine presentation order.
 const std::array<Row, 94>& rows();
+const Row* rowFor(Item);
+enum class Category : uint8_t { setup, webs, swinging, movement, flips, feedback, display, count };
+inline constexpr size_t categoryCount = static_cast<size_t>(Category::count);
+struct Screen {
+    const char* title;
+    const char* tabTitle;
+    std::span<const Item> items;
+};
+const std::array<Screen, categoryCount>& screens();
+// Null while the control has an effect, otherwise a short explanation. Stored
+// preferences are retained when a parent is off or a different mode overrides them.
+const char* inactiveReason(Item, const Values&);
+// RESET ALL affects only the active category's in-game controls, including inactive ones.
+Values resetCategory(Category, Values);
 // The most choices a row shows (game_menu's buffers): a row with more would
 // lose its last ones.
 inline constexpr size_t maxChoices = 9;
