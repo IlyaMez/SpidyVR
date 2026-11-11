@@ -233,9 +233,10 @@ Your body and fists
   Take the other hand's  that hand closes into a fist on the web
   web
   Squeeze a grip ....... otherwise closes that hand into a fist (the grip
-                         when the trigger is your web button); with an enemy
-                         marked or within reach a hand moving fast is a fist
-                         too, even while it shoots
+                         when the trigger is your web button). A hand moving
+                         fast is a fist too (AIR FISTS off: only with an
+                         enemy marked or within reach), and with an enemy
+                         near even while it shoots
   T-pose, both triggers  calibrates your body (when the panel asks): his
                          height and arms become yours. B skips it
 
@@ -929,6 +930,10 @@ VR settings
                    finishers. Launch and smash velocity, knockback, combo
                    rules and punch recognition do not change. Off restores
                    normal damage. This is not a global game damage setting.
+  AIR FISTS ...... in VR MOVEMENT after HALF PUNCH DAMAGE, on by default: a
+                   hand moved fast closes into a fist even with nobody to
+                   punch. Off: only with an enemy marked or within reach,
+                   so hands moved about at rest never close.
   WEB TIE ........ in VR WEBS, off by default.
                    Web an enemy up, put one web on a wall (a ceiling, a
                    beam, a crane, a lamp post) and the other on him, bring

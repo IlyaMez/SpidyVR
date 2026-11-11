@@ -2093,6 +2093,10 @@ void App::options(ImVec2 origin, ImVec2 size) {
             "Half punch damage",
             "Punches and web strikes deal half their damage; launches, smashes and knockback stay the same.",
             S(42), [&] { tabToggle("##halfpunchdamage", Item::halfPunchDamage); });
+        settingOption(Item::airFists, "Air fists",
+               "A hand moved fast closes into a fist even with nobody to punch. Off: only with an enemy "
+               "marked or within reach, so hands at rest never close.",
+               S(42), [&] { tabToggle("##airfists", Item::airFists); });
     });
     group(4, 0, "Flip controls", [&] {
         settingOption(Item::realisticFlips, "Realistic flips (experimental)",

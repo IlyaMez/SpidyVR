@@ -3,6 +3,47 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
+**Latest build (November 11): fixes from the players' reports on 0.8.5.**
+
+- **The suit power takes hands held out before the chest.** Five players on
+  0.8.1 and 0.8.5 got no suit power at all; one: "after many attempts in one
+  playthrough where I ended up hunched over, hands inside my virtual chest
+  and it popped". Since November 5 both hands had to be within 12 cm of a
+  point 38 cm under the eyes and 15 cm ahead. In two of that player's
+  sessions the hands came together at the chest 30 times, mostly 24 to 36 cm
+  ahead of the eyes, and the point took 6 of them (one power in all). The
+  chest is now a short line 35 cm under the eyes, from 15 to 32 cm ahead of
+  them: each hand within 14 cm of it, the hands within 25 cm of each other,
+  and as before both triggers within 0.15 s and no web out of either hand.
+  The line takes all 30, and the October 28 player whose hands at rest made
+  38 suit powers by accident has them on it less often than in the old
+  point's 12 cm (2.4% of that session's play, was 3.4%).
+- **Running on the ground is not the air.** "when walking if you move your
+  arms you start flipping on ground" (0.8.5, with a video). Spidy took every
+  step the swing ran the body as flight, and since pull request #77 the swing
+  runs it on the ground too: SPIDY RUN (the Pro preset has it on, with RUN
+  FROM STANDING and REALISTIC FLIPS) and SMOOTH WEB LANDING's carry. So
+  REALISTIC FLIPS turned the player there by the arms, the wind's body
+  haptics blew, and with SPIDY RUN JUMP off the A of a jump there never
+  reached the game: it was held back as a press in the air before JUMP
+  ALWAYS could pass it on. One 0.8.5 session ran 495 such steps, all at a
+  standstill up and down and 10 to 14 m/s across. Now a step is in the air
+  only off the ground (`game_swing::airborne`).
+- **AIR FISTS** (SPIDY VR > Movement after HALF PUNCH DAMAGE, on by default;
+  `air_fists` in spidy_vr.ini and profiles; the launcher's Combat card). On, a
+  hand moved fast closes into a fist with nobody to punch, as before
+  November 5 ("I liked when even if there wasn't a enemy I could punch and it
+  would go into a fist"). Off, November 5's way: a fist only with an enemy
+  marked or within reach, for the player whose idle hands kept closing and
+  opening ("they just spam a grab motion").
+
+Checked: the core tests (the chest line with the hands held out, at arm's
+length and 30 cm apart; a run on the ground and the landing carry not in
+the air; a fast hand with nobody to punch and AIR FISTS on, shooting and
+not; AIR FISTS' row, key and default), the launcher tests, the six Python
+protocol suites. Not run: the game or a headset. The new chest rests on two
+sessions of one player and one of another.
+
 **Unreleased: gameplay presets on Play.** The Play screen now switches directly
 between built-in Arcade, Balanced and Pro presets and saved profiles. The three
 presets explicitly cover 52 gameplay settings while preserving personal setup;

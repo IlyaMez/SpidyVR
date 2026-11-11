@@ -8981,12 +8981,21 @@ int main() {
         near(pose.shoot,0,.001f);near(pose.fist,1,.001f);
         // November 5: an open hand moved fast with nobody to punch stays open ("if I don't do anything
         // they just spam a grab motion"); with somebody to punch it is a fist.
+        // November 11: AIR FISTS (on by default) closes it all the same, as before November 5 ("I liked
+        // when even if there wasn't a enemy I could punch and it would go into a fist"); the shooting pose
+        // stays over it while the hand shoots, as before.
         HandPoser waving;HandPoseInput waved;waved.tracked=true;waved.speed=3;
         for(int i=0;i<5;++i)pose=waving.update(dt,waved);
         near(pose.fist,0,.001f);near(pose.shoot,0,.001f);
         HandPoser punching;waved.fighting=true;
         for(int i=0;i<5;++i)pose=punching.update(dt,waved);
         near(pose.fist,1,.001f);
+        HandPoser air;waved.fighting=false;waved.airFists=true;
+        for(int i=0;i<5;++i)pose=air.update(dt,waved);
+        near(pose.fist,1,.001f);near(pose.shoot,0,.001f);
+        HandPoser airShot;HandPoseInput shooting=waved;shooting.web=1;
+        for(int i=0;i<5;++i)pose=airShot.update(dt,shooting);
+        near(pose.fist,1,.001f);near(pose.shoot,1,.001f);
         // An untracked hand is neither.
         thrown.tracked=false;pose=fight.update(dt,thrown);
         near(pose.fist,0);near(pose.shoot,0);
@@ -23623,12 +23632,19 @@ int main() {
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
         // The realistic flips' rows come last, after the EXPERIMENTAL rows before them.
-        constexpr size_t firstRealistic = 83;
+        constexpr size_t firstRealistic = 84;
         check(all.size() == firstRealistic + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
             check(all[firstRealistic + i].item == realistic[i], "the realistic flips' rows out of order");
         check(std::strcmp(all[firstRealistic].title, "REALISTIC FLIPS") == 0 && all[firstRealistic].choices.empty(),
               "realistic flips: a switch, first of its rows");
+        // AIR FISTS (November 11): a switch before them, on by default, shown on the Movement page after
+        // HALF PUNCH DAMAGE and kept as air_fists.
+        check(all[83].item == Item::airFists && std::strcmp(all[83].title, "AIR FISTS") == 0 &&
+                  all[83].choices.empty() && all[83].place == Place::tab && Values{}.airFists &&
+                  defaultChoice(Item::airFists) == 1 && !withTabOnly({}, "air_fists=0\n").airFists &&
+                  withTabOnly({}, "").airFists,
+              "AIR FISTS: an ON switch before the realistic flips, kept as air_fists");
         check(all[50].item == Item::controlledFlips && all[53].item == Item::joystickRunCamera &&
                   all[54].item == Item::wallRunCameraTilt && all[55].item == Item::halfPunchDamage,
               "custom switches misplaced");
@@ -23834,7 +23850,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 89,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 90,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -24118,7 +24134,7 @@ int main() {
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
                   "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
                   "degrees=0\nwrist_shooters=0\n"
-                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\nsteady_states=0\ncombat_responsive=0\nspidy_run_jump=1\nforearm_aim_limit=180\npalm_shooters=0\nweb_lines=0\n",
+                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\nsteady_states=0\ncombat_responsive=0\nspidy_run_jump=1\nforearm_aim_limit=180\npalm_shooters=0\nweb_lines=0\nair_fists=1\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

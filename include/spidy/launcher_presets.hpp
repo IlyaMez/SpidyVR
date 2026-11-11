@@ -82,6 +82,7 @@ inline constexpr std::string_view personalProfileSettings[] = {
     "hud",
     "ui_style",
     "combat_visuals",
+    "air_fists",
     "near_clip_mm",
     "seated",
     "web_angle_degrees",

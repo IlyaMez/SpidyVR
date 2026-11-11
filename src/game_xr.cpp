@@ -5225,6 +5225,7 @@ DWORD WINAPI run(void*) {
                             doing.holding = attachedBefore[i];
                             doing.shot = ballShot[i];
                             doing.fighting = fightNear;
+                            doing.airFists = values.airFists;
                             ballShot[i] = false;
                             const auto fingered = fingers[i].update(seconds, doing);
                             pose.hands[i] = {motion.grips[i].position - motion.anchor, motion.grips[i].orientation,

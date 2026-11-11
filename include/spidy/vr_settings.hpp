@@ -152,6 +152,9 @@ struct Values {
     int heightCm = 0;
     bool seated = false;
     bool combatVisuals = true; // combat overlays and automatic combat slow-motion VFX
+    // A fast hand closes into a fist with nobody to punch too (the tab's AIR
+    // FISTS; hand_pose.hpp). Off: only with an enemy marked or within reach.
+    bool airFists = true;
     // Aiming with the eyes (the tab's EYE AIM; eyeAimShots, eyeAimZips): web
     // balls go where the eyes look, from the hand that pulled; a zip goes to
     // the point the eyes look at, the game's camera being turned onto it.
@@ -456,8 +459,9 @@ enum class Item : uint8_t {
     forearmAimLimit,
     palmShooters,
     webLines,
+    airFists,
 };
-inline constexpr Item lastItem = Item::webLines;
+inline constexpr Item lastItem = Item::airFists;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -481,7 +485,7 @@ struct Row {
     Place place{};
 };
 // Stable row/setting numbers; categories below determine presentation order.
-const std::array<Row, 94>& rows();
+const std::array<Row, 95>& rows();
 const Row* rowFor(Item);
 enum class Category : uint8_t { setup, webs, swinging, movement, flips, feedback, display, count };
 inline constexpr size_t categoryCount = static_cast<size_t>(Category::count);

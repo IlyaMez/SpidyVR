@@ -445,7 +445,7 @@ hand in the XR worker):
 | The hand on the other hand's web (the tick), and while it holds that web | no pose: the button closes a fist on the strand, with the trigger as the web button too, where the grip is open |
 | A web ball leaving the hand | the whole pose for 0.5 s |
 | The hand moving faster than 1.2 m/s against the head, an enemy marked (the ring) or within a fist's reach | a fist, and the fist wins: the pose is scaled down by how fast the hand is, to nothing at 2.5 m/s |
-| The same with nobody to punch | nothing: the hand stays as it is. Until November 5 it closed into a fist all the same, and a player's idle hands kept closing and opening after a fight or a launch ("they just spam a grab motion") |
+| The same with nobody to punch | with AIR FISTS on (the default) a fist all the same, under the pose: it shows as the pose goes. Off: nothing, the hand stays as it is. Before November 5 it was always a fist, and a player's idle hands kept closing and opening after a fight or a launch ("they just spam a grab motion"); from November 5 to 11 it was always nothing, and others missed punching the air ("I liked when even if there wasn't a enemy I could punch and it would go into a fist") |
 
 Checked: the solver's angles and the thumb's place on Spider-Man's hand, from
 an open hand, over a fist and half way (two tests); the timing above (two
