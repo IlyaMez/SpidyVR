@@ -2347,6 +2347,9 @@ int main() {
         check(!airborne(sample(1,0,0,0x2060001,0),now,hz),"a perch (contact 2) is airborne");
         check(!airborne(sample(1,0,1,0x2060005,0),now,hz),"a wall crawl is airborne");
         check(!airborne(sample(1,0,0,0x2060000,0),now,hz),"a wall run is airborne");
+        // November 11: the swing running the body on the ground (SPIDY RUN, the landing carry) is not.
+        check(!airborne(sample(2,1,1,0x2060000,0),now,hz),"SPIDY RUN on the ground is airborne");
+        check(!airborne(sample(2,1,1,0x2060010,0),now,hz),"the landing carry is airborne");
         check(!airborne(sample(2,1,0,0x2060010,hz/5),now,hz),"a step 200 ms old is airborne");
         check(airborne(sample(2,1,0,0x2060010,-hz/100),now,hz),"a step newer than the frame is not airborne");
         check(!airborne(sample(0,1,0,0x2060010,0),now,hz),"a stopped swing is airborne");
