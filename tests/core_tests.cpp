@@ -10484,12 +10484,23 @@ int main() {
         Pose spread[2]{{{-.06f,1.33f,-.15f},{}},{{.3f,1.1f,-.3f},{}}};
         float single[2]{1,0};
         check(!alone.update(dt,true,head,spread,both,single)&&!alone.hands(),"one hand at the chest held its trigger");
-        // Both at the chest but 22 cm apart (an October 28 player at rest): no gesture.
+        // Both at the chest but 30 cm apart: no gesture.
         SuitPowerPress wide;
-        Pose wideGrips[2]{{{-.11f,1.33f,-.15f},{}},{{.11f,1.33f,-.15f},{}}};
+        Pose wideGrips[2]{{{-.15f,1.33f,-.15f},{}},{{.15f,1.33f,-.15f},{}}};
         float bothPulled[2]{1,1};
         check(!wide.update(dt,true,head,wideGrips,both,bothPulled)&&!wide.hands()&&!wide.powers(),
-              "hands 22 cm apart were the suit power");
+              "hands 30 cm apart were the suit power");
+        // November 11: wrists together held out before the chest, 31 cm ahead of the eyes and 33 cm
+        // under them (a player's 30 tries, of which the 12 cm round a point took 6) are the power too;
+        // the hands at arm's length, 55 cm ahead, are not.
+        SuitPowerPress out;
+        Pose held[2]{{{-.07f,1.37f,-.31f},{}},{{.07f,1.37f,-.31f},{}}};
+        check(out.update(dt,true,head,held,both,bothPulled)&&out.powers()==1,
+              "hands held out before the chest were no suit power");
+        SuitPowerPress reaching;
+        Pose arms[2]{{{-.07f,1.37f,-.55f},{}},{{.07f,1.37f,-.55f},{}}};
+        check(!reaching.update(dt,true,head,arms,both,bothPulled)&&!reaching.hands(),
+              "hands at arm's length were the suit power");
         // A hand whose web is out reels with its trigger: never the gesture's.
         SuitPowerPress reel;
         const bool webOut[2]{true,false};

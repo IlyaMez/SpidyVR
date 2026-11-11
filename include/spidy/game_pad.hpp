@@ -491,22 +491,31 @@ class TemplePress {
 // suit power. A player's idea, October 15 ("both your hands to your chest and
 // hit trigger like the scan"): VR play had no way to it at all, as clicking
 // both sticks is the pad layer and only the game screen sent the game its L3
-// + R3. The chest: a point `below` the headset and `ahead` of it, level with
-// where it looks. A trigger is the gesture's (hands(): no web, web ball or
-// reel meanwhile) only if it goes down with both hands there, each within
-// `reach` of the point and no more than `apart` from the other, and with no
-// web out of its hand. It waits `together` for the other trigger; not joined,
-// it is the web's again, still held: a press that much late. Both down within
-// `together` of each other are the power, and both triggers are its until let
-// go. Until November 5 one trigger pulled within 22 cm of the point was the
-// gesture's until let go: a player's hands at rest were 13 to 19 cm from it,
-// and his October 28 session made 38 suit powers and not one web from its
-// triggers. Outside VR play nothing holds, and a trigger held through that
-// must be let go first.
+// + R3. The chest: a short line `below` the headset, from `closest` to
+// `farthest` ahead of it, level with where it looks: hands pressed to the
+// chest and hands held out before it, wrists together, are both on it. A
+// trigger is the gesture's (hands(): no web, web ball or reel meanwhile) only
+// if it goes down with both hands there, each within `reach` of the line and
+// no more than `apart` from the other, and with no web out of its hand. It
+// waits `together` for the other trigger; not joined, it is the web's again,
+// still held: a press that much late. Both down within `together` of each
+// other are the power, and both triggers are its until let go. Until
+// November 5 one trigger pulled within 22 cm of a point 38 cm under the eyes
+// and 15 cm ahead was the gesture's until let go: a player's hands at rest
+// were 13 to 19 cm from it, and his October 28 session made 38 suit powers
+// and not one web from its triggers. From November 5 to 11 both hands had to
+// be within 12 cm of that point, and five players reported no suit power at
+// all. In two sessions of one of them, the hands came together at the chest
+// 30 times, mostly 24 to 36 cm ahead of the eyes, and the point took 6 of
+// the 30 (one power in all, "hunched over, hands inside my virtual chest").
+// The line takes all 30, and the October 28 player's hands at rest are on it
+// less often than in the point's 12 cm (2.4% of that play, was 3.4%).
+// Outside VR play nothing holds, and a trigger held through that must be let
+// go first.
 class SuitPowerPress {
   public:
-    static constexpr float below = .38f, ahead = .15f, reach = .12f, apart = .2f, together = .15f,
-                           pressed = .6f, released = .3f, holdSeconds = .15f;
+    static constexpr float below = .35f, closest = .15f, farthest = .32f, reach = .14f, apart = .25f,
+                           together = .15f, pressed = .6f, released = .3f, holdSeconds = .15f;
     // seconds: since the previous update. play: the controllers play VR.
     // head and grips: the headset's and each hand's grip pose, in one space;
     // tracked and triggers: each hand's; webs: each hand's web is out (none:
@@ -515,20 +524,23 @@ class SuitPowerPress {
                 const float triggers[2], const bool webs[2] = nullptr) {
         const float dt = std::isfinite(seconds) ? std::clamp(seconds, 0.f, .1f) : 0.f;
         left_ = std::max(0.f, left_ - dt);
-        Vec3 chest{};
+        Vec3 look{0, 0, -1};
         bool placed = play && finite(head.position);
         if (placed) {
-            Vec3 look = head.orientation.rotate({0, 0, -1});
+            look = head.orientation.rotate({0, 0, -1});
             look.y = 0;
             look = length(look) > .1f ? normalized(look) : Vec3{0, 0, -1};
-            chest = head.position + Vec3{0, -below, 0} + look * ahead;
-            placed = finite(chest);
+            placed = finite(look);
         }
-        // Both hands at the chest, together.
+        // Both hands at the chest, together: each hand against the nearest
+        // point of the chest's line.
         bool at[2]{};
-        for (unsigned i = 0; i < 2; ++i)
-            at[i] = placed && tracked[i] && finite(grips[i].position) &&
-                    length(grips[i].position - chest) <= reach;
+        for (unsigned i = 0; i < 2; ++i) {
+            if (!placed || !tracked[i] || !finite(grips[i].position))
+                continue;
+            const float out = std::clamp(dot(grips[i].position - head.position, look), closest, farthest);
+            at[i] = length(grips[i].position - (head.position + Vec3{0, -below, 0} + look * out)) <= reach;
+        }
         const bool posed = at[0] && at[1] && length(grips[0].position - grips[1].position) <= apart;
         for (unsigned i = 0; i < 2; ++i) {
             const float trigger = std::isfinite(triggers[i]) ? triggers[i] : 0.f;
