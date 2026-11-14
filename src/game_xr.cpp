@@ -1293,7 +1293,7 @@ DWORD WINAPI run(void*) {
         uint32_t senseBroken{}, senseDodges{};
         // (They outlive the session: one may still be playing as it ends.)
         // The guards' sounds (a blocked blow's and a refused web pull's, one for each kind of guard) are
-        // recordings made for the mod, at their own rate (blockWaveRate), the others as before. The array is
+        // sound effects from Pixabay, at their own rate (blockWaveRate), the others as before. The array is
         // indexed by ImpactSound, so in its order.
         static_assert(static_cast<size_t>(ImpactSound::WebBlockShield) == 12,
                       "sounds[] below is indexed by ImpactSound");

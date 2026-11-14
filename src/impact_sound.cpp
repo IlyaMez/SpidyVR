@@ -22,7 +22,7 @@ constexpr Shape shapes[] = {
     {.42f, 110, 34, 9, 1.f, 2000, 45, .8f, 2.8f, .86f},
 };
 constexpr float rushSeconds = .22f, rushGain = .2f;
-// The guards' sounds (ImpactSound::BlockBaton .. WebBlockShield) are recordings made for the mod
+// The guards' sounds (ImpactSound::BlockBaton .. WebBlockShield) are sound effects from Pixabay
 // (block_sound.hpp and web_block_sound.hpp), set to one loudness there, and they play at one level here:
 // blockLevel, a factor on the samples, 10^(-5/20), 5 dB under the files' own level.
 constexpr float blockLevel = .562f;

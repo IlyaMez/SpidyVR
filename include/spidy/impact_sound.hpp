@@ -8,7 +8,7 @@
 // feedback now and feel bad"). Each is made here from a falling low tone
 // (the body of the blow) under a short burst of noise (the smack), as drum
 // machines make a kick and a snare; a strike's rush is noise swept through a
-// band. Nothing is loaded from a file: the guards' sounds (below) are recordings made for the mod, compiled
+// band. Nothing is loaded from a file: the guards' sounds (below) are sound effects from Pixabay, compiled
 // in.
 namespace spidy {
 enum class ImpactSound : std::uint8_t {
@@ -17,7 +17,7 @@ enum class ImpactSound : std::uint8_t {
     Heavy,    // one that sends him flying, lifts him or slams him
     Finisher, // the flow's
     Rush,     // a web strike's flight
-    // A blow a guard stopped: not made here but recorded for the mod (block_sound.hpp), at the rate asked for
+    // A blow a guard stopped: not made here but taken from Pixabay (block_sound.hpp), at the rate asked for
     // - a baton's (the ordinary melee-weapon guards'), a swordsman's, a brute's (the heavies': the slayer's)
     // and a shield's.
     BlockBaton,
@@ -25,7 +25,7 @@ enum class ImpactSound : std::uint8_t {
     BlockSlayer,
     BlockShield,
     // A web pull a guard refused: the long web lands on an enemy whose guard stands and does not take him.
-    // Recorded for the mod too (web_block_sound.hpp; a swordsman's is the sword's block sound), one for each
+    // From Pixabay too (web_block_sound.hpp; a swordsman's is the sword's block sound), one for each
     // kind of guard in the order of the four above, at the loudness of those.
     WebBlockBaton,
     WebBlockSword,

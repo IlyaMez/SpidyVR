@@ -3,7 +3,7 @@
 
 // The sounds of a web pull a guard refused (ImpactSound::WebBlockBaton, WebBlockSlayer and WebBlockShield; a
 // swordsman's plays block_sound.hpp's blockSwordSound): the long web lands on an enemy whose guard stands, he
-// holds, and the pull does not take him. They are recordings made for the mod: webblockbaton.mp3,
+// holds, and the pull does not take him. They are sound effects from Pixabay: webblockbaton.mp3,
 // slayerwebblock.mp3 and webblockshield.mp3, decoded to 44100 Hz mono 16-bit (these stereo files carry the
 // same sound in both channels, so the mix to mono changes nothing), each cut to where its sound is (the
 // silence before it and the hush after it off, a 15 ms fade-out so none ends on a click), its offset removed,

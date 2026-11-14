@@ -2,7 +2,7 @@
 #include <cstdint>
 
 // The sounds of a blow a guard stopped (ImpactSound::BlockBaton, BlockSword, BlockSlayer and BlockShield).
-// They are recordings made for the mod: batonblock.mp3, SwordsmanBlock.mp3, slayerblock.mp3 and
+// They are sound effects from Pixabay: batonblock.mp3, SwordsmanBlock.mp3, slayerblock.mp3 and
 // shieldblock.mp3, decoded to 44100 Hz mono 16-bit (the swordsman's file is stereo, its two channels all but
 // the same: mixed to mono; it also builds up quietly for a tenth of a second before the clash, which would
 // land after the blow, so that is cut too), each cut to where its sound is (the silence before it and the
