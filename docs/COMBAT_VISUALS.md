@@ -5,8 +5,14 @@ Settings > SPIDY VR > DISPLAY. It defaults on and saves as combat_visuals
 in spidy_vr.ini and shared profiles.
 
 Off hides Spidy's punch-direction arrows, white target/lock circle,
-impact bursts and combo lettering, KO text and automatic combat
-slow-motion recolouring/ripples. Manual slow motion keeps its own visuals.
+impact bursts and combo lettering, the BLOCKED mark of a blow a guard
+stopped (a shield in the comic style, a shield and a tag of diamonds in
+the tech style), KO text and automatic combat slow-motion
+recolouring/ripples. Manual slow motion keeps its own visuals.
+
+A blow a guard stops ends the combo whatever this switch says: the
+flow's count starts over, and with it the arrow of the blow it called
+next (left, right, up or down). The marks only show it.
 
 Spider-Sense is independent of this switch: overhead attack warnings,
 offscreen direction indicators and sightline warnings remain enabled for

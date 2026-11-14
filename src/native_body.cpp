@@ -3,6 +3,7 @@
 #include "spidy/native_body.hpp"
 #include "spidy/body_ik.hpp"
 #include "spidy/game_fp.hpp"
+#include "spidy/guard_pose.hpp"
 #include "spidy/native_appearance.hpp"
 #include <MinHook.h>
 #include <algorithm>
@@ -11,6 +12,7 @@
 #include <cmath>
 #include <cstring>
 #include <initializer_list>
+#include <memory>
 #include <string>
 #include <vector>
 #include <windows.h>
@@ -162,10 +164,10 @@ bool toModel(float* out, uintptr_t local, uintptr_t joints, uint32_t count) {
 // Reads the rig's joints and builds its rest pose with the game's own
 // conversion. A root (parent -1) is placed from the matrix before the first
 // joint, which must be the identity.
-bool readRig(uintptr_t rig, RigData& out) {
+bool readRig(uintptr_t rig, RigData& out, uint32_t most = native_body::maxJoints) {
     uint16_t count{};
     const auto joints = pointer(rig + 8), rest = pointer(rig + 0x18);
-    if (!read(rig + 2, &count, 2) || !count || count > native_body::maxJoints || !joints || !rest)
+    if (!read(rig + 2, &count, 2) || !count || count > most || !joints || !rest)
         return false;
     std::vector<uint8_t> table(count * 16ull);
     if (!read(joints, table.data(), table.size()))
@@ -567,6 +569,108 @@ void solveHero(float* out, uintptr_t job, uintptr_t instance) {
         d.solveMs += static_cast<double>(finished.QuadPart - started.QuadPart) * 1000 / frequency.QuadPart;
     });
 }
+// ---- the guarding enemy's pose (guard_pose.hpp)
+// ----------------------------------------------------------------- The headset side posts what each enemy is
+// doing (native_body::guardPose); every pose job whose joints are an enemy's with a cue puts his arms up /
+// swings his arm after the game has written them. The cues are few and short.
+SRWLOCK guardLock = SRWLOCK_INIT;
+guard_pose::Table guardTable;      // under guardLock
+std::atomic<uint32_t> guardLive{}; // cues with something to show: the check every pose job makes first
+std::atomic<uint32_t> guardPosts{}, guardMatched{}, guardPosed{}, guardWarned{};
+// The rigs the cues' enemies have been read as (under guardLock): the key is what the rig's table pointers
+// said when it was read. A rig that could not be posed stays in, with its reason, so it is not read again
+// every job.
+struct GuardRig {
+    uintptr_t rig{}, table{}, restTable{};
+    uint32_t count{};
+    uint64_t used{};
+    std::shared_ptr<const guard_pose::Rig> data;
+};
+std::array<GuardRig, 8> guardRigs;
+uint64_t guardRigUses{};
+
+double secondsNow() {
+    static const double hz = [] {
+        LARGE_INTEGER f{};
+        QueryPerformanceFrequency(&f);
+        return static_cast<double>(f.QuadPart);
+    }();
+    LARGE_INTEGER t{};
+    QueryPerformanceCounter(&t);
+    return hz > 0 ? static_cast<double>(t.QuadPart) / hz : 0.;
+}
+// The enemy's rig as the pose needs it: null when it cannot be posed (the reason goes to the log once).
+std::shared_ptr<const guard_pose::Rig> guardRigOf(uintptr_t rig) {
+    uint16_t count{};
+    read(rig + 2, &count, sizeof(count));
+    const uintptr_t table = pointer(rig + 8), restTable = pointer(rig + 0x18);
+    AcquireSRWLockShared(&guardLock);
+    for (const auto& g : guardRigs)
+        if (g.rig == rig && g.table == table && g.restTable == restTable && g.count == count) {
+            auto found = g.data;
+            ReleaseSRWLockShared(&guardLock);
+            return found;
+        }
+    ReleaseSRWLockShared(&guardLock);
+    RigData data;
+    std::shared_ptr<const guard_pose::Rig> made;
+    guard_pose::Why why = guard_pose::Why::shape;
+    if (readRig(rig, data, 1024)) {
+        auto fresh = std::make_shared<guard_pose::Rig>();
+        why = guard_pose::prepare(*fresh, data.parent, data.hash, data.rest);
+        if (why == guard_pose::Why::ok)
+            made = fresh;
+    }
+    char line[160];
+    std::snprintf(line, sizeof(line), "guard pose: a rig of %u joints %s", static_cast<unsigned>(count),
+                  made ? "can be posed" : guard_pose::whyName(why));
+    game_fp::note(line);
+    AcquireSRWLockExclusive(&guardLock);
+    GuardRig* slot = &guardRigs[0];
+    for (auto& g : guardRigs)
+        if (g.used < slot->used)
+            slot = &g;
+    *slot = {rig, table, restTable, count, ++guardRigUses, made};
+    ReleaseSRWLockExclusive(&guardLock);
+    return made;
+}
+bool poseGuarded(float* joints, const guard_pose::Rig* rig, const guard_pose::Eval& eval) {
+    __try {
+        return guard_pose::apply(joints, *rig, eval);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// A pose job: if its joints are those of an enemy with a cue, pose them.
+void guardPoseJob(float* out, uintptr_t job) {
+    if (!guardLive.load(std::memory_order_relaxed))
+        return;
+    const double now = secondsNow();
+    std::array<guard_pose::Table::Slot, guard_pose::Table::slots> cues;
+    AcquireSRWLockShared(&guardLock);
+    const size_t n = guardTable.live(now, cues);
+    ReleaseSRWLockShared(&guardLock);
+    if (!n) {
+        AcquireSRWLockExclusive(&guardLock);
+        guardLive = static_cast<uint32_t>(guardTable.prune(now));
+        ReleaseSRWLockExclusive(&guardLock);
+        return;
+    }
+    for (size_t i = 0; i < n; ++i) {
+        const uintptr_t entity = pointer(cues[i].record);
+        if (!entity || pointer(entity + 0xd8) != reinterpret_cast<uintptr_t>(out))
+            continue;
+        guardMatched.fetch_add(1, std::memory_order_relaxed);
+        const uintptr_t rigAt = pointer(job + 0x28);
+        if (!rigAt)
+            return;
+        const auto rig = guardRigOf(rigAt);
+        const guard_pose::Eval eval = guard_pose::evaluate(cues[i].cue, now);
+        if (rig && eval.any() && poseGuarded(out, rig.get(), eval))
+            guardPosed.fetch_add(1, std::memory_order_relaxed);
+        return; // a job is one skeleton
+    }
+}
 float writer(float* out, void* job) {
     const float moved = originalWriter(out, job);
     if (!enabled.load(std::memory_order_relaxed))
@@ -578,6 +682,8 @@ float writer(float* out, void* job) {
         solveHero(out, reinterpret_cast<uintptr_t>(job), instance);
     // A first-person scene: the head of the character the view is on shrinks away, as the player's does.
     game_fp::shrinkHead(out, pointer(reinterpret_cast<uintptr_t>(job) + 0x28));
+    // An enemy with a cue (a guard, a counter) is posed.
+    guardPoseJob(out, reinterpret_cast<uintptr_t>(job));
     return moved;
 }
 } // namespace
@@ -642,6 +748,21 @@ uint32_t native_body::start(uintptr_t gameBase) {
 }
 void native_body::retarget(uintptr_t heroRecord) {
     record = heroRecord;
+}
+void native_body::guardPose(uint64_t enemyRecord, uint32_t move, float strength) {
+    if (!enemyRecord)
+        return;
+    const double now = secondsNow();
+    AcquireSRWLockExclusive(&guardLock);
+    guardTable.post(enemyRecord, move, strength, now);
+    guardLive = static_cast<uint32_t>(guardTable.prune(now));
+    ReleaseSRWLockExclusive(&guardLock);
+    // Several cues and not one pose job has matched an enemy's joints: the layout this reads them by is not
+    // the game's for enemies. Said once, for the log.
+    const uint32_t posts = guardPosts.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (posts >= 4 && !guardMatched.load(std::memory_order_relaxed) && !guardWarned.exchange(1))
+        game_fp::note("guard pose: four cues and no pose job has had an enemy's joints (the body hook may be "
+                      "off, or an enemy's joints are not where a pose job has them)");
 }
 void native_body::submit(const Command& next) {
     AcquireSRWLockExclusive(&commandLock);

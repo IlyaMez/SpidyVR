@@ -3,6 +3,7 @@
 // thread, and what they do where they land (game_shooter.hpp).
 #include "spidy/game_shooter.hpp"
 #include "spidy/game_focus.hpp"
+#include "spidy/game_guard.hpp"
 #include "spidy/game_sound.hpp"
 #include "spidy/game_warp.hpp"
 #include "spidy/game_targets.hpp"
@@ -817,8 +818,12 @@ void collided(uintptr_t shot, uintptr_t event) {
                 d.statusType = 19; // kWebEncase
                 d.statusAmount = webbingPerHit;
                 webbed = native_bodies::damage(d) != 0;
-                if (webbed && c.kind == game_targets::Kind::bot)
+                if (webbed && c.kind == game_targets::Kind::bot) {
                     addWebbing(record);
+                    // The ball is the mod's own damage and nothing more: it opens no guard (his state says
+                    // when he is webbed). The guards' log says of the hit (game_guard::ballHit).
+                    game_guard::ballHit(c);
+                }
             } else if (c.kind == game_targets::Kind::throwable && c.physics &&
                        !(c.traits & game_targets::breakable)) {
                 // As a throw launches it: once, along the shot, tumbling.

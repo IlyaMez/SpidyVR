@@ -103,6 +103,8 @@ void setHeadAxes(Vec3 forward, Vec3 up, Vec3 eyes);
 // be shown this way.
 bool available();
 Status status();
+// A line for the session log (the block sounds' pool says what the audio device did).
+void note(const char* text);
 // The worker's latest line for the session log, when it is not the one `seen`
 // already names (pass 0 at first): what it found, hid or lost.
 bool note(uint32_t& seen, char* out, size_t size);

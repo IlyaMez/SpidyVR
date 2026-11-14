@@ -44,6 +44,33 @@ not; AIR FISTS' row, key and default), the launcher tests, the six Python
 protocol suites. Not run: the game or a headset. The new chest rests on two
 sessions of one player and one of another.
 
+**Unreleased: Enemy types.** A switch for enemies that block in the base game to
+block here too. **Enemy types** (the launcher's Options: Movement, Combat, after
+Air fists; `enemy_types` in spidy_vr.ini and profiles) is off by default: nobody
+guards, as before, and the gameplay presets leave it alone. On, the ones with a
+baton, the swordsmen, the brutes and the shield bearers stop VR punches and web
+strikes, no web drags one whose guard stands, and each kind has its own block
+sound (a baton, a sword, a slayer, a shield; the long web's refused pull has its
+own too). A guard is open while the enemy is webbed, stunned, held, down or
+flying, when a gadget or a thrown prop hurts him, and for a moment after you
+dodge over him; a swing kick goes through a baton's guard, and an enemy who has
+not noticed you does not guard. Punching never breaks a guard, but a few blocked
+punches in a row make the enemy swing back and stagger you. A blocked blow ends
+the combo, is marked BLOCKED (comic and tech styles) and nudges your view back a
+little; the enemy puts his arms up. `guard.txt` in the Spidy folder (written the
+first time the game starts, with the switch off too) holds the finer rules: more
+classes that guard, the counter, the swing kick, running enemies, how long a
+guard stays open. The session log names the enemy and the guard of every first
+block with a `GUARD` line, so a wrong guess can be corrected there without a
+rebuild. Settings packet version 32 (`enemyTypes`; version 31 still works, guards
+off).
+
+Checked: the core tests (833, with the switch's row, key and default and
+settings version 32 among them), the launcher tests (41 checks) and the new
+guard tests (which enemies guard, what opens a guard, the counter, the pose, the
+recoil, guard.txt), built on Linux. Not run: this version in the game, or built
+with MSVC. An earlier form of Enemy types was played in a PSVR2 through SteamVR.
+
 **Unreleased: gameplay presets on Play.** The Play screen now switches directly
 between built-in Arcade, Balanced and Pro presets and saved profiles. The three
 presets explicitly cover 52 gameplay settings while preserving personal setup;

@@ -67,6 +67,7 @@ constexpr Vec3 red{.7682f, .0194f, .0284f};   // #e3262f, the brand's
 constexpr Vec3 yellow{1.f, .7529f, .0742f};   // #ffe14d: a burst, a finisher
 constexpr Vec3 cyan{.0060f, .6724f, 1.f};     // #12d6ff: the misprint's left ghost
 constexpr Vec3 magenta{1.f, .0273f, .2918f};  // #ff2e93: its right ghost
+constexpr Vec3 steel{.2307f, .3185f, .4508f}; // #8499b3: a guard's, the block's shield
 constexpr float pose = 1.f / 12, degree = pi / 180;
 // How far the misprint's ghosts lie to either side on the poses a mark
 // lands, as a share of its size.
@@ -716,6 +717,106 @@ void appendKnockout(std::vector<Vertex>& out, const KnockoutView& knockout, Vec3
     });
     print.layers(height * .06f, height * .1f, plate::red, land.hit ? height * plate::misprint : 0,
                  [&] { print.text(text, {width * -.5f, height * -.5f}, height, .2f, plate::yellow); });
+}
+void appendBlock(std::vector<Vertex>& out, const BlockView& block, Vec3 viewer, float pixelAngle,
+                 UiStyle style) {
+    if (style == UiStyle::tech)
+        return tech::appendBlock(out, block, viewer, pixelAngle);
+    const float distance = length(viewer - block.point);
+    if (!finite(block.point) || !finite(viewer) || !std::isfinite(pixelAngle) || pixelAngle <= 0 ||
+        !std::isfinite(block.age) || block.age < 0 || block.age >= BlockView::seconds ||
+        !(distance >= .12f && distance <= 60))
+        return;
+    // Level and upright across the line of sight, as the bursts are.
+    const Vec3 view = (viewer - block.point) / distance;
+    Vec3 right = cross(Vec3{0, 1, 0}, view);
+    right = length(right) > .1f ? normalized(right) : perpendicular(view);
+    const Vec3 up = cross(view, right);
+    const float strength = std::isfinite(block.strength) ? std::clamp(block.strength, 0.f, 1.f) : 0.f;
+    // Printed on twos, as a sound word is: two poses of flash, two of sparks, then the shield and its
+    // lettering held till the last two, which are the pop out and the shrinking away.
+    const int pose = static_cast<int>(block.age / plate::pose);
+    const int last = static_cast<int>(BlockView::seconds / plate::pose + .5f);
+    Landing land = landing(block.age);
+    if (pose == last - 2)
+        land = {1.12f, 0, true};
+    else if (pose >= last - 1)
+        land.scale = .6f;
+    // The lettering keeps a readable size at a distance, as the count's does; a weak blow's shield is the
+    // smaller.
+    const float reading = std::clamp(distance / .7f, .8f, 2.5f);
+    const float height = .036f * reading;                        // the lettering's
+    const float half = .05f * reading * (.85f + .3f * strength); // the shield's half height
+    const float seed = block.point.x * 2.9f + block.point.y * 4.7f + block.point.z * 6.1f;
+    // He swings back at this blow: the lettering turns yellow and every pip red.
+    const bool counter = block.counterAt >= 2 && block.streak >= block.counterAt;
+    Print print(out, block.point, right, up, view, pixelAngle * distance);
+    // The flash where the fist met him: a paper star round a cyan one, small and then whole, then its paper
+    // lines thrown clear (each pose drawn anew).
+    if (pose < 2) {
+        const float outer = half * 1.9f * (pose == 0 ? .6f : 1.f);
+        const float turned = seed + static_cast<float>(pose);
+        print.layers(outer * .05f, 0, {}, 0, [&] {
+            print.star({}, outer * .5f, outer, 9, turned, plate::paper);
+            print.star({}, outer * .24f, outer * .5f, 9, turned, plate::cyan);
+        });
+    } else if (pose < 4) {
+        const int lines = pose - 2;
+        const float from = half * (1.55f + .5f * static_cast<float>(lines));
+        const float width = half * (.1f - .03f * static_cast<float>(lines));
+        print.layers(half * .035f, 0, {}, 0, [&] {
+            for (int i = 0; i < 8; ++i) {
+                const float angle = seed + 2 * pi * (static_cast<float>(i) + .5f * hash(seed, i + 60)) / 8.f;
+                const Flat way{std::cos(angle), std::sin(angle)}, side{-way.y * width, way.x * width};
+                const float to = from + half * (.5f + .5f * hash(seed, i + 80));
+                print.triangle(way * from + side, way * to, way * from - side, plate::paper);
+            }
+        });
+    }
+    // The mark: the shield at the middle, the word over it, the pips under it, all popped in as one and set a
+    // little off level.
+    print.place(land.scale, land.turn + 4 * plate::degree);
+    const float w = half * .82f, gap = height * .45f;
+    // A heater shield in seven points, round its middle.
+    const auto shield = [&](float scale, Vec3 colour) {
+        const Flat points[7] = {{-w, half},
+                                {w, half},
+                                {w, 0},
+                                {w * .7f, -half * .6f},
+                                {0, -half * 1.12f},
+                                {-w * .7f, -half * .6f},
+                                {-w, 0}};
+        const Flat middle{0, half * .05f};
+        for (int i = 0; i < 7; ++i)
+            print.triangle(middle, middle + (points[i] - middle) * scale,
+                           middle + (points[(i + 1) % 7] - middle) * scale, colour);
+    };
+    print.layers(half * .07f, half * .1f, plate::ink, land.hit ? half * plate::misprint : 0, [&] {
+        shield(1.f, plate::steel);
+        shield(.74f, plate::paper);
+        // Its chevron, red.
+        print.line({-w * .5f, half * .5f}, {0, half * -.1f}, half * .13f, plate::red);
+        print.line({0, half * -.1f}, {w * .5f, half * .5f}, half * .13f, plate::red, false);
+    });
+    // The word.
+    constexpr std::string_view word = "BLOCKED!";
+    const float across = textWidth(word, height) + Print::lean * height;
+    const float baseline = half * 1.12f + gap;
+    print.layers(height * .06f, height * .1f, plate::red, land.hit ? height * plate::misprint : 0, [&] {
+        print.text(word, {across * -.5f, baseline}, height, .2f, counter ? plate::yellow : plate::paper);
+    });
+    // A pip for each blocked blow he takes before he swings back: red for those he has taken, paper for those
+    // to come.
+    const int pips = block.counterAt;
+    if (pips >= 2 && pips <= BlockView::maxPips && block.streak >= 1) {
+        const float radius = height * .3f, spacing = radius * 2.8f, y = -half * 1.12f - gap - radius;
+        print.layers(radius * .32f, 0, {}, 0, [&] {
+            for (int i = 0; i < pips; ++i) {
+                const float x = (static_cast<float>(i) - .5f * static_cast<float>(pips - 1)) * spacing;
+                print.disc({x, y}, radius, i < block.streak || counter ? plate::red : plate::paper);
+            }
+        });
+    }
 }
 namespace {
 // What a Spider-Sense warning asks for, as its plate.

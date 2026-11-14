@@ -7,6 +7,7 @@
 // out of walls and the ground.
 #include "spidy/game_grab.hpp"
 #include "spidy/game_focus.hpp"
+#include "spidy/game_guard.hpp"
 #include "spidy/game_punch.hpp"
 #include "spidy/game_shooter.hpp"
 #include "spidy/native_bodies.hpp"
@@ -197,8 +198,11 @@ bool offers(Kind kind) {
 // in the fight. On October 8, 15:36, pulls took civilians: every bot was
 // offered; until October 12 they took the knocked out and the thugs of waves
 // to come.
-bool takes(const Candidate& c) {
-    return offers(c.kind) && (c.kind != Kind::bot || game_targets::fighting(base, c));
+// (game_guard) No enemy whose guard stands - a baton's, a swordsman's, a brute's, a shield's - is dragged by
+// a web until his guard is open. ignoreGuard: the pick that finds out whether one was refused.
+bool takes(const Candidate& c, bool ignoreGuard = false) {
+    return offers(c.kind) && (c.kind != Kind::bot ||
+                              (game_targets::fighting(base, c) && (ignoreGuard || !game_guard::holds(c))));
 }
 Tracked* track(uint64_t record) {
     for (auto& t : tracked)
@@ -240,11 +244,12 @@ Tracked* follow(const Candidate& c, Vec3 centre) {
     return &tracked.back();
 }
 // The candidate a web along the ray takes (TargetQueries::pick), and its centre.
-const Candidate* nearest(Vec3 origin, Vec3 direction, float distance, float cone, Vec3& centre) {
+const Candidate* nearest(Vec3 origin, Vec3 direction, float distance, float cone, Vec3& centre,
+                         bool ignoreGuard = false) {
     const Candidate* best{};
     float bestMiss = cone, bestDistance = 1e9f;
     for (const auto& c : candidates) {
-        if (!takes(c))
+        if (!takes(c, ignoreGuard))
             continue;
         Vec3 at{};
         if (!game_targets::position(c, at))
@@ -273,8 +278,16 @@ class Targets final : public TargetQueries {
     std::optional<GrabTarget> pick(Vec3 origin, Vec3 direction, float distance, float cone) const override {
         Vec3 centre{};
         const auto* best = nearest(origin, direction, distance, cone, centre);
-        if (!best)
+        if (!best) {
+            // Nothing to take: but one whose guard stands under the aim is a pull refused, and the headset
+            // says so.
+            if (const auto* guarded = nearest(origin, direction, distance, cone, centre, true))
+                if (game_guard::holds(*guarded))
+                    game_guard::refused(*guarded);
             return {};
+        }
+        // The log says why the guard of an enemy with one let this pull take him (nothing for the others).
+        game_guard::taken(*best);
         const auto* t = follow(*best, centre);
         return described(*best, t->position, t->velocity);
     }

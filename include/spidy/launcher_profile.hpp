@@ -122,6 +122,9 @@ inline constexpr ProfileSetting profileSettings[] = {
     tabOnly("wall_run_camera_tilt", Item::wallRunCameraTilt, &Values::wallRunCameraTilt),
     tabOnly("half_punch_damage", Item::halfPunchDamage, &Values::halfPunchDamage),
     tabOnly("air_fists", Item::airFists, &Values::airFists),
+    // Enemy types: the enemies that block in the base game block base attacks until they are webbed or
+    // stunned; off, nobody guards. A profile from before it leaves the setting as it is.
+    tabOnly("enemy_types", Item::enemyTypes, &Values::enemyTypes),
     tabOnly("web_tie", Item::webTie, &Values::webTie),
     tabOnly("native_run", Item::nativeRun, &Values::nativeRun),
     tabOnly("air_slingshot", Item::airSlingshot, &Values::airSlingshot),
