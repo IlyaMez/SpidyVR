@@ -1837,7 +1837,7 @@ int main() {
     });
     test("slingshot settings append to the old wire format and default off", [] {
         game_swing::Settings s;
-        check(s.version == 31 && s.bytes == 148 && !s.webSlingshot, "wrong slingshot defaults");
+        check(s.version == 32 && s.bytes == 152 && !s.webSlingshot, "wrong slingshot defaults");
         check(offsetof(game_swing::Settings, webSlingshot) == 48, "old settings moved");
         s.webSlingshot = 1; check(game_swing::validSettings(s), "ON refused");
         s.webSlingshot = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -2503,7 +2503,7 @@ int main() {
         check(vr_settings::choose(vr_settings::Item::betterClimbing, 1, v), "ON failed");
         check(vr_settings::withTabOnly({}, vr_settings::tabOnlyText(v)).betterClimbing, "switch not saved");
         game_swing::Settings s;
-        check(s.version == 31 && s.bytes == 148 && offsetof(game_swing::Settings, betterClimbing) == 52,
+        check(s.version == 32 && s.bytes == 152 && offsetof(game_swing::Settings, betterClimbing) == 52,
               "settings moved old fields");
         s.betterClimbing = 1; check(game_swing::validSettings(s), "ON refused");
         s.betterClimbing = 2; check(!game_swing::validSettings(s), "invalid switch accepted");
@@ -3859,7 +3859,7 @@ int main() {
     test("merged settings keep phone suppression, arcade webs and hand climbing independent", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 31 && s.bytes == 148, "updated settings did not append the climbing field");
+        check(s.version == 32 && s.bytes == 152, "updated settings did not append the climbing field");
         check(offsetof(Settings, noBlows) == 36 && offsetof(Settings, arcade) == 40 &&
               offsetof(Settings, handClimb) == 44, "upstream phone or arcade fields moved");
         s.noBlows = 3;
@@ -4345,6 +4345,94 @@ int main() {
             near(length(view.headPose.position - old.headPose.position), 0, .0001f);
             for (const auto& ray : rig.handCollisionRays(view.headPose.position)) near(ray.distance, 0);
         }
+    });
+    test("recoil: a blow the guard stopped knocks the view back a little and it comes home", [] {
+        GameTrackingRig rig, baseline;
+        auto f = trackedFrame();
+        const Vec3 feet{0, 0, 0};
+        playFor(rig, f, feet, {0, 1, 0}, 1);
+        playFor(baseline, f, feet, {0, 1, 0}, 1);
+        rig.recoil({0, 0, 1}, .03f);
+        float peak = 0;
+        for (int i = 0; i < 90; ++i) {
+            ++f.predictedDisplayTime;
+            const auto moved = rig.update(f, feet, {0, 0, -1}, true, {0, 1, 0});
+            const auto still = baseline.update(f, feet, {0, 0, -1}, true, {0, 1, 0});
+            // The head went exactly as far as the recoil says, only along the kick, and never toward him.
+            const Vec3 by = moved.headPose.position - still.headPose.position;
+            near(length(by - moved.recoil), 0, .00002f);
+            near(by.x, 0, .00002f);
+            near(by.y, 0, .00002f);
+            check(by.z > -.00002f, "the recoil went toward the enemy");
+            near(length(still.recoil), 0, 0);
+            peak = std::max(peak, by.z);
+            // The eyes, the hands and the webs' placement went with it; the feet's anchor did not.
+            for (unsigned e = 0; e < 2; ++e) {
+                const Vec3 eye{moved.eyes[e][12], moved.eyes[e][13], moved.eyes[e][14]};
+                const Vec3 eyeStill{still.eyes[e][12], still.eyes[e][13], still.eyes[e][14]};
+                near(length(eye - eyeStill - by), 0, .00002f);
+                near(length(moved.grips[e].position - still.grips[e].position - by), 0, .00002f);
+            }
+            near(length(moved.anchor - still.anchor), 0, 0);
+        }
+        check(peak > .029f && peak < .0301f, "the knock back is not as far as it was asked");
+        ++f.predictedDisplayTime;
+        const auto home = rig.update(f, feet, {0, 0, -1}, true, {0, 1, 0});
+        const auto base = baseline.update(f, feet, {0, 0, -1}, true, {0, 1, 0});
+        near(length(home.headPose.position - base.headPose.position), 0, .00002f);
+        // No size, no way, or straight up: not a kick.
+        rig.recoil({0, 0, 1}, 0);
+        rig.recoil({0, 0, 0}, .03f);
+        rig.recoil({0, 1, 0}, .03f);
+        ++f.predictedDisplayTime;
+        near(length(rig.update(f, feet, {0, 0, -1}, true, {0, 1, 0}).recoil), 0, 0);
+    });
+    test("recoil: a player a surface holds is not knocked about, and one already out eases home", [] {
+        GameTrackingRig rig, baseline;
+        auto f = trackedFrame();
+        const Vec3 feet{0, 0, .9f};
+        const SurfaceHold wall{{0, 0, 1}, {}, 0, false};
+        holdFor(rig, f, feet, wall, 1);
+        holdFor(baseline, f, feet, wall, 1);
+        rig.recoil({0, 0, 1}, .03f);
+        for (int i = 0; i < 20; ++i) {
+            ++f.predictedDisplayTime;
+            const auto moved = rig.update(f, feet, {0, 0, -1}, true, {0, 1, 0}, true, wall);
+            const auto still = baseline.update(f, feet, {0, 0, -1}, true, {0, 1, 0}, true, wall);
+            near(length(moved.recoil), 0, 0);
+            near(length(moved.headPose.position - still.headPose.position), 0, .00002f);
+        }
+        // Out on the ground, then held: it stops going further and is home within a third of a second.
+        GameTrackingRig other;
+        auto g = trackedFrame();
+        playFor(other, g, feet, {0, 1, 0}, 1);
+        other.recoil({0, 0, 1}, .03f);
+        ++g.predictedDisplayTime;
+        float out = other.update(g, feet, {0, 0, -1}, true, {0, 1, 0}).recoil.z;
+        check(out > .01f, "the kick did not move the view");
+        for (int i = 0; i < 30; ++i) {
+            ++g.predictedDisplayTime;
+            const float now = other.update(g, feet, {0, 0, -1}, true, {0, 1, 0}, true, wall).recoil.z;
+            check(now <= out + 1e-6f, "a surface held the player and the recoil still grew");
+            out = now;
+        }
+        near(out, 0, .0003f);
+    });
+    test("recoil: a break in tracking ends it", [] {
+        GameTrackingRig rig;
+        auto f = trackedFrame();
+        const Vec3 feet{};
+        playFor(rig, f, feet, {0, 1, 0}, 1);
+        rig.recoil({0, 0, 1}, .03f);
+        ++f.predictedDisplayTime;
+        check(rig.update(f, feet, {0, 0, -1}, true, {0, 1, 0}).recoil.z > .01f,
+              "the kick did not move the view");
+        f.focused = false;
+        ++f.predictedDisplayTime;
+        rig.update(f, feet, {0, 0, -1}, true, {0, 1, 0});
+        f.focused = true;
+        ++f.predictedDisplayTime;
+        near(length(rig.update(f, feet, {0, 0, -1}, true, {0, 1, 0}).recoil), 0, 0);
     });
     test("ground dodge cannot acquire a prone vent camera from transient crawl flags", [] {
         CrawlCameraGate gate;
@@ -10070,7 +10158,7 @@ int main() {
         Swing fresh(inert());
         check(!fresh.webLandingSmoothEnabled() && !fresh.landCarrying(), "SMOOTH WEB LANDING on by default");
         game_swing::Settings packet;
-        check(packet.version == 31 && packet.bytes == 148 && !packet.webLandingSmooth &&
+        check(packet.version == 32 && packet.bytes == 152 && !packet.webLandingSmooth &&
                   packet.webLandingImpact == 24 &&
                   offsetof(game_swing::Settings, webLandingSmooth) == game_swing::settingsBytesV29,
               "SMOOTH WEB LANDING not appended, or on by default");
@@ -10224,7 +10312,7 @@ int main() {
         Swing fresh(inert());
         check(!fresh.groundRunEnabled() && !fresh.groundRunning(), "SPIDY RUN on by default");
         game_swing::Settings packet;
-        check(packet.version == 31 && packet.bytes == 148 && !packet.spidyRun &&
+        check(packet.version == 32 && packet.bytes == 152 && !packet.spidyRun &&
                   offsetof(game_swing::Settings, spidyRun) == game_swing::settingsBytesV27,
               "SPIDY RUN not appended, or on by default");
         packet.spidyRun = 2;
@@ -10362,7 +10450,7 @@ int main() {
             check(!sw.groundRunning(), "the air started a run from standing");
         }
         game_swing::Settings packet;
-        check(packet.version == 31 && packet.bytes == 148 && !packet.spidyRunStanding &&
+        check(packet.version == 32 && packet.bytes == 152 && !packet.spidyRunStanding &&
                   offsetof(game_swing::Settings, spidyRunStanding) == game_swing::settingsBytesV28,
               "SPIDY RUN FROM STANDING not appended, or on by default");
         packet.spidyRunStanding = 2;
@@ -10614,6 +10702,72 @@ int main() {
         WebStrike ground;ground.hangOn(true,1.6f);
         check(ground.phase()==WebStrike::Phase::Idle,"a hang on the ground");
     });
+    test("enemy types is the launcher's switch for the guards: off by default, kept, and settings version 32 "
+         "carries it",
+         [] {
+             using vr_settings::Item;
+             // Off by default, so that a spidy_vr.ini from before it (no enemy_types line) and a reset leave
+             // the game as it was.
+             vr_settings::Values v;
+             check(!v.enemyTypes, "enemy types must default off");
+             check(vr_settings::choice(Item::enemyTypes, v) == 0 &&
+                       vr_settings::defaultChoice(Item::enemyTypes) == 0,
+                   "default choice is not OFF");
+             check(!vr_settings::withTabOnly({}, "hand_climb=1\n").enemyTypes,
+                   "an old spidy_vr.ini turned the guards on");
+             // On is kept and read back, and any other line is left alone by it.
+             check(vr_settings::choose(Item::enemyTypes, 1, v) && v.enemyTypes, "ON failed");
+             check(!vr_settings::choose(Item::enemyTypes, 1, v), "ON twice said it changed something");
+             check(!vr_settings::choose(Item::enemyTypes, 2, v), "a third choice was taken");
+             const std::string text = vr_settings::tabOnlyText(v);
+             check(text.find("\nenemy_types=1\n") != std::string::npos, "the line is not written");
+             const auto back = vr_settings::withTabOnly({}, text);
+             check(back.enemyTypes && back == v, "ON not kept");
+             check(vr_settings::withTabOnly({}, "enemy_types=1\n").enemyTypes &&
+                       !vr_settings::withTabOnly({}, "enemy_types=0\n").enemyTypes,
+                   "the line is not read");
+             // The launcher's row alone, not the game's tab, and the game's RESET ALL leaves it as it is.
+             size_t found = 0;
+             for (const auto& row : vr_settings::rows())
+                 if (row.item == Item::enemyTypes) {
+                     ++found;
+                     check(row.place == vr_settings::Place::launcher &&
+                               std::string(row.title) == "ENEMY TYPES" && row.choices.empty(),
+                           "the row is not the launcher's switch");
+                 }
+             check(found == 1, "the row is not there once");
+             check(vr_settings::lastItem == Item::enemyTypes, "enemy types is not the last item");
+             vr_settings::Values on;
+             on.enemyTypes = true;
+             for (size_t i = 0; i < vr_settings::categoryCount; ++i)
+                 check(vr_settings::resetCategory(static_cast<vr_settings::Category>(i), on).enemyTypes,
+                       "a reset of the game's menu turned the guards back off");
+             // Settings version 32 appends it, off, and version 31 (148 bytes) is still taken, with the
+             // guards off.
+             game_swing::Settings s;
+             check(s.version == 32 && s.bytes == 152 && s.enemyTypes == 0 &&
+                       game_swing::settingsBytesV31 == 148 &&
+                       offsetof(game_swing::Settings, enemyTypes) == game_swing::settingsBytesV31 &&
+                       offsetof(game_swing::Settings, webLines) == game_swing::settingsBytesV30,
+                   "settings moved old fields");
+             check(game_swing::validSettings(s), "the defaults are refused");
+             s.enemyTypes = 1;
+             check(game_swing::validSettings(s), "ON refused");
+             s.enemyTypes = 2;
+             check(!game_swing::validSettings(s), "invalid switch accepted");
+             game_swing::Settings old;
+             old.version = 31;
+             old.bytes = game_swing::settingsBytesV31;
+             check(game_swing::validSettings(old) && old.enemyTypes == 0,
+                   "version 31 refused, or it turns the guards on");
+             game_swing::Settings wrong;
+             wrong.version = 32;
+             wrong.bytes = game_swing::settingsBytesV31;
+             check(!game_swing::validSettings(wrong), "version 32 at version 31's size accepted");
+             wrong.version = 31;
+             wrong.bytes = sizeof(game_swing::Settings);
+             check(!game_swing::validSettings(wrong), "version 31 at version 32's size accepted");
+         });
     test("called blows hit harder and throw him the way they went", [] {
         const Flow flow;
         const auto blow=[](Vec3 direction,float strength) {
@@ -12062,6 +12216,10 @@ int main() {
             const KnockoutView knockout{point, .3f};
             s ? appendKnockout(v, knockout, viewer, pixel, *s) : appendKnockout(v, knockout, viewer, pixel);
         });
+        three("a blocked blow", [&](std::vector<Vertex>& v, const UiStyle* s) {
+            const BlockView blocked{point, .5f, 2, 3, .3f};
+            s ? appendBlock(v, blocked, viewer, pixel, *s) : appendBlock(v, blocked, viewer, pixel);
+        });
         three("Spider-Sense", [&](std::vector<Vertex>& v, const UiStyle* s) {
             const SenseView sense{point, SenseAnswer::Dodge, .5f, true, .5f, -1};
             s ? appendSense(v, sense, viewer, pixel, *s) : appendSense(v, sense, viewer, pixel);
@@ -12224,6 +12382,172 @@ int main() {
         appendKnockout(none, {stood, .3f}, viewer, 0, UiStyle::tech);
         check(none.empty(), "a tech mark before its time, nowhere, with no time left or no pixel");
     });
+    test(
+        "a blocked blow's BLOCKED mark: printed on twos with a shield, lettering and a pip for each block "
+        "before his counter; in tech a shield and a tag",
+        [] {
+            const Vec3 viewer{0, 1.6f, 0}, at{0, 1.4f, -.7f};
+            constexpr float pixel = .0006f, pose = 1.f / 12;
+            const Vec3 facing = normalized(viewer - at);
+            const Vec3 ink{.0033f, .0030f, .0070f}, paper{.9301f, .9131f, .8550f}, cyan{.0060f, .6724f, 1},
+                yellow{1, .7529f, .0742f}, red{.7682f, .0194f, .0284f}, steel{.2307f, .3185f, .4508f};
+            const auto count = [](const std::vector<Vertex>& v, Vec3 colour) {
+                size_t n{};
+                for (const auto& x : v)
+                    n += length(x.color - colour) < .01f;
+                return n;
+            };
+            const auto widest = [&](const std::vector<Vertex>& v) {
+                float r{};
+                for (const auto& x : v)
+                    r = std::max(r, length(x.position - at));
+                return r;
+            };
+            const auto strongest = [](const std::vector<Vertex>& v) {
+                float a{};
+                for (const auto& x : v)
+                    a = std::max(a, x.alpha);
+                return a;
+            };
+            const auto flat = [&](const std::vector<Vertex>& v) {
+                for (const auto& x : v)
+                    if (!finite(x.position) || !(x.alpha >= 0 && x.alpha <= 1) ||
+                        std::abs(dot(x.position - at, facing)) > 1e-3f)
+                        return false;
+                return !v.empty() && v.size() % 3 == 0;
+            };
+            const auto same = [](const std::vector<Vertex>& a, const std::vector<Vertex>& b) {
+                if (a.size() != b.size())
+                    return false;
+                for (size_t i = 0; i < a.size(); ++i)
+                    if (length(a[i].position - b[i].position) > 0 || length(a[i].color - b[i].color) > 0 ||
+                        a[i].alpha != b[i].alpha)
+                        return false;
+                return true;
+            };
+            const auto draw = [&](UiStyle style, float age, int streak = 1, int counterAt = 3,
+                                  float strength = .5f) {
+                std::vector<Vertex> v;
+                appendBlock(v, {at, strength, streak, counterAt, age}, viewer, pixel, style);
+                return v;
+            };
+            const auto comic = [&](float age, int streak = 1, int counterAt = 3, float strength = .5f) {
+                return draw(UiStyle::comic, age, streak, counterAt, strength);
+            };
+            const auto tech = [&](float age, int streak = 1, int counterAt = 3, float strength = .5f) {
+                return draw(UiStyle::tech, age, streak, counterAt, strength);
+            };
+            // The comic's: a white flash round a cyan star and the shield, keyed in ink, in poses of a
+            // twelfth of a second.
+            const auto flash = comic(pose * .5f), held = comic(pose * 4.5f), counter = comic(pose * 4.5f, 3);
+            check(flat(flash) && flat(held) && flat(counter),
+                  "the block's vertices are off their plane, or not numbers");
+            check(count(flash, paper) > 0 && count(flash, cyan) > 0 && count(flash, ink) > 0,
+                  "the block's flash is not paper round cyan, keyed in ink");
+            check(count(held, steel) > 0 && count(held, red) > 0 && count(held, paper) > 0 &&
+                      count(held, ink) > 0 && count(held, cyan) == 0,
+                  "the shield is not steel, paper and a red chevron keyed in ink, with no flash");
+            check(widest(comic(pose * 1.5f)) > widest(flash), "the flash does not grow");
+            check(same(comic(.01f), comic(.07f)) && !same(comic(.07f), comic(.09f)),
+                  "a pose is not held a twelfth of a second");
+            check(same(comic(pose * 4.2f), comic(pose * 5.8f)) &&
+                      !same(comic(pose * 5.8f), comic(pose * 6.2f)),
+                  "the shield and its lettering are not held, then popped");
+            // Two poses of paper sparks thrown clear of the shield, each drawn anew, and none once it is
+            // held.
+            check(comic(pose * 2.5f).size() > held.size() && comic(pose * 3.5f).size() > held.size() &&
+                      count(comic(pose * 2.5f), paper) > count(held, paper) &&
+                      !same(comic(pose * 2.5f), comic(pose * 3.5f)) &&
+                      comic(pose * 4.5f).size() == held.size(),
+                  "the sparks are not thrown clear of the shield for two poses, or stay");
+            // Lettering in paper, yellow on the blow that sets off his counter, and a pip for each block he
+            // takes: red ones for those taken, paper for those to come, all red at the counter.
+            check(count(held, yellow) == 0 && count(counter, yellow) > 0,
+                  "the lettering is not yellow for the counter's blow only");
+            const auto first = comic(pose * 4.5f, 1), second = comic(pose * 4.5f, 2);
+            check(count(second, red) > count(first, red) && count(counter, red) > count(second, red),
+                  "a pip does not turn red for each block he takes");
+            const auto none = comic(pose * 4.5f, 0, 0);
+            check(count(first, red) > count(none, red) && count(first, paper) > count(none, paper),
+                  "no pips for each block before his counter");
+            check(count(comic(pose * 4.5f, 1, 7), red) == count(none, red) &&
+                      count(comic(pose * 4.5f, 1, 1), red) == count(none, red) &&
+                      count(comic(pose * 4.5f, 0, 3), red) == count(none, red),
+                  "pips for a count they cannot show (1, or over six) or for no block told");
+            check(count(comic(pose * 4.5f, 1, BlockView::maxPips), red) > count(none, red),
+                  "six pips are not drawn");
+            // A weak blow's shield is the smaller; the lettering keeps its size at a distance, as the count's
+            // does.
+            check(widest(comic(pose * 4.5f, 1, 3, .05f)) < widest(comic(pose * 4.5f, 1, 3, 1)),
+                  "a weak blow's mark is no smaller");
+            std::vector<Vertex> far;
+            appendBlock(far, {at + Vec3{0, 0, -5}, .5f, 1, 3, pose * 4.5f}, viewer, pixel, UiStyle::comic);
+            check(!far.empty() && length(far.front().position - (at + Vec3{0, 0, -5})) < 1.2f,
+                  "a distant mark is lost");
+            // The tech's: thin lines in the line white and a blue plate, an amber bar and diamonds; red for
+            // the counter's blow; and nothing holds a pose.
+            const auto techHeld = tech(.3f), techCounter = tech(.3f, 3);
+            check(flat(techHeld) && flat(techCounter),
+                  "the tech block's vertices are off their plane, or not numbers");
+            check(count(techHeld, ::spidy::tech::line) > 0 && count(techHeld, ::spidy::tech::amber) > 0 &&
+                      count(techHeld, ::spidy::tech::panel) > 0 && count(techHeld, ::spidy::tech::red) == 0,
+                  "the tech block is not the line white, amber and the menus' blue");
+            check(count(techCounter, ::spidy::tech::red) > 0 && count(techCounter, ::spidy::tech::amber) == 0,
+                  "the counter's blow is not red, not amber, in tech");
+            check(count(tech(.3f, 2), ::spidy::tech::amber) > count(tech(.3f, 1), ::spidy::tech::amber) &&
+                      count(tech(.3f, 1), ::spidy::tech::amber) >
+                          count(tech(.3f, 0, 0), ::spidy::tech::amber),
+                  "a diamond does not light for each block he takes in tech");
+            check(tech(.3f, 1, 0).size() < tech(.3f, 1, 3).size(), "the tech mark has a tag for no count");
+            // No lettering in the tech's (the comic style has the word): with no count to show it is the
+            // shield alone, 5 cm across at 70 cm; the tag holds only its diamonds (about 18 cm out for three,
+            // where "BLOCKED" on it would have taken it to 31).
+            const auto across = [&](const std::vector<Vertex>& v) {
+                float r{};
+                for (const auto& x : v)
+                    r = std::max(r, std::abs(x.position.x - at.x));
+                return r;
+            };
+            check(across(tech(.3f, 1, 0)) < .06f && across(tech(.3f, 0, 3)) < .06f,
+                  "the tech shield is wider than itself: lettering");
+            check(across(techHeld) > .12f && across(techHeld) < .22f,
+                  "the tech tag is no tag of three diamonds: lettering");
+            check(across(tech(.3f, 1, BlockView::maxPips)) < .3f, "the tech tag of six diamonds is lettered");
+            check(across(comic(pose * 4.5f)) > across(tech(.3f, 1, 0)) * 1.3f,
+                  "the comic's BLOCKED! is gone with the tech's");
+            // Nothing holds a pose while it moves (going out, then fading away), and it is not the printed
+            // mark.
+            check(!same(tech(.1f), tech(.105f)) && !same(tech(.55f), tech(.555f)) &&
+                      !same(comic(.3f), tech(.3f)),
+                  "the tech block holds a pose, or is the printed one");
+            check(widest(tech(.02f)) < widest(tech(.3f)), "the tech tag is not drawn out");
+            check(strongest(tech(.62f)) < strongest(tech(.3f)) && strongest(tech(.62f)) < .6f,
+                  "the tech mark does not fade out");
+            // Both are over by BlockView::seconds, and nothing is drawn before it, for no pixel, for the
+            // middle of the eyes or for a place that is no number.
+            const float nan = std::numeric_limits<float>::quiet_NaN();
+            for (const auto style : {UiStyle::comic, UiStyle::tech}) {
+                check(draw(style, BlockView::seconds - .01f).size() > 0 &&
+                          draw(style, BlockView::seconds).empty() &&
+                          draw(style, BlockView::seconds + 1).empty(),
+                      "a block mark does not end at its time");
+                check(draw(style, -.01f).empty() && draw(style, nan).empty(),
+                      "a block mark before its time or at no time");
+                std::vector<Vertex> lost;
+                appendBlock(lost, {at, .5f, 1, 3, .3f}, viewer, 0, style);
+                appendBlock(lost, {at, .5f, 1, 3, .3f}, viewer, nan, style);
+                appendBlock(lost, {viewer, .5f, 1, 3, .3f}, viewer, pixel, style);
+                appendBlock(lost, {{nan, 1, 0}, .5f, 1, 3, .3f}, viewer, pixel, style);
+                appendBlock(lost, {at, .5f, 1, 3, .3f}, {nan, 1, 0}, pixel, style);
+                check(lost.empty(), "a block mark with no pixel, on the eyes or nowhere");
+                // Hostile numbers in the rest: no crash, nothing off the plane.
+                check(flat(draw(style, .3f, -5, 99999, nan)) && flat(draw(style, .3f, 99999, -1, 7.f)),
+                      "a block mark with a count that is no sense is off the plane");
+                for (int p = 0; p < 8; ++p)
+                    check(flat(draw(style, pose * (static_cast<float>(p) + .5f))),
+                          "a pose of a block mark is empty or off the plane");
+            }
+        });
     test("tech Spider-Sense: wavy glowing lines in what to do, a ring of dashes closing, amber at its last notch", [] {
         const Vec3 viewer{0, 1.6f, 0}, headTop{0, 1.75f, -3};
         constexpr float pixel = .0005f;
@@ -22907,7 +23231,7 @@ int main() {
     test("free combat: settings default to called combat and preserve older packet layouts", [] {
         using namespace game_swing;
         Settings s;
-        check(s.version == 31 && s.bytes == 148 && s.combatVisuals == 1 &&
+        check(s.version == 32 && s.bytes == 152 && s.combatVisuals == 1 &&
                   offsetof(Settings, combatVisuals) == 56,
               "free combat broke the settings defaults or layout");
         s.combatVisuals = 0;
@@ -22954,7 +23278,7 @@ int main() {
         check(withTabOnly(Values{}, "single_hand_yank_percent=999\n").singleHandYankPercent == 300,
               "saved single-hand yank strength was not clamped");
         game_swing::Settings packet;
-        check(packet.version == 31 && packet.bytes == 148 && !packet.halfPunchDamage &&
+        check(packet.version == 32 && packet.bytes == 152 && !packet.halfPunchDamage &&
                   packet.singleHandYankPercent == 100 &&
                   offsetof(game_swing::Settings, halfPunchDamage) == 96 &&
                   offsetof(game_swing::Settings, singleHandYankPercent) == 100,
@@ -23135,26 +23459,242 @@ int main() {
             const auto s=samples(wave);
             near(static_cast<float>(s.size())/22050,impactSeconds(sound),.001f);
             float peak{},energy{},sum{};
-            for(const float v:s){peak=std::max(peak,std::abs(v));energy+=v*v;sum+=v;}
+            for(const float v:s){
+                peak = std::max(peak, std::abs(v));
+                energy += v * v;
+                sum += v;
+            }
             check(peak>.3f&&peak<.9f,"a blow's sound is too quiet or clipped");
             check(peak>lastPeak&&energy>lastEnergy&&s.size()>lastCount,"a harder blow was not louder and longer");
             check(std::abs(s.front())<.01f&&std::abs(s.back())<.01f,"the sound clicks at an end");
             check(std::abs(sum/s.size())<.02f,"the sound is off centre");
             // The smack comes first: the first 20 ms hold more than their share.
             float early{};
-            for(size_t i=0;i<441;++i)early+=s[i]*s[i];
+            for(size_t i=0;i<441;++i)
+                early += s[i] * s[i];
             check(early>energy*441/s.size(),"the blow has no attack");
-            lastPeak=peak;lastEnergy=energy;lastCount=s.size();
+            lastPeak=peak;
+            lastEnergy = energy;
+            lastCount = s.size();
         }
         const auto rush=samples(impactWave(ImpactSound::Rush));
         float peak{};
         size_t loudest{};
-        for(size_t i=0;i<rush.size();++i)if(std::abs(rush[i])>peak){peak=std::abs(rush[i]);loudest=i;}
+        for(size_t i=0;i<rush.size();++i)
+            if (std::abs(rush[i]) > peak) {
+                peak = std::abs(rush[i]);
+                loudest = i;
+            }
         check(peak>.05f&&peak<.45f,"the rush is too quiet or too loud");
         check(loudest>rush.size()/5&&loudest<rush.size()*4/5,"the rush does not swell and fade");
         check(impactWave(ImpactSound::Light)==impactWave(ImpactSound::Light),"the same sound came out differently");
         check(impactWave(ImpactSound::Firm,1).size()==44+2*static_cast<size_t>(std::lround(.16f*8000)),"an absurd rate was not limited");
+        // The blocked blow's sounds are recorded files (one for each kind of guard - a baton's, a
+        // swordsman's, a brute's, a shield's): each with a clear peak that is not too loud, a start that
+        // comes at once, no click at either end, a length of its own that is the same at any rate, and all
+        // four about as loud as one another (the loudest fifth of a second of each within 3.5 dB of the
+        // others'; the pressed-to-equal level is measured with a K-weighted filter in the tool that made
+        // them, this is the plain RMS check that no one is far off).
+        const ImpactSound blockSounds[] = {ImpactSound::BlockBaton, ImpactSound::BlockSword,
+                                           ImpactSound::BlockSlayer, ImpactSound::BlockShield};
+        float quietest = 1e9f, loudestBlock = 0;
+        float lengths[4]{};
+        for (int which = 0; which < 4; ++which) {
+            const ImpactSound sound = blockSounds[which];
+            check(isBlockSound(sound), "a block sound is not named as one");
+            const auto blocked = samples(impactWave(sound, blockWaveRate));
+            float blockedPeak{};
+            for (const float v : blocked)
+                blockedPeak = std::max(blockedPeak, std::abs(v));
+            // Played at blockLevel, 5 dB under the files' own: their peaks are .39 to .85 of full scale,
+            // played .22 to .48.
+            check(blockedPeak > .2f && blockedPeak < .55f, "a block sound is too quiet or too loud");
+            check(std::abs(blocked.front()) < .01f && std::abs(blocked.back()) < .01f,
+                  "a block sound clicks at an end");
+            size_t onset = 0;
+            while (onset < blocked.size() && std::abs(blocked[onset]) < .25f * blockedPeak)
+                ++onset;
+            check(static_cast<float>(onset) / static_cast<float>(blockWaveRate) < .06f,
+                  "a block sound starts late (silence before the blow)");
+            near(static_cast<float>(blocked.size()) / static_cast<float>(blockWaveRate), impactSeconds(sound),
+                 .001f);
+            lengths[which] = impactSeconds(sound);
+            check(lengths[which] > .25f && lengths[which] < 1.2f, "a block sound is the wrong length");
+            // The loudest fifth of a second, as RMS.
+            const size_t window = static_cast<size_t>(.2f * static_cast<float>(blockWaveRate));
+            float best{};
+            for (size_t at = 0; at + window <= blocked.size(); at += 441) {
+                double sum = 0;
+                for (size_t i = at; i < at + window; ++i)
+                    sum += static_cast<double>(blocked[i]) * blocked[i];
+                best = std::max(best, static_cast<float>(std::sqrt(sum / static_cast<double>(window))));
+            }
+            // The loudest fifth of a second sits near -25 to -23 dB of full scale (.055 to .071) played 5 dB
+            // under the files'.
+            check(best > .045f && best < .085f,
+                  "a block sound is not at its level (5 dB under the files' own)");
+            quietest = std::min(quietest, best);
+            loudestBlock = std::max(loudestBlock, best);
+            // At a lower rate the same sound, as long, no louder (the mean of the stretch each sample stands
+            // for).
+            const auto low = samples(impactWave(sound, 22050));
+            near(static_cast<float>(low.size()) / 22050, impactSeconds(sound), .001f);
+            float lowPeak{};
+            for (const float v : low)
+                lowPeak = std::max(lowPeak, std::abs(v));
+            check(lowPeak > .15f && lowPeak <= blockedPeak * 1.05f,
+                  "a block sound changes in level at a lower rate");
+        }
+        check(20 * std::log10(loudestBlock / quietest) < 3.5f,
+              "the four block sounds are not about as loud as one another");
+        check(lengths[0] != lengths[1] && lengths[1] != lengths[2] && lengths[2] != lengths[3],
+              "two block sounds are the same length: one file was used twice?");
     });
+    test("web-block sounds: the four of a refused web pull are recorded files (a swordsman's is his block "
+         "sound), at the loudness of the four of a blocked blow",
+         [] {
+             const auto samples = [](const std::vector<std::uint8_t>& wave) {
+                 std::vector<double> out;
+                 for (size_t i = 44; i + 1 < wave.size(); i += 2)
+                     out.push_back(static_cast<std::int16_t>(wave[i] | wave[i + 1] << 8) / 32768.0);
+                 return out;
+             };
+             // ITU-R BS.1770's K-weighting at 44100 Hz (a high shelf of +4 dB above about 1.7 kHz, then a 38
+             // Hz high-pass, both derived for the rate by the bilinear transform): the measure the sounds
+             // were set to equal loudness by, in a tool that is not in the tree. Here it keeps their numbers
+             // honest.
+             const auto kWeighted = [](const std::vector<double>& x) {
+                 const double pi = 3.14159265358979323846, rate = 44100;
+                 double f0 = 1681.974450955533, q = 0.7071752369554196;
+                 const double gain = 3.999843853973347;
+                 double k = std::tan(pi * f0 / rate);
+                 const double vh = std::pow(10.0, gain / 20), vb = std::pow(vh, 0.4996667741545416);
+                 double a0 = 1 + k / q + k * k;
+                 const double shelfB[3] = {(vh + vb * k / q + k * k) / a0, 2 * (k * k - vh) / a0,
+                                           (vh - vb * k / q + k * k) / a0};
+                 const double shelfA[3] = {1, 2 * (k * k - 1) / a0, (1 - k / q + k * k) / a0};
+                 f0 = 38.13547087602444;
+                 q = 0.5003270373238773;
+                 k = std::tan(pi * f0 / rate);
+                 a0 = 1 + k / q + k * k;
+                 const double highB[3] = {1, -2, 1};
+                 const double highA[3] = {1, 2 * (k * k - 1) / a0, (1 - k / q + k * k) / a0};
+                 const auto biquad = [](const std::vector<double>& in, const double* b, const double* a) {
+                     std::vector<double> out(in.size());
+                     double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+                     for (size_t i = 0; i < in.size(); ++i) {
+                         const double y = b[0] * in[i] + b[1] * x1 + b[2] * x2 - a[1] * y1 - a[2] * y2;
+                         x2 = x1;
+                         x1 = in[i];
+                         y2 = y1;
+                         y1 = y;
+                         out[i] = y;
+                     }
+                     return out;
+                 };
+                 return biquad(biquad(x, shelfB, shelfA), highB, highA);
+             };
+             // The loudest `seconds` of a K-weighted signal (windows 25 ms apart; a shorter sound is padded
+             // with silence), dB.
+             const auto loudest = [](const std::vector<double>& k, double seconds) {
+                 const size_t window = static_cast<size_t>(seconds * 44100), hop = 1102;
+                 std::vector<double> padded = k;
+                 if (padded.size() < window)
+                     padded.resize(window, 0.0);
+                 double best = -1e9;
+                 for (size_t at = 0; at + window <= padded.size(); at += hop) {
+                     double sum = 0;
+                     for (size_t i = at; i < at + window; ++i)
+                         sum += padded[i] * padded[i];
+                     best =
+                         std::max(best, -0.691 + 10 * std::log10(sum / static_cast<double>(window) + 1e-20));
+                 }
+                 return best;
+             };
+             const ImpactSound blocks[] = {ImpactSound::BlockBaton, ImpactSound::BlockSword,
+                                           ImpactSound::BlockSlayer, ImpactSound::BlockShield};
+             const ImpactSound webs[] = {ImpactSound::WebBlockBaton, ImpactSound::WebBlockSword,
+                                         ImpactSound::WebBlockSlayer, ImpactSound::WebBlockShield};
+             // Which are which: the eight are recorded sounds played the same way; only the last four are a
+             // refused pull's.
+             for (const auto sound : blocks)
+                 check(isBlockSound(sound) && !isWebBlockSound(sound),
+                       "a blocked blow's sound is named as a web pull's");
+             for (const auto sound : webs)
+                 check(isBlockSound(sound) && isWebBlockSound(sound),
+                       "a refused web pull's sound is not named as one");
+             for (const auto sound : {ImpactSound::Light, ImpactSound::Firm, ImpactSound::Heavy,
+                                      ImpactSound::Finisher, ImpactSound::Rush})
+                 check(!isBlockSound(sound) && !isWebBlockSound(sound),
+                       "a blow's own sound is named as a guard's");
+             // Each kind has its own file, in the order baton, sword, slayer, shield (the guard's sound +
+             // WebBlockBaton is what the headset plays): their lengths are the files' own (the sword's is his
+             // block sound's).
+             const float lengths[4] = {.946f, .708f, .277f, 1.703f};
+             double level[8]{};
+             float quietPeak = 1e9f;
+             for (int which = 0; which < 4; ++which) {
+                 const ImpactSound sound = webs[which];
+                 near(impactSeconds(sound), lengths[which], .006f);
+                 const auto wave = impactWave(sound, blockWaveRate);
+                 const auto played = samples(wave);
+                 near(static_cast<float>(played.size()) / static_cast<float>(blockWaveRate),
+                      impactSeconds(sound), .001f);
+                 check(played.size() > 44, "a web-block sound is empty");
+                 double peak = 0;
+                 for (const double v : played)
+                     peak = std::max(peak, std::abs(v));
+                 // At blockLevel (5 dB under the files' own): the files' peaks are .39 to .75 of full scale,
+                 // played .22 to .42.
+                 check(peak > .15 && peak < .55, "a web-block sound is too quiet or too loud");
+                 quietPeak = std::min(quietPeak, static_cast<float>(peak));
+                 check(std::abs(played.front()) < .01 && std::abs(played.back()) < .01,
+                       "a web-block sound clicks at an end");
+                 size_t onset = 0;
+                 while (onset < played.size() && std::abs(played[onset]) < .25 * peak)
+                     ++onset;
+                 // The files' bodies come within 75 ms of their start (the slayer's has a soft lead-in).
+                 check(static_cast<float>(onset) / static_cast<float>(blockWaveRate) < .1f,
+                       "a web-block sound starts late");
+                 const auto low = samples(impactWave(sound, 22050));
+                 near(static_cast<float>(low.size()) / 22050, impactSeconds(sound), .001f);
+                 const auto k = kWeighted(played);
+                 level[4 + which] = (loudest(k, .2) + loudest(k, .4)) / 2;
+                 const auto blockK = kWeighted(samples(impactWave(blocks[which], blockWaveRate)));
+                 level[which] = (loudest(blockK, .2) + loudest(blockK, .4)) / 2;
+                 // A swordsman's refused web pull plays his block sound (he has no web-block file of his own
+                 // yet), so those two are one sound; every other kind's web-block sound is a file of its own.
+                 const bool sameSound = std::equal(
+                     played.begin(),
+                     played.begin() + static_cast<std::ptrdiff_t>(std::min<size_t>(played.size(), 2000)),
+                     samples(impactWave(blocks[which], blockWaveRate)).begin());
+                 check(sameSound == (which == 1),
+                       "a web-block sound is the block sound of its kind (the sword's alone is)");
+             }
+             check(lengths[0] > lengths[1] && lengths[1] > lengths[2] && lengths[3] > lengths[0],
+                   "the web-block sounds are not in the order of the kinds");
+             // All eight are at one K-weighted loudness: the mean of the loudest 200 ms and the loudest 400
+             // ms, -20.96 dB in the files and 5 dB under that played (blockLevel): -25.96 dB. All but the
+             // brute's web-block sound (the seventh of the eight, level[6]); that one plays 3 dB under the
+             // rest, -28.96 dB.
+             double lowest = 1e9, highest = -1e9;
+             for (int i = 0; i < 8; ++i) {
+                 if (i == 6)
+                     continue;
+                 lowest = std::min(lowest, level[i]);
+                 highest = std::max(highest, level[i]);
+             }
+             check(highest - lowest < .1,
+                   "the seven guard sounds that were not turned down are not at one K-weighted loudness");
+             check(lowest > -26.15 && highest < -25.75,
+                   "the guard sounds are not at their level (5 dB under -20.96 dB)");
+             check(std::abs(level[6] - (lowest + highest) / 2 + 3.0) < .1,
+                   "the brute's web-block sound is not 3 dB under the other seven");
+             static_assert(static_cast<int>(ImpactSound::WebBlockSlayer) -
+                                   static_cast<int>(ImpactSound::BlockBaton) ==
+                               6,
+                           "level[6] is the brute's web-block sound");
+         });
     test("impact burst is printed on twos: a star small and then whole, its lines thrown clear, the flow's count lettered over it, then nothing", [] {
         const Vec3 viewer{0,1.6f,0},at{0,1.4f,-.7f};
         const float pose=1.f/12;
@@ -23631,8 +24171,11 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        // The realistic flips' rows come last, after the EXPERIMENTAL rows before them.
-        constexpr size_t firstRealistic = 84;
+        // The realistic flips' rows come last, after the EXPERIMENTAL rows before them, AIR FISTS and the
+        // launcher's ENEMY TYPES.
+        check(all[84].item == Item::enemyTypes && all[84].place == Place::launcher,
+              "ENEMY TYPES is not the row before the realistic flips'");
+        constexpr size_t firstRealistic = 85;
         check(all.size() == firstRealistic + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
             check(all[firstRealistic + i].item == realistic[i], "the realistic flips' rows out of order");
@@ -23840,11 +24383,12 @@ int main() {
               "the view above the game screen's rows: VR, or GAME SCREEN");
         // VR VIEW is on the pause menu's first page, beside RESUME, and no other row is; the realistic
         // flips' thresholds and how a spin builds and dies away are the launcher's alone (the user,
-        // October 25: "cleanup the redundant"). The other rows are the tab's.
+        // October 25: "cleanup the redundant"), and so is ENEMY TYPES. The other rows are the tab's.
         for (const auto& row : all) {
             const bool launcherOnly =
                 row.item == Item::automaticMinimumSpeed || row.item == Item::automaticResponse ||
-                row.item == Item::automaticFalloff || row.item == Item::automaticHandThreshold;
+                row.item == Item::automaticFalloff || row.item == Item::automaticHandThreshold ||
+                row.item == Item::enemyTypes;
             check(row.place == (row.item == Item::view ? Place::page
                                 : launcherOnly           ? Place::launcher
                                                          : Place::tab),
@@ -23921,7 +24465,7 @@ int main() {
               "spidy_vr.ini does not keep WEB LINES as web_lines");
         game_swing::Settings s;
         check(!s.webLines && offsetof(game_swing::Settings, webLines) == game_swing::settingsBytesV30 &&
-                  s.version == 31 && s.bytes == sizeof(game_swing::Settings),
+                  s.version == 32 && s.bytes == sizeof(game_swing::Settings),
               "web lines on in a new packet, or not appended");
         s.webLines = 1;
         check(game_swing::validSettings(s), "a packet with web lines refused");
@@ -24120,7 +24664,7 @@ int main() {
         const Values defaults;
         check(tabOnlyText(defaults) ==
                   "controlled_flips=0\nnear_clip_mm=20\nhand_climb=0\n"
-                  "joystick_wall_run_camera=1\nwall_run_camera_tilt=1\nhalf_punch_damage=0\n"
+                  "joystick_wall_run_camera=1\nwall_run_camera_tilt=1\nhalf_punch_damage=0\nenemy_types=0\n"
                   "realistic_flips=0\n"
                   "rotation_strength=50\nrotation_speed=240\nflight_speed_min=3\n"
                   "swing_momentum=1\nrotation_response_ms=500\nhand_momentum=100\n"
@@ -24132,9 +24676,14 @@ int main() {
                   "slingshot_speed=0\nrecording_smoothing=0\n"
                   "two_hand_zip=0\nrope_steering=0\nweb_range_m=100\nweb_speed=0\n"
                   "flip_reprojection=0\nsteady_hud=0\nreel_haptics=0\nswing_haptics=0\n"
-                  "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_angle_"
+                  "pc_media=0\nsingle_hand_yank_percent=100\nweb_tie=0\nnative_run=0\nair_slingshot=0\nweb_"
+                  "angle_"
                   "degrees=0\nwrist_shooters=0\n"
-                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\nsteady_states=0\ncombat_responsive=0\nspidy_run_jump=1\nforearm_aim_limit=180\npalm_shooters=0\nweb_lines=0\nair_fists=1\n",
+                  "dodge_tumble=0\nrun_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_"
+                  "jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_"
+                  "blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\nsteady_states=0\ncombat_"
+                  "responsive=0\nspidy_run_jump=1\nforearm_aim_limit=180\npalm_shooters=0\nweb_lines=0\nair_"
+                  "fists=1\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

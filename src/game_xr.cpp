@@ -18,6 +18,7 @@
 #include "spidy/game_fp.hpp"
 #include "spidy/web_aim.hpp"
 #include "spidy/game_grab.hpp"
+#include "spidy/game_guard.hpp"
 #include "spidy/game_lines.hpp"
 #include "spidy/game_menu.hpp"
 #include "spidy/game_offers.hpp"
@@ -39,8 +40,10 @@
 #include "spidy/game_time.hpp"
 #include "spidy/game_tracking.hpp"
 #include "spidy/game_warp.hpp"
+#include "spidy/guard_pose.hpp"
 #include "spidy/hand_pose.hpp"
 #include "spidy/impact_sound.hpp"
+#include "spidy/voice_pool.hpp"
 #include "spidy/native_eye_frame.hpp"
 #include "spidy/native_eye_gpu.hpp"
 #include "spidy/native_eye_history.hpp"
@@ -539,6 +542,9 @@ BridgeCall sampleLine{};
 // edge is drawn to that edge.
 BridgeCall sampleBends{}, sampleWebFlight{};
 BridgeCall sampleClimb{};
+// The guards (game_guard, in the same module as the punches): the blows they stopped and the web pulls they
+// refused, and their log lines. Optional: an older module has no guards.
+BridgeCall sampleGuard{}, guardNote{};
 BridgeCall startPunch{}, samplePunch{}, stopPunch{}, swingSettings{}, sampleStrike{}, sampleSlingshot{};
 // Spider-Sense (game_sense, in the same module as the punches): optional, an
 // older module draws no warnings.
@@ -1152,6 +1158,7 @@ DWORD WINAPI run(void*) {
         uint64_t fpPlayStart{}, fpIdleSince{}, fpWantStart{};
         bool sceneFlick{};
         uint32_t fpNoteSeen{};
+        game_guard::Note guardSeen{};
         bool flatScreen{};
         Pose screenPose{};
         const auto dimensions = runtime.eyeDimensions();
@@ -1230,6 +1237,10 @@ DWORD WINAPI run(void*) {
         // blow; the bursts still showing where the latest blows landed, each
         // since its display time; and the sounds, made once.
         uint64_t blowsBefore{}, strikesBefore{};
+        // The guards (game_guard): the blows one stopped, the web pulls it refused, the guards opened, and
+        // the counters enemies began and those that reached the hero, as the previous frame had them.
+        uint32_t guardBlocksBefore{}, guardRefusalsBefore{}, guardBreaksBefore{}, guardCountersBefore{},
+            guardCounterHitsBefore{};
         HitStop hitStop;
         // The called blow's arrow over the thug it is on (web_strike.hpp's
         // Cues), since the display time it showed.
@@ -1253,6 +1264,14 @@ DWORD WINAPI run(void*) {
         };
         std::array<Burst, 6> bursts{};
         size_t nextBurst{};
+        // The BLOCKED marks of the latest blows a guard stopped (web_visual.hpp's BlockView), each since its
+        // display time.
+        struct BlockMark {
+            BlockView view;
+            int64_t since{};
+        };
+        std::array<BlockMark, 4> blockMarks{};
+        size_t nextBlockMark{};
         // Spider-Sense's marks (spider_sense.hpp), one for each attacker the
         // game warned the player of: since the display time it showed, the
         // top of his head, what it asks for, its time left, when a counter
@@ -1273,13 +1292,50 @@ DWORD WINAPI run(void*) {
         uint32_t senseShown{}, senseFrames{}, senseSightFrames{}, senseTingles{};
         uint32_t senseBroken{}, senseDodges{};
         // (They outlive the session: one may still be playing as it ends.)
-        static const std::vector<uint8_t> sounds[5] = {
-            impactWave(ImpactSound::Light), impactWave(ImpactSound::Firm), impactWave(ImpactSound::Heavy),
-            impactWave(ImpactSound::Finisher), impactWave(ImpactSound::Rush)};
+        // The guards' sounds (a blocked blow's and a refused web pull's, one for each kind of guard) are
+        // sound effects from Pixabay, at their own rate (blockWaveRate), the others as before. The array is
+        // indexed by ImpactSound, so in its order.
+        static_assert(static_cast<size_t>(ImpactSound::WebBlockShield) == 12,
+                      "sounds[] below is indexed by ImpactSound");
+        // (The sound played for a guard is BlockBaton or WebBlockBaton plus his guards::Sound: the four of
+        // each are in its order, baton, sword, slayer, shield.)
+        static_assert(static_cast<unsigned>(ImpactSound::BlockShield) ==
+                              static_cast<unsigned>(ImpactSound::BlockBaton) + 3 &&
+                          static_cast<unsigned>(ImpactSound::WebBlockBaton) ==
+                              static_cast<unsigned>(ImpactSound::BlockBaton) + 4 &&
+                          static_cast<unsigned>(ImpactSound::WebBlockShield) ==
+                              static_cast<unsigned>(ImpactSound::WebBlockBaton) + 3 &&
+                          static_cast<unsigned>(spidy::guards::Sound::Baton) == 0 &&
+                          static_cast<unsigned>(spidy::guards::Sound::Sword) == 1 &&
+                          static_cast<unsigned>(spidy::guards::Sound::Slayer) == 2 &&
+                          static_cast<unsigned>(spidy::guards::Sound::Shield) == 3,
+                      "the guard sounds are in the order of guards::Sound");
+        static const std::vector<uint8_t> sounds[13] = {
+            impactWave(ImpactSound::Light),
+            impactWave(ImpactSound::Firm),
+            impactWave(ImpactSound::Heavy),
+            impactWave(ImpactSound::Finisher),
+            impactWave(ImpactSound::Rush),
+            impactWave(ImpactSound::BlockBaton, blockWaveRate),
+            impactWave(ImpactSound::BlockSword, blockWaveRate),
+            impactWave(ImpactSound::BlockSlayer, blockWaveRate),
+            impactWave(ImpactSound::BlockShield, blockWaveRate),
+            impactWave(ImpactSound::WebBlockBaton, blockWaveRate),
+            impactWave(ImpactSound::WebBlockSword, blockWaveRate),
+            impactWave(ImpactSound::WebBlockSlayer, blockWaveRate),
+            impactWave(ImpactSound::WebBlockShield, blockWaveRate)};
+        // PlaySound plays one sound at a time, the newest cutting the one before, so the guards' sounds go
+        // through a few voices of their own (voice_pool.hpp), which mix and let a spammed punch overlap
+        // itself; PlaySound is the way if none opens. Nothing is opened here: the pool's own thread opens a
+        // voice when a sound needs one and says in the session log what the audio device did (game_fp::note).
+        voice_pool::open(blockWaveRate, 4);
         // One at a time, the newest cutting the one before short: a strike's
         // rush ends in its blow.
         auto play = [&](ImpactSound sound) {
             const auto& wave = sounds[static_cast<size_t>(sound)];
+            // (The whole WAV: the pool reads its format and plays it from this static memory.)
+            if (isBlockSound(sound) && voice_pool::play(wave.data(), wave.size()))
+                return;
             PlaySoundW(reinterpret_cast<LPCWSTR>(wave.data()), nullptr, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
         };
         // Web-shooter shots each hand had fired by the previous frame.
@@ -1498,6 +1554,7 @@ DWORD WINAPI run(void*) {
             s.webRange = static_cast<float>(values.webRange);
             s.webSpeed = static_cast<uint32_t>(values.webSpeed);
             s.halfPunchDamage = values.halfPunchDamage;
+            s.enemyTypes = values.enemyTypes;
             s.singleHandYankPercent = static_cast<uint32_t>(values.singleHandYankPercent);
             s.webTie = values.webTie;
             s.airSlingshot = values.airSlingshot;
@@ -2404,6 +2461,11 @@ DWORD WINAPI run(void*) {
                         if (game_fp::note(fpNoteSeen, line, sizeof(line))) {
                             message(3, 0, line);
                             lastNoteAt = GetTickCount64();
+                        } else if (guardNote && guardNote(&guardSeen) == 0) {
+                            // A line of the guards' log (game_guard keeps its own, in the module of the
+                            // punches).
+                            message(3, 0, guardSeen.text);
+                            lastNoteAt = GetTickCount64();
                         }
                     }
                     if (const bool onCamera = fpScene && game_fp::onCamera(); onCamera != wasCameraView) {
@@ -3286,6 +3348,158 @@ DWORD WINAPI run(void*) {
                             blowsBefore = strikes.blows;
                             strikesBefore = strikes.opened;
                             knockoutsBefore = strikes.knockouts;
+                        }
+                        // The guards (game_guard). A blow a guard stopped: the hand that threw it gets a
+                        // short hard bump (it met something that did not give) and the block sound plays - a
+                        // recording, played the way the other blow sounds are (BLOW SOUNDS: OFF silences it);
+                        // a web pull refused on a guarding enemy ticks in both hands. And the enemy is seen
+                        // to guard: his arms come up for a blocked punch or a refused web pull (the pose job
+                        // puts them up, native_body.cpp), swing for his counter, and come down when his guard
+                        // opens. The counter itself staggers the hero in the game (game_punch); here it is
+                        // felt - a hit on the body, a thump, and the view thrown back three times as far as a
+                        // block's.
+                        game_guard::Report guardNow{};
+                        const game_guard::Report expectedGuard;
+                        const bool guarding = punchStarted && sampleGuard && !sampleGuard(&guardNow) &&
+                                              guardNow.magic == expectedGuard.magic &&
+                                              guardNow.version == expectedGuard.version &&
+                                              guardNow.bytes == expectedGuard.bytes && guardNow.status == 1;
+                        if (guarding) {
+                            // The module started over counts from nothing.
+                            guardBlocksBefore = std::min(guardBlocksBefore, guardNow.blocks);
+                            guardRefusalsBefore = std::min(guardRefusalsBefore, guardNow.refusals);
+                            guardBreaksBefore = std::min(guardBreaksBefore, guardNow.breaks);
+                            guardCountersBefore = std::min(guardCountersBefore, guardNow.counters);
+                            guardCounterHitsBefore = std::min(guardCounterHitsBefore, guardNow.counterHits);
+                            const bool posing = guardNow.pose != 0;
+                            if (guardNow.blocks > guardBlocksBefore && input.focused) {
+                                const unsigned hand = guardNow.lastHand & 1;
+                                const float strength = std::isfinite(guardNow.lastStrength)
+                                                           ? std::clamp(guardNow.lastStrength, 0.f, 1.f)
+                                                           : 0.f;
+                                runtime.haptic(hand, .75f + .25f * strength, .05f);
+                                runtime.haptic(1 - hand, .15f, .03f);
+                                feel(body_haptics::Kind::punch, static_cast<int>(hand), .5f + .3f * strength);
+                                pulseUntil[hand] = frame.predictedDisplayTime + 70'000'000;
+                                // The BLOCKED mark where the fist met him, with how many blocked blows in a
+                                // row he has taken and how many make him swing back (drawn with the other
+                                // combat marks, below: COMBAT VISUALS hides it).
+                                if (finite(guardNow.lastPoint)) {
+                                    auto& mark = blockMarks[nextBlockMark++ % blockMarks.size()];
+                                    mark.view = {guardNow.lastPoint, strength,
+                                                 static_cast<int>(guardNow.lastStreak),
+                                                 static_cast<int>(guardNow.counterBlows)};
+                                    mark.since = frame.predictedDisplayTime;
+                                }
+                                // The combo is over (game_punch's endCombo: the count starts over and the
+                                // call - the arrow of the blow it asked for - is gone, so the cue over him
+                                // loses its arrow with the next sample), and what the marks of the blows just
+                                // before still show of it comes down with it: the count in the flow, and the
+                                // sign of a called blow.
+                                for (auto& burst : bursts) {
+                                    burst.view.count = std::min(burst.view.count, 1);
+                                    burst.view.called = false;
+                                }
+                                if (values.blowSounds != 2) {
+                                    // The sound of his guard: a baton's, a swordsman's, a brute's (the
+                                    // slayer's) or a shield's.
+                                    play(static_cast<ImpactSound>(
+                                        static_cast<unsigned>(ImpactSound::BlockBaton) +
+                                        std::min(guardNow.lastSound & 0xffu, 3u)));
+                                    ++ownSounds;
+                                }
+                                // The view is knocked back a little, away from him, and comes home (the rig's
+                                // recoil; guard.txt `recoil`, 3 cm). A placement: the hero himself does not
+                                // move. A weak blow gives 60% of it, a full one all of it.
+                                if (std::isfinite(guardNow.recoil) && guardNow.recoil > 0 && motion.active &&
+                                    validTrackedPose(motion.headPose)) {
+                                    Vec3 away = finite(guardNow.lastPoint)
+                                                    ? motion.headPose.position - guardNow.lastPoint
+                                                    : Vec3{};
+                                    away.y = 0;
+                                    // Right on top of him: back along the way the head faces.
+                                    if (length(away) < .05f)
+                                        away = motion.headPose.orientation.rotate({0, 0, 1});
+                                    rig.recoil(away, guardNow.recoil * (.6f + .4f * strength));
+                                }
+                                // His arms come up, and the blow jolts him - not when he is in the middle of
+                                // an attack: he blocks it and follows his own attack through, and arms raised
+                                // over the swing would only tear it.
+                                if (posing && !(guardNow.lastSound & game_guard::lastAttacking))
+                                    native_body::guardPose(guardNow.lastTarget, spidy::guard_pose::moveBlock,
+                                                           strength);
+                            }
+                            if (guardNow.refusals > guardRefusalsBefore && input.focused) {
+                                runtime.haptic(0, .3f, .04f);
+                                runtime.haptic(1, .3f, .04f);
+                                // The sound of his guard, one of the web-block sounds, played the way a
+                                // blocked blow's is (BLOW SOUNDS: OFF silences it). It comes with the
+                                // refusal, and only the long web is refused: a web ball only twitches him or
+                                // webs him (game_shooter), no refusal.
+                                if (values.blowSounds != 2) {
+                                    play(static_cast<ImpactSound>(
+                                        static_cast<unsigned>(ImpactSound::WebBlockBaton) +
+                                        std::min(guardNow.refusedSound & 0xffu, 3u)));
+                                    ++ownSounds;
+                                }
+                                // A web pull he refused: his arms come up too.
+                                if (posing)
+                                    native_body::guardPose(guardNow.refusedTarget,
+                                                           spidy::guard_pose::moveRefuse, 1.f);
+                            }
+                            // Blocked punches in a row made an enemy swing back: his arm swings (the stagger
+                            // on the hero comes when it arrives, below).
+                            if (guardNow.counters > guardCountersBefore && input.focused && posing)
+                                native_body::guardPose(guardNow.counterTarget, spidy::guard_pose::moveCounter,
+                                                       1.f);
+                            // The swing reached the hero (game_punch asked the game for the stagger): felt on
+                            // the body, a thump in both hands, and the view thrown back well beyond a
+                            // block's.
+                            if (guardNow.counterHits > guardCounterHitsBefore && input.focused) {
+                                runtime.haptic(0, 1.f, .12f);
+                                runtime.haptic(1, 1.f, .12f);
+                                const Vec3 to =
+                                    finite(guardNow.lastPoint) && motion.active
+                                        ? guardNow.lastPoint - (motion.headPose.position - Vec3{0, .4f, 0})
+                                        : Vec3{};
+                                if (length(to) > .1f)
+                                    feelFrom(body_haptics::Kind::hit, -1, .6f, to);
+                                else
+                                    feel(body_haptics::Kind::hit, -1, .6f);
+                                if (values.blowSounds != 2) {
+                                    play(ImpactSound::Firm);
+                                    ++ownSounds;
+                                }
+                                if (std::isfinite(guardNow.recoil) && guardNow.recoil > 0 && motion.active &&
+                                    validTrackedPose(motion.headPose)) {
+                                    Vec3 away = finite(guardNow.lastPoint)
+                                                    ? motion.headPose.position - guardNow.lastPoint
+                                                    : Vec3{};
+                                    away.y = 0;
+                                    if (length(away) < .05f)
+                                        away = motion.headPose.orientation.rotate({0, 0, 1});
+                                    rig.recoil(away, guardNow.recoil * 3.f);
+                                }
+                            }
+                            // A guard opened (a gadget, a thrown prop, a dodge over him): his arms come down,
+                            // and a firm double tick says "now".
+                            if (guardNow.breaks > guardBreaksBefore && input.focused) {
+                                if (posing)
+                                    native_body::guardPose(guardNow.openedTarget, spidy::guard_pose::moveDrop,
+                                                           0.f);
+                                if (guardNow.lastCause ==
+                                        static_cast<uint32_t>(spidy::guards::Cause::Stagger) ||
+                                    guardNow.lastCause ==
+                                        static_cast<uint32_t>(spidy::guards::Cause::Dodge)) {
+                                    runtime.haptic(0, .5f, .06f);
+                                    runtime.haptic(1, .5f, .06f);
+                                }
+                            }
+                            guardBlocksBefore = guardNow.blocks;
+                            guardRefusalsBefore = guardNow.refusals;
+                            guardBreaksBefore = guardNow.breaks;
+                            guardCountersBefore = guardNow.counters;
+                            guardCounterHitsBefore = guardNow.counterHits;
                         }
                         // The mark over the thug the next punch would go to, with
                         // the arrow of the blow the flow calls. A new call ticks
@@ -5828,6 +6042,16 @@ DWORD WINAPI run(void*) {
                                 view.age = static_cast<float>(static_cast<double>(shown - burst.since) * 1e-9);
                                 appendImpact(translucent, view, viewer, pixelAngle, saved->uiStyle);
                             }
+                        // The BLOCKED marks, where the latest blows a guard stopped met him: fixed in the
+                        // world, as the bursts are, and printed or drawn in the chosen UI STYLE.
+                        if (combatVisuals)
+                            for (const auto& mark : blockMarks) {
+                                if (!mark.since)
+                                    continue;
+                                auto view = mark.view;
+                                view.age = static_cast<float>(static_cast<double>(shown - mark.since) * 1e-9);
+                                appendBlock(translucent, view, viewer, pixelAngle, saved->uiStyle);
+                            }
                         // The called blow's arrow, over its thug.
                         if (combatVisuals && cue.left > 0) {
                             auto view = cue;
@@ -6109,6 +6333,7 @@ DWORD WINAPI run(void*) {
     // the main menu after VR from closing the game.
     game_time::uninstall();
     PlaySoundW(nullptr, nullptr, 0);
+    voice_pool::close();
     bridge::Control release;
     release.serial = ++serial;
     release.leaseMs = 0;
@@ -6215,6 +6440,9 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
     sampleTie = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyTieSample"));
     sampleLine = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyLineSample"));
     sampleAim = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyAimSample"));
+    // Optional: an older ray module has no guards.
+    guardNote = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyGuardNote"));
+    sampleGuard = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyGuardSample"));
     startPunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchStart"));
     samplePunch = reinterpret_cast<BridgeCall>(GetProcAddress(rays, "SpidyPunchSample"));
     // Optional too: without them the VR settings' grab, speed and punch

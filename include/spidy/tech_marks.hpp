@@ -45,6 +45,12 @@ void appendImpact(std::vector<Vertex>& out, const ImpactView& impact, Vec3 viewe
 void appendCue(std::vector<Vertex>& out, const CueView& cue, Vec3 viewer, float pixelAngle);
 // A knockout: a reticle closing on where he stood and a "KO" tag.
 void appendKnockout(std::vector<Vertex>& out, const KnockoutView& knockout, Vec3 viewer, float pixelAngle);
+// A blow a guard stopped: a hexagon going out from where the fist met him, a shield drawn in thin lines on a
+// blue plate, and - when guard.txt gives him a counter to count towards - a callout up and to the right: a
+// leader out to a tag, a panel with a bar at its left and a diamond in it for each blow he takes before he
+// swings back (lit for those he has taken). The blow that sets off his counter has the chevron, the bar and
+// the diamonds red. No lettering: the shield says it (the comic style has the word).
+void appendBlock(std::vector<Vertex>& out, const BlockView& block, Vec3 viewer, float pixelAngle);
 // Spider-Sense: five glowing wavy lines fanned up from his head, as the game
 // draws its own round the hero's, in what the warning asks for, inside a ring
 // of dashes closing in; amber with pointers in at its last notch.

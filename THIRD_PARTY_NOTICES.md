@@ -60,3 +60,10 @@ the PSF License Agreement; its complete license is `python\LICENSE.txt`.
 The Blade & Sorcery mod is a mechanics reference. Its files are not bundled or
 linked. The ArkWeb research checkout is likewise not bundled or linked. See
 `docs/REFERENCE.md` for attribution and independently checked address facts.
+
+The blocking sounds of Enemy types, in `include/spidy/block_sound.hpp` and
+`include/spidy/web_block_sound.hpp` (used by `src/impact_sound.cpp`), are sound effects from
+[Pixabay](https://pixabay.com/), cut, levelled and stored there as sample tables. They are used
+under the [Pixabay Content License](https://pixabay.com/en/service/license/), not under Spidy's
+license: free to use and change, no credit required, but they may not be sold or distributed on a
+standalone basis.

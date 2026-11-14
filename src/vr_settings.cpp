@@ -340,6 +340,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.joystickRunCamera;
     case Item::halfPunchDamage:
         return &v.halfPunchDamage;
+    case Item::enemyTypes:
+        return &v.enemyTypes;
     case Item::webTie:
         return &v.webTie;
     case Item::webLines:
@@ -452,9 +454,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 95>& rows() {
+const std::array<Row, 96>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 95> all{{
+    static const std::array<Row, 96> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -665,7 +667,8 @@ const std::array<Row, 95>& rows() {
         {Item::webAimSource, "WEB AIM",
          "MODEL FOREARM: webs follow the body's forearm. CONTROLLER as before.", webAimSourceChoices},
         {Item::forearmBlend, "FOREARM BLEND",
-         "With WEB AIM: MODEL FOREARM, blend from the controller (0%) to forearm (100%).", forearmBlendChoices},
+         "With WEB AIM: MODEL FOREARM, blend from the controller (0%) to forearm (100%).",
+         forearmBlendChoices},
         {Item::webLandingSmooth,
          "SMOOTH WEB LANDING",
          "Holding a web, a landing under WEB LANDING IMPACT is soft and keeps its speed.",
@@ -695,6 +698,14 @@ const std::array<Row, 95>& rows() {
          "AIR FISTS",
          "A fast hand closes into a fist with nobody to punch. Off: only near enemies.",
          {}},
+        // The launcher's Enemy types, not in the game's tab (its screen is Movement, next to the other combat
+        // rows). Before the realistic flips' rows, which come last, so that the numbers of the rows before it
+        // stay as they were.
+        {Item::enemyTypes,
+         "ENEMY TYPES",
+         "Enemies that block in the base game block base attacks until webbed or stunned.",
+         {},
+         Place::launcher},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
          "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
@@ -755,11 +766,12 @@ const std::array<Screen, categoryCount>& screens() {
         Item::betterClimbing, Item::singleHandYankStrength, Item::twoHandZip, Item::ropeSteering,
     };
     static constexpr Item movement[] = {
-        Item::nativeRun, Item::nativeRunAt, Item::runCurve, Item::steadyStates,
-        Item::spidyRun, Item::spidyRunFromStanding, Item::spidyRunJump, Item::momentumLeap,
-        Item::earlyJump, Item::softLanding, Item::webLandingSmooth, Item::webLandingImpact,
-        Item::handClimb, Item::joystickRunCamera, Item::wallRunCameraTilt, Item::combatResponsive,
-        Item::combatVisuals, Item::halfPunchDamage, Item::airFists, Item::runLogs,
+        Item::nativeRun,     Item::nativeRunAt,          Item::runCurve,          Item::steadyStates,
+        Item::spidyRun,      Item::spidyRunFromStanding, Item::spidyRunJump,      Item::momentumLeap,
+        Item::earlyJump,     Item::softLanding,          Item::webLandingSmooth,  Item::webLandingImpact,
+        Item::handClimb,     Item::joystickRunCamera,    Item::wallRunCameraTilt, Item::combatResponsive,
+        Item::combatVisuals, Item::halfPunchDamage,      Item::airFists,          Item::enemyTypes,
+        Item::runLogs,
     };
     static constexpr Item flips[] = {
         Item::realisticFlips, Item::flips, Item::controlledFlips, Item::flipSpeed,
@@ -1014,6 +1026,7 @@ constexpr TabOnly tabOnly[] = {
     {"joystick_wall_run_camera", &Values::joystickRunCamera, nullptr},
     {"wall_run_camera_tilt", &Values::wallRunCameraTilt, nullptr},
     {"half_punch_damage", &Values::halfPunchDamage, nullptr},
+    {"enemy_types", &Values::enemyTypes, nullptr},
     {"realistic_flips", &Values::realisticFlips, nullptr},
     {"rotation_strength", nullptr, &Values::automaticStrength},
     {"rotation_speed", nullptr, &Values::automaticSpeed},

@@ -285,6 +285,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     if (out.inactive) {
         wallRoll_.suspend();
         handCollision_.reset();
+        recoil_.reset();
         wasActive_ = false;
         // A scene (play does not run, the game's time does, or a first-person scene was shown): when play
         // comes back the view faces where the scene left it (below). Whether the last frame without play had
@@ -813,6 +814,11 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     }
     out.handPush = handCollision_.update(f.seconds, pressing, placed.toWorld(f.head), rawGrips, tracked);
     placed.origin += out.handPush;
+    // A blow the guard stopped knocks the view back a little, and it comes home (Recoil). The world's "back"
+    // is not the way on a surface the view stands on or the player is held on, so there a kick in flight
+    // stops pulling and the view eases home; the eyes' clearance below sees the placement as it is with it.
+    out.recoil = recoil_.update(f.seconds, !holds && !standing_);
+    placed.origin += out.recoil;
     // The eyes out of what the world is built of (HeadClearance), and the
     // hands, the webs and the body with them: they stay where the eyes see
     // them.

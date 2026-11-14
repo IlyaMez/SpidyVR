@@ -2071,6 +2071,9 @@ bool available() {
         return true;
     return mode != 0 && c && now - c < holdMs;
 }
+void note(const char* text) {
+    say(text);
+}
 bool note(uint32_t& seen, char* out, size_t size) {
     const uint32_t serial = noteSerial.load(std::memory_order_acquire);
     if (serial == seen || !out || !size)

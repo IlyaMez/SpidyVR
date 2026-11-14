@@ -172,6 +172,27 @@ int main(int argc, char** argv) {
         blows.push_back({"KNOCKOUT LEAVING 1", knockout(at(6))});
         blows.push_back({"KNOCKOUT LEAVING 2", knockout(at(7))});
         ok &= sheet(name + "blows.bmp", scene.backdrop, camera, scene.u, scene.v, side, 5, blows);
+        // A blow a guard stopped: the poses of the first block of three before he swings back, the second,
+        // the one that sets off his counter, a weak and a full blow, no count told, and the mark leaving.
+        const auto block = [&](float strength, int streak, int counterAt, float age) {
+            std::vector<Vertex> v;
+            appendBlock(v, {p, strength, streak, counterAt, age}, viewer, pixelAngle, style);
+            return v;
+        };
+        std::vector<Cell> blocked;
+        for (int k = 0; k < 5; ++k)
+            blocked.push_back({"BLOCK 1 OF 3 POSE " + std::to_string(k + 1), block(.5f, 1, 3, at(k))});
+        blocked.push_back({"BLOCK 2 OF 3 HELD", block(.5f, 2, 3, at(4))});
+        blocked.push_back({"BLOCK 3 OF 3 COUNTER", block(.5f, 3, 3, at(4))});
+        blocked.push_back({"WEAK BLOW", block(.1f, 1, 3, at(4))});
+        blocked.push_back({"FULL BLOW", block(1, 1, 3, at(4))});
+        blocked.push_back({"NO COUNT TOLD", block(.5f, 0, 0, at(4))});
+        blocked.push_back({"1 OF 5", block(.5f, 1, 5, at(5))});
+        blocked.push_back({"4 OF 5", block(.5f, 4, 5, at(5))});
+        blocked.push_back({"POP OUT", block(.5f, 2, 3, at(6))});
+        blocked.push_back({"LEAVING", block(.5f, 2, 3, at(7))});
+        blocked.push_back({"GONE", block(.5f, 2, 3, at(8))});
+        ok &= sheet(name + "block.bmp", scene.backdrop, camera, scene.u, scene.v, side, 5, blocked);
         // Spider-Sense (spider_sense.hpp): the warning over his head as it lands, as its ring closes on the
         // blow, as each answer, with no time set, and as a counter breaks it. The cells are about the mark's
         // own centre, which stands over his head.

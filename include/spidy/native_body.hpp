@@ -260,6 +260,11 @@ float crawlOutwardWeight();
 // his latest pose job; false (and `out` untouched) before one was read.
 bool proportions(body_calibration::Proportions& out);
 uint32_t stop();
+// (guard_pose.hpp) A guarding enemy is to be seen to guard. `move` is a guard_pose::Move (a
+// blocked punch, a refused web pull, his counter, his guard opening) for the enemy with this actor record;
+// the pose job then puts his arms up / swings his arm on his skeleton for as long as the move shows. Needs
+// the body hook (the BODY setting) to be running; any thread.
+void guardPose(uint64_t enemyRecord, uint32_t move, float strength = 1.f);
 
 // MODEL FOREARM web aim (vr_settings::Values::webAimSource; web_aim::
 // ForearmAim): each arm as the latest hero pose job's solve left it, world
