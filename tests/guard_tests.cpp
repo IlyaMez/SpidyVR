@@ -217,6 +217,9 @@ int main() {
     CHECK(parseRules("venom off\nrecord\nbreaker Thing\n", names) == 3);
     Rules again;
     CHECK(parseRules("on\n", again) == 0 && again.enabled);
+    // Saved by Notepad as "UTF-8 with BOM": the first line's `off` is still an `off`.
+    CHECK(parseRules("\xEF\xBB\xBFoff\r\n", again) == 0 && !again.enabled);
+    CHECK(parseRules("on\n", again) == 0 && again.enabled);
     CHECK(parseRules("", again) == 0);
     CHECK(parseRules("off extra\n", again) == 1 && again.enabled); // "off" takes no word
     CHECK(parseRules("hp 0\n", again) == 0 && again.hp == 0.f);

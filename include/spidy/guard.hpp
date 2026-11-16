@@ -426,6 +426,9 @@ inline bool number(std::string_view s, float& out) {
 // Returns how many lines were not understood (the rules read up to them stand).
 inline int parseRules(std::string_view text, Rules& rules) {
     int unknown{};
+    // Notepad's "UTF-8 with BOM" puts three bytes before the first line: an `off` there is still an `off`.
+    if (text.substr(0, 3) == "\xEF\xBB\xBF")
+        text.remove_prefix(3);
     while (!text.empty()) {
         const auto end = text.find('\n');
         std::string_view line = text.substr(0, end);

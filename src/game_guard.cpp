@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <windows.h>
 using namespace spidy;
 using namespace spidy::game_guard;
@@ -529,6 +530,37 @@ bool game_guard::touchWanted() {
     return on.load(std::memory_order_relaxed) && touchOn.load(std::memory_order_relaxed);
 }
 
+namespace {
+// What only Enemy types on asks for, once a session (setupOnce): guard.txt written with its defaults where the
+// Spidy folder has none, every class read again with its rules, and the game's class list logged (a walk over
+// the game's image). With Enemy types off a session does none of it (November 16: before, every session did,
+// on the headset's thread, with the switch off). start() leaves them here; under setupLock.
+SRWLOCK setupLock = SRWLOCK_INIT;
+guards::Rules setupRules;
+std::wstring setupFile;
+uintptr_t setupBase{};
+bool setupWrite{}, setupPending{};
+void setupOnce() {
+    if (!moduleStarted.load() || !launcherAllows.load())
+        return;
+    AcquireSRWLockExclusive(&setupLock);
+    const bool pending = std::exchange(setupPending, false);
+    const guards::Rules rules = setupRules;
+    const std::wstring file = setupFile;
+    const uintptr_t gameBase = setupBase;
+    const bool write = setupWrite;
+    ReleaseSRWLockExclusive(&setupLock);
+    if (!pending)
+        return;
+    if (write)
+        writeNew(file, fileText);
+    // Every class is read again with the rules (the first scans may have used the built-in ones).
+    game_targets::setGuardRules(rules);
+    if (rules.enabled)
+        logGameClasses(gameBase);
+}
+} // namespace
+
 uint32_t game_guard::start(uintptr_t gameBase) {
     guards::Rules rules;
     std::string text;
@@ -537,8 +569,13 @@ uint32_t game_guard::start(uintptr_t gameBase) {
     const bool fromFile = readFile(file, text);
     if (fromFile)
         unknown = guards::parseRules(text, rules);
-    else
-        writeNew(file, fileText);
+    AcquireSRWLockExclusive(&setupLock);
+    setupRules = rules;
+    setupFile = file;
+    setupBase = gameBase;
+    setupWrite = !fromFile;
+    setupPending = true;
+    ReleaseSRWLockExclusive(&setupLock);
     AcquireSRWLockExclusive(&lock);
     base = gameBase;
     book.clear();
@@ -558,8 +595,6 @@ uint32_t game_guard::start(uintptr_t gameBase) {
     recoilMetres.store(rules.recoil * .01f, std::memory_order_relaxed);
     dodge = {};
     watchedAt = 0;
-    // Every class is read again with the rules (the first scans may have used the built-in ones).
-    game_targets::setGuardRules(rules);
     // guard.txt's `off` and the launcher's Enemy types are both ways to turn it off.
     rulesAllow.store(rules.enabled);
     moduleStarted.store(true);
@@ -569,7 +604,7 @@ uint32_t game_guard::start(uintptr_t gameBase) {
         line, sizeof(line),
         "GUARD %s: guard.txt %s, %zu extra class parts, brute hp %s%.0f, recoil %.1f cm, counter after %.0f "
         "blocked punches, pose %s, touch %s, web hold %.0f s, %d line(s) not understood",
-        rules.enabled ? "on" : "OFF", fromFile ? "read" : "written (defaults)",
+        rules.enabled ? "on" : "OFF", fromFile ? "read" : "written once Enemy types is on (defaults)",
         rules.weapon.size() + rules.brawler.size() + rules.shield.size() + rules.swordsman.size() +
             rules.exempt.size(),
         rules.hp > 0 ? "from " : "off ", rules.hp, rules.recoil, rules.tuning.counterBlows,
@@ -605,14 +640,15 @@ uint32_t game_guard::start(uintptr_t gameBase) {
     if (!launcherAllows.load())
         game_guard::log(
             "GUARD Enemy types is off: nobody guards until the launcher's Enemy types is turned on");
-    if (rules.enabled)
-        logGameClasses(gameBase);
+    setupOnce();
     return 0;
 }
 
 void game_guard::setEnemyTypes(bool enabled) {
     const bool was = launcherAllows.exchange(enabled);
     refreshOn();
+    if (enabled)
+        setupOnce();
     if (was == enabled)
         return;
     game_guard::log(

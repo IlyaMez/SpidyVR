@@ -434,6 +434,9 @@ void close() {
         say("block sounds: the pool's thread did not end in time (it is left; PlaySound plays from here on)");
     }
     const Stats s = stats();
+    // A session that played no block sound (Enemy types off) has nothing to say.
+    if (!s.requested && !s.opened)
+        return;
     char line[200];
     std::snprintf(line, sizeof(line),
                   "block sounds: pool closed - %u asked for, %u started (%u over another), %u finished, %u "

@@ -58,7 +58,7 @@ not noticed you does not guard. Punching never breaks a guard, but a few blocked
 punches in a row make the enemy swing back and stagger you. A blocked blow ends
 the combo, is marked BLOCKED (comic and tech styles) and nudges your view back a
 little; the enemy puts his arms up. `guard.txt` in the Spidy folder (written the
-first time the game starts, with the switch off too) holds the finer rules: more
+first time a session runs with the switch on) holds the finer rules: more
 classes that guard, the counter, the swing kick, running enemies, how long a
 guard stays open. The session log names the enemy and the guard of every first
 block with a `GUARD` line, so a wrong guess can be corrected there without a

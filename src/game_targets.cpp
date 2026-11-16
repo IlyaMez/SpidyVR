@@ -298,6 +298,13 @@ bool game_targets::scan(uintptr_t base, uint32_t kinds, std::vector<Candidate>& 
         if (head.vtable - base >= size)
             continue;
         const uint32_t bits = lookup(base, head.vtable);
+        // The census's names (classesLock keeps them until the scan's end, where they are joined).
+        if (bits & combatClass)
+            if (const auto n = combatNames.find(head.vtable); n != combatNames.end())
+                combatSeen.emplace_back(head.record, &n->second);
+        if (bits & behaviorClass)
+            if (const auto n = behaviorNames.find(head.vtable); n != behaviorNames.end())
+                behaviorSeen.emplace_back(head.record, &n->second);
         if (bits & botHealthClass)
             healths[head.record] = entry.address;
         else if (bits & healthClass)

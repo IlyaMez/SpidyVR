@@ -280,10 +280,11 @@ class Targets final : public TargetQueries {
         const auto* best = nearest(origin, direction, distance, cone, centre);
         if (!best) {
             // Nothing to take: but one whose guard stands under the aim is a pull refused, and the headset
-            // says so.
-            if (const auto* guarded = nearest(origin, direction, distance, cone, centre, true))
-                if (game_guard::holds(*guarded))
-                    game_guard::refused(*guarded);
+            // says so (with the guards on: off, nobody guards and nothing is looked for again).
+            if (game_guard::running())
+                if (const auto* guarded = nearest(origin, direction, distance, cone, centre, true))
+                    if (game_guard::holds(*guarded))
+                        game_guard::refused(*guarded);
             return {};
         }
         // The log says why the guard of an enemy with one let this pull take him (nothing for the others).
@@ -327,12 +328,13 @@ class Targets final : public TargetQueries {
                 return c.record;
         return {};
     }
-    // The enemies a throw may be aimed at.
+    // The enemies a throw may be aimed at: a guarding one too, since a thing thrown at him is one of the ways
+    // to open his guard (game_guard).
     void characters(std::vector<GrabTarget>& out) const override {
         for (const auto& c : candidates) {
             const auto s = shape(c);
             Vec3 at{};
-            if (s.core == TargetKind::Character && takes(c) && game_targets::position(c, at))
+            if (s.core == TargetKind::Character && takes(c, true) && game_targets::position(c, at))
                 out.push_back({c.record, s.core, at + Vec3{0, s.lift, 0}, {}, s.mass, s.radius});
         }
     }
