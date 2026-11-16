@@ -433,7 +433,7 @@ void App::start(bool closeGame) {
     const auto report = newReportPath(scan_.root);
     const auto* chosen = runtime();
     const auto args = spidy::launcher::sessionArguments(settings_.options, report, chosen ? chosen->manifest : L"",
-                                                        newStopEventName(), closeGame);
+                                                        newStopEventName(), closeGame, scan_.gameExe);
     log_.clear();
     logCount_ = 0;
     if (!session_.start(scan_.python, scan_.root, args, report, startError_))

@@ -211,6 +211,10 @@ struct HandInput {
     // Physical controller grip and position, independent of the web-button mapping.
     float wallGrip{};
     Vec3 wallPosition{};
+    // Not tracked, but there: the headset lost the controller's pose (an arm
+    // at the side, behind the head), not its buttons. Its grip and trigger
+    // count; aim and gripRelativeToHead do not (issue #81).
+    bool lost{};
 };
 struct Input {
     std::array<HandInput, 2> hands{};

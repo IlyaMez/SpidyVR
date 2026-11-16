@@ -119,6 +119,28 @@ constexpr double poiInteract = 9, poiThrowable = 7, poiLeftFace = 13;
 constexpr double markerSubtype(double category, double subtype) {
     return category == poiInteract && subtype == poiThrowable ? poiLeftFace : subtype;
 }
+// What an interact marker asks of the pad, by its own subtype: the
+// throwable's web yank, LB + RB held (POIDefault.RefreshThrowable draws
+// [ACTION_WEB_YANK], "(Hold) Throw"), and the X of subtype 13, which
+// POIDefault draws as icon_face_button_left. {} for any other marker, or a
+// subtype not known. Its 12, 14 and 15 (Y, B, A) are left to Spidy: a
+// marker stays offered for many seconds (11 s straight in klibo's session),
+// and B and A are Spidy's dodge and jump while it is.
+// The game names these markers' buttons nowhere else: klibo's mailboxes and
+// manhole cover (November 11, 0.8.6) came as AddPOI(id, 9, 7) and
+// POIInteractAvailable(id, 1, '') with no text and no line of the HUD's
+// prompt list, so X - which the marker showed - sent nothing and held opened
+// the gadget wheel. Live while the game offers that marker's interact
+// (LiveDemands::available).
+constexpr Demand markerDemand(double category, double subtype) {
+    if (category != poiInteract)
+        return {};
+    if (subtype == poiThrowable)
+        return {padLeftShoulder | padRightShoulder, false, false, true};
+    if (subtype == poiLeftFace)
+        return {padX};
+    return {};
+}
 // `text` with the buttons it spells out replaced by the VR controls for
 // them: "LB + RB (Hold) Throw" becomes "X (Hold) Throw".
 // `interactServes` (the interact button sending what a live prompt asks for,
@@ -158,10 +180,13 @@ Demand unpack(uint32_t);
 // until the call that ends it, standMs at most. And a line of the HUD's own
 // prompt list (the throw's "[ACTION_WEB_YANK] (Hold) Throw", "[BTN_Y]
 // Interact"; one a kind, the widget's show and hide) stands from its show
-// until its hide, standMs at most.
+// until its hide, standMs at most. And a marker of the HUD's over a thing in
+// the world (AddPOI(id, category, subtype)) asks for what its subtype names
+// (markerDemand) while the game offers its interact - POIInteractAvailable(id,
+// 1, ...) until (id, 0, ...) or ClearPOI(id), standMs at most.
 class LiveDemands {
   public:
-    static constexpr unsigned channels = 16, kinds = 21;
+    static constexpr unsigned channels = 16, kinds = 21, markers = 16;
     static constexpr uint64_t liveMs = 2000, channelMs = 60000, otherMs = 8000, standMs = 600000;
     // A prompt call: `word` what its text named (pack; 0 for none), `clears`
     // its manager taking a prompt away.
@@ -202,6 +227,35 @@ class LiveDemands {
         prompts_[kind] = clears ? 0 : word;
         promptAt_[kind] = now;
     }
+    // The HUD's marker `id` added (AddPOI) asking for `word` (markerDemand,
+    // packed; 0 for nothing), or taken away (ClearPOI: clears true). Added
+    // again it keeps its offer; the oldest gives way when all are taken.
+    void marker(uint64_t now, uint32_t id, uint32_t word, bool clears) {
+        if (clears) {
+            if (Marker* m = find(id))
+                *m = {};
+            return;
+        }
+        Marker& m = slot(id);
+        m.word = word;
+        m.at = now;
+    }
+    // Its interact offered or withdrawn (POIInteractAvailable(id, on, ...)),
+    // in either order with its AddPOI. Returns what it asks for now: its
+    // word while offered, else 0.
+    uint32_t available(uint64_t now, uint32_t id, bool on) {
+        Marker* m = on ? &slot(id) : find(id);
+        if (!m)
+            return 0;
+        m->on = on;
+        m->at = now;
+        return on ? m->word : 0;
+    }
+    // A load or the HUD's shutdown: every marker goes with it.
+    void clearMarkers() {
+        for (auto& m : markers_)
+            m = {};
+    }
     // Everything live at `now`, together; what has run out is dropped.
     Demand demand(uint64_t now) {
         Demand out;
@@ -229,6 +283,12 @@ class LiveDemands {
             if (prompts_[k])
                 out |= unpack(prompts_[k]);
         }
+        for (auto& m : markers_) {
+            if (m.on && now - m.at > standMs)
+                m.on = false;
+            if (m.on && m.word)
+                out |= unpack(m.word);
+        }
         return out;
     }
     void clear() {
@@ -236,8 +296,38 @@ class LiveDemands {
     }
 
   private:
+    struct Marker {
+        uint32_t id{}, word{};
+        uint64_t at{};
+        bool used{}, on{};
+    };
+    Marker* find(uint32_t id) {
+        for (auto& m : markers_)
+            if (m.used && m.id == id)
+                return &m;
+        return nullptr;
+    }
+    // `id`'s own, else a free one, else the oldest, made `id`'s.
+    Marker& slot(uint32_t id) {
+        if (Marker* m = find(id))
+            return *m;
+        Marker* m = &markers_[0];
+        for (auto& candidate : markers_) {
+            if (!candidate.used) {
+                m = &candidate;
+                break;
+            }
+            if (candidate.at < m->at)
+                m = &candidate;
+        }
+        *m = {};
+        m->used = true;
+        m->id = id;
+        return *m;
+    }
     uint32_t live_{}, texts_[channels]{}, other_{}, stand_{}, prompts_[kinds]{};
     uint64_t fresh_{}, at_[channels]{}, otherAt_{}, standAt_{}, promptAt_[kinds]{};
+    Marker markers_[markers]{};
 };
 // Every control of the pad the game can ask for, so a check can cover them
 // all instead of the ones a player has reported.

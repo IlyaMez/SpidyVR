@@ -27,6 +27,8 @@ bool connected{};
 uint32_t packet{};
 std::atomic<uint64_t> reads{}, active{};
 std::atomic<bool> hooked{};
+// What a real controller in slot 0 held at the game's last read, before Spidy's buttons go over it.
+std::atomic<uint16_t> realHeld{};
 
 int16_t larger(int16_t first, int16_t second) {
     return std::abs(static_cast<int>(first)) >= std::abs(static_cast<int>(second)) ? first : second;
@@ -35,6 +37,7 @@ DWORD serve(GetState original, DWORD user, XINPUT_STATE* out) {
     const DWORD real = original(user, out);
     if (user != 0 || !out)
         return real;
+    realHeld.store(real == ERROR_SUCCESS ? out->Gamepad.wButtons : 0, std::memory_order_relaxed);
     State mine;
     uint32_t number{};
     AcquireSRWLockExclusive(&lock);
@@ -171,6 +174,9 @@ Telemetry game_pad::telemetry() {
     t.buttons = GetTickCount64() < deadline ? submitted.buttons : 0;
     ReleaseSRWLockShared(&lock);
     return t;
+}
+uint16_t game_pad::realButtons() {
+    return realHeld.load(std::memory_order_relaxed);
 }
 
 // Headless probes play the menus with this. Input: State, then lease in ms.

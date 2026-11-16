@@ -817,6 +817,9 @@ DWORD WINAPI run(void*) {
         // read off his entity: Spider-Man until a body says otherwise.
         uint64_t playerBody{};
         bool spiderMan = true;
+        // A real controller's held buttons (game_pad::realButtons): since when, and whether it was said.
+        uint64_t realHeldSince{};
+        bool realHeldTold{};
         // Menus are played with a virtual Xbox controller (game_pad).
         padInstalled = !game_pad::install();
         uint64_t padRetryMs = GetTickCount64() + 1000;
@@ -2851,8 +2854,8 @@ DWORD WINAPI run(void*) {
                         const Input climbInput = wallClimbInput(motion);
                         for (unsigned i = 0; i < 2; ++i) {
                             const auto& hand = climbInput.hands[i];
-                            input.hands[i] = {hand.aim, hand.gripRelativeToHead, hand.tracked, hand.trigger,
-                                              hand.grip};
+                            input.hands[i] = {hand.aim, hand.gripRelativeToHead,
+                                              hand.tracked ? 1u : hand.lost ? 2u : 0u, hand.trigger, hand.grip};
                             input.wallPositions[i] = motion.grips[i].position;
                             input.wallGrips[i] = hand.tracked ? frame.hands[i].squeeze : 0.f;
                         }
@@ -3103,10 +3106,15 @@ DWORD WINAPI run(void*) {
                             }
                             onStrandBefore[i] = on;
                         }
-                        for (unsigned i = 0; i < 2; ++i)
+                        // To where the web sticks: one that bends round an edge in
+                        // flight has that edge as its anchor, which is no new shot.
+                        for (unsigned i = 0; i < 2; ++i) {
+                            const auto& edges = swingBends.hands[i];
                             flightVisual[i].update(frame.seconds, webFlight.phases[i], webFlight.durations[i],
                                                    webFlight.progress[i], webFlight.tips[i],
-                                                   swingState.webs[i].anchor);
+                                                   edges.count && finite(edges.end) ? edges.end
+                                                                                    : swingState.webs[i].anchor);
+                        }
                         bool trails[2]{};
                         Vec3 trailEnds[2]{};
                         // The hands whose webs a zip pulled: one zip on the body, in the arm of
@@ -3719,7 +3727,9 @@ DWORD WINAPI run(void*) {
                                 if (const auto& edges = swingBends.hands[from];
                                     hand.attached == 1 && !grabPhases[from] && edges.count &&
                                     finite(edges.end) && native_webs::drawsHeld()) {
-                                    hand.anchor = edges.end;
+                                    // Still flying (WEB SPEED): round its edges to its tip.
+                                    hand.anchor =
+                                        flightVisual[from].flying() ? flightVisual[from].tip() : edges.end;
                                     bent[i].count =
                                         std::min<uint32_t>(edges.count, native_webs::maxRopeBends);
                                     for (uint32_t k = 0; k < bent[i].count; ++k)
@@ -4713,6 +4723,24 @@ DWORD WINAPI run(void*) {
                             runtime.haptic(1, .4f);
                         }
                         game_pad::submit(pad, 200);
+                        // Another controller in the game's first slot holding a button for 3 s:
+                        // said once a session, since the VR controllers cannot press it then.
+                        if (const uint16_t held = game_pad::realButtons(); !held) {
+                            realHeldSince = 0;
+                        } else if (!realHeldTold) {
+                            const uint64_t tick = GetTickCount64();
+                            if (!realHeldSince) {
+                                realHeldSince = tick;
+                            } else if (tick - realHeldSince >= 3000) {
+                                realHeldTold = true;
+                                char line[200];
+                                std::snprintf(line, sizeof(line),
+                                              "Another controller in the game's first slot holds buttons 0x%04X: "
+                                              "the VR controllers cannot press those while it does",
+                                              static_cast<unsigned>(held));
+                                message(3, 0, line);
+                            }
+                        }
                         if (walk.interact && !interacting) {
                             ++interacts;
                             wallInteracts += onWall;

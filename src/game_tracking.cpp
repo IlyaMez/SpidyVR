@@ -60,6 +60,12 @@ bool handValid(const TrackedHand& h) {
     return h.valid && validTrackedPose(h.aim) && validTrackedPose(h.grip) && std::isfinite(h.trigger) &&
            std::isfinite(h.squeeze) && std::isfinite(h.stickX) && std::isfinite(h.stickY);
 }
+// A controller's stick counts whether or not the headset sees the controller:
+// an arm at the side or behind the head loses its pose, not its stick (issue
+// #81). Only what needs where the hand is waits for handValid.
+bool stickValid(const TrackedHand& h) {
+    return std::isfinite(h.stickX) && std::isfinite(h.stickY);
+}
 Mat4 worldPose(Pose pose) {
     const Vec3 x = pose.orientation.rotate({1, 0, 0}), y = pose.orientation.rotate({0, -1, 0}),
                z = pose.orientation.rotate({0, 0, -1}), p = pose.position;
@@ -217,12 +223,18 @@ Input trackedSwingInput(const XrFrame& f, const Rig& rig, bool triggerWebs) {
         const float reel = triggerWebs ? hand.squeeze : hand.trigger;
         // The hand aims from its web shooter where it points (webShooter),
         // not along the controller's aim pose.
-        if (handValid(hand))
+        if (handValid(hand)) {
             input.hands[i] = {rig.toWorld(webShooter(hand.grip, i)), hand.grip.position - f.head.position,
                               true, std::clamp(reel, 0.f, 1.f), std::clamp(web, 0.f, 1.f)};
+        } else if (std::isfinite(web) && std::isfinite(reel)) {
+            // The headset lost the hand, not its buttons (HandInput::lost).
+            input.hands[i].lost = true;
+            input.hands[i].trigger = std::clamp(reel, 0.f, 1.f);
+            input.hands[i].grip = std::clamp(web, 0.f, 1.f);
+        }
     }
     const auto& move = f.hands[0];
-    if (handValid(move) && std::hypot(move.stickX, move.stickY) > .2f) {
+    if (stickValid(move) && std::hypot(move.stickX, move.stickY) > .2f) {
         // Ahead of the player as they stand, a flip's tilt aside.
         const auto forward = horizontal(Quat::yaw(rig.yaw).rotate(f.head.orientation.rotate({0, 0, -1})));
         input.move = limited(cross(forward, {0, 1, 0}) * move.stickX + forward * move.stickY, 1);
@@ -414,7 +426,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     const bool basicFlipAir = flips_ && !controlledFlips_ && !autoSettings_.enabled &&
                               airborne && !holds && !onSurface;
     out.basicFlipControls = basicFlipAir;
-    const float turn = handValid(f.hands[1]) ? f.hands[1].stickX : 0;
+    const float turn = stickValid(f.hands[1]) ? f.hands[1].stickX : 0;
     // A stick held into play turns nothing until it is let go: out of a menu,
     // or through a stutter after a snap it already made. A smooth turn goes
     // on through a stutter.
@@ -465,7 +477,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     flip.surface = onSurface || holds;
     flip.controlled = controlledFlips_ && !autoSettings_.enabled;
     const auto& flipHand = f.hands[autoSettings_.enabled || controlledFlips_ ? 0 : 1];
-    flip.stickTracked = handValid(flipHand);
+    flip.stickTracked = stickValid(flipHand);
     if (flip.stickTracked) {
         flip.stickX = flipHand.stickX;
         flip.stickY = flipHand.stickY;
@@ -535,14 +547,14 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     // eyes, each frame the short way from where its up is, so a corner's
     // next face turns it on from the wall it is on; back level, what is left
     // is a turn about the vertical, which the tracking space keeps.
-    const bool walks = handValid(f.hands[0]) && std::hypot(f.hands[0].stickX, f.hands[0].stickY) > .2f;
+    const bool walks = stickValid(f.hands[0]) && std::hypot(f.hands[0].stickX, f.hands[0].stickY) > .2f;
     // Crossing the stick's centre to reverse must not restart the camera
     // transition. A sustained release still returns to the close climb view.
     runIdleSeconds_ = walks ? 0.f : std::min(.1f, runIdleSeconds_ + f.seconds);
     // A hold may also describe ground or a walkable slope. Only wall/ceiling
     // contact may align the camera when the left stick starts moving.
     const bool runSurface = holds && held.y < surfaceEnterCos;
-    const bool wallRun = handClimb_ && !ventCrawl && runSurface && handValid(f.hands[0]) && !f.jump &&
+    const bool wallRun = handClimb_ && !ventCrawl && runSurface && stickValid(f.hands[0]) && !f.jump &&
                          (walks || (wallRunning_ && runIdleSeconds_ < .1f));
     if (wallRun && !wallRunning_) {
         // Capture the direction visible BEFORE the wall-floor transition
@@ -883,7 +895,7 @@ GameMotionFrame GameTrackingRig::update(const XrFrame& f, Vec3 feet, Vec3 gameFo
     }
     if (out.releaseWebs)
         for (auto& hand : out.swing.hands)
-            hand.tracked = false;
+            hand.tracked = hand.lost = false;
     const auto head = placed.toWorld(f.head);
     out.head = worldPose(head);
     out.headPose = head;

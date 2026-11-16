@@ -226,9 +226,16 @@ def steam_executable(read=_registry_value):
     return next((path for path in candidates if path.is_file()),None)
 
 
-def epic_launch(manifests=None):
+def same_path(a,b):
+    """`a` and `b` name the same file: the file itself when both exist (junctions, letter case), else the
+    spelling."""
+    try: return os.path.samefile(a,b)
+    except OSError: return os.path.normcase(os.path.abspath(a))==os.path.normcase(os.path.abspath(b))
+
+
+def epic_launch(manifests=None,game=None):
     """The Epic Games Launcher's link that starts Spider-Man, from its install manifest; None when Epic has no
-    copy installed."""
+    copy installed. With `game` (a Spider-Man.exe), only when that file is the one in Epic's install folder."""
     import json
     folder=pathlib.Path(manifests or pathlib.Path(os.environ.get('ProgramData',r'C:\ProgramData'))/
                         'Epic/EpicGamesLauncher/Data/Manifests')
@@ -238,6 +245,9 @@ def epic_launch(manifests=None):
         if not isinstance(manifest,dict): continue
         name=str(manifest.get('DisplayName',''))
         if 'Spider-Man' not in name or 'Remastered' not in name: continue
+        if game and not (manifest.get('InstallLocation') and
+                         same_path(pathlib.Path(str(manifest['InstallLocation']))/'Spider-Man.exe',game)):
+            continue
         parts=[str(manifest.get(key,'')) for key in ('CatalogNamespace','CatalogItemId','AppName')]
         if all(parts):
             return 'com.epicgames.launcher://apps/'+'%3A'.join(parts)+'?action=launch&silent=true'
@@ -300,22 +310,27 @@ def enlarge_render_memory(pid,megabytes=RENDER_RING_MB,patience=2.5,scene_pool=S
         return exports
 
 
-def wait_for_game(timeout=180,prepare=None,early=None,ready=None):
+def wait_for_game(timeout=180,prepare=None,early=None,ready=None,game_exe=None):
     """`prepare` runs only when this launcher starts the game, before the game reads its settings.
 
     `early(pid)` runs once, as soon as the game process exists. `ready(game)` decides when to
-    return; by default, when a save is loaded and its player exists.
+    return; by default, when a save is loaded and its player exists. `game_exe`: the Spider-Man.exe the
+    Spidy Launcher uses; when it is the Epic Games Store's copy, Epic starts the game even if Steam has
+    one too.
     """
     ready=ready or ready_player
     try: pid=find_game()
     except RuntimeError as error:
         if not str(error).startswith('Spider-Man is not running.'): raise
         pid=None
-    # Steam's copy is the one Spidy is made on; the Epic Games Store's is started when Steam has none.
+    # The store whose copy the launcher uses starts it: Epic's for the file in Epic's install folder (a Steam
+    # copy installed beside it answered "no active license", GitHub issue #84). Otherwise Steam's, the one Spidy
+    # is made on, and Epic's when Steam has none.
     epic=None
     if pid is None:
         steam=steam_executable()
-        if not (steam and steam_has_game(steam)): epic=epic_launch()
+        if game_exe: epic=epic_launch(game=game_exe)
+        if not epic and not (steam and steam_has_game(steam)): epic=epic_launch()
     if epic:
         if prepare: prepare()
         os.startfile(epic)

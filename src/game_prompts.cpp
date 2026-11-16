@@ -398,6 +398,27 @@ int readChannel(const GfxValue* args, uint32_t count) {
         return -1;
     return static_cast<int>(number);
 }
+// Argument `at` of a call as a number: a Number, an Int, a UInt, or a Boolean
+// as 0 or 1 - its own byte alone, since the rest of the word is whatever was
+// there before (POIInteractAvailable(36, -252392192, '') in klibo's report of
+// November 11 is a false). False for anything else.
+bool readNumber(const GfxValue* args, uint32_t count, uint32_t at, double& out) {
+    GfxValue v;
+    if (!args || at >= count || !readValue(args + at, v))
+        return false;
+    const uint32_t type = v.type & 0x8f;
+    if (type == 5)
+        std::memcpy(&out, &v.data, sizeof(out));
+    else if (type == 2)
+        out = (v.data & 0xff) ? 1 : 0;
+    else if (type == 3)
+        out = static_cast<int32_t>(v.data);
+    else if (type == 4)
+        out = static_cast<uint32_t>(v.data);
+    else
+        return false;
+    return std::isfinite(out);
+}
 } // namespace
 
 void game_prompts::setObserving(bool on) {
@@ -463,6 +484,10 @@ void census(const char* name, const GfxValue* args, uint32_t count, bool prompts
 // never comes.
 constexpr uintptr_t cameraShown = 0x3894818, cameraHidden = 0x3894830, hudShutdown = 0x38946c8,
                     loadingShown = 0x4f44a68;
+// The HUD's markers over things in the world (REFERENCE.md): AddPOI(id,
+// category, subtype), POIInteractAvailable(id, on, text) and ClearPOI(id),
+// each name the one literal of its kind in the supported Spider-Man.exe.
+constexpr uintptr_t addPoiName = 0x38a02a0, poiAvailableName = 0x38982c8, clearPoiName = 0x4f646e0;
 // What the first text among a call's arguments that names a button names
 // (readPromptText); 0 for none. A call this does not know by name.
 uint32_t namedInAnyText(const GfxValue* args, uint32_t count) {
@@ -503,13 +528,52 @@ void game_prompts::observeCall(uintptr_t imageBase, const char* name, const void
         liveDemands.stand(GetTickCount64(), word, !shown);
         // A load or the HUD's shutdown takes its prompt list down too, its
         // widget's hide or not.
-        if (!camera)
+        if (!camera) {
             for (unsigned k = 0; k < prompt_buttons::LiveDemands::kinds; ++k) {
                 liveDemands.prompt(GetTickCount64(), k, 0, true);
                 promptWords[k] = 0;
             }
+            liveDemands.clearMarkers();
+        }
         ReleaseSRWLockExclusive(&demandLock);
         return;
+    }
+    // The HUD's markers: what an interact marker's subtype names
+    // (prompt_buttons::markerDemand), asked for while the game offers its
+    // interact. Their calls carry no text, so this is the only place a
+    // mailbox's LB + RB - drawn as X in VR play (rewriteCall) - or a marker
+    // drawn with a face button is named. The calls go on below as before.
+    double poi{};
+    if (reads && (offset == addPoiName || offset == clearPoiName || offset == poiAvailableName) &&
+        readNumber(values, count, 0, poi) && poi >= 0 && poi < 4294967296.0 && poi == std::floor(poi)) {
+        const auto id = static_cast<uint32_t>(poi);
+        double category{}, subtype{}, on{};
+        uint32_t offered = 0;
+        bool interact = false;
+        AcquireSRWLockExclusive(&demandLock);
+        if (offset == clearPoiName) {
+            liveDemands.marker(GetTickCount64(), id, 0, true);
+        } else if (offset == addPoiName) {
+            if (readNumber(values, count, 1, category) && readNumber(values, count, 2, subtype)) {
+                interact = category == prompt_buttons::poiInteract;
+                liveDemands.marker(GetTickCount64(), id,
+                                   prompt_buttons::pack(prompt_buttons::markerDemand(category, subtype)), false);
+            }
+        } else if (readNumber(values, count, 1, on)) {
+            offered = liveDemands.available(GetTickCount64(), id, on != 0);
+        }
+        ReleaseSRWLockExclusive(&demandLock);
+        if (offered)
+            lastPacked.store(offered, std::memory_order_relaxed);
+        // An interact marker's subtype in the timeline, beside its offer, so a
+        // report says which subtype a trunk, a pigeon or a car to lift has.
+        if (interact) {
+            char line[callChars];
+            formatCall(name, values, count, line, sizeof(line));
+            AcquireSRWLockExclusive(&callLock);
+            keepLine(line);
+            ReleaseSRWLockExclusive(&callLock);
+        }
     }
     if (index == callNames) {
         // Any other call that hands the UI a text naming a button is a prompt
@@ -587,11 +651,6 @@ const char* game_prompts::observeText(const char* text) {
     const Copy* copy = copyOf(text);
     return copy ? copy->text.c_str() : text;
 }
-
-namespace {
-// AddPOI's name, as the game hands it to the wrapper (its literal).
-constexpr uintptr_t addPoiName = 0x38a02a0;
-} // namespace
 
 bool game_prompts::rewriteCall(uintptr_t imageBase, const char* name, const void* args, uint32_t count,
                                void* copy) {

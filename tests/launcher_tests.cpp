@@ -173,6 +173,10 @@ int main() {
                                                  L"--output", L"r.json", L"--xr-runtime", L"vd.json",
                                                  L"--stop-event", L"Local\\Stop"};
         check(args == defaults, "defaults");
+        // The game the launcher uses goes last, so the session starts it through its own store (#84).
+        args = sessionArguments(options, L"r.json", L"", L"", false, LR"(D:\Epic\Spider-Man.exe)");
+        check(args.size() == 9 && args[7] == L"--game-exe" && args[8] == LR"(D:\Epic\Spider-Man.exe)",
+              "the launcher's game");
         options = {false, true, 2048, 90, false, false};
         args = sessionArguments(options, L"r.json", L"", L"");
         const std::vector<std::wstring> changed{L"--auto-launch", L"--seconds", L"0", L"--swing-speed", L"65",

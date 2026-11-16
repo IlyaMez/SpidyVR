@@ -2569,6 +2569,48 @@ int main() {
         }
         check(cut&&!wrapped&&!s.webs()[0].attached,"the wall in the way kept the web");
     });
+    test("a web that flies (WEB SPEED) bends round the corner passed meanwhile, and holds once it arrives", [physical] {
+        // A player on 0.8.1, WEB SPEED on: "when I'm moving and shoot a web
+        // between two buildings ... it attaches but immediately detaches". A
+        // flying web's line went unwatched until it arrived; by then the body
+        // was past the corner, the line crossed the building with no clear one
+        // before it to bend from, and the web was cut 0.15 s after it arrived.
+        // Shot from 220 m below its end (0.6 to 3.7 s of flight), the body past
+        // the corner in 0.3 s and waiting there; with WEB SPEED off the same.
+        for(int mode=0;mode<=3;++mode) {
+            Corner w;Swing s(physical());s.webTravel(1000,mode);
+            Input in=w.held();in.hands[0].aim.position.y=-200;
+            Body body{{14,20,2},{-10,0,0},false};
+            float arrived=-1;bool wrapped{},cut{};
+            for(int i=0;i<300&&(arrived<0||i/60.f<arrived+.5f);++i) {
+                const auto intent=s.predictNativeStep(1.f/60,in,w,body);
+                for(const auto& e:s.events()) {
+                    if(e.kind==EventKind::Attach&&arrived<0)arrived=i/60.f;
+                    wrapped|=e.kind==EventKind::Wrap;cut|=e.kind==EventKind::Obstructed;
+                }
+                body={intent.target,{intent.target.x>11?-10.f:0.f,0,0},false};
+            }
+            check(arrived>=0&&(mode==0||arrived>.5f),"the web did not fly there");
+            const auto& web=s.webs()[0];
+            check(!cut&&web.ready()&&wrapped&&web.bent==1,"the flown web was cut at the corner, or did not bend");
+            near(length(web.end()-w.anchor),0);
+            check(length(Vec3{web.anchor.x-10,0,web.anchor.z})<.2f,"the bend is not at the corner's edge");
+        }
+    });
+    test("without physical webs a flying web the corner cuts is cut in flight, never caught and let go", [] {
+        for(int mode=1;mode<=3;++mode) {
+            Corner w;Swing s(inert());s.webTravel(1000,mode);
+            Input in=w.held();in.hands[0].aim.position.y=-200;
+            Body body{{14,20,2},{-10,0,0},false};
+            bool arrived{},cut{};
+            for(int i=0;i<300&&!cut;++i) {
+                const auto intent=s.predictNativeStep(1.f/60,in,w,body);
+                for(const auto& e:s.events()){arrived|=e.kind==EventKind::Attach;cut|=e.kind==EventKind::Obstructed;}
+                body={intent.target,{intent.target.x>11?-10.f:0.f,0,0},false};
+            }
+            check(cut&&!arrived&&!s.webs()[0].attached,"the web was caught behind the building and let go");
+        }
+    });
     // Arcade webs. Boxes the rays meet from either side, as the game's own do:
     // from inside one a ray meets the face it leaves by, turned along the ray.
     struct Boxes : TestWorld {
@@ -6653,12 +6695,72 @@ int main() {
             off=std::max(off,length((p-from)-way*dot(p-from,way)));
         check(off<.01f,"the eyes left the straight way to the wall");
     });
-    test("invalid controller cannot walk or attach a web", [] {
+    test("a controller the headset lost aims nothing, but its stick and buttons count (issue #81)", [] {
         auto f=trackedFrame();f.hands[0].valid=false;f.hands[0].stickY=1;
         f.hands[1].aim.position.x=std::numeric_limits<float>::quiet_NaN();
         const auto input=trackedSwingInput(f,{});
         check(input.focused&&!input.hands[0].tracked&&!input.hands[1].tracked,"invalid hand accepted");
-        near(length(input.move),0);
+        check(input.hands[0].lost&&input.hands[1].lost,"a lost hand's buttons were dropped");
+        near(input.hands[0].grip,1);near(input.hands[0].trigger,1);
+        check(length(input.move)>.99f,"a lost hand's stick walked nowhere");
+        // Its right stick turns the view as one in sight does (the snap turn test below).
+        GameTrackingRig rig;auto g=trackedFrame();g.hands[1].valid=false;g.head.position.x=.4f;
+        rig.update(g,{},{0,0,-1},true);
+        g.predictedDisplayTime=2;g.hands[1].stickX=1;
+        near(rig.update(g,{},{0,0,-1},true).head[8],.5f);
+        // Across to the game's swing: 2 is a lost hand, past it nothing.
+        game_swing::Command c;c.serial=1;c.hands[0].tracked=2;
+        check(game_swing::valid(c)&&game_swing::input(c).hands[0].lost&&!game_swing::input(c).hands[0].tracked,
+              "a lost hand did not reach the swing");
+        c.hands[0].tracked=3;check(!game_swing::valid(c),"a hand neither tracked nor lost accepted");
+        // As the webs are let go of (a long break, a recenter), a lost hand is no hand.
+        GameTrackingRig broken;broken.update(f,{},{0,0,-1},true);
+        broken.triggerWebs(true);f.predictedDisplayTime=2;
+        const auto out=broken.update(f,{},{0,0,-1},true);
+        check(out.releaseWebs&&!out.swing.hands[0].lost&&!out.swing.hands[0].tracked,"a let-go kept a lost hand");
+    });
+    test("a lost hand holds its web while its button is held, and shoots none (issue #81)", [] {
+        TestWorld world;
+        spidy::Swing solver(inert());
+        auto in = aimed();
+        in.hands[0].trigger = 0;
+        const Body body{{0, 0, 0}, {}, false};
+        const auto step = [&] {
+            solver.predictNativeStep(1.f / 90, in, world, body);
+            bool lost = false;
+            for (const auto& e : solver.events())
+                lost |= e.kind == EventKind::TrackingLost;
+            return lost;
+        };
+        step();
+        check(solver.webs()[0].attached, "no web to hold");
+        // The arm behind the head: no pose, the grip held.
+        in.hands[0].tracked = false;
+        in.hands[0].lost = true;
+        in.hands[0].aim = {};
+        in.hands[0].gripRelativeToHead = {};
+        for (int i = 0; i < 90; ++i)
+            check(!step() && solver.webs()[0].attached, "a lost hand let go of its web");
+        // Let go of while lost, it goes; pressed again while lost, nothing is shot.
+        in.hands[0].grip = 0;
+        step();
+        check(!solver.webs()[0].attached, "a lost hand's let-go kept the web");
+        in.hands[0].grip = 1;
+        step();
+        check(!solver.webs()[0].attached, "a lost hand shot a web");
+        // Seen again with that press still held: no shot until it is let go.
+        in = aimed();
+        in.hands[0].trigger = 0;
+        step();
+        check(!solver.webs()[0].attached, "a press made while lost shot once seen again");
+        in.hands[0].grip = 0;
+        step();
+        in.hands[0].grip = 1;
+        step();
+        check(solver.webs()[0].attached, "no web after a fresh press");
+        // Untracked and not lost (no controller, the webs let go of): it goes, as before.
+        in.hands[0].tracked = false;
+        check(step() && !solver.webs()[0].attached, "an untracked hand kept its web");
     });
     test("game rig snap turn pivots at head and waits for stick release", [] {
         GameTrackingRig rig;auto f=trackedFrame();f.head.position.x=.4f;
@@ -13177,6 +13279,59 @@ int main() {
               "a pedestrian's talk marker");
         check(markerSubtype(poiInteract, poiLeftFace)==poiLeftFace,"a marker that is X already");
         check(markerSubtype(3, poiThrowable)==poiThrowable,"an objective's marker of the same number");
+    });
+    test("a marker the game offers names its button by its subtype, and X at it is the game's", [] {
+        using namespace prompt_buttons;
+        const Demand pair{padLeftShoulder|padRightShoulder,false,false,true};
+        check(markerDemand(poiInteract,poiThrowable)==pair,"a throwable's marker is not the game's LB + RB, held");
+        check(markerDemand(poiInteract,13)==Demand{padX},"the X marker");
+        // Y, B and A markers stay Spidy's: offered for many seconds, they would take its dodge and jump.
+        check(!markerDemand(poiInteract,12).any()&&!markerDemand(poiInteract,14).any()&&
+                  !markerDemand(poiInteract,15).any(),
+              "a Y, B or A marker took its button from Spidy");
+        check(!markerDemand(poiInteract,1).any()&&!markerDemand(poiInteract,17).any(),
+              "a talk marker or one of a subtype not known named a button");
+        check(!markerDemand(3,poiThrowable).any(),"an objective's marker of the same number named one");
+        // As klibo's mailbox came on November 11: AddPOI(38, 9, 7), POIInteractAvailable(38, 1, '').
+        LiveDemands live;
+        live.marker(1000,38,pack(markerDemand(poiInteract,poiThrowable)),false);
+        check(!live.demand(1000).any(),"a marker asked before the game offered it");
+        check(live.available(1100,38,true)==pack(pair),"the offer did not say what it asks");
+        check(live.demand(9000).buttons==pair.buttons,"an offered marker's ask went with liveMs");
+        live.available(9100,38,false);
+        check(!live.demand(9100).any(),"a withdrawn marker still asked");
+        live.available(9200,38,true);
+        live.marker(9300,38,0,true);
+        check(!live.demand(9300).any()&&!live.available(9400,38,false),"a cleared marker still asked");
+        // Offered before it was added; a marker never withdrawn ends at standMs; a load ends them all.
+        live.available(10000,40,true);
+        live.marker(10010,40,pack(Demand{padX}),false);
+        check(live.demand(10020)==Demand{padX},"an offer before its marker was lost");
+        check(!live.demand(10011+LiveDemands::standMs).any(),"a marker never withdrawn lived on");
+        live.marker(20000,41,pack(Demand{padX}),false);live.available(20000,41,true);
+        live.clearMarkers();
+        check(!live.demand(20000).any(),"a load left a marker asking");
+        // More markers than room: the oldest gives way, the newest asks.
+        for(uint32_t i=0;i<LiveDemands::markers+4;++i)live.marker(30000+i,100+i,pack(Demand{padB}),false);
+        check(live.available(31000,100+LiveDemands::markers+3,true)==pack(Demand{padB}),"the newest marker was lost");
+        // X at the offered mailbox is the game's LB + RB for as long as it is held, and no wheel's.
+        using namespace game_pad;
+        live.clearMarkers();
+        live.marker(40000,38,pack(markerDemand(poiInteract,poiThrowable)),false);live.available(40000,38,true);
+        NamedPress press;
+        NamedPress::Input in;
+        press.update(1.f/90,true,in,live.demand(40000));
+        in.buttons=buttonX;
+        check(press.update(1.f/90,true,in,live.demand(40010))==State{bumpers},"X at a mailbox sent no LB + RB");
+        check((press.claimed()&NamedPress::controlX)!=0,"X at a mailbox was left to the gadget wheel");
+        check(press.update(1.f/90,true,in,live.demand(41000))==State{bumpers},"the throw's hold let go");
+        // At a marker drawn with the left face button, the game's own X.
+        live.marker(42000,50,pack(markerDemand(poiInteract,13)),false);live.available(42000,50,true);
+        live.available(42000,38,false);
+        NamedPress square;
+        NamedPress::Input none;
+        square.update(1.f/90,true,none,live.demand(42000));
+        check(square.update(1.f/90,true,in,live.demand(42010))==State{x},"X at an X marker was not the game's X");
     });
     test("the game's action words say their buttons, and its LB + RB is put as X", [] {
         using namespace prompt_buttons;
@@ -25342,7 +25497,7 @@ int main() {
             out = flipFrame(rig, frame, false);
         check(!levelTilt(out.flipTilt), "neutral then push did not start a flip");
     });
-    test("basic flips: losing right-hand tracking freezes tilt until neutral is seen again", [] {
+    test("basic flips: the right stick flips on with its hand out of the headset's sight (issue #81)", [] {
         GameTrackingRig rig;
         rig.flips(true);
         auto frame = trackedFrame();
@@ -25353,22 +25508,10 @@ int main() {
             out = flipFrame(rig, frame, false);
         const Quat held = out.flipTilt;
         frame.hands[1].valid = false;
-        for (int i = 0; i < 30; ++i) {
-            out = flipFrame(rig, frame, false);
-            near(length(out.flipTilt.rotate({0, 1, 0}) - held.rotate({0, 1, 0})), 0, .000001f);
-        }
-        frame.hands[1].valid = true;
-        for (int i = 0; i < 30; ++i) {
-            out = flipFrame(rig, frame, false);
-            near(length(out.flipTilt.rotate({0, 1, 0}) - held.rotate({0, 1, 0})), 0, .000001f);
-        }
-        frame.hands[1].stickY = 0;
-        flipFrame(rig, frame, false);
-        frame.hands[1].stickY = -1;
         for (int i = 0; i < 15; ++i)
             out = flipFrame(rig, frame, false);
         check(length(out.flipTilt.rotate({0, 1, 0}) - held.rotate({0, 1, 0})) > .1f,
-              "recovered controller could not rotate after a fresh neutral");
+              "a lost hand's stick stopped the flip");
     });
     test("basic flips: landing levels the view without turning a held roll into a snap", [] {
         for (float smooth : {0.f, 1.5f}) {
@@ -25704,7 +25847,7 @@ int main() {
             }
         }
     });
-    test("controlled flips: losing left-hand tracking freezes tilt until a new neutral", [] {
+    test("controlled flips: the left stick steers on with its hand out of the headset's sight (issue #81)", [] {
         GameTrackingRig rig; rig.controlledFlips(true);
         auto f = trackedFrame();
         flipFrame(rig, f, false); flipFrame(rig, f, true); flipFrame(rig, f, false);
@@ -25712,19 +25855,13 @@ int main() {
         GameMotionFrame out;
         for (int i = 0; i < 25; ++i) out = flipFrame(rig, f, false);
         const Quat held = out.flipTilt;
-        for (bool valid : {false, true}) {
-            f.hands[0].valid = valid;
-            for (int i = 0; i < 30; ++i) {
-                out = flipFrame(rig, f, false);
-                check(out.controlledFlipControls, "tracking loss changed the toggle state");
-                near(length(out.flipTilt.rotate({0, 1, 0}) - held.rotate({0, 1, 0})), 0, .000001f);
-            }
+        f.hands[0].valid = false;
+        for (int i = 0; i < 15; ++i) {
+            out = flipFrame(rig, f, false);
+            check(out.controlledFlipControls, "tracking loss changed the toggle state");
         }
-        f.hands[0].stickY = 0; flipFrame(rig, f, false);
-        f.hands[0].stickY = -1;
-        for (int i = 0; i < 15; ++i) out = flipFrame(rig, f, false);
         check(length(out.flipTilt.rotate({0, 1, 0}) - held.rotate({0, 1, 0})) > .1f,
-              "recovered hand could not resume rotation");
+              "a lost hand's stick stopped the flip");
     });
     test("controlled flips: landing exits and a later takeoff needs a new A press", [] {
         GameTrackingRig rig; rig.controlledFlips(true);

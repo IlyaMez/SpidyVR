@@ -379,6 +379,44 @@ class LauncherTests(unittest.TestCase):
         started.assert_not_called()
         steam.assert_called_once()
 
+    def test_the_launchers_epic_copy_is_started_through_epic_even_beside_a_steam_copy(self):
+        # GitHub issue #84: a Steam copy installed beside the Epic one, Steam started, "no active license".
+        game=Mock(pid=42)
+        missing=RuntimeError('Spider-Man is not running.')
+        with tempfile.TemporaryDirectory() as temp:
+            root=pathlib.Path(temp)
+            (root/'Epic/Spider-Man').mkdir(parents=True)
+            (root/'Steam/common/Spider-Man').mkdir(parents=True)
+            epic_exe,steam_exe=root/'Epic/Spider-Man/Spider-Man.exe',root/'Steam/common/Spider-Man/Spider-Man.exe'
+            epic_exe.write_bytes(b'MZ')
+            steam_exe.write_bytes(b'MZ')
+            manifests=root/'Manifests'
+            manifests.mkdir()
+            (manifests/'a.item').write_text(json.dumps({
+                'DisplayName':"Marvel's Spider-Man Remastered",'InstallLocation':str(epic_exe.parent),
+                'CatalogNamespace':'ns','CatalogItemId':'item','AppName':'app'}),encoding='utf-8')
+            link='com.epicgames.launcher://apps/ns%3Aitem%3Aapp?action=launch&silent=true'
+            self.assertEqual(launcher.epic_launch(manifests),link)
+            self.assertEqual(launcher.epic_launch(manifests,game=str(epic_exe)),link)
+            self.assertIsNone(launcher.epic_launch(manifests,game=str(steam_exe)))
+            real=launcher.epic_launch
+            for chosen,epic_started in ((epic_exe,True),(steam_exe,False),(None,False)):
+                with patch.object(launcher,'find_game',side_effect=[missing,42,42]), \
+                     patch.object(launcher,'Game',return_value=game),patch.object(launcher.time,'sleep'), \
+                     patch.object(launcher,'steam_executable',return_value=pathlib.Path('C:/Steam/steam.exe')), \
+                     patch.object(launcher,'steam_has_game',return_value=True), \
+                     patch.object(launcher,'epic_launch',
+                                  side_effect=lambda game=None: real(manifests,game=game)), \
+                     patch.object(launcher.os,'startfile',create=True) as started, \
+                     patch.object(launcher.subprocess,'Popen') as steam:
+                    launcher.wait_for_game(ready=lambda game: True,game_exe=str(chosen) if chosen else None)
+                if epic_started:
+                    started.assert_called_once_with(link)
+                    steam.assert_not_called()
+                else:
+                    started.assert_not_called()
+                    steam.assert_called_once()
+
     def test_game_closed_before_load_releases_handle(self):
         game=Mock(pid=42)
         with patch.object(launcher,'find_game',side_effect=[42,42,RuntimeError('Spider-Man is not running.')]), \

@@ -2079,21 +2079,33 @@ def hud_snapshot(game, address):
     return None
 
 
-def wait_for_renderer(game, process, render_data, timeout=180, problems=None, tell_every=20):
+def wait_for_renderer(game, process, render_data, timeout=180, problems=None, tell_every=20, module_patience=30):
     """The game's graphics queue, as soon as the game draws frames (its intro, seconds after it starts).
 
     `render_data` is the render memory module's telemetry, when that module is loaded: its frame count
-    shows the renderer running before the queue is looked for. `problems` collects why each look found
-    no queue (for the session's report); the console hears the latest every `tell_every` seconds.
+    shows the renderer running before the queue is looked for. A module that has counted no 30 frames in
+    `module_patience` seconds is no longer waited for: an Intel Arc A750's game drew at 86 to 240 frames a
+    second while its count never got there, and the session waited out the three minutes (October 24).
+    `problems` collects why each look found no queue (for the session's report); the console hears the
+    latest every `tell_every` seconds.
     """
-    deadline = time.monotonic()+timeout
+    started = time.monotonic()
+    deadline = started+timeout
     problem = 'the game drew no frames'
-    told, fronted = time.monotonic(), False
+    told, fronted, unheeded = time.monotonic(), False, False
     while alive(game) and time.monotonic() < deadline:
-        memory = render_memory_snapshot(game, render_data) if render_data else None
-        if render_data and (not memory or memory['frames'] < 30):
-            time.sleep(.25)
-            continue
+        memory = render_memory_snapshot(game, render_data) if render_data and not unheeded else None
+        if render_data and not unheeded and (not memory or memory['frames'] < 30):
+            if time.monotonic()-started < module_patience:
+                time.sleep(.25)
+                continue
+            unheeded = True
+            note = (f"Spidy's render memory module counted {memory['frames'] if memory else 'no'} game frames "
+                    f"in {module_patience:.0f} s (ring {memory['ring'] if memory else 'unread'}): looking for "
+                    "the graphics queue without it")
+            if problems is not None:
+                problems.append(note)
+            print(note, flush=True)
         try:
             return discover_queue(game, process)
         except TimeoutError as error:
@@ -2253,6 +2265,9 @@ def main():
                         "at about half the distance the flat game has them, and an upscaled eye's textures are "
                         'asked for at its smaller rendered size (about 2 percent more frames)')
     p.add_argument('--auto-launch',action='store_true')
+    p.add_argument('--game-exe', default='',
+                   help="The Spider-Man.exe the Spidy Launcher uses: --auto-launch starts it through the Epic "
+                        "Games Store when it is Epic's copy, even with a Steam copy installed too")
     p.add_argument('--close-game', action='store_true',
                    help='A running game that already holds Spidy (VR ran in it, or another build is in it) is '
                         'closed as its close button does, then started again (the launcher asks the player first)')
@@ -2476,7 +2491,8 @@ def session(a, startup):
     # switch); before October 5's seventh build the launcher found one, once, and VR stayed on the
     # screen after any reload.
     if a.auto_launch:
-        game = wait_for_game(prepare=prepare_display, early=render_memory_module, ready=lambda game: True)
+        game = wait_for_game(prepare=prepare_display, early=render_memory_module, ready=lambda game: True,
+                             game_exe=getattr(a, 'game_exe', None) or None)
     else:
         game = Game(find_game())
         render_memory_module(game.pid)

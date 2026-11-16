@@ -1311,6 +1311,19 @@ class ProtocolTests(unittest.TestCase):
              patch.object(run_game_vr.time, 'sleep'):
             self.assertEqual(run_game_vr.wait_for_renderer(game, 5, 0x3000), 0x1234)
         self.assertEqual((memory.call_count, queue.call_count), (4, 2))
+        # A module that never counts (an Intel Arc A750, October 24) is waited for module_patience seconds,
+        # then the queue is looked for without it, and the report says so.
+        clock, problems = iter(range(0, 1000)), []
+        with patch.object(run_game_vr, 'alive', return_value=True), \
+             patch.object(run_game_vr, 'render_memory_snapshot', return_value=dict(frames=0, ring='game')) as memory, \
+             patch.object(run_game_vr, 'discover_queue', return_value=0x77) as queue, \
+             patch.object(run_game_vr.time, 'monotonic', side_effect=lambda: next(clock)), \
+             patch.object(run_game_vr.time, 'sleep'), patch('builtins.print'):
+            self.assertEqual(run_game_vr.wait_for_renderer(game, 5, 0x3000, problems=problems, module_patience=10), 0x77)
+        queue.assert_called_once()
+        self.assertLess(memory.call_count, 12)
+        self.assertEqual(len(problems), 1)
+        self.assertIn('counted 0 game frames in 10 s', problems[0])
         # Without the render memory module (an attached game), the queue alone decides.
         with patch.object(run_game_vr, 'alive', return_value=True), \
              patch.object(run_game_vr, 'discover_queue', return_value=0x99) as queue:

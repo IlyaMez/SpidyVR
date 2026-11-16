@@ -3,7 +3,102 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (November 11): fixes from the players' reports on 0.8.5.**
+**Latest build (November 16): fixes from the players' reports on 0.8.6 and
+GitHub issues #81 and #84.**
+
+- **X at a mailbox or a manhole cover is the game's.** "Can't catch pigeons
+  or rip out manhole covers either. Have to switch to pad mode" (0.8.6, with
+  a report). The game offers a throwable only as a marker over it, made by
+  `AddPOI(id, 9, 7)` and offered by `POIInteractAvailable(id, 1, '')`, with
+  no text and no line in the HUD's prompt list. Spidy drew that marker as X
+  but read a prompt's button only from text, so X had no way to the game,
+  and held for 0.3 s it opened the gadget wheel instead. In that session 25
+  X presses at mailboxes and a manhole cover sent nothing. Now an interact
+  marker names its button by its own subtype (`prompt_buttons::
+  markerDemand`), live from the game's offer until it is withdrawn, cleared
+  or a load. That means LB + RB held for a throwable and X for subtype 13,
+  and X there neither opens the wheel nor is kept from the game. Markers
+  that name Y, B or A stay Spidy's, because a marker can stay offered for
+  many seconds (11 s in that session) and B and A are its dodge and jump.
+  Each interact marker's subtype now goes into the report's call list, to
+  show what a trunk, a pigeon or a car to lift use.
+- **A controller the headset loses keeps its stick and buttons** (GitHub
+  #81). Spidy counted a Quest controller as gone the moment it left the
+  cameras' view: with an arm at the side the right stick stopped turning,
+  and with an arm behind the head on a long swing the held web let go.
+  Now a lost hand's stick walks, turns and flips (`stickValid`). Its held
+  web stays held for as long as its grip is, from where the hand was last
+  seen, and its trigger still reels. The hand shoots, takes and yanks
+  nothing until it is seen again, and a press made while it was lost is no
+  shot when it returns. Aiming, punches, climbing and gestures still wait
+  for the hand. The swing's hand
+  value 2 (`Command::Hand::tracked`) is "lost". An older module refuses it.
+- **A web that flies (WEB SPEED) keeps to its line.** "When I'm moving and
+  shoot a web between two buildings, sometimes it doesn't attach when it
+  hits a building. Other times it attaches but immediately detaches" (0.8.1;
+  "with off it works perfectly"). The swing watched the line from the body
+  to where the web sticks, bending it round edges and cutting a blocked one,
+  only once the web had arrived. By then the body had swung or fallen past
+  a corner, the line crossed the building with no clear step before it to
+  bend from, and the web was cut 0.15 s after it caught. A flying web's line
+  is now watched from the shot, as a held one's is. Only its pull waits for
+  it to arrive. The flying rope is drawn round its bends to its tip.
+- **The Epic Games Store's copy starts through Epic beside a Steam copy**
+  (GitHub #84: "it will go through Steam regardless and say no active
+  license"). Epic started the game only when Steam had no copy installed.
+  The launcher now hands its game (`--game-exe`) to the session, and the
+  copy in Epic's install folder is started by Epic.
+- **No three-minute wait for a render memory module that counts nothing.**
+  An Intel Arc A750's game drew at 86 to 240 frames a second (October 24,
+  0.4.0) while Spidy's render memory module never counted the 30 frames the
+  session waits for before it looks for the game's graphics queue. The
+  session then ended with "the game drew no frames". After 30 s without
+  them the queue is looked for anyway, and the report and the console say
+  what the module counted.
+- **Another controller holding a button is named.** One player's right grip
+  sent RB 15 times in the game's Settings and nothing happened. His game
+  log also listed an "XBOX 360 For Windows" controller, whose buttons the
+  game reads under the VR controllers'. A real controller that holds a
+  button for 3 s is now said once in the session log, with the buttons.
+
+Checked: the core tests (a throwable's marker from AddPOI to its offer,
+withdrawal, ClearPOI and a load, and X at it sending LB + RB held; a lost
+hand holding its web, walking and turning, and shooting nothing; a flying
+web bending round the corner passed in flight at each WEB SPEED and cut in
+flight without physical webs), the launcher tests (the game's path in the
+session's arguments) and the six Python protocol suites (Epic's copy beside
+Steam's, the renderer wait without the module's count). Not run: the game
+or a headset. The suit mod read as Peter (0.8.6) is not changed: no signal
+of the game's that tells its Spider-Man from Peter has been read in play yet.
+
+**Also in this build: Enemy types, pull request #82 by vrfloop-lab.** A switch for enemies that block in the base game to
+block here too. **Enemy types** (the launcher's Options: Movement, Combat, after
+Air fists; `enemy_types` in spidy_vr.ini and profiles) is off by default: nobody
+guards, as before, and the gameplay presets leave it alone. On, the ones with a
+baton, the swordsmen, the brutes and the shield bearers stop VR punches and web
+strikes, no web drags one whose guard stands, and each kind has its own block
+sound (a baton, a sword, a slayer, a shield; the long web's refused pull has its
+own too). A guard is open while the enemy is webbed, stunned, held, down or
+flying, when a gadget or a thrown prop hurts him, and for a moment after you
+dodge over him; a swing kick goes through a baton's guard, and an enemy who has
+not noticed you does not guard. Punching never breaks a guard, but a few blocked
+punches in a row make the enemy swing back and stagger you. A blocked blow ends
+the combo, is marked BLOCKED (comic and tech styles) and nudges your view back a
+little; the enemy puts his arms up. `guard.txt` in the Spidy folder (written the
+first time a session runs with the switch on) holds the finer rules: more
+classes that guard, the counter, the swing kick, running enemies, how long a
+guard stays open. The session log names the enemy and the guard of every first
+block with a `GUARD` line, so a wrong guess can be corrected there without a
+rebuild. Settings packet version 32 (`enemyTypes`; version 31 still works, guards
+off).
+
+Checked: the core tests (833, with the switch's row, key and default and
+settings version 32 among them), the launcher tests (41 checks) and the new
+guard tests (which enemies guard, what opens a guard, the counter, the pose, the
+recoil, guard.txt), built on Linux. Not run: this version in the game, or built
+with MSVC. An earlier form of Enemy types was played in a PSVR2 through SteamVR.
+
+**Previous build (November 11): fixes from the players' reports on 0.8.5.**
 
 - **The suit power takes hands held out before the chest.** Five players on
   0.8.1 and 0.8.5 got no suit power at all; one: "after many attempts in one
@@ -43,33 +138,6 @@ the air; a fast hand with nobody to punch and AIR FISTS on, shooting and
 not; AIR FISTS' row, key and default), the launcher tests, the six Python
 protocol suites. Not run: the game or a headset. The new chest rests on two
 sessions of one player and one of another.
-
-**Unreleased: Enemy types.** A switch for enemies that block in the base game to
-block here too. **Enemy types** (the launcher's Options: Movement, Combat, after
-Air fists; `enemy_types` in spidy_vr.ini and profiles) is off by default: nobody
-guards, as before, and the gameplay presets leave it alone. On, the ones with a
-baton, the swordsmen, the brutes and the shield bearers stop VR punches and web
-strikes, no web drags one whose guard stands, and each kind has its own block
-sound (a baton, a sword, a slayer, a shield; the long web's refused pull has its
-own too). A guard is open while the enemy is webbed, stunned, held, down or
-flying, when a gadget or a thrown prop hurts him, and for a moment after you
-dodge over him; a swing kick goes through a baton's guard, and an enemy who has
-not noticed you does not guard. Punching never breaks a guard, but a few blocked
-punches in a row make the enemy swing back and stagger you. A blocked blow ends
-the combo, is marked BLOCKED (comic and tech styles) and nudges your view back a
-little; the enemy puts his arms up. `guard.txt` in the Spidy folder (written the
-first time a session runs with the switch on) holds the finer rules: more
-classes that guard, the counter, the swing kick, running enemies, how long a
-guard stays open. The session log names the enemy and the guard of every first
-block with a `GUARD` line, so a wrong guess can be corrected there without a
-rebuild. Settings packet version 32 (`enemyTypes`; version 31 still works, guards
-off).
-
-Checked: the core tests (833, with the switch's row, key and default and
-settings version 32 among them), the launcher tests (41 checks) and the new
-guard tests (which enemies guard, what opens a guard, the counter, the pose, the
-recoil, guard.txt), built on Linux. Not run: this version in the game, or built
-with MSVC. An earlier form of Enemy types was played in a PSVR2 through SteamVR.
 
 **Unreleased: gameplay presets on Play.** The Play screen now switches directly
 between built-in Arcade, Balanced and Pro presets and saved profiles. The three

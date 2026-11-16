@@ -1027,7 +1027,20 @@ void Swing::inputs(float dt, const Input& in, const WorldQueries& world) {
                            std::isfinite(in.trackingYaw) && std::isfinite(h.trigger) && std::isfinite(h.grip);
         const Vec3 forward = h.aim.orientation.rotate({0, 0, -1});
         if (!valid || !finite(forward) || length(forward) < .9f || length(forward) > 1.1f) {
-            release(i, EventKind::TrackingLost);
+            // A hand the headset lost (HandInput::lost) keeps the web it holds
+            // for as long as its button is held, from where it was last seen
+            // (s.offset), and its trigger reels it. It shoots, takes and yanks
+            // nothing until it is seen again, and a press made meanwhile is no
+            // shot then.
+            const bool keep = h.lost && w.attached && std::isfinite(h.grip) && h.grip > .35f &&
+                              std::isfinite(h.trigger) && (w.airAnchor || world.exists(w.surface));
+            if (keep && w.ready()) {
+                if (h.trigger < .35f)
+                    s.triggerReleased = true;
+                s.reeling = s.triggerReleased && h.trigger > .65f;
+            }
+            if (!keep) // let go of by its button, or by the hand's loss
+                release(i, h.lost ? EventKind::Release : EventKind::TrackingLost);
             s.sample = false;
             s.held = true; // require a full release before the next shot
             s.rate = {};
@@ -1608,8 +1621,14 @@ void Swing::step(float dt, const Input& in, const WorldQueries& world, const Wor
             release(i, EventKind::Obstructed);
             continue;
         }
-        if (!w.ready())
-            continue;
+        // A web still flying (WEB SPEED) is followed as a held one is: its
+        // line from the body to where it will stick bends round what comes
+        // between, or is cut, step by step as with WEB SPEED off; only its
+        // pull waits for it to arrive. Left alone until it arrived, the body
+        // had swung or fallen past a corner meanwhile, the line crossed the
+        // building from its first step with no clear one before it to bend
+        // from (wrap), and the web let go 0.15 s after it arrived (0.8.1:
+        // "it attaches but immediately detaches").
         const Vec3 d = w.anchor - body_.position;
         const float dist = length(d);
         int passed{};

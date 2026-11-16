@@ -552,10 +552,12 @@ inline bool calibrated(const SessionOptions& options) {
 // Arguments after the script for tools/run_game_vr.py, for an untimed session
 // that starts the game itself (or uses the one already running). closeGame:
 // the player agreed to close a running game that already holds Spidy
-// (kCloseGameExit), and the session does that first.
+// (kCloseGameExit), and the session does that first. gameExe: the Spider-Man.exe
+// the launcher found or was shown; the session starts it through the store that
+// installed it (an Epic copy beside a Steam one, GitHub issue #84).
 inline std::vector<std::wstring> sessionArguments(const SessionOptions& options, std::wstring_view report,
                                                   std::wstring_view runtime, std::wstring_view stopEvent,
-                                                  bool closeGame = false) {
+                                                  bool closeGame = false, std::wstring_view gameExe = {}) {
     std::vector<std::wstring> args{L"--auto-launch", L"--seconds", L"0", L"--swing-speed",
                                    std::to_wstring(std::clamp(options.swingSpeed, 1, 65)), L"--output",
                                    std::wstring(report)};
@@ -624,6 +626,10 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
     }
     if (closeGame)
         args.emplace_back(L"--close-game");
+    if (!gameExe.empty()) {
+        args.emplace_back(L"--game-exe");
+        args.emplace_back(gameExe);
+    }
     return args;
 }
 

@@ -1276,8 +1276,8 @@ class ScreenControls {
             } else if (click && !clickSpent_) {
                 clickDown_ = true;
                 s.buttons &= static_cast<uint16_t>(~leftThumb);
-                const float rx = right.valid && std::isfinite(right.stickX) ? right.stickX : 0.f;
-                const float ry = right.valid && std::isfinite(right.stickY) ? right.stickY : 0.f;
+                const float rx = std::isfinite(right.stickX) ? right.stickX : 0.f;
+                const float ry = std::isfinite(right.stickY) ? right.stickY : 0.f;
                 if (std::abs(rx) >= decisive && std::abs(rx) > std::abs(ry)) {
                     s.buttons |= rx > 0 ? dpadRight : dpadLeft;
                     dpad_ = true;
@@ -1831,8 +1831,8 @@ inline State fromControllers(const XrFrame& frame, Mapping mapping, const Walk& 
         s.thumbLX = stick(walk.right);
         s.thumbLY = stick(walk.forward);
         constexpr float decisive = .7f;
-        const float rx = right.valid && std::isfinite(right.stickX) ? right.stickX : 0.f;
-        const float ry = right.valid && std::isfinite(right.stickY) ? right.stickY : 0.f;
+        const float rx = std::isfinite(right.stickX) ? right.stickX : 0.f;
+        const float ry = std::isfinite(right.stickY) ? right.stickY : 0.f;
         if (std::abs(rx) >= decisive && std::abs(rx) > std::abs(ry))
             s.buttons |= rx > 0 ? dpadRight : dpadLeft;
         else if (std::abs(ry) >= decisive)
@@ -1867,4 +1867,10 @@ struct Telemetry {
     uint32_t installed{}, buttons{};
 };
 Telemetry telemetry();
+// The buttons a real controller in the game's first slot gave its last read,
+// before the VR controllers' go over them (OR): one it holds, the VR
+// controllers cannot press. lorax69's right grip sent RB 15 times to the
+// game's Settings (0.8.5) and nothing turned, with an "XBOX 360 For Windows"
+// controller also in his game log.
+uint16_t realButtons();
 } // namespace spidy::game_pad

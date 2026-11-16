@@ -119,6 +119,9 @@ class InFlightStep {
 struct Hand {
     Pose aim{};
     Vec3 relative{};
+    // 1 tracked; 2 lost, its buttons live (HandInput::lost). No change of
+    // layout or version: an older swing module refuses a 2, and both come in
+    // one package.
     uint32_t tracked{};
     float trigger{}, grip{};
 };
@@ -645,7 +648,7 @@ inline bool valid(const Command& c) {
     for (const auto& h : c.hands) {
         const auto q = h.aim.orientation;
         const float norm = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
-        if (h.tracked > 1 || !finite(h.aim.position) || !finite(h.relative) || !std::isfinite(norm) ||
+        if (h.tracked > 2 || !finite(h.aim.position) || !finite(h.relative) || !std::isfinite(norm) ||
             norm < .99f || norm > 1.01f || !std::isfinite(h.trigger) || !std::isfinite(h.grip) ||
             h.trigger < 0 || h.trigger > 1 || h.grip < 0 || h.grip > 1)
             return false;
@@ -820,9 +823,11 @@ inline Input input(const Command& c) {
         out.leap = c.leap;
         out.look = c.look;
     }
-    for (unsigned i = 0; i < 2; ++i)
-        out.hands[i] = {c.hands[i].aim, c.hands[i].relative, c.hands[i].tracked != 0, c.hands[i].trigger,
+    for (unsigned i = 0; i < 2; ++i) {
+        out.hands[i] = {c.hands[i].aim, c.hands[i].relative, c.hands[i].tracked == 1, c.hands[i].trigger,
                         c.hands[i].grip};
+        out.hands[i].lost = c.hands[i].tracked == 2;
+    }
     if (c.version >= 5) {
         for (unsigned i = 0; i < 2; ++i) {
             out.hands[i].wallPosition = c.wallPositions[i];
