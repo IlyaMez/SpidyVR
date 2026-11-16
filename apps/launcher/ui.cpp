@@ -2097,6 +2097,12 @@ void App::options(ImVec2 origin, ImVec2 size) {
                "A hand moved fast closes into a fist even with nobody to punch. Off: only with an enemy "
                "marked or within reach, so hands at rest never close.",
                S(42), [&] { tabToggle("##airfists", Item::airFists); });
+        // The guards (game_guard::setEnemyTypes has the choice from the game's settings, spidy_vr.ini's
+        // enemy_types).
+        settingOption(Item::enemyTypes, "Enemy types",
+                      "Enemies that block in the base game block your punches and web strikes until they are "
+                      "webbed or stunned. Off: nobody guards, as before.",
+                      S(42), [&] { tabToggle("##enemytypes", Item::enemyTypes); });
     });
     group(4, 0, "Flip controls", [&] {
         settingOption(Item::realisticFlips, "Realistic flips (experimental)",

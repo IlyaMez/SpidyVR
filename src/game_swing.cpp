@@ -6,6 +6,7 @@
 #include "spidy/game_sound.hpp"
 #include "spidy/crawl_hands.hpp"
 #include "spidy/game_grab.hpp"
+#include "spidy/game_guard.hpp"
 #include "spidy/game_lines.hpp"
 #include "spidy/web_line.hpp"
 #include "spidy/game_offers.hpp"
@@ -1702,7 +1703,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
          header[2] != settingsBytesV21 && header[2] != settingsBytesV22 && header[2] != settingsBytesV23 &&
          header[2] != settingsBytesV24 && header[2] != settingsBytesV25 && header[2] != settingsBytesV26 &&
          header[2] != settingsBytesV27 && header[2] != settingsBytesV28 && header[2] != settingsBytesV29 &&
-         header[2] != settingsBytesV30 && header[2] != sizeof(s)) ||
+         header[2] != settingsBytesV30 && header[2] != settingsBytesV31 && header[2] != sizeof(s)) ||
         !copy(&s, input, header[2]) || !validSettings(s))
         return 2001;
     AcquireSRWLockExclusive(&lifecycle);
@@ -1737,6 +1738,9 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidySwingSettings(void* input) {
         noBlows = s.version >= 6 ? s.noBlows : 0u;
         combatVisuals = s.version < 11 || s.combatVisuals != 0;
         halfPunchDamage = s.version >= 21 && s.halfPunchDamage != 0;
+        // The launcher's Enemy types (settings version 32): on only when it says so. An older sender leaves
+        // the guards off.
+        game_guard::setEnemyTypes(s.version >= 32 && s.enemyTypes != 0);
         solver.singleHandYankStrength((s.version >= 22 ? s.singleHandYankPercent : 100u) / 100.f);
         // WEB TIE: off (and in older packets) no gesture and no tie, and a
         // webbed enemy comes as before; switched off, the ties let go.

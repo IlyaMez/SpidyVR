@@ -363,6 +363,10 @@ Data game_dodge::data() {
     ReleaseSRWLockShared(&lock);
     return out;
 }
+uint64_t game_dodge::begun() {
+    const volatile Live& live = SpidyDodgeLive;
+    return live.starts;
+}
 
 // For a probe without the swing (which starts it in a session): the hook in,
 // as game_dodge::start returns.

@@ -792,6 +792,7 @@ int main() {
         t.joystickRunCamera = false;
         t.halfPunchDamage = true;
         t.airFists = false;
+        t.enemyTypes = true; // off by default
         t.webTie = true;
         t.webLines = true;
         t.singleHandYankPercent = 200;
@@ -850,12 +851,15 @@ int main() {
                   "aim_markers=1\nair_webs=1\nsmart_anchor=0\nweb_range_m=100\nweb_speed=0\nswing_speed=32\n"
                   "weight=100\nelastic_web=0\n"
                   "soft_release=0\nswing_assist=0\nweb_slingshot=0\nslingshot_speed=0\n"
-                  "better_climbing=0\nsingle_hand_yank_percent=100\ntwo_hand_zip=0\nrope_steering=0\nwall_run=1\nsnap_turn=30\n"
+                  "better_climbing=0\nsingle_hand_yank_percent=100\ntwo_hand_zip=0\nrope_steering=0\nwall_"
+                  "run=1\nsnap_turn=30\n"
                   "smooth_turn=0\nhaptics=100\nreel_haptics=0\nswing_haptics=0\nblow_sounds=0\npc_media=0\n"
                   "body_haptics=100\nbody_haptics_webs=1\nbody_haptics_wind=1\n"
                   "body_haptics_combat=1\nbody_haptics_movement=1\nscreen_size=1\nscreen_depth=2\nhud=2\n"
-                  "ui_style=0\ncombat_visuals=1\nnear_clip_mm=20\nseated=0\nflips=0\ncontrolled_flips=0\nflip_speed=180\nhand_climb=0\n"
-                  "joystick_wall_run_camera=1\nwall_run_camera_tilt=1\nhalf_punch_damage=0\nair_fists=1\n"
+                  "ui_style=0\ncombat_visuals=1\nnear_clip_mm=20\nseated=0\nflips=0\ncontrolled_flips="
+                  "0\nflip_speed=180\nhand_climb=0\n"
+                  "joystick_wall_run_camera=1\nwall_run_camera_tilt=1\nhalf_punch_damage=0\nair_fists="
+                  "1\nenemy_types=0\n"
                   "web_tie=0\n"
                   "native_run=0\nair_slingshot=0\nweb_angle_degrees=0\nwrist_shooters=0\ndodge_tumble=0\n"
                   "run_curve=0\nnative_run_at_percent=70\nrun_logs=0\nrunning_leap=0\nearly_jump=0\n"

@@ -1,8 +1,10 @@
 #pragma once
+#include "guard.hpp"
 #include "math.hpp"
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -48,7 +50,29 @@ enum Trait : uint32_t {
     breakable = 8,
     ally = 16,
     hover = 32,
-    neutral = 64
+    neutral = 64,
+    // A boss: a BossHealth component (the guard leaves the bosses to the game).
+    boss = 128,
+    // A state class: the bot is stunned (BotStateStunned, BotStateElectricStun): game_targets::isStunned.
+    stunned = 256,
+    // Enemy types (guard.hpp, game_guard): what guard the classes of the actor's components give it - a
+    // baton's (a melee weapon's manager), a brute's, a shield's - and a class that takes every guard from it.
+    guardWeapon = 512,
+    guardBrawler = 1024,
+    guardShield = 2048,
+    guardExempt = 4096,
+    // A state class: the bot is staggered, stunned, webbed or knocked about (guards::opensGuard) - his guard
+    // is open in it (game_targets::inOpenState).
+    guardOpen = 8192,
+    // A component class of a swordsman (SwordsmanBot, BotConfigSwordsman ...): his block has the sword's
+    // sound and a swing kick does not go through it (guards::soundOf, guards::kickPasses).
+    guardSwordsman = 16384,
+    // A state class: the bot is webbed or caught in a web (guards::webbedState): his guard is down in it,
+    // whatever the mod's own blows did lately (game_targets::inWebbedState).
+    guardWebbed = 32768,
+    // A component class on the actor that is a behavior of a fight (guards::fightBehavior: BehaviorMeleeGame,
+    // BehaviorRangedCombat ...): a sign that he has detected the hero (game_guard::watch).
+    guardEngaged = 65536
 };
 // A bot's size: the capsule his mover collides with, above his actor's
 // transform, as the game builds it (1fbba90) from his mover manager's body
@@ -142,6 +166,20 @@ bool cocooned(uintptr_t base, const Candidate&);
 // A bot the game has stuck to a surface in his cocoon: BotStateWallStuck (a
 // down state, so not up()). What the web tie ends in.
 bool wallStuck(uintptr_t base, const Candidate&);
+// In a stunned state now (Trait stunned on his state machine's current state).
+bool isStunned(uintptr_t base, const Candidate&);
+// In a state that has him staggered, stunned, webbed or knocked about (guards::opensGuard by the state's
+// name, or any class it derives from).
+bool inOpenState(uintptr_t base, const Candidate&);
+// In a state that has him webbed or caught in a web (guards::webbedState by the state's name, or any class it
+// derives from): he never guards in it.
+bool inWebbedState(uintptr_t base, const Candidate&);
+// The name of the class of the state his state machine is in at this moment ("BotStateWebStruggle"), for the
+// guard's log. False (and `out` empty) when he is no bot or it cannot be read.
+bool stateName(uintptr_t base, const Candidate&, std::string& out);
+// In a state of an enemy on the move at the hero (guards::runningState by the name of the state's own class,
+// not by those it derives from: a dash attack is an attack).
+bool inRunningState(uintptr_t base, const Candidate&);
 // A device that still stands: one with hit points left, where it has any
 // (a turret torn off and thrown has none).
 bool standing(const Candidate& device);
@@ -167,6 +205,42 @@ bool position(const Candidate&, Vec3& out);
 // The candidate's hit points: false, and `out` left as it was, for an actor
 // without a health component or with one that cannot be read.
 bool health(const Candidate&, float& out);
+// Enemy types (guard.hpp): the most hit points he can have (his health component's float at +0x80), false for
+// none or one that cannot be read.
+bool maxHealth(const Candidate&, float& out);
+// The rules the classes' guard bits are read by (the built-in ones until set). Set at any time: every class
+// is read again by the next scan.
+void setGuardRules(const guards::Rules& rules);
+// The kind of guard the traits give: the strongest of the guard bits, None for none or an exempting class.
+inline guards::Kind guardKind(uint32_t traits) {
+    if (traits & guardExempt)
+        return guards::Kind::None;
+    guards::Kind kind = guards::Kind::None;
+    if (traits & guardWeapon)
+        kind = guards::stronger(kind, guards::Kind::Weapon);
+    if (traits & guardBrawler)
+        kind = guards::stronger(kind, guards::Kind::Brawler);
+    if (traits & guardShield)
+        kind = guards::stronger(kind, guards::Kind::Shield);
+    return kind;
+}
+// The combat-related component classes (tellsCombat) of one actor at the latest scan, comma separated: for
+// the guard's census line, so a guard that is missing can be given by a class name. False for an actor with
+// none.
+bool combatClasses(uint64_t record, std::string& out);
+// The Behavior classes of one actor at the latest scan, comma separated (the machinery every actor's
+// behaviors run on left out: guards::isBehavior): for the guard's census line, to tell the behaviors of an
+// enemy who has not detected the hero from those of one who has. False for an actor with none.
+bool behaviors(uint64_t record, std::string& out);
+
+// A class name the guard's census keeps: whether it is one that shows a block, a shield or a weapon.
+bool tellsCombat(const char* name);
+// The classes the game image itself names in its type information, for finding the game's
+// own block (or guard, or reaction) state: every "BotState..." class (without the BotState) in `states`, and
+// the other classes whose names tell of a block, a guard, a parry, a shield, a stagger and the like in
+// `others`, each a comma separated list in order, cut at about 240 names. False when the image cannot be
+// read.
+bool imageClasses(uintptr_t base, std::string& states, std::string& others);
 
 class Watch {
   public:

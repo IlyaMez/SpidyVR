@@ -23,9 +23,9 @@ view rotation and banking; it is not simply every slider at maximum.
 Personal setup stays as you set it: seated mode, height and body calibration,
 turning, web-button mapping and aiming alignment (including eye tracking),
 haptics, sound and media, HUD and screen presentation, cutscenes, graphics,
-recording and diagnostic logging. A preset remains selected when only these
-preferences change. A gameplay edit adds `*`; use **Save as a profile** to keep
-your variation. Built-ins cannot be overwritten or deleted.
+enemy types, recording and diagnostic logging. A preset remains selected when
+only these preferences change. A gameplay edit adds `*`; use **Save as a
+profile** to keep your variation. Built-ins cannot be overwritten or deleted.
 
 Your existing custom and imported profiles still apply the keys they contain,
 including personal settings if those keys are present. Missing keys stay unchanged.

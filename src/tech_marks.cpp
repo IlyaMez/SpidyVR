@@ -732,6 +732,96 @@ void appendKnockout(std::vector<Vertex>& out, const KnockoutView& knockout, Vec3
     hud.plain([&] { hud.text("KO", {x0 + height * .55f, -height * .5f}, height, line, 1, .13f); });
 }
 
+void appendBlock(std::vector<Vertex>& out, const BlockView& block, Vec3 viewer, float pixelAngle) {
+    const float distance = length(viewer - block.point);
+    if (!finite(block.point) || !finite(viewer) || !std::isfinite(pixelAngle) || pixelAngle <= 0 ||
+        !std::isfinite(block.age) || block.age < 0 || block.age >= BlockView::seconds ||
+        !(distance >= .12f && distance <= 60))
+        return;
+    const Facing f = facing(block.point, viewer);
+    const float age = block.age, px = pixelAngle * distance;
+    const float strength = unit(block.strength);
+    // The tag keeps a readable size at a distance, as the count's does (`height` is its unit); a weak blow's
+    // shield is the smaller.
+    const float reading = std::clamp(distance / .7f, .8f, 2.5f);
+    const float height = .03f * reading;
+    const float half = .05f * reading * (.85f + .3f * strength);
+    // He swings back at this blow: the chevron, the tag's bar and the diamonds are red, not amber.
+    const bool counter = block.counterAt >= 2 && block.streak >= block.counterAt;
+    const Vec3 accent = counter ? red : amber;
+    // Gone a little before its time is up.
+    const float fading = 1 - smooth((age - .5f) / .17f);
+    Hud hud(out, block.point, f.right, f.up, f.view, px);
+    // The first instant: a bright diamond where the fist met him.
+    if (age < .08f) {
+        hud.opacity(1 - age / .08f);
+        hud.lit(.45f, [&] { hud.diamond({}, half * .26f, mix(line, {1, 1, 1}, .6f)); });
+    }
+    // A hexagon going out from it, as a field flares where a blow strikes it.
+    if (const float t = age / .3f; t > 0 && t < 1) {
+        hud.opacity((1 - t) * (1 - t));
+        const float r = half * (.45f + 1.15f * easeOut(t));
+        hud.lit(.25f,
+                [&] { hud.arc({}, r, std::max(half * .035f * (1 - t), .7f * px), line, 1, 0, 2 * pi, 6); });
+    }
+    // The shield: thin lines on a translucent blue plate, drawn in as the display comes on, a chevron in it.
+    const float w = half * .82f;
+    const Flat shape[8] = {
+        {-w, half}, {w, half}, {w, 0}, {w * .7f, -half * .6f}, {0, -half * 1.12f}, {-w * .7f, -half * .6f},
+        {-w, 0},    {-w, half}};
+    hud.opacity(fading * easeOut(age / .1f));
+    hud.plain([&] {
+        hud.fill(shape[6], shape[2], shape[1], shape[0], panel, .55f);
+        hud.fill(shape[5], shape[3], shape[2], shape[6], panel, .55f);
+        hud.fill(shape[5], shape[4], shape[3], shape[3], panel, .55f);
+    });
+    hud.opacity(fading * easeOut(age / .1f) * flicker(age - .02f));
+    hud.lit(.3f, [&] {
+        hud.trail(shape, 8, std::max(half * .035f, .8f * px), line, .95f);
+        const Flat chevron[3] = {{-w * .5f, half * .5f}, {0, half * -.1f}, {w * .5f, half * .5f}};
+        hud.trail(chevron, 3, std::max(half * .06f, .9f * px), accent);
+    });
+    // The callout, as the combo count's is: a leader out from the shield's shoulder to a tag - a panel ruled
+    // above and below, a bar at its left - with a diamond in it for each blocked blow he takes before he
+    // swings back: lit for those he has taken, a thin outline for those to come. No lettering (the comic
+    // style has the word): the shield says it, and with no count to show there is no tag at all.
+    const int pips = block.counterAt >= 2 && block.counterAt <= BlockView::maxPips && block.streak >= 1
+                         ? block.counterAt
+                         : 0;
+    if (pips == 0)
+        return;
+    const float pipRadius = height * .32f, pipStep = pipRadius * 3.1f, pad = height * .55f;
+    const Flat from{w * .92f, half * .98f}, elbow = from + Flat{1, 1} * (height * .95f);
+    const float tagHigh = height * 1.5f, x0 = elbow.x;
+    const float wide =
+        pad + pipRadius * 1.1f + pipStep * static_cast<float>(pips - 1) + pipRadius * 1.1f + pad * .7f;
+    const float lead = easeOut(age / .08f), grown = easeOut((age - .06f) / .12f);
+    hud.opacity(fading);
+    const float half1 = std::max(height * .025f, .8f * px);
+    hud.lit(0, [&] { hud.bar(from, between(from, elbow, lead), half1, line, .9f); });
+    if (grown <= 0)
+        return;
+    const float x1 = x0 + wide * grown, y0 = elbow.y - tagHigh * .5f, y1 = elbow.y + tagHigh * .5f;
+    hud.plain([&] { hud.fill({x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}, panel, .6f); });
+    hud.lit(0, [&] {
+        hud.bar({x0, y1}, {x1, y1}, half1, line, .9f);
+        hud.bar({x0, y0}, {x1, y0}, half1, line, .9f);
+        hud.bar({x0, y0}, {x0, y1}, height * .07f, accent);
+    });
+    // The diamonds flicker on once the plate is out.
+    hud.opacity(fading * flicker(age - .16f));
+    const float firstPip = x0 + pad + pipRadius * 1.1f;
+    hud.lit(0, [&] {
+        for (int i = 0; i < pips; ++i) {
+            const Flat at{firstPip + pipStep * static_cast<float>(i), elbow.y};
+            if (i < block.streak || counter)
+                hud.diamond(at, pipRadius * 1.1f, accent);
+            else
+                hud.arc(at, pipRadius, std::max(pipRadius * .26f, .8f * px), line, .9f, 0, 2 * pi, 4);
+        }
+    });
+}
+
 namespace {
 Vec3 senseColor(SenseAnswer answer) {
     return answer == SenseAnswer::Dodge ? red : answer == SenseAnswer::Jump ? amber : cyan;

@@ -84,6 +84,11 @@ struct Values {
     // Experimental physical hand pulls, solid palms and crawling body poses.
     bool handClimb = false;
     bool halfPunchDamage = false; // half health damage, unchanged punch reactions
+    // ENEMY TYPES (the launcher's Enemy types; game_guard): the enemies that block in the base game (batons,
+    // shields, brutes and swordsmen) block the base attacks (punches and web strikes) until they are webbed
+    // or stunned. Off by default: nobody guards, as before Enemy types. First person cutscenes and half punch
+    // damage are other settings and do not change with it.
+    bool enemyTypes = false;
     // The web tie (the tab's WEB TIE; web_tie.hpp, docs/WEB-TIE.md): a webbed-up
     // enemy stuck to a wall by the hands together and the right stick's click,
     // and a webbed enemy who comes to the player only on the yank
@@ -460,8 +465,9 @@ enum class Item : uint8_t {
     palmShooters,
     webLines,
     airFists,
+    enemyTypes,
 };
-inline constexpr Item lastItem = Item::airFists;
+inline constexpr Item lastItem = Item::enemyTypes;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -485,7 +491,7 @@ struct Row {
     Place place{};
 };
 // Stable row/setting numbers; categories below determine presentation order.
-const std::array<Row, 95>& rows();
+const std::array<Row, 96>& rows();
 const Row* rowFor(Item);
 enum class Category : uint8_t { setup, webs, swinging, movement, flips, feedback, display, count };
 inline constexpr size_t categoryCount = static_cast<size_t>(Category::count);

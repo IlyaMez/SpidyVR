@@ -75,4 +75,8 @@ void stop();
 // (real m/s).
 void carry(uint64_t hero, bool webbed, bool airborne, Vec3 velocity);
 Data data();
+// How many dodges of the hero's have begun since the game started (SpidyDodgeLive's `starts`), for the
+// guards: a dodge that carries him over an enemy opens that enemy's guard (game_guard::dodgeBegan). Any
+// thread.
+uint64_t begun();
 } // namespace spidy::game_dodge
