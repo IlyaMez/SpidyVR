@@ -37,7 +37,7 @@ add_library(spidy_core src/swing.cpp src/web_grab.cpp src/web_tie.cpp src/web_li
             src/web_visual.cpp src/body_ik.cpp src/punch.cpp src/shooter.cpp src/vr_settings.cpp
             src/body_calibration.cpp src/overlay_text.cpp src/slow_motion.cpp src/web_strike.cpp
             src/impact_sound.cpp src/prompt_buttons.cpp src/gadget_wheel.cpp src/spider_sense.cpp src/phone.cpp
-            src/body_haptics.cpp src/tech_marks.cpp)
+            src/body_haptics.cpp src/tech_marks.cpp src/vr_texts.cpp)
 target_include_directories(spidy_core PUBLIC include)
 if(MSVC)
   target_compile_options(spidy_core PRIVATE /W4 /permissive-)

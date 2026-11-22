@@ -1631,6 +1631,51 @@ class ProtocolTests(unittest.TestCase):
                                                  'Microsoft Basic Render Driver'])
         self.assertEqual(game_adapters(''), [])
 
+    def test_two_graphics_cards_name_both_and_what_to_set(self):
+        from run_game_vr import gpu_mismatch_advice
+        # xr_session.cpp's words, as a Pico 4 Ultra player's laptop would have them.
+        message = ("Game GPU does not match OpenXR GPU: the game draws on Intel(R) UHD Graphics, the headset's "
+                   'runtime on NVIDIA GeForce RTX 4060 Laptop GPU.')
+        advice = gpu_mismatch_advice(message)
+        self.assertTrue(advice.startswith('Spidy VR unavailable: this PC has two graphics cards'))
+        self.assertIn('started on Intel(R) UHD Graphics while your headset', advice)
+        self.assertIn('High performance (NVIDIA GeForce RTX 4060 Laptop GPU)', advice)
+        self.assertIn('Display > Graphics', advice)
+        # An older module's bare words, and names Windows did not give: still the way out, without names.
+        bare = gpu_mismatch_advice('Game GPU does not match OpenXR GPU')
+        self.assertIn('started on one while your headset', bare)
+        self.assertIn('High performance, close the game', bare)
+        unknown = gpu_mismatch_advice(message.replace('Intel(R) UHD Graphics', 'unknown'))
+        self.assertIn('started on one while', unknown)
+        self.assertIsNone(gpu_mismatch_advice('Find headset XrResult=-2'))
+        self.assertIsNone(gpu_mismatch_advice(None))
+
+    def test_a_module_the_game_did_not_load_says_why(self):
+        from bridge_game import load_refusal
+        system = r'C:\Windows\System32'
+        versions = {system+r'\msvcp140.dll': '14.44.35211.0', r'C:\Mods\msvcp140.dll': '14.29.30133.0',
+                    system+r'\vcruntime140.dll': '14.44.35211.0'}
+        held = [dict(name='Spider-Man.exe', path=r'C:\Games\Spider-Man.exe'),
+                dict(name='VCRUNTIME140.dll', path=system+r'\vcruntime140.dll'),
+                dict(name='MSVCP140.dll', path=system+r'\msvcp140.dll')]
+        plain = load_refusal('spidy_bridge.dll', held, 0, system, versions.get)
+        self.assertTrue(plain.startswith("Spider-Man did not load Spidy's module spidy_bridge.dll."))
+        self.assertNotIn('C++ runtime', plain)
+        self.assertIn('antivirus', plain)
+        # Windows' own words when the file does not load here either.
+        self.assertIn('(error 225).', load_refusal('spidy_bridge.dll', held, 225, system, versions.get))
+        # An older runtime another program brought into the game: Spidy's module gets that one.
+        held[2] = dict(name='MSVCP140.dll', path=r'C:\Mods\msvcp140.dll')
+        named = load_refusal('spidy_bridge.dll', held, 0, system, versions.get)
+        self.assertIn(r"runtime's MSVCP140.dll 14.29.30133.0 from C:\Mods", named)
+        self.assertIn('another mod, overlay or tool', named)
+        # Windows' own copy, too old.
+        held[2] = dict(name='MSVCP140.dll', path=system+r'\msvcp140.dll')
+        versions[system+r'\msvcp140.dll'] = '14.38.33135.0'
+        old = load_refusal('spidy_bridge.dll', held, 0, system, versions.get)
+        self.assertIn('14.38.33135.0', old)
+        self.assertNotIn('another mod', old)
+
     def test_the_console_goes_to_a_log_beside_the_report(self):
         import io
         import run_game_vr

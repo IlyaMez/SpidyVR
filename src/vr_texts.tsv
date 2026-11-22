@@ -1,0 +1,718 @@
+# The game's texts in VR wording (vr_texts.hpp). One per line: the game's tag, a tab, the words a VR player sees
+# instead. *word* is the game's emphasis (<span class='emphasis'>word</span>). Buttons are written out in plain text
+# (A, B, X, Y, the grips, the triggers, the sticks), never as the game's icons, and a gesture says the motion. After
+# editing: python tools/game_texts.py table (needs the game installed: it reads each tag's English text from the
+# game's own table and writes src/vr_texts_table.inc).
+#
+# Help lines the game shows in play name the VR control that sends that button while the line is up (NamedPress):
+# LT or LB the left trigger, RT or RB the right one, L3 a click of the left stick, the D-pad the right stick pushed
+# that way. Where Spidy has its own gesture for the same button, the line describes the gesture: a hand beside the
+# head with its trigger (R3, scan), both hands at the chest with both triggers (L3 + R3, suit power), the right
+# stick pushed up and held (LT + RT, zip to a point and the game's aim) or down (D-pad down, heal), X (LB + RB),
+# the gadget wheel on X. Webs, swinging and walls are Spidy's own. Loading tips, the Moves List and the skills
+# describe moves, not a button on screen: they say how VR plays them (a fast fist, a fist swung up, both fists down).
+#
+# Left as the game wrote them: the controls, accessibility and key binding screens and the menus' bare button
+# names (BUTTON_*), which describe the gamepad and the keyboard themselves; the keyboard's own lines (*_MKB, but
+# TUT_PARKOUR_MKB); and four lines no VR control is known for (a movie's skip, MJ's device rotation, the air
+# tricks). MJ's and Miles's scenes, the stakeout cameras and the hostage QTE follow PLAYERS.md's table for a button
+# the game asks for; whether those scenes run as VR play or on the game screen was not measured.
+
+# Aiming, zipping to a surface (the game's LT, then RT; in VR the right stick held up is its aim)
+TUT_A1_GALLERY_OBJECT_DISTRACTION_AIM	Hold your left trigger to *aim* at an *object*.
+TUT_A1_GALLERY_OBJECT_DISTRACTION_TARGET	Turn your head to the *object* to *aim* at it.
+TUT_A1_GALLERY_WEBSHOOTER_DISTRACTION_AIM	Hold your left trigger to *aim* at the *floor*.
+TUT_A1_GALLERY_WEBSHOOTER_DISTRACTION_TARGET	Turn your head to the *point* on the floor to *aim* at it.
+TUT_A1_GALLERY_DISTRACTION_SHOOT	Pull your right trigger to fire the *Web Shooter*.
+TUT_A1_GALLERY_WEBZIP_AIM	Push the right stick straight up and hold it to *aim*.
+TUT_A1_GALLERY_WEBZIP_TO_CEILING	Look at the *ceiling* and let go of the right stick to *zip* to it.
+TUT_A1_SHIPYARD_ZIPTOWALL	Look at the *wall* and let go of the right stick to *zip* to it.
+TUT_AIM	Hold your left trigger to Aim.
+TUT_AIMANDZIP	Push the right stick straight up and hold it, look at a surface, then let go of the stick to zip to it.
+TUT_BACKPACK_ZIP_REMINDER	Push the right stick straight up and hold it, look at a surface, then let go to zip to it.
+TUT_ZIPTOSURFACE	Let go of the right stick while aiming to zip to the surface.
+HELP_ZIPTOSURFACE_REMINDER	Push the right stick up and hold it, look at a surface, then let go to zip to it.
+HELP_CRIME_PERCHTOSIGNAL	Push the right stick up and hold it to *aim*, then let go to get in range and fix the signal.
+HELP_DEMONS_STORY_TAIL_CEILINGATTACH	Push the right stick up and hold it, look at the ceiling, then let go to zip to it.
+HELP_GEN_AIMEDPERCH	Push the right stick up and hold it to *aim*, then let go to *perch*.
+HELP_SCORPION_WEBZIP_TO_WALL	Push the right stick up and hold it, look at the wall, then let go to zip to it.
+HELP_TASKMASTER_PERCHNEARCAMS	Push the right stick up and hold it to aim, then let go to perch near spy cams.
+HELP_SHIPYARD_AIM	Hold your left trigger to aim at the junction box.
+HELP_SHIPYARD_AIMATJUNCTIONBOX	Turn your head to the junction box to aim at it.
+CTRL_ACTION_ZIPTOWALL	Right stick up, hold: Zip to Wall
+
+# Zip to a point, perch, vents, Web Tunnel (the game's LT + RT: the right stick pushed up and held)
+TUT_LEDGEZIP	Push the right stick straight up and hold it to perform a *Zip To Point* move.
+TUT_ZIPTOPERCH	Look at a point, then push the right stick straight up and hold it to *zip* there.
+TUT_VENTZIP	Look at a *vent*, then push the right stick straight up and hold it to *zip* to it.
+TUT_WEBZIP_POINTLAUNCH	Push the right stick up and hold it to Zip to Point, then press A to Point Launch.
+TUT_CTNS_SB_EMP_TRIGGERPHOTOBOMB	Push the right stick straight up and hold it to activate this *Photobomb Target*.
+HELP_SCORPION_WEBTUNNEL	Push the right stick straight up and hold it to *Web Tunnel*.
+HELP_WEB_TUNNEL	Push the right stick straight up and hold it to perform the *Web Tunnel* move.
+CTRL_ACTION_PERCH	Right stick up, hold: Perch
+CTRL_ACTION_WEBTUNNEL	Right stick up, hold: Web Tunnel
+CTRL_ACTION_ZIPTOTARGET	Right stick up, hold: Zip to Target
+CTRL_ACTION_ZIPTOVENT	Right stick up, hold: Zip to Vent
+CTRL_BUTTONS_PERCH	Right stick up, hold
+CTRL_BUTTONS_LAUNCH	Right stick up, hold, then A
+
+# Scanning (the game's R3: a hand raised beside your head, its trigger pulled)
+TUT_SPIDEYSENSE	Raise a hand beside your head and pull its trigger to activate Spider Sense.
+TUT_SCANFORDISTRACTION	Raise a hand beside your head and pull its trigger to scan for distraction objects.
+TUT_SCANFORENEMIES	Raise a hand beside your head and pull its trigger to scan for enemies.
+TUT_SCANFORINTERACTS	Raise a hand beside your head and pull its trigger to scan the environment.
+TUT_LONGPING	Raise a hand beside your head and hold its trigger to locate *citywide activities*.
+TUT_FACTIONBASE_BONUSOBJECTIVES	Raise a hand beside your head and pull its trigger for bonus objective progress.
+TUT_PING_BACKPACKS	Raise a hand beside your head and pull its trigger to locate Backpacks.
+TUT_PING_CHALLENGES	Raise a hand beside your head and pull its trigger to locate Challenges.
+TUT_PING_CRIMES	Raise a hand beside your head and pull its trigger to locate crimes in progress.
+TUT_PING_ENEMYBASE	Raise a hand beside your head and pull its trigger to locate Enemy Bases.
+TUT_PING_INTELTOWERS	Raise a hand beside your head and pull its trigger to locate Surveillance Towers.
+TUT_PING_LANDMARKS	Raise a hand beside your head and pull its trigger to locate Landmarks.
+TUT_PING_RESEARCHSTATIONS	Raise a hand beside your head and pull its trigger to locate Research Stations.
+TUT_BC02_INVESTIGATE_SCANFORCLUES	Raise a hand beside your head and pull its trigger to scan for clues.
+TUT_CTNS_HH_FINDLOCATION_DETECTSIGNAL	Raise a hand beside your head and pull its trigger to detect mobile signals.
+TUT_CTNS_HH_FINDLOCATION_EXPOSECONVERSATIONS	Raise a hand beside your head and pull its trigger to find conversations.
+TUT_CTNS_HH_SCAN_ROOM	Raise a hand beside your head and pull its trigger to *scan* the *room*.
+TUT_CTNS_SB_BOMB_LOCATE	Raise a hand beside your head and pull its trigger to locate the bomb.
+TUT_CTNS_SB_EMP_DAMAGEHELP	Raise a hand beside your head and pull its trigger to find the next EMP target.
+TUT_CTNS_SS_LOCATESABLE	Raise a hand beside your head and pull its trigger to locate Sable.
+TUT_OM_ACID_FINDORIGIN	Raise a hand beside your head and pull its trigger to find the cause of the abnormal pressure.
+TUT_OM_ASBESTOS_FOLLOWTRAIL	Raise a hand beside your head and pull its trigger to *follow* the trail.
+TUT_OM_ASBESTOS_SCANFORCOMPONENTS	Raise a hand beside your head and pull its trigger to *scan* for the *components*.
+TUT_OM_CHIN_DIVE_SCAN	Get to the fountain, raise a hand beside your head and pull its trigger to scan for deadly bacteria.
+TUT_OM_CHI_ACID_O32_SCAN_HELP	Raise a hand beside your head and pull its trigger to *scan* the pressure.
+TUT_OM_FISH_SCANFISH	Raise a hand beside your head and pull its trigger to *scan* the *fish*.
+TUT_OM_PIGEON_SCANPIGEONS	Raise a hand beside your head and pull its trigger to *scan* the *pigeons*.
+TUT_OM_WS_DIVE_SCAN	Raise a hand beside your head and pull its trigger to *scan* for *toxic algae*.
+HELP_A2_GCT_FINDSOURCES	Raise a hand beside your head and pull its trigger to *find sources*.
+HELP_GEN_SCAN	Raise a hand beside your head and pull its trigger to *scan*.
+HELP_GEN_SPIDERBOTSYNC	Raise a hand beside your head and pull its trigger to sync with Spider-bot.
+HELP_SAFE_PING	Raise a hand beside your head and pull its trigger to show enemies that are safe for Takedowns.
+UI_HELP_PING_ACTIVE_CRIMES	Raise a hand beside your head and pull its trigger to show active crimes.
+TIPS_LOADING_013	Raise a hand beside your head and pull its trigger to scan the environment for points of interest.
+
+# The web shooter and gadgets (the game's RB: the right trigger while the line is up; LT + RB: hold the left one)
+TUT_WEBENEMIESTOWALLS	Pull your right trigger *repeatedly* to web up enemies and stick them to walls.
+TUT_WEB_TURRETS	Pull your right trigger *repeatedly* to web up the turret.
+TUT_DISABLEELECTRO	Use your Web Shooters (your right trigger) to stun Electro.
+TUT_CTNS_BC_SLOWCAT	Pull your right trigger to slow down Black Cat
+TUT_CTNS_BC_WEBCAT	Pull your right trigger to web Black Cat.
+TUT_CTNS_SB_EMP_WEBEMP	Pull your right trigger repeatedly to web up the EMP.
+TUT_CTNS_SS_CHASE_DESTROYDRONES	Pull your right trigger to destroy drones with your web shooters.
+TUT_WS_INVISIBLE_DESTROYDRONE	Pull your right trigger to *destroy* the *drone*.
+TUT_WS_INVISIBLE_DRONE	Get *close* to the *drone* while *invisible* and pull your right trigger.
+TUT_WS_SPIDERBOT2_WEBCRIMINAL	Pull your right trigger repeatedly until the enemy is webbed down.
+TEXT_SPIDERBOT_THUG_WEB_TUT	Pull your right trigger repeatedly until the enemy is webbed down.
+HELP_A1_FISK_WEBFISK	Pull your right trigger *repeatedly* to web up Fisk.
+HELP_WEBSHOOTER	Pull your right trigger repeatedly to web up enemies.
+HELP_WEB_HEAVY	Pull your right trigger repeatedly to web up Brutes.
+HELP_TASKMASTER_WEBTHROWBOMBS	Pull your right trigger repeatedly to muffle thrown bombs for a bonus.
+CTNS_TIP_BLACKCATSTAMINA	Deplete her stamina with your Web Shooters (your right trigger).
+TUT_OBJ_OM_HAR_WS_STEAM_E08_2	Shoot the *smoking vents*: hold your left trigger and pull your right one.
+TUT_OM_ACID_LEAKS	Hold your left trigger and pull your right one to fire webs and *seal the leaks*.
+TUT_OM_ASBESTOS_SEALGRATE	Hold your left trigger and pull your right one to *web* the grate and *seal it*.
+TUT_OM_MIGRATION_HITSCREENS	Hold your left trigger, then pull your right one to hit the screens with *Electric Webs*.
+HELP_GEN_DESTROYPOWERNODES	Hold your left trigger to aim and pull your right one to destroy transformers with *Web Shooters*.
+UI_HELP_DISTRACT_WITH_WEB_SHOOTER	Hold your left trigger to aim and pull your right one to shoot webs near an enemy and distract them.
+TUT_AIM_TRIPMINE	Hold your left trigger to aim the Trip Mine at the boxes.
+TUT_FIRE_ELECTRICWEB	Pull your right trigger to fire Electric Web at an enemy.
+TUT_FIRE_IMPACTWEB	Pull your right trigger to fire Impact Web at an enemy.
+TUT_FIRE_TRIPMINE	Pull your right trigger to launch the Trip Mine.
+TUT_SHOOT_ELECTRICWEB	Pull your right trigger to shoot the Electric Web.
+HELP_FIRE_IMPACTWEB	Pull your right trigger to fire an *Impact Web* at an enemy.
+HELP_FIRE_WEBBOMB	Pull your right trigger to fire a *Web Bomb* at an enemy.
+HELP_SHIPYARD_FIREELECTRICWEB	Pull your right trigger to shoot the Electric Web.
+CTRL_ACTION_USEGADGET	Right trigger: Use Gadget
+CTNS_PROMPT_BC_IMPACTWEB	Right trigger: Impact Web
+CTRL_BUTTONS_ELECTRICWEBS	Point a free hand, pull its trigger
+TIPS_LOADING_014	To build up webbing on enemies, point a free hand at them and pull its trigger *rapidly*. Enemies near walls will get stuck when enough webs have built up on them.
+MOVES_WEBSHOOTER_BTNS	Free hand's trigger, rapidly
+
+# The gadget wheel (hold X, move that hand toward a gadget, let go of X)
+TUT_WEAPONWHEEL	Hold X to bring up the *Gadget Select* in front of that hand.
+TUT_WEAPONWHEEL_ALT	Hold X to bring up the *Gadget Select* in front of that hand.
+TUT_WEAPONWHEEL_TOGGLE	Hold X to bring up the *Gadget Select* in front of that hand.
+TUT_WEAPONWHEEL_TOGGLE_SELECT	Move your hand toward the gadget and let go of X to select it.
+TUT_GADGETSELECT	Move your hand toward a gadget and let go of X to select it.
+TUT_EQUIP_ELECTRICWEB	Move your hand toward Electric Web and let go of X.
+TUT_EQUIP_IMPACTWEB	Move your hand toward Impact Web and let go of X.
+TUT_EQUIP_TRIPWIRE	Move your hand toward Trip Mine and let go of X.
+TUT_EQUIP_WEBBOMB	Move your hand toward Web Bomb and let go of X.
+TUT_IMPACTWEBSELECT	Hold X for the Gadget Select, move your hand toward the Impact Web and let go of X.
+TUT_IMPACTWEBSELECT_ALT	Hold X for the Gadget Select, move your hand toward the Impact Web and let go of X.
+TUT_IMPACTWEBSELECT_TOGGLE	Hold X for the Gadget Select, move your hand toward the Impact Web and let go of X.
+TUT_WEBSHOOTERSELECT	Hold X for the Gadget Select, move your hand toward the Web Shooter and let go of X.
+TUT_WEBSHOOTERSELECT_ALT	Hold X for the Gadget Select, move your hand toward the Web Shooter and let go of X.
+TUT_WEBSHOOTERSELECT_TOGGLE	Hold X for the Gadget Select, move your hand toward the Web Shooter and let go of X.
+HELP_SHIPYARD_ELECTRICWEBSELECT	Hold X for the Gadget Select, move your hand toward the Electric Web and let go of X.
+HELP_SHIPYARD_ELECTRICWEBSELECT_ALT	Hold X for the Gadget Select, move your hand toward the Electric Web and let go of X.
+HELP_SHIPYARD_ELECTRICWEBSELECT_TOGGLE	Hold X for the Gadget Select, move your hand toward the Electric Web and let go of X.
+HELP_SHIPYARD_SWITCHGADGETS	Hold X, move your hand toward another gadget and let go of X to switch.
+HELP_SHIPYARD_ELECTRICWEB	Right stick up: Electric Web
+TUT_CTNS_SB_GADGET_QUICKSWITCH	Hold X, move your hand toward another gadget and let go of X to switch.
+TIPS_LOADING_054	Hold X, move your hand toward a gadget and let go of X to *swap* to it.
+
+# Throwing and yanking (the game's LB + RB is X; its yank at an enemy is Y)
+TUT_THROWOBJECTS	Hold X to throw objects.
+TUT_YANK_AND_THROW_TURRET	Hold X to yank and throw turrets
+TUT_OM_ASBESTOS_THOWBARRELS	Throw the barrels into the ocean with X.
+TEXT_OM_GREN_FISH_YANKBARRELS	Yank the barrels out of the water with X
+HELP_GEN_THROW	Hold X to throw.
+HELP_TASKMASTER_DISPOSEBOMBS	Hold X to dispose of bombs when in range.
+HELP_WS_ASBESTOS_NEUTRALIZE	Hold X to neutralize the chemical.
+HELP_WS_ASBESTOS_THROWFROMAIR	Hold X while in the air to throw concrete bags.
+CHALLENGE_BOMB_TUT_DISPOSEBOMB	Hold X to dispose of the bomb when in range.
+SKILL_UPGRADE_ROCKETRETURN_DESC	Press X to throw rockets back at enemies.
+MOVES_YANK_OBJECT_BTNS	Hold X
+TUT_YANK	Hold Y to *yank* enemies, or shoot a web at one and pull your hand back sharply.
+TUT_LAUNCH_AND_YANK	Swing a fist up into an enemy (or hold X), then hold Y to *Air Launch* and *yank* them down.
+TIPS_LOADING_007	Disarm enemies by holding Y to yank away their weapon.
+TIPS_LOADING_008	While in the air, *hold* Y to yank enemies up to you. Chain this with other air combat moves to stay above enemies.
+TIPS_LOADING_032	After launching an enemy into the air, hold Y to yank them down and *slam* them into other enemies.
+SKILL_UPGRADE_AIRYANK_DESC	Hold Y while in the air to yank enemies upwards and enable air combat moves.
+SKILL_UPGRADE_YANKANDTHROW_DESC	Hold Y to hurl yanked weapons back at enemies with concussive force.
+SKILL_UPGRADE_YANKDOWN_DESC	Hold Y after knocking enemies into the air to yank them back down with concussive force.
+SKILL_UPGRADE_YANKHEAVYWEAPONS_DESC	Hold Y to yank heavy arms like rifles, launchers, and shields away from enemies.
+SKILL_UPGRADE_YANKSMALLARMS_DESC	Hold Y to yank small arms like pistols and batons right out of enemies' hands.
+
+# Fighting with your fists (a fast fist is the game's X; a fist swung up its Air Launch while it asks for X)
+HELP_BASIC_ATTACK	Throw a fast fist at an enemy to *attack*.
+HELP_BUILD_FOCUS_01	Punch enemies to build *Focus*: a fast fist into them lands a blow.
+HELP_AIR_COMBO	In the air, keep punching the enemy beside you to perform an *Air Combo*.
+HELP_AIR_LAUNCH	Swing a fist up into an enemy, or hold X, to perform an *Air Launch*.
+HELP_GEN_BREAKBLOCK	Swing a fist up into the enemy, or hold X, to break block.
+TUT_BREAKGUARD	Swing a fist up into a shield enemy, or hold X, to break their guard with an Air Launcher.
+HELP_GEN_COMBATCONTROLS	A fast fist: Melee Attack<br>B: Dodge<br>A punch toward a far enemy: Web Strike<br>Free hand's trigger: Web Shooter
+TIPS_LOADING_003	Swing or fall fast into an enemy to *Swing Kick* them and send them flying. Swing kicks are good for chaining into air combat attacks.
+TIPS_LOADING_043	Swing a fist up into enemies with melee weapons to *launch* them into the air.
+MOVES_BASICATTACK_BTNS	A fast fist
+MOVES_COMBO_BTNS	Four punches in a row
+MOVES_AIRCOMBO_BTNS	Four punches in the air
+MOVES_AIRLAUNCH_BTNS	Fist swung up into the enemy
+MOVES_AIRLAUNCH_DESC	Swing a fist up into an enemy to launch them into the air. A great way to begin air combat.
+MOVES_LAUNCHFOLLOWUP_BTNS	Fist swung up, then a punch
+MOVES_AIRSLAM_BTNS	Punch down at the enemy
+MOVES_AIRSLAM_DESC	While in the air, punch down at an enemy to slam them back to the ground.
+MOVES_YANKDOWN_BTNS	Fist swung up, then punch down
+MOVES_SWINGKICK_BTNS	Swing fast into the enemy
+MOVES_SWINGKICK_DESC	Swing, zip or fall fast into the ringed enemy to kick them feet first and send them flying.
+SKILL_UPGRADE_SWINGKICK_DESC	Swing or fall fast into an enemy to Swing Kick them and send them flying.
+MOVES_WEBSTRIKE_BTNS	Punch toward a far enemy, or Y
+MOVES_GROUNDSTRIKE_BTNS	Both fists down hard, in the air
+MOVES_GROUNDSTRIKE_DESC	In a fight, in the air, throw both fists down together, hard, to smash the ground. Can be performed from the air at higher elevations. Blast range and damage increases when used from higher elevation.
+SKILL_UPGRADE_GROUNDSTRIKE_DESC	After leaping off an enemy or from air combat, throw both fists down together, hard, to smash the ground with explosive force.
+CTRL_BUTTONS_GROUNDSTRIKE	Both fists down hard, in the air
+
+# The Moves List's other rows, their buttons in plain text
+MOVES_AIRTHROW_BTNS	Hold Y
+MOVES_AIRYANK_BTNS	Hold Y
+MOVES_BASICATTACK_YANKENEMY_BTNS	Hold Y
+MOVES_DISARMENEMY_BTNS	Hold Y
+MOVES_WEBGRAB_BTNS	Hold Y
+MOVES_SPINCYCLE_BTNS	Hold Y, then tap Y, Y, Y
+MOVES_THROW_BTNS	X, then hold Y
+MOVES_DODGE_BTNS	B
+MOVES_PERFECTDODGE_BTNS	B, at the last moment
+MOVES_LONGDODGE_BTNS	B, then A
+MOVES_DODGEUNDER_BTNS	X, then B
+MOVES_WALLDODGE_BTNS	B into a wall, then X
+MOVES_LEAPOFF_BTNS	X, then A
+MOVES_JUMP_BTNS	A
+MOVES_QUICKRECOVERY_BTNS	A as you roll
+MOVES_WALLJUMP_BTNS	A, running up a wall
+MOVES_WALLCORNERING_BTNS	Hold B
+
+# Finishers and the suit power (the game's B + Y; L3 + R3: both hands together at your chest, both triggers)
+CTRL_ACTION_FINISHER	B + Y: Finisher
+UI_HELP_ACTIVE_FINISHER	Press B and Y together near an enemy to finish them.
+TIPS_LOADING_019	Build up your *Focus* and press B and Y together to instantly finish an enemy. The more *Focus* you have the more *damage* you do.
+MOVES_FINISHER_BTNS	B and Y together
+HELP_SUIT_POWER	Hold both hands together at your chest and pull both triggers to activate your *Suit Power*.
+TEXT_SUITPOWER_ACTIVATE	Hold both hands together at your chest and pull both triggers to activate.
+UI_HELP_FOCUS_MODE	Hold both hands together at your chest and pull both triggers to activate Focus Mode.
+TUT_A3_OTTOFIGHT_GADGETAMMO	Activate your Suit Power (both hands at your chest, both triggers) to regenerate gadget refills.
+
+# Healing (the game's D-pad down: the right stick pushed down and held)
+HELP_ACTIVATE_HEAL	Push the right stick straight down and hold it to *heal*.
+TIPS_LOADING_031	Push the right stick straight down and hold it to use *Focus* and heal.
+MOVES_REGEN_BTNS	Right stick down, hold
+
+# Swinging, diving, running and walls
+HUD_MSG_SWING	Squeeze a grip and hold it: Swing
+HUD_MSG_WEBZIP	Pull your hand back sharply: Web Zip
+HELP_GEN_SWING	Squeeze a grip to shoot a web and keep holding it to *swing*.
+HELP_GEN_SWING_RELEASE	Let go of the grip to detach.
+HELP_GEN_SWINGCONTROLSCOMBINED	Hold a grip to *Swing* <br>Pull that hand back sharply to *Web Zip*.
+HELP_GEN_SWING_JUMP	Let go of the grip at the top of a swing to *jump* off it and *gain speed*.
+HELP_GEN_PAKOURTOSWING	Press A to *jump*, then squeeze a grip to *swing*.
+HELP_JUMP_AND_SWING	Press A to jump, then squeeze a grip to swing.
+CTRL_BUTTONS_JUMPANDSWING	A, then hold a grip
+TUT_DIVESWING	Squeeze a grip as you dive to swing out with greater speed.
+TIPS_LOADING_009	To quickly change direction while swinging, shoot a web the new way and pull that hand back sharply to *Web Zip*.
+TIPS_LOADING_011	To *Point Launch*, zip to a point (push the right stick up and hold it) and then press A right before landing.
+TIPS_LOADING_012	Let go and fall before your next web to *gain speed* while swinging. The farther you fall the more speed you gain.
+MOVES_SWING_BTNS	Hold a grip
+MOVES_WEBZIP_BTNS	Pull a web's hand back sharply
+MOVES_WEBZIP_DESC	While in the air, pull the hand that holds a web back sharply to zip to where it holds. Web Zip is great for maintaining altitude and changing direction.
+MOVES_PERCHZIP_BTNS	Right stick up, hold
+MOVES_PERCHLAUNCH_BTNS	Right stick up, hold, then A
+TUT_OM_CHIN_DIVE_DIVE_150M	Dive (click the left stick in the air) for 150 meters, then swing.
+TUT_OM_WS_DIVE_250M	Click the left stick in the air to *dive* for 100 Meters, then *swing out*.
+TUT_OM_WS_DIVE_300M	Click the left stick in the air to *dive* for 250 Meters, then *swing out*.
+HELP_GEN_DIVE	Click the left stick while in the air to *dive*.
+UI_HELP_DIVE	Click the left stick in the air to dive and gain speed.
+CTRL_ACTION_DIVE	Left stick click: Dive
+UI_HELP_ENTER_PERCH_FROM_GROUND	Click the left stick to perch near a ledge.
+TUT_CRAWL_DROP	Click and hold the left stick to drop.
+TUT_HANG	Pull your left trigger to hang.
+UI_HELP_CEILING_HANG	Pull your left trigger to hang from the ceiling.
+TUT_PARKOUR	Push the left stick forward and hold your right trigger to *parkour*.
+# The game shows its keyboard's line in place of the one above while the keyboard was the last device it saw.
+TUT_PARKOUR_MKB	Push the left stick forward and hold your right trigger to *parkour*.
+TUT_QUICKCROUCH	Hold your right trigger to move quickly.
+HINT_A1_GALLERY_QUICK_MOVE_WHILE_CROUCHING	Hold your right trigger to move quickly
+HELP_GEN_PARKOUR	Hold your right trigger to *parkour*.
+HELP_GEN_SPRINT	Hold your right trigger to *sprint*.
+TUT_BC02_CHASE_EMP_TIP	The EMP temporarily disabled your webs! Hold your right trigger to keep up with Black Cat.
+TIPS_LOADING_017	Run with the left stick. Turn on NATIVE RUN (Settings, VR MOVEMENT) to *sprint* and *parkour* over objects.
+TUT_WALLRUN	Swing or jump into a *wall* at speed to *Wall Run* along it.
+HELP_FISK_WALLRUN	Swing or jump into a wall at speed to *Wall Run*.
+HELP_PENTHOUSE_WALLRUN	Swing or jump into a wall at speed to *Wall Run*.
+HELP_GEN_RUNUPWALLS	Walk into a *wall* with the left stick to step onto it, and keep pushing to go *up*.
+MOVES_WALLRUN_BTNS	Swing fast into a wall
+MOVES_WALLRUN_DESC	Swing or jump into a wall at speed to run along it.
+MOVES_CHARGEJUMP_BTNS	Hold A on the ground, let go
+MOVES_CHARGEJUMP_DESC	On the ground, hold A to build up charge, then let go for a huge leap. Tilt the left stick to leap forward too.
+SKILL_UPGRADE_CHARGEJUMP_DESC	On the ground, hold A to build up charge, then let go for a huge leap.
+HUD_MSG_LONG_DODGE	Left trigger + B: Long Dodge
+
+# The D-pad's other ways (the right stick pushed that way while the line is up), the camera, the menus
+TUT_BC_04_FINALE_BLACKCAT_TAKEDOWN	Push the right stick right on [BLACKCAT_ICON] *marked* enemies to request a *Black Cat Takedown*.
+CTRL_ACTION_BC_TAKEDOWN	Right stick right: Black Cat Takedown
+CTRL_ACTION_DISABLECAM	Right stick up: Disable Camera
+TUT_OM_PIGEON_DISPERSEVACCINE	Pull your left trigger to *disperse vaccine*.
+TUT_OM_SMOG_EQUIPCAM	Reach behind your hip for your phone and open CAMERA to equip the *camera*.
+HELP_EQUIP_CAMERA	Reach behind your hip for your phone and open CAMERA to equip your *Camera*.
+HELP_AIM_CAMERA	Hold your left trigger to aim the *Camera*.
+HELP_AIM_CAMERA_TOGGLE	Pull your left trigger to aim the *Camera*.
+HELP_SNAP_PHOTO	Pull your right trigger when the viewfinder turns green to take a photo.
+TUT_CTNS_HH_TAKE_PHOTO	Pull your right trigger to take a photo.
+CTNS_HELP_PHOTOCONTROLS	Pull your left trigger to zoom, then your right trigger to take a picture
+CTRL_BUTTONS_PHOTOS	Hold left trigger, pull right trigger
+HELP_A2_AUNTMAY_FUSEBOXES	Hold your left trigger and Y: Web Fuse Boxes
+HELP_A2_GCT_LOOK	Turn your head to *look around*.
+TUT_ACCESSSKILLTREE	Reach behind your hip for your phone and open MENU to access the *Skill Tree*.
+TUT_OPEN_GADGETPAGE	Reach behind your hip for your phone and open MENU for the Gadget Page
+TUT_MISSIONSELECT	Open MENU on your phone to switch between available *Missions* on the missions page.
+TUT_FASTTRAVEL_02	Open MENU on your phone, highlight F.E.A.S.T. in the map, and hold Y to Fast Travel.
+HELP_GEN_VIEWMAP	Reach behind your hip for your phone and open MENU to view the map.
+HUD_ALERT_MULTIPLEMISSIONSAVAILABLE	Open MENU on your phone to switch to other missions on the Missions Page.
+HUD_ABANDONMISSION_ALERT	You can leave any activity by pressing the Menu button, then 'Abandon Mission'
+
+# The rest of the game's lines that name a button: written out in plain text, the motion said where VR does
+# it its own way (a punch is the game's X while it asks for one, a quick step aside its dodge while
+# Spider-Sense warns). Hint cards' "Press A to continue", the HUD's "Y: Interact".
+BTN_A1_SUITCRAFTING_OPENATTACHMENT	PRESS A TO OPEN ATTACHMENT
+BTN_ADJUSTTIME	Y: Adjust Time
+BTN_MICHAELS_03_OSCORP_EXIT	Press B to exit.
+BTN_MICHAELS_03_OSCORP_NEXTSLIDE	A: NEXT SLIDE
+BTN_MOVES_CONTROLLERLAYOUT	PRESS Y TO VIEW CONTROLLER LAYOUT
+CIRCUIT_GEN_BEGINDEBUG	PRESS A TO BEGIN DEBUGGING COMPONENT
+CIRCUIT_GEN_BEGINDIAG	PRESS A TO BEGIN DIAGNOSTICS
+CIRCUIT_GEN_NEXTCOMPONENT	PRESS A FOR NEXT COMPONENT
+CIRCUIT_OTTOLEAVES_CRITFAILURE_CONTINUE	PRESS A TO CONTINUE
+CTNS_CTRL_MJRUN	Hold your right trigger to run
+CTNS_DLC_UNLOCKED_CAMPAIGN_BODY	Use the DLC tab of the game menu (MENU on your phone) to access &quot;The City That Never Sleeps&quot; campaigns.
+CTNS_HELP_TRUCKENEMIES	Press A to surprise enemies
+CTRL_ACTION_AIRLAUNCH	Fist swung up, or hold X: Air Launch
+CTRL_ACTION_ATTACH	X: Attach
+CTRL_ACTION_DODGEUNDER	X, then B: Dodge Under Legs
+CTRL_ACTION_MILES_AIMTOHACK	Left trigger: Aim to Hack
+CTRL_ACTION_MJ_REQ_DISTRACTION	X: Request Distraction
+CTRL_ACTION_MJ_REQ_TAKEDOWN	X: Request Takedown
+CTRL_ACTION_PERCHTAKEDOWN	Punch or X: Perch Takedown
+CTRL_ACTION_POINTLAUNCH	A: Point Launch
+CTRL_ACTION_PULL	Hold X: Pull
+CTRL_ACTION_QUICKRECOVERY	A: Quick Recovery
+CTRL_ACTION_TAKEDOWN	Punch or X: Takedown
+CTRL_ACTION_TARGETSELECT	Left stick: Target Select
+CTRL_ACTION_THROW	Hold X: Throw
+CTRL_ACTION_WEBSTRIKE	Y or a punch from afar: Web Strike
+CTRL_ACTION_WEBSTRIKE_TAKEDOWN	Y: Web Strike Takedown
+CTRL_ACTION_ZIP	Pull your hand back sharply: Zip
+CTRL_MJ_AIMCAMERA	Hold your left trigger to Aim Camera.
+CTRL_MJ_TAKEPHOTO	Pull your right trigger to Take Photo.
+CTRL_STEALTHTAKEDOWN	Punch or press X behind an enemy for a Stealth Takedown.
+ERROR_CLOSE	B: Close
+GAME_WAYPOINTS_SHOWONPING_DESC	Mission waypoint icons are shown when you scan (a hand raised beside your head, its trigger pulled).
+HELP_ATTACK_FROM_BEHIND	Punch or press X to attack from behind.
+HELP_BC04_FINALE_HELICOPTERATTACH	Press Y to attach to the helicopter
+HELP_DODGE	Press B, or step or lean quickly to a side, to *dodge*.
+HELP_DODGE_DIRECTIONAL	Press B with the left stick pushed to a side, or step that way, to *dodge to the side*.
+HELP_DODGE_UNDER_1	Press B to perform a *Dodge Under* move after an attack.
+HELP_DODGE_UNDER_2	Press X then B to perform the *Dodge Under* move.
+HELP_DROP_CEILING	Press B to *drop* from the *ceiling*.
+HELP_GEN_DODGEUNDER	Press X then B to perform the *Dodge Under* move while in ground combat.
+HELP_GEN_DRONECONTROLS	Left stick: Fly<br>X: Shock Enemy
+HELP_GEN_ENLARGEPHOTO	Click the right stick to *enlarge photo*.
+HELP_GEN_HACK	Hold Y to *hack*.
+HELP_GEN_HIGHLIGHTENEMIES	Click the left stick to *highlight enemies*.
+HELP_GEN_MILESVAULT	Push the left stick forward and press A to *vault*.
+HELP_GEN_SEARCH	Click the left stick to *search*.
+HELP_LEAP_OFF	Press X then A near an enemy to perform a *Leap Off* move.
+HELP_PENTHOUSE_WALLCRAWL	Walk into a wall with the left stick to Wall Crawl on it.
+HELP_PERCH_TD	Punch or press X for *Perch Takedown*.
+HELP_VENT_TD	Punch or press X for *Vent Takedown*.
+HELP_WALL_ATTACK	Dodge onto a *wall* with B and press X to perform an *Off The Wall Attack*.
+HELP_WEBSTRIKE	Tap Y, or punch toward an enemy up to 10 m away, to *Web Strike*.
+HUD_BTN_ABANDONMISSION	B: ABANDON MISSION
+HUD_BTN_A_CONTINUE	A: CONTINUE
+HUD_BTN_RETRY	A: RETRY
+HUD_BTN_Y_RETRY	Y: RETRY
+HUD_LEVEL_UP_UPGRADEBTN	Open MENU on your phone to Upgrade
+HUD_MSG_CONTINUE	PRESS A TO CONTINUE
+HUD_MSG_COUNTER	Punch or X: Counter
+HUD_MSG_DODGE	B or a quick step aside: Dodge
+HUD_MSG_EPIC_STRUGGLE	Mash X
+HUD_MSG_HEAVY_MELEE	X + A: Heavy Melee
+HUD_MSG_JUMP	A: Jump
+HUD_MSG_MELEE	Punch or X: Melee
+HUD_MSG_STRIKE	Y: Strike
+HUD_MSG_VIEWITEM	PRESS Y TO VIEW
+MAP_FASTTRAVELHERE	Hold A to Fast Travel Here
+MDEMO_PROMPT_OPENDOOR	Y: Open Door
+MOVES_CEILINGHANG_BTNS	Left trigger
+MOVES_CEILINGHANG_DESC	While wall crawling on a ceiling, pull your left trigger to ceiling hang. While hanging, use the left stick to ascend or descend.
+MOVES_QUICKRECOVERY_DESC	After landing, press A during a roll to launch back into the air.
+MOVES_SPINCYCLE_DESC	When throwing an enemy, rapidly tap Y during the throw to continue spinning enemies.
+MOVES_WALLCORNERING_DESC	Hold B near a building corner to automatically corner it.
+MOVES_WALLJUMP_DESC	While running up a wall, tap A to move up faster.
+PROMPT_ EXTRACT_BACTERIA	Y: Extract Bacteria
+PROMPT_A2_AUNTMAY_SWEEP	Y: Sweep
+PROMPT_ACCESSCOMPUTER	Y: Access Computer
+PROMPT_ACCESS_SERVER	Y: Access Server
+PROMPT_ACTIVATE	Y: Activate
+PROMPT_ACTIVATE_SPIDERBOT	Y: Activate Spider-bot
+PROMPT_ANSWERPHONE	Y: Take Phone
+PROMPT_APPRECIATEART	Y: Appreciate Art
+PROMPT_CHECKDOOR	Y: Check Door
+PROMPT_CHECKEMAIL	Y: Check E-mail
+PROMPT_CHECKFOOTAGE	Y: Check Footage
+PROMPT_CHECKHOLE	Y: Check Hole
+PROMPT_CHECKLADDER	Y: Check Ladder
+PROMPT_CHECKOFFICEDOOR	Y: Check Office Door
+PROMPT_CHECKSUV	Y: Check SUV
+PROMPT_CIRCUITPROJECT	Y: Circuit Projects
+PROMPT_COLLECT_ALGAE	Y: Collect Algae Sample
+PROMPT_CRAWLUNDER	Y: Crawl Under
+PROMPT_DISABLELIGHTS	Y: Disable Lights
+PROMPT_DISARMBOMB	Y: Disarm Bomb
+PROMPT_DRONE	X: Drone
+PROMPT_DROPDOWN	Y: Drop Down
+PROMPT_ENTER	Y: Enter
+PROMPT_ENTERAUCTIONHOUSE	Y: Enter Auction House
+PROMPT_ENTERCODE	Y: Enter Code
+PROMPT_ENTERFEAST	Y: Enter F.E.A.S.T.
+PROMPT_ENTERGARAGE	Y: Enter Garage
+PROMPT_ENTEROFFICE	Y: Enter Office
+PROMPT_ENTERVENT	Y: Enter Vent
+PROMPT_ENTER_DEMONWAREHOUSE	Y: Enter Demon Warehouse
+PROMPT_ENTER_HAMMERHEADBASE	Y: Enter Hammerhead Front
+PROMPT_ENTER_OLYMPUSBASE	Y: Enter Olympus Hideout
+PROMPT_EXAMINE	Y: Examine
+PROMPT_EXIT	Y: Exit
+PROMPT_EXITTOCITY	Y: Exit to City
+PROMPT_FIX_PANEL	Y: Fix Panel
+PROMPT_GATHERSAMPLE	Y: Gather Sample
+PROMPT_INCAPACITATE	Y: Incapacitate
+PROMPT_INSPECT	Y: Inspect
+PROMPT_INSPECTSUPPLIES	Y: Inspect Supplies
+PROMPT_INSPECTTRACKS	Y: Inspect Tracks
+PROMPT_INTERACT	Y: Interact
+PROMPT_INTERACT_LIFT	X
+PROMPT_INTERACT_OFFERHACK	Y: Hack
+PROMPT_INTERACT_OFFERINTERROGATE	Y: Interrogate
+PROMPT_INTERACT_OFFERLIFT	Y: Lift
+PROMPT_INTERACT_SWIPEBADGE	Y: Swipe Badge
+PROMPT_INTERROGATE	Y: Interrogate
+PROMPT_INVESTIGATE	Y: Investigate
+PROMPT_INVESTIGATECABINATE	Y: Investigate Cabinet
+PROMPT_INVESTIGATECAGE	Y: Investigate Cage
+PROMPT_INVESTIGATECAR	Y: Investigate Car
+PROMPT_INVESTIGATEDESK	Y: Investigate Desk
+PROMPT_INVESTIGATEDRUGS	Y: Investigate Drugs
+PROMPT_INVESTIGATEFACILITY	Y: Investigate Facility
+PROMPT_INVESTIGATEFLASHLIGHT	Y: Investigate Flashlight
+PROMPT_INVESTIGATEMESS	Y: Investigate Mess
+PROMPT_INVESTIGATEPRODUCTION	Y: Investigate Production
+PROMPT_INVESTIGATERESIDUE	Y: Investigate Residue
+PROMPT_INVESTIGATESPILL	Y: Investigate Spill
+PROMPT_INVESTIGATETRAIL	Y: Investigate Trail
+PROMPT_INVESTIGATEWALKIE	Y: Investigate Walkie
+PROMPT_INVESTIGATE_BARRELS	Y: Investigate Barrels
+PROMPT_INVESTIGATE_COUNTERDRUG	Y: Investigate Counter-Drug
+PROMPT_INVESTIGATE_INHALER	Y: Investigate Inhaler
+PROMPT_ITERROGATEITERROGATE	Y: Interrogate
+PROMPT_LIFT	Y: Lift
+PROMPT_LISTEN	Y: Listen
+PROMPT_LOOK	Y: Look
+PROMPT_LOOKATBODIES	Y: Look at Bodies
+PROMPT_LOOKATCOFFEE	Y: Investigate Coffee
+PROMPT_LOOKATFLASHLIGHT	Y: Investigate Flashlight
+PROMPT_LOOKATJACKET	Y: Investigate Jacket
+PROMPT_LOOKATPENCIL	Y: Investigate Pencil
+PROMPT_LOOKATRADIO	Y: Investigate Radio
+PROMPT_LOOKTHROUGHCAM	Y: Look Through Camera
+PROMPT_LOOKTHROUGHWINDOW	Y: Look Through Window
+PROMPT_MJ_CREATEDISTRACTION	Y: Create Distraction
+PROMPT_MOVE	Y: Move
+PROMPT_NEWSPAPER	Y: Take Newspaper
+PROMPT_NORMANSAPT_OPENWITHKEY	Y: Open with Key
+PROMPT_OPEN	Y: Open
+PROMPT_OPENDOOR	Y: Open Door
+PROMPT_OPENGATE	Y: Open Gate
+PROMPT_OPENLABDOOR	Y: Open Lab Door
+PROMPT_OPENSTORAGEROOM	Y: Open Storage Room
+PROMPT_OPEN_RESEARCHSTATION	Y: Open Research Station
+PROMPT_OSCORPTECH	Y: Pick Up Sensor Module
+PROMPT_PICK UP	Y: Pick Up
+PROMPT_PICKUPTRANSMITTER	Y: Pick Up Transmitter
+PROMPT_PICKUP_ATROPINE	Y: Pick Up Atropine
+PROMPT_PICKUP_CHEMICALS	Y: Search for Chemicals
+PROMPT_PICKUP_PLANT	Y: Pick Up Eclipta Alba
+PROMPT_PICKUP_SPIDERBOT	Y: Pick Up Spider-bot
+PROMPT_PLAYVIDEO	Y: Play Video
+PROMPT_PUSH	Y: Push
+PROMPT_REASSEMBLEHANDPRINT	Y: Reassemble Handprint
+PROMPT_REMOVE_SEMICONDUCTORS	Y: Remove Broken Semiconductors
+PROMPT_REPAIR	Y: Repair
+PROMPT_RESET_TOWER	Y: Reset Tower
+PROMPT_REWIRE_SCANNER	Y: Rewire Scanner
+PROMPT_SCAN_STEAM	Y: Scan the Steam
+PROMPT_SEMICONDUCTORS	Y: Collect Semiconductors
+PROMPT_SIDEMISSION	Y: Access Console
+PROMPT_SLEEP	Y: Sleep
+PROMPT_SPECTROGRAPH	Y: Use Spectrograph
+PROMPT_STARTCHALLENGE	Y: Start Challenge
+PROMPT_STEALTABLET	Y: Steal Tablet
+PROMPT_STUNGUN	Y: Pick Up Stun Gun
+PROMPT_TAKEDOWNBLACKCAT	Y: Takedown Black Cat
+PROMPT_TAKE_BONDING_AGENT	Y: Take Bonding Agent
+PROMPT_TALK	Y: Talk
+PROMPT_TALKTOEMT	Y: Talk to EMT
+PROMPT_TALKTOGUARD	Y: Talk to Guard
+PROMPT_TALKTOYURI	Y: Talk to Yuri
+PROMPT_TALKTO_OFFICER	Y: Talk to Officer
+PROMPT_TALKWITHBLACKCAT	Y: Talk with Black Cat
+PROMPT_TEST_SAMPLE	Y: Test Sample
+PROMPT_TURNOFF	Y: Turn Off
+PROMPT_TURNON	Y: Turn On
+PROMPT_TURNVALVE	Y: Turn Valve
+PROMPT_USE	Y: Use
+PROMPT_USEAUDIOGUIDE	Y: Use Audio Guide
+PROMPT_USEDISARMKEY	Y: Use Disarm Key
+PROMPT_USEEQUIPMENT	Y: Use Equipment
+PROMPT_USELAPTOP	Y: Use Laptop
+PROMPT_VENT	X: Vent
+PROMPT_VN_TOMBSTONE_BUILDTRACKER	Y: Build Tracker
+PROMPT_WEBBACKPACK	Y: Web Backpack
+PROMPT_WIRE	Y: Pick Up Wire
+PROMPT_WORKONSUIT	Y: Repair Suit
+PROMPT_WS_DIVE_DISPERSE	Y: Disperse Cure
+PROMPT_YANKPANEL	Hold X: Yank Panel
+PROMPT_ZIPTOTRAIN	Y: Zip to Train
+PROMP_RESCUEPED	Y: Rescue
+PROMP_TESTARM	Y: Test Arm
+SKILL_UPGRADE_COUNTERTHROW_DESC	Press X, then hold Y to grab and throw an enemy in any direction.
+SKILL_UPGRADE_FINISHERS_DESC	Press B + Y to instantly knock out enemies. Requires 1 Focus bar.
+SKILL_UPGRADE_LEAPOFF_DESC	Press Jump (A) mid-combo to leap off enemies.
+SKILL_UPGRADE_PERCHLAUNCH_DESC	Press A when zipping towards a perch to launch off it, maintaing momentum.
+SKILL_UPGRADE_PERFECTDODGEKO_DESC	Press Y after Perfect Dodging rifle and pistol enemies for an instant takedown.
+SKILL_UPGRADE_PERFECTDODGE_DESC	Press B just as your Spider Sense turns blue to counter enemies with a Web Shot to the face. Generates bonus Focus.
+SKILL_UPGRADE_PERFECTHIT_DESC	Press X just as an attack lands to generate bonus Focus.
+SKILL_UPGRADE_POINTLAUNCHBOOST_DESC	Press A on contact with point to massively boost Point Launch distance.
+SKILL_UPGRADE_QUICKRECOVERY_DESC	Press A during a roll after landing to launch back into the air.
+SKILL_UPGRADE_REBOUNDATTACK_DESC	Near a wall, press B, then X to launch off the wall for a powerful multi-target attack.
+SKILL_UPGRADE_SLIPPERYESCAPE_DESC	Press X after dodging over enemies to perform a damaging Triple Kick.
+SKILL_UPGRADE_SPIDERFOCUS_DESC	Attacks in combat generate Focus. Press X with at least one bar of Focus to enter Focus Mode.
+SKILL_UPGRADE_SPINCYCLE_DESC	When throwing an enemy, rapidly press Y during the throw to continue spinning enemies.
+SKILL_UPGRADE_STEALTHSTRIKE_DESC	Use Y to instantly take down unaware enemies at range. Use this ability from the air for a powerful first attack.
+SKILL_UPGRADE_WEBGRAB_DESC	Hold Y to grab and throw webbed and electrified enemies. They can be tossed into other enemies or walls.
+SPECTOGRAPH_TUTORIAL_01	Your goal is to identify the unknown substance by its *absorption spectrum*.<br>Press A to continue.
+SPECTOGRAPH_TUTORIAL_02	Use *fragments* of the unknown substance and try to match up the *absorption lines* in the spectrum.<br>Press A to continue.
+SPECTOGRAPH_TUTORIAL_03	Use the left stick to move your cursor. Press A to pick up a *fragment*.
+SPECTOGRAPH_TUTORIAL_04	Place the *fragment* into an available slot and try to match up the *absorption lines*.<br>Press A to continue.
+SPECTOGRAPH_TUTORIAL_05	Some unknown substances require multiple *fragments* to be stacked in a column.<br>Press A to continue.
+SPECTOGRAPH_TUTORIAL_06	If two *absorption lines* overlap, they combine into a thicker *absorption line*.<br>Press A to continue.
+SPECTOGRAPH_TUTORIAL_07	Some *fragments* contain *subtractive lines*.<br>Press A to continue.
+SPECTOGRAPH_TUTORIAL_08	When a *subtractive line* overlaps an *absorption line*, they cancel out.<br>Press A to continue.
+SPECTOGRAPH_TUTORIAL_09	This station allows you to work on *Spectrograph projects*.<br>Press A to continue.
+SPECTOGRAPH_TUTORIAL_10	Earn *XP* and other *rewards* for completing projects.<br>Press A to continue.
+SPECTOGRAPH_TUTORIAL_11	More Spectrograph projects will *unlock* as you progress through the game. <br>Press A to continue.
+SPEC_COMPLETE_BTN_CONTINUE	X: CONTINUE
+STAKEOUT_TUT_LOOK	Use the right stick to look around.
+STAKEOUT_TUT_TAKE_PIC	When the viewfinder turns green, pull your right trigger to take a picture.
+STAKEOUT_TUT_ZOOM_CONTROLS	Use your left and right triggers to zoom the camera in and out.
+TECHWEB_ELECTRICWEB_TUTORIAL_01	Hold A to unlock the Electric Web.
+TECHWEB_ELECTRICWEB_TUTORIAL_02	You just unlocked the *Electric Web* gadget. There are other gadgets you can unlock here, but Officer Davis needs your help so you'll have to come back later.<br><br>Press A to continue.
+TECHWEB_GEAR_TUTORIAL_01	You just unlocked a new piece of *Gear*. To use this you must *equip* it in the Suit page. <br><br>Press A to continue.
+TECHWEB_SUITCRAFT_TUTORIAL_01	On this screen you can purchase *upgrades* and unlock *new equipment* using Tokens.Earn Tokens by doing side missions and citywide activities. <br><br>But first, let's craft your new suit.<br><br>Press A to continue.
+TECHWEB_SUITCRAFT_TUTORIAL_02	Hold A to *craft* your new suit.
+TECHWEB_SUITCRAFT_TUTORIAL_03	Crafting Complete! <br><br>Press A to continue.
+TEXT_A1_CRIME_AIMWEBS	Turn your head to aim webs.
+TEXT_A1_CRIME_DISARM	Pull your right trigger to disarm.
+TEXT_A1_GALLERY_PROMPT_INTERVIEW	Y: Begin Interview
+TEXT_A1_SUITCRAFTING_HOLDTOCRAFT_TUT	Hold A to *craft* your new suit.
+TEXT_A3_NORMANSAPT_PROMPT_ALARM	Y: Set Off Alarm
+TEXT_COOP_PROMPT_PUSH	Y: Push
+TEXT_COOP_PROMPT_SETCHARGE	Y: Set Charge
+TEXT_SPIDERBOT_ACTIVATE	Press Y to activate Spider-bot.
+TEXT_SPIDERBOT_COLLECT	Press Y to collect Spider-bots.
+TEXT_SPIDERBOT_DISPERSECROWD	Press Y to disperse the crowd.
+TEXT_SPIDERBOT_LAUNCH	Press Y to launch Spider-bot.
+TEXT_SPLASHSCREEN_CONTINUE	PRESS A TO START
+TIPS_ENEMY_BATON_02	Hold X to break their block with the Air Launch move.
+TIPS_LOADING_001	Press Y, or punch toward a distant enemy, to *Web Strike* them. This can be chained into *Leap Off* or *Dodge Under* moves.
+TIPS_LOADING_002	Press X or Y to attack an enemy, then press B to perform the *Dodge Under* move.
+TIPS_LOADING_004	Press X or Y to attack an enemy, then press A to perform a *Leap Off* move. Use this as another way to start air combat.
+TIPS_LOADING_023	While running up a wall, press A near the top to *slingshot* over the building.
+TIPS_LOADING_024	While wall running, you can steer and quick turn with the left stick.
+TIPS_LOADING_025	When wall running horizontally, *hold* B to whip around a corner.
+TIPS_LOADING_027	Press B with the left stick pulled back to air brake. This is great for stopping your momentum quickly.
+TIPS_LOADING_029	Dodge into a wall with B and press X to perform an *Off The Wall* attack that hits multiple enemies.
+TIPS_LOADING_030	While you swing, the web *Air Dodges* the blows Spider-Sense warns of for you.
+TIPS_LOADING_034	*Hold* Y and choose a direction with the left stick to *throw enemies*.
+TIPS_LOADING_041	Press Y, or punch toward an enemy up to 10 m away, to perform a *Web Strike* and quickly zip to enemies firing from a distance.
+TIPS_LOADING_042	Press X then B to perform the *Dodge Under* move on enemies with shields.  Shield enemies are vulnerable from the back. 
+TIPS_LOADING_044	Enemy rockets will give an *audible warning* when locked on. Press B to *dodge* before they hit.
+TIPS_LOADING_047	Press B to *Dodge Demon Swordsmen* attacks, and then counter attack. You can also use *throwables* to stun them and open them up to further attacks.
+TIPS_LOADING_048	Press Y, or punch toward the enemy, to perform a *Web Strike* and close the gap with *Sable Jetpack* enemies. You can also web them up to disable their jetpacks.
+TUT_A1_GALLERY_TAKEDOWN_SAFE	Punch or press X to take down *safe* enemies.
+TUT_A1_SHIPYARD_MOVETOCEILING	Use the left stick to move onto the ceiling.
+TUT_A2_GCT_LI_ATTACK_DODGE	B, or a quick step aside, to *dodge* to the *side*.
+TUT_A2_GCT_LI_ATTACK_JUMP	A to *jump* to the *ceiling*.
+TUT_A2_GCT_SPIDERMAN_TAKEDOWN	Punch or press X for Spider-Man Takedown
+TUT_A2_MILES_AIMHACK	Aim at the drone and hold your right trigger to hack.
+TUT_A2_MILES_HACK	Hold your right trigger to Hack
+TUT_A2_MILES_HACKINGMODE	Hold your left trigger to enter *hacking mode*.
+TUT_A2_MILES_TARGETHACK	Aim at targets and hold your right trigger to hack.
+TUT_A3_NORMANSAPT_CROWDBLEND	Press X while near a crowd to *blend in*.
+TUT_A3_NORMANSAPT_STEALTHTAKEDOWN	Press X behind an enemy for a *Stealth Takedown*.
+TUT_AIMLURE	Hold your left trigger to *aim* the *lure*.
+TUT_AIM_AT_QTE	Save the *hostage* before time runs out. Turn your head to *aim* at the target and pull your right trigger to *disarm* them.
+TUT_AWARENESS_STRAT_2	When *[AWARE_ICON]* appears on an enemy, you have been *spotted*.<br>Press A to continue..
+TUT_BACKPACKS	Find backpacks to earn *Backpack Tokens*, which you can spend to craft better gear.<br>Press A to continue.
+TUT_BC_QUEST_FINDLOOT	Find *Walter Hardy's stolen paintings* hidden throughout the city.<br>Press A to continue.
+TUT_BC_SCREWBALL_CHALLENGES	Find *Screwball Challenges* around the city. Complete Challenges to earn *Challenge Tokens*.<br>Press A to continue.
+TUT_BLACKCAT_STAKEOUTS	Complete *Black Cat Stakeouts* around the city to uncover Black Cat's mystery.<br>Press A to continue.
+TUT_CHALLENGE_RECON_POINTS	Find *Challenge Recon Points* around the city. Complete Challenges to earn *Challenge Tokens*.<br>Press A to continue.
+TUT_CIRCUIT_06	This station allows you to work on Circuit projects.<br>Press A to continue.
+TUT_CIRCUIT_07	Earn XP and other rewards for completing projects.<br>Press A to continue.
+TUT_CIRCUIT_08	More Circuit projects will unlock as you progress through the game. <br>Press A to continue.
+TUT_CIRCUIT_PUZZLE_CHARGEREQ	In order to complete the *neuro chip* you must also meet its *charge* requirement.<br>Press A to continue.
+TUT_CIRCUIT_PUZZLE_CHARGES	Some *circuit pieces* provide a *positive* or *negative charge*.<br>Press A to continue.
+TUT_CIRCUIT_PUZZLE_DIRECTIONAL	Some *circuit pieces* only allow connections from specific *directions*.<br>Press A to continue.
+TUT_CIRCUIT_PUZZLE_GOAL	Create a connection between the green *start piece* and the orange *end piece*.<br>Press A to continue.
+TUT_CIRCUIT_PUZZLE_INTRO	The *Power Control* for the arm is damaged.<br>Press A to continue.
+TUT_CIRCUIT_PUZZLE_POWERVOLTAGECONTROL	In order to set the *Power Voltage Control* you must also meet its *charge* requirement.<br>Press A to continue.
+TUT_CRAWL	Use the left stick to crawl along surface.
+TUT_CRAWLUP	Keep using the left stick to crawl up.
+TUT_CTNS_BC_DISARM_BOMB	Press Y to disarm bomb.
+TUT_CTNS_HH_ANALYZE_SIGNAL	Hold Y to analyze signal.
+TUT_CTNS_HH_DODGESHIELDRUSH	Press B to dodge.
+TUT_CTNS_HH_EAVESDROP	Hold Y to eavesdrop.
+TUT_CTNS_HH_EMP_PULSE	Press Y to activate EMP Pulse.
+TUT_CTNS_HH_ISOLATE_CONVO	Press Y to isolate conversation.
+TUT_CTNS_MJ_STUNGUNTAKEDOWN	Press X *behind an enemy* to use *stun gun*.
+TUT_CTNS_SB_BOMB_GROUNDPOUND	In the air, throw a fist down (or press X + A) to use a *Ground Strike* to break open multiple boxes.
+TUT_CTNS_SB_GEN_MAXLIKES	Pull your right trigger at the right time to maximize your *OMGs*.
+TUT_CTNS_SB_PHOTOBOMB_LIKESMETER	Maximize your *bonus points* by pulling your right trigger when *Screwball's OMG Meter* is full.
+TUT_CTNS_SS_CHASE_MOUNTJET	Press Y to mount the hover-jet.
+TUT_CTNS_SS_DISASTER_BLENDIN	Press Y to blend in.
+TUT_DEMON_BASES	Complete *Demon Warehouses* around the city to earn *Base Tokens*.<br>Press A to continue.
+TUT_DODGEUNDER	Press X, then B near enemies to perform the *Dodge Under* move.
+TUT_DODGEVULTUREDASH	Press B to dodge Vulture.
+TUT_DODGE_ROCKET	Press B to dodge rockets.
+TUT_DODGE_TURRET_FIRE	Press B to dodge turret fire.
+TUT_ELECTRICWEB_CRAFT	Hold A to craft the *Electric Web*.
+TUT_ELECTRICWEB_STUNGUN	With the stun gun you can now craft the *Electric Web*.<br>Press A to continue.
+TUT_ELECTRICWEB_UNLOCKED	*Electric Web* unlocked!<br>Press A to continue.
+TUT_FASTTRAVEL_MARKED	*Fast Travel* locations are now marked on the map.<br>Press A to continue.
+TUT_FASTTRAVEL_PETESAPT	Hold A over Peter's apartment to *Fast Travel*.
+TUT_FILTERMAP	You may filter any of the *map icons* on the *Legend Page*, which can be accessed by pressing Y.<br>Press A to continue.
+TUT_FISK_BASES	Complete more *Fisk Hideouts* around the city to earn more *Base Tokens*.<br>Press A to continue.
+TUT_HANGINGCONTROLS	Use the left stick to ascend and descend.
+TUT_HH_HAMMERHEAD_BASES	Complete *Hammerhead Fronts* around the city to earn *Base Tokens*.<br>Press A to continue.
+TUT_IMPACTWEB_01	With the plans from Otto you can now craft the *Impact Web*.<br>Press A to continue.
+TUT_IMPACTWEB_02	Hold A to craft the *Impact Web*.
+TUT_IMPACTWEB_03	*Impact Web* Unlocked!<br>Press A to continue.
+TUT_IMPACTWEB_04	You can use *Tokens* to upgrade each gadget.<br>Press A to continue.
+TUT_IMPACTWEB_05	Unlock new gadgets with *Tokens* or with parts found in *missions*.<br>Press A to continue.
+TUT_IMPACTWEB_06	Earn *Tokens* by completing *side missions* and *citywide activities*.<br>Press A to continue.
+TUT_JUMP	Press A to *jump*.
+TUT_LANDMARKS_MAP	Take *photos* of *Landmarks* throughout the city to earn *Landmark Tokens*.<br>Press A to continue.
+TUT_LEDGEATTACK	Punch or press X to *attack* from a ledge.
+TUT_LEVELUP_01	You have *leveled up* and earned a *Skill Point*!<br>Press A to continue.
+TUT_LEVELUP_02	*Skill Points* are awarded when you gain enough *Experience Points (XP)*.<br>Press A to continue.
+TUT_LEVELUP_03	Complete missions and defeat enemies to gain *XP* and earn more *Skill Points*.<br>Press A to continue.
+TUT_MICHAELS_03_OSCORP_NEXTSLIDE	Press A to view next slide.
+TUT_OBJ_OM_HAR_WS_SEISMIC_2_J08	Swing into the air and throw a fist down (or hold X + A) to *Ground Strike*.
+TUT_OBJ_OM_HAR_WS_SEISMIC_2_J08_STRIKE_HERE	*Ground Strike* here: jump with A, then throw a fist down (or press X + A).
+TUT_OM_ACID_ADJUSTVALVE	Press Y to adjust the *valve*.
+TUT_OM_ASBESTOS_SCANCONTAMINATED	Press Y to *scan* the *contaminated steam*.
+TUT_OM_ASBESTOS_SCANSTEAM	Press Y to *scan* the *steam*.
+TUT_OM_CHIN_DIVE_COLLECT_SAMPLE	Press Y to *collect bacteria sample*.
+TUT_OM_CHIN_DIVE_KILLBACTERIA	Press Y to *kill* the *bacteria*.
+TUT_OM_STEAM_ADJUSTPRESSURE	Press Y to *adjust pressure*.
+TUT_OM_WEBLESS_ENTERLAB	Press Y to *Enter the Lab*.
+TUT_OM_WEBLESS_EXITLABPROMPT	Press Y to *Exit the Lab*.
+TUT_OM_WEBLESS_TESTSAMPLE	Press Y to *test* the *sample*.
+TUT_OM_WS_DIVE_ADDSOLUTION	Press Y to *add* the *solution* to the lake.
+TUT_OM_WS_DIVE_COLLECTSAMPLE	Press Y to *collect algae sample*.
+TUT_PERCHLAUNCH	Press A to *Point Launch*.
+TUT_PERFECTDODGE	Press B, or step aside, at the last moment to perform a Perfect Dodge and stun enemies.
+TUT_PERFECTDODGEDETAILED	Press B, or step aside, when enemies flash red to perform a Perfect Dodge.
+TUT_QUEST_PIGEONS	Catch *pigeons* for Howard across the city.<br>Press A to continue.
+TUT_QUICKRECOVERY	Press A to do a *Quick Recovery*.
+TUT_RESEARCH_MAP	Open more *Research Stations* around the city to earn more *Research Tokens*.<br>Press A to continue.
+TUT_SABLE_PRISONER_BASES	Complete *Sable Outposts* and *Prisoner Camps* to earn *Base Tokens*.<br>Press A to continue.
+TUT_SS_COLLECTIBLES	Find *Recordings* at *Crime Scenes* around the city to solve this mystery.<br>Press A to continue.
+TUT_SS_OLYMPUS_BASES	Complete *Olympus Hideouts* around the city to earn *Base Tokens*.<br>Press A to continue.
+TUT_SUITCRAFTING_01	You can now use your *Tokens* to create the *Advanced Suit*.<br>Press A to continue.
+TUT_SUITCRAFTING_02	Complete *side missions* and *citywide activities* to earn *Tokens*.<br>Press A to continue.
+TUT_SUITCRAFTING_03	Hold A to craft the *Advanced Suit*.
+TUT_SUITCRAFTING_04	New *Suit* and *Suit Power* unlocked!<br>Press A to continue.
+TUT_SUITCRAFTING_05	Crafting a new *Suit* auto-equips the new *Suit Power*.<br>Press A to continue.
+TUT_SUITCRAFTING_07	Use the *Suit Power* menu to swap back to any previous *Suit Powers* you have unlocked.<br>Press A to continue.
+TUT_SUITCRAFTING_08	Suits can also be upgraded with *Suit Mods*. Unlock and equip *Suit Mods* here.<br>Press A to continue.
+TUT_SUITCRAFTING_09	Complete side missions and activities to unlock *Suits*, *Suit Powers*, and *Suit Mods*.<br>Press A to continue.
+TUT_SUITCRAFTING_10	Use *Tokens* to create *Suit Mods*.<br>Press A to continue.
+TUT_SUITCRAFTING_11	*Suit Mods* increase your utility and boost your offense and defense.<br>Press A to continue.
+TUT_SUITCRAFTING_12	You can equip three *Suit Mods* at a time to stack bonus effects.<br>Press A to continue.
+TUT_TARGETLURE	Turn your head to aim to the *guard's right*.
+TUT_THROWLURE	Hold your left trigger and pull your right one to *throw* the *lure*.
+TUT_TRIPMINE_CRAFT	Hold A to craft the *Trip Mine*.
+TUT_TRIPMINE_STARTCRAFT	You can now craft the *Trip Mine*.<br>Press A to continue.
+TUT_TRIPMINE_UNLOCKED	*Trip Mine* unlocked!<br>Press A to continue.
+TUT_WALLCRAWL	Walk into a wall with the left stick to *Wall Crawl* on it.
+TUT_WEBBOMB_CRAFT	Hold A to craft the *Web Bomb*.
+TUT_WEBBOMB_START	You can now craft the *Web Bomb*.<br>Press A to continue.
+TUT_WEBBOMB_UNLOCKED	*Web Bomb* unlocked!<br>Press A to continue.
+TUT_WS_GEN_GROUNDSTRIKE_UNLOCK	Ground Strike the metal plates (jump with A, then throw a fist down or press X + A) to unlock the Research Station.
+TUT_WS_INVISIBLE_ACTIVATEINVISIBILITY	Press Y to activate *invisibility*.
+TUT_WS_SEISMIC_EXITVIEW	Press B to exit satellite view.
+TUT_WS_UPLINK_CONFIRMTRANSFER	Press Y to confirm data transfer.
+TUT_WS_UPLINK_CONTROLDISH	Press Y to control the dish.
+TUT_ZIPTOTRAIN	Press Y to *zip* to the *train*.
+UI_HELP_LEAP_OFF	Press X then A near enemies to perform the *Leap Off* move.
+UI_HELP_MOVE_ON_VEHICLE	Use the left stick to *move*.
+UI_HELP_POINT_LAUNCH	Press A to *Point Launch*.
+UI_HELP_WEB_ZIP	Pull the hand that holds a web back sharply to perform a *Web Zip*.
+UI_STORE_PROMPT	X TO OPEN PS STORE
+
+# The game's keyboard lines, which it shows in place of the ones above while the keyboard was the last device it saw
+TUT_CRAWLUP_MKB	Keep using the left stick to crawl up.
+TUT_HANGINGCONTROLS_MKB	Use the left stick to ascend and descend.
+SPECTOGRAPH_TUTORIAL_03_MKB	Use the left stick to move your cursor. Press A to pick up a *fragment*.
+SPECTOGRAPH_TUTORIAL_04_MKB	Place the *fragment* into an available slot and try to match up the *absorption lines*.

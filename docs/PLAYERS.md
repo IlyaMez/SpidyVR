@@ -530,6 +530,14 @@ Moving
   your webs for its move. One fist alone stays a punch. Not with no enemy
   near (a hard pull down on both webs while swinging is no Ground Strike),
   and not with REALISTIC FLIPS on, where both arms swung down flip you.
+  The game's own help lines, prompts, hint cards, loading tips, Moves List
+  and skill descriptions say the VR controls (since November 22, in
+  English), with the buttons in plain text: "Hold LT and tap RB to seal the
+  leaks" reads "Hold your left trigger and pull your right one", a scan
+  "Raise a hand beside your head and pull its trigger", a zip to a point
+  "Push the right stick straight up and hold it", a takedown "Punch or
+  press X", a prompt "Y: Interact". The game's controls and key binding
+  screens keep its own words, and so does every text in another language.
 
   THE GAME'S CAMERA (the research stations' photos)
   Phone, CAMERA ........ takes the game's camera out, as its D-pad up does
@@ -1282,7 +1290,14 @@ IF SOMETHING IS WRONG
 - Buttons do nothing in VR (no menu, no doors, no web strike) while webs and
   walking work, and the game's prompts show keyboard keys: Steam Input is
   on for the game. In Steam, right-click the game > Properties > Controller
-  > Disable Steam Input, close the game, then press START VR.
+  > Disable Steam Input, close the game, then press START VR. The same
+  fixed it for players whose A did not jump on the ground (it did in the
+  air, or only with X held) and whose phone closed at the menu button.
+- "Game GPU does not match OpenXR GPU" or "this PC has two graphics cards":
+  the game started on the other card than your headset's. In Windows
+  Settings > System > Display > Graphics, add Spider-Man.exe from the game's
+  folder, set it to High performance, close the game, then press START VR.
+  On a desktop, plug the monitor into the graphics card.
 - Steam Frame controllers: B, X and Y all dodge, or the D-pad interacts.
   Versions up to 0.3.2 gave SteamVR no layout for them. Newer ones do, and
   the session log says "Controllers: Steam Frame, with their own layout".

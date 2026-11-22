@@ -8,6 +8,7 @@ import argparse
 import ctypes as c
 import hashlib
 import json
+import os
 import pathlib
 import shutil
 import struct
@@ -18,7 +19,7 @@ from datetime import datetime, timezone
 from capture_game_state import Game, find_game, open_process, close
 from observe_game import (modules, call_remote, call_with_payload, remote_system_export,
                           load_library, free_library, get_export)
-from inspect_game import PE
+from inspect_game import PE, file_version
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DLL = ROOT / 'build/windows-ninja/spidy_bridge.dll'
@@ -63,6 +64,53 @@ def other_build_text(folder):
             'Spider-Man, then press START VR: the launcher starts the game again.')
 
 
+# The Microsoft C++ runtime's libraries Spidy's modules load, and the least version they need
+# (xr_runtime.CPP_RUNTIME_MINIMUM). A game process that already holds one of them gives Spidy's module that one.
+CPP_RUNTIME = ('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
+CPP_RUNTIME_MINIMUM = (14, 40)
+
+
+def version_tuple(text):
+    try:
+        return tuple(int(part) for part in text.split('.')) if text else None
+    except ValueError:
+        return None
+
+
+def load_refusal(name, held, local_error=None, system=None, version=file_version):
+    """What the session says when the game did not load Spidy's module `name`, with what can be told from
+    outside the game: `held`, the game's modules (observe_game.modules); `local_error`, Windows' error code
+    loading the same file here, if it failed. Until November 22 it said only "Bridge failed to load from the
+    expected staging path" (BluLotl, Spidy 0.8.7 on Virtual Desktop, November 17)."""
+    system = pathlib.Path(system or pathlib.Path(os.environ.get('SystemRoot', r'C:\Windows'))/'System32')
+    text = f"Spider-Man did not load Spidy's module {name}."
+    if local_error:
+        text += f' Loading it here, Windows says: {c.FormatError(local_error).strip()} (error {local_error}).'
+    for module in held:
+        if module['name'].lower() not in CPP_RUNTIME:
+            continue
+        found = version_tuple(version(module['path']))
+        folder = pathlib.Path(module['path']).parent
+        elsewhere = os.path.normcase(str(folder)) != os.path.normcase(str(system))
+        if (found and found[:2] < CPP_RUNTIME_MINIMUM) or elsewhere:
+            text += (f" The game holds the C++ runtime's {module['name']}"
+                     f"{' ' + '.'.join(map(str, found)) if found else ''} from {folder}, and Spidy's modules need "
+                     f"Microsoft's {'.'.join(map(str, CPP_RUNTIME_MINIMUM))} or newer"
+                     f"{': another mod, overlay or tool brought that copy into the game?' if elsewhere else '.'}")
+            break
+    return text + (' An antivirus that blocks or removes Spidy\'s files does this too: allow the Spidy folder in '
+                   'it. Then close the game and press START VR again.')
+
+
+def local_load_error(path):
+    """Windows' error code loading the module at `path` into this process, or 0 when it loads."""
+    local = load_library(str(path))
+    if local:
+        free_library(local)
+        return 0
+    return c.get_last_error()
+
+
 def staged(path, staging, digest):
     """A module the game loaded from `path` is this folder's build `digest`, staged where prepare puts it."""
     path = pathlib.Path(path).resolve()
@@ -87,7 +135,9 @@ def prepare(pid, process, dll=DLL, staging=STAGING,
         call_with_payload(process, remote_system_export(pid, b'LoadLibraryW'),
                           (str(path)+'\0').encode('utf-16-le'))
         loaded = next((x for x in modules(pid) if x['name'].lower() == dll.name.lower()), None)
-    if not loaded or pathlib.Path(loaded['path']).resolve() != path:
+    if not loaded:
+        raise RuntimeError(load_refusal(dll.name, modules(pid), local_load_error(path)))
+    if pathlib.Path(loaded['path']).resolve() != path:
         raise RuntimeError('Bridge failed to load from the expected staging path')
     local = load_library(str(path))
     if not local: raise c.WinError(c.get_last_error())

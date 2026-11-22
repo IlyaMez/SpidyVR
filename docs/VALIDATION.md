@@ -1,6 +1,37 @@
 # Validation — 2026-10-27
 
-## November 8: gameplay presets and Play selector (local, unreleased)
+## November 22: the game's tutorials in VR wording (local, unreleased)
+
+What the user asked: "can we find a list of [the in-game tutorials] and modify
+them for vr (text mostly)", then "do it fully".
+
+| Check | Result |
+|---|---|
+| The game's texts, offline | `tools/game_texts.py dump` read 57,403 English texts from `asset_archive` (toc, DSAR's LZ4 blocks, the localization asset) with their tags and hashes; two hashes logged in the game on October 24 (`CTRL_ACTION_THROW` 0x9E608AEB, `PROMPT_INTERACT` 0xC77E6208) are the table's own. 1,509 tutorial, help and prompt texts, 705 naming a control, in `reports/game-texts/tutorial-texts.tsv` |
+| The route | Disassembly: the lookup by hash (`0x1749970`, 241 callers) and the one by tag (`0x1749a20`, 149) both call `0x1748d90` (table, hash); nothing else reads a text by hash (the other readers of the table's global give tags, flags, or a text by index from one caller) |
+| The wording | 250 texts in `src/vr_texts.tsv` at first (written from PLAYERS.md's controls and the humanizer guide's plain-wording rules), then, as the user asked ("change the text to explain the motion where needed and write the buttons in plain text", "for the missing ones"), 668: every line that names a button but the controls, accessibility and key binding screens, the menus' bare button names and four with no VR control known, buttons as words, gestures as motions; `game_texts.py check`: every English text it replaces is the installed game's |
+| Core tests | 841/841 (new: the table in hash order, each found by its hash, given only for its own English words, a wording's demand covering its English's buttons by pointer and by copied words, shared wordings asking for all their texts' buttons (the gadget wheel's LB and RB), only A, B, X, Y, accept, cancel, the left stick and the game's marks as tokens, plain ASCII, balanced emphasis, prompt lines and button columns within 40 characters, the leaks' line still asking LT and RB) |
+| Python | the seven protocol suites OK; new `game_texts_protocol_tests.py` (the asset id hash, an LZ4 block with an overlapping match, a localization DAT1, a table written and read back within 110 columns, the generated `.inc` equal to the TSV) |
+| In the game, no headset (`probe_vr_texts.py`, the user's save in free roam) | `SpidyVrTextsCheck` at the title: 248 of 249 entries in the game's English and given in VR wording by both lookups. The one miss, `TUT_PARKOUR`, was the game showing its keyboard line (`TUT_PARKOUR_MKB`) with the keyboard the last device; after the virtual pad had pressed, 249 of 249 both ways. `TUT_PARKOUR_MKB` has the same wording since. With it, a fresh game: 250 of 250 given in VR wording by both lookups (`TUT_PARKOUR` through its keyboard line) |
+| The report's count | Same fresh run: the save's load looked up the tip list, and the 12 tips of the table came back in VR wording, each counted once (`rewrites` 12, 12 `VR text TIPS_LOADING_...` lines). The check's own lookups count nothing |
+| Loading tips | They are `ShowText(7, tip)`, taken by tag. Restarting the checkpoint four times with Y (NEXT TIP) every 2.5 s showed 12 tips; the two of the table among them came in VR wording: "Build up your Focus and press [BTN_B] + [BTN_Y] to instantly finish an enemy" (the game's own B and Y icons, its cyan emphasis) and "To build up webbing on enemies, shoot web balls at them rapidly (the trigger of a free hand)..." (two lines on the loading bar). Screenshots in `reports/vr-texts/20261122-154837/` (013, 033). In the fresh run's three restarts: "Pull a trigger at your temple to scan the environment for points of interest" and "Let go and fall before your next web to gain speed while swinging..." (`reports/vr-texts/20261122-155156/060`) |
+| Moves List | Game menu, MOVES LIST: Punch; Punch, punch, punch, punch; Punch from afar, or tap (Y); Hold the right stick down (Heal); Uppercut; Uppercut, punch; Swing into an enemy; Both fists down in the air, and the Ground Strike's description in VR wording; rows kept as the game wrote them show its icons (Hold (Y), (B), (X), (B)). `reports/menu-pad/moves1.png` to `moves3.png` |
+
+| A new game's first mission (`probe_vr_texts.py --watch`, a new profile in the empty sixth place, the user's word "feeel free to create a new game for tutorials if needed") | The opening's swing tutorial stops the game on its //HELP panel: "Shoot a web and hold it to swing." (`HELP_GEN_SWING`, in place of "Hold [BTN_RT] to swing"; `reports/vr-texts/newgame-help-swing.png`). The virtual pad's RT (held under 2 s a press: `SpidyPadSubmit` refuses longer, 8502) carried it on, and the next two came in VR wording too: `HELP_GEN_SWING_RELEASE` "Let go of your web to detach." and `HELP_JUMP_AND_SWING` "Press [BTN_A] to jump, then shoot a web to swing." |
+| Buttons in plain text (the 664-text build, a fresh game) | `SpidyVrTextsCheck`: 664 of 664 given in VR wording by both lookups; 649 in the English they were written for, the other 15 being lines the game swaps for its keyboard ones with the keyboard the last device (the suit crafting cards, the spectrograph's cursor, crawl up, hanging, parkour; four of those keyboard lines name keys and have the same VR wording since, 668). Tips on the loading screen: "Disarm enemies by holding Y to yank away their weapon.", "Raise a hand beside your head and pull its trigger to scan the environment for points of interest.". Moves List: "Hold Y, then tap Y, Y, Y", "B, at the last moment", "A fast fist", "B into a wall, then X", "Free hand's trigger, rapidly", "PRESS Y TO VIEW CONTROLLER LAYOUT" (`reports/menu-pad/moves6.png`); the menu's own footer ((B) CLOSE) is no text of the table and keeps its icon. In free roam the HUD's prompts `PROMPT_INVESTIGATE`, `PROMPT_EXAMINE`, `PROMPT_NEWSPAPER` and `PROMPT_SIDEMISSION` were given in VR wording (35 texts in all, `rewrites` 35); no prompt was walked up to, so none was seen on screen |
+
+The new profile is the game's sixth (`slot5-s.save`, which the profile screen
+showed EMPTY; the file it replaced is in
+`reports/backups/saves-20261122-vr-texts/`), left at the first mission for
+headset checks of the tutorials.
+
+Not run: a headset session (the switch `setVrTexts(promptHelp && !flatScreen)`
+in `game_xr` and the report's `VR text TAG` lines), a hint card that pauses
+the game (none of the table's texts is one: the cards' buttons are its menu
+accept), and NamedPress with a VR wording on screen (the demand is read from
+the English: core tests only; in the swing tutorial above the pad's own RT
+was pressed).
+
 
 - Added opt-in Arcade, Balanced and Pro built-ins, each explicitly covering
   52 gameplay values. Twenty-seven other profile keys retain personal setup;

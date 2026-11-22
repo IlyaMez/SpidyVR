@@ -2536,6 +2536,10 @@ DWORD WINAPI run(void*) {
                     game_prompts::setObserving(promptHelp);
                     game_prompts::setReading(promptHelp);
                     game_prompts::setRewriting(promptHelp && mapping == game_pad::Mapping::gameplay);
+                    // The game's tutorials, tips and Moves List in VR wording
+                    // (vr_texts.hpp): on its screen too, where hint cards and
+                    // loading tips show, but not with the game played as it is.
+                    game_prompts::setVrTexts(promptHelp && !flatScreen);
                     // A change in the SPIDY VR tab takes effect at once.
                     if (game_menu::take(values)) {
                         ++settingChanges;

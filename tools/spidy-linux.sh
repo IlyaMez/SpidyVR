@@ -4,6 +4,7 @@
 #   (WiVRn: put PRESSURE_VESSEL_IMPORT_OPENXR_1_RUNTIMES=1 in front, and for its Flatpak also
 #    PRESSURE_VESSEL_FILESYSTEMS_RW=/var/lib/flatpak/app/io.github.wivrn.wivrn, or for a --user
 #    install ~/.local/share/flatpak/app/io.github.wivrn.wivrn written out in full; see docs/LINUX.md)
+# Once: Microsoft's C++ runtime in the game's prefix:  protontricks 1817070 -q vcrun2017 vcrun2022
 # Order: start SteamVR or WiVRn, connect the headset, start the game from Steam, wait at the main menu, run this.
 set -euo pipefail
 

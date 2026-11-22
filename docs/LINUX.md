@@ -28,7 +28,17 @@ stayed the more reliable of the two.
    does not need `PRESSURE_VESSEL_FILESYSTEMS_RW`.
    Without these the container does not see WiVRn. With SteamVR the short options above are the
    tested ones.
-4. SteamVR over Steam Link: SteamVR's beta branch (Steam > SteamVR > Properties > Betas) has worked
+4. Install Microsoft's Visual C++ runtime into the game's Proton prefix, once (start the game once
+   first, so that the prefix exists):
+
+       protontricks 1817070 -q vcrun2017 vcrun2022
+
+   With the Flatpak protontricks: `flatpak run com.github.Matoking.protontricks 1817070 -q vcrun2017
+   vcrun2022`. Spidy's modules need version 14.40 or newer. On Windows the launcher installs it; here
+   nothing does, and Wine's own stand-in is not enough. Without it the scripts found no headset, with
+   WiVRn and SteamVR alike (GitHub #50; three players on Discord in November). Builds after 0.8.7
+   say so before they look for the headset.
+5. SteamVR over Steam Link: SteamVR's beta branch (Steam > SteamVR > Properties > Betas) has worked
    better. If a firewall runs, open Steam's streaming ports, for example with ufw:
 
        sudo ufw allow 27031/udp
@@ -52,6 +62,9 @@ stayed the more reliable of the two.
 
 ## When it does not work
 
+- `The Microsoft Visual C++ runtime here is ...` or `is Wine's own`, or no headset found although
+  `PROTON_LOG=1` shows the runtime finding it: setup step 4 (`protontricks 1817070 -q vcrun2017
+  vcrun2022`), then start the game again from Steam.
 - `No headset found (wineopenxr64: OpenXR instance unavailable: -51)`: Proton found no VR runtime
   when the game started. Quit the game, make sure SteamVR or WiVRn has the headset, start the game
   again, then the script. With WiVRn, check that `~/.config/openxr/1/active_runtime.json` names

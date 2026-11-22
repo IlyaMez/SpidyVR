@@ -1,6 +1,7 @@
 // The game's prompt texts on their way to its markup resolver (game_prompts.hpp).
 #include "spidy/game_prompts.hpp"
 #include "spidy/diag_log.hpp"
+#include "spidy/vr_texts.hpp"
 #include <MinHook.h>
 #include <algorithm>
 #include <atomic>
@@ -318,6 +319,14 @@ uint32_t copyAsked(const char* text, std::string_view words, bool& found) {
 // The widget's lines as they last named something, by kind, for the
 // timeline: a line is shown again every frame while it waits its turn.
 uint32_t promptWords[prompt_buttons::LiveDemands::kinds]{};
+// The game's texts in VR wording (setVrTexts, tableText): whether they are
+// given, and which of the table's entries the game has had this session
+// (each counts once in Live::rewritten and gets one line in the timeline).
+std::atomic<bool> vrWording{};
+// SpidyVrTextsCheck's own lookups, which count as nothing given.
+std::atomic<bool> checking{};
+constexpr size_t givenRoom = 1024;
+std::atomic<uint8_t> given[givenRoom]{};
 
 void __fastcall resolveHook(void* self, void* field, const char* text) {
     char seen[1024];
@@ -349,6 +358,15 @@ void __fastcall resolveHook(void* self, void* field, const char* text) {
 } // namespace
 
 namespace {
+// What a text the game shows asks for: the buttons it names, or where it is
+// the VR wording of one of the game's own texts (vr_texts), the buttons the
+// game's words named. The wording says "your right trigger"; the game still
+// waits for its RB, which that trigger sends while the line is up
+// (game_pad::NamedPress).
+prompt_buttons::Demand askedBy(const char* text, std::string_view words) {
+    prompt_buttons::Demand d;
+    return vr_texts::asked(text, words, d) ? d : prompt_buttons::forText(words);
+}
 // The buttons a prompt's own text names, packed (prompt_buttons::pack); 0 for
 // none. The text is a Scaleform string, managed or not (game_menu's layout).
 uint32_t readPromptText(const GfxValue* value) {
@@ -369,7 +387,7 @@ uint32_t readPromptText(const GfxValue* value) {
     // what the game's own text asked for: its LB + RB, not the X it shows.
     bool copied = false;
     const uint32_t kept = copyAsked(reinterpret_cast<const char*>(p), view, copied);
-    const auto asked = copied ? prompt_buttons::unpack(kept) : prompt_buttons::forText(view);
+    const auto asked = copied ? prompt_buttons::unpack(kept) : askedBy(reinterpret_cast<const char*>(p), view);
     if (!asked.any()) {
         if (asked.keyboard)
             keyboardTexts.fetch_add(1, std::memory_order_relaxed);
@@ -652,6 +670,39 @@ const char* game_prompts::observeText(const char* text) {
     return copy ? copy->text.c_str() : text;
 }
 
+void game_prompts::setVrTexts(bool on) {
+    vrWording.store(on, std::memory_order_relaxed);
+}
+
+// Every text the game looks up passes here, so the way out is two loads and a
+// search of a few hundred hashes; only a hash with a VR wording reads the
+// game's words, and no further than the English ones and their end.
+const char* game_prompts::tableText(uint32_t hash, const char* text) {
+    if (!vrWording.load(std::memory_order_relaxed) || reinterpret_cast<uintptr_t>(text) < 0x10000)
+        return text;
+    const vr_texts::Entry* e = vr_texts::find(hash);
+    char seen[lineChars];
+    if (!e || e->english.size() + 2 > sizeof(seen))
+        return text;
+    const size_t got = copyText(text, seen, e->english.size() + 2);
+    if (got != e->english.size() || e->english != std::string_view(seen, got))
+        return text;
+    const size_t index = static_cast<size_t>(e - vr_texts::all().data());
+    if (index < givenRoom && !checking.load(std::memory_order_relaxed) &&
+        !given[index].exchange(1, std::memory_order_relaxed)) {
+        rewrote.fetch_add(1, std::memory_order_relaxed);
+        if (reading.load(std::memory_order_relaxed)) {
+            char line[callChars];
+            _snprintf_s(line, sizeof(line), _TRUNCATE, "VR text %.*s", static_cast<int>(e->tag.size()),
+                        e->tag.data());
+            AcquireSRWLockExclusive(&callLock);
+            keepLine(line);
+            ReleaseSRWLockExclusive(&callLock);
+        }
+    }
+    return e->vr.data();
+}
+
 bool game_prompts::rewriteCall(uintptr_t imageBase, const char* name, const void* args, uint32_t count,
                                void* copy) {
     if (!imageBase || reinterpret_cast<uintptr_t>(name) != imageBase + addPoiName || !args || !copy ||
@@ -683,7 +734,7 @@ const char* game_prompts::promptShown(unsigned kind, const char* text) {
     uint32_t word = copyAsked(text, {}, copied);
     const char* shown = text;
     if (!copied) {
-        word = prompt_buttons::pack(prompt_buttons::forText(view));
+        word = prompt_buttons::pack(askedBy(text, view));
         // A line no lookup gave its copy, in VR play: its own now.
         if (rewriting.load(std::memory_order_relaxed))
             if (const Copy* copy = copyOf(text))
@@ -797,6 +848,78 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyPromptsWatched(void* output) 
     out.reading = reading.load(std::memory_order_relaxed) ? 1u : 0u;
     out.live = game_prompts::live();
     game_prompts::recentCalls(out.calls);
+    __try {
+        if (reinterpret_cast<uintptr_t>(output) < 0x10000)
+            return 9611;
+        std::memcpy(output, &out, sizeof(out));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 9611;
+    }
+    return 0;
+}
+// The game's texts in VR wording on (1) or off (0), for a headless probe.
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyVrTextsSet(void* input) {
+    uint32_t mode = 1;
+    __try {
+        if (reinterpret_cast<uintptr_t>(input) >= 0x10000)
+            std::memcpy(&mode, input, sizeof(mode));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 9601;
+    }
+    game_prompts::setVrTexts(mode != 0);
+    return 0;
+}
+namespace {
+// Whether the game's text at `p` is `want`, read no further than its end.
+bool sameText(const char* p, std::string_view want) {
+    char seen[lineChars];
+    if (reinterpret_cast<uintptr_t>(p) < 0x10000 || want.size() + 2 > sizeof(seen))
+        return false;
+    const size_t got = copyText(p, seen, want.size() + 2);
+    return got == want.size() && want == std::string_view(seen, got);
+}
+} // namespace
+// Output: TextsCheck. Every entry through the game's lookups, the wording off
+// and then on (game_prompts.hpp).
+extern "C" __declspec(dllexport) DWORD WINAPI SpidyVrTextsCheck(void* output) {
+    using ByHash = const char*(__fastcall*)(uint32_t, const char*);
+    using ByTag = const char*(__fastcall*)(const char*);
+    const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+    const auto byHash = reinterpret_cast<ByHash>(base + 0x1749970);
+    const auto byTag = reinterpret_cast<ByTag>(base + 0x1749a20);
+    game_prompts::TextsCheck out;
+    const bool was = vrWording.load(std::memory_order_relaxed);
+    // The game's own lookups of the same texts meanwhile are not told apart:
+    // the check is for a probe at the title screen, where nothing shows them.
+    checking.store(true, std::memory_order_relaxed);
+    char tag[96];
+    for (int pass = 0; pass < 2; ++pass) {
+        game_prompts::setVrTexts(pass == 1);
+        for (const auto& e : vr_texts::all()) {
+            strncpy_s(tag, e.tag.data(), _TRUNCATE);
+            const char* hashed = byHash(e.hash, nullptr);
+            const char* tagged = byTag(tag);
+            bool fine;
+            if (pass == 0) {
+                ++out.entries;
+                const bool kept = sameText(hashed, e.english);
+                out.english += kept;
+                out.keptByHash += kept;
+                out.keptByTag += sameText(tagged, e.english);
+                fine = kept && sameText(tagged, e.english);
+            } else {
+                const bool vrHash = sameText(hashed, e.vr), vrTag = sameText(tagged, e.vr);
+                out.vrByHash += vrHash;
+                out.vrByTag += vrTag;
+                fine = vrHash && vrTag;
+            }
+            if (!fine && !out.firstMiss[0])
+                _snprintf_s(out.firstMiss, sizeof(out.firstMiss), _TRUNCATE, "%s (%s)", tag,
+                            pass ? "VR wording" : "English");
+        }
+    }
+    game_prompts::setVrTexts(was);
+    checking.store(false, std::memory_order_relaxed);
     __try {
         if (reinterpret_cast<uintptr_t>(output) < 0x10000)
             return 9611;

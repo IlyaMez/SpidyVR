@@ -440,6 +440,24 @@ of impact:
   before it, and listing every second the game named something. `--dll`
   loads another build's stereo module for a before and after. Close the game
   with `tools/close_game.py` and end Steam afterwards.
+- `tools/game_texts.py`: the game's own texts read from its archives, no game
+  running. `dump` writes the English table (57,403 texts with tag and hash)
+  and the tutorial, help and prompt texts as a TSV to `reports/game-texts/`;
+  `table` turns `src/vr_texts.tsv` (a tag and its VR wording a line, `*word*`
+  for the game's emphasis) into `src/vr_texts_table.inc` with each tag's
+  hash and English text; `check` says whether the installed game still has
+  every English text the table replaces (run it after a game update).
+- `tools/probe_vr_texts.py`: the VR wording in the running game. At the title
+  `SpidyVrTextsCheck` runs every entry through the game's lookup by hash and
+  by tag, with the wording off and on; then the wording goes on
+  (`SpidyVrTextsSet`), A loads the save, the last checkpoint is restarted
+  (`--restarts`) for more loading tips, and the reading's `VR text TAG` and
+  `ShowText` lines go to `reports/vr-texts.json`, a screenshot a second
+  through each load to `reports/vr-texts/<time>/`. `--attach` works on a
+  game already running with the modules in it; `--watch SECONDS` presses
+  nothing and records while `probe_menu_pad.py pad ...` drives the game
+  (a new game's first mission: its help lines are the tutorials). A pad
+  press holds 2 s at most (`SpidyPadSubmit` refuses longer with 8502).
 - `tools/probe_vent.py`: the same reading, plus driving the game there from one
   attach, with a little script of steps - `a*6@2` (a press, repeated, seconds
   apart), `walk:4` and `look:2,-1,0` (the sticks, held), `watch`, `watched`,
@@ -1150,7 +1168,7 @@ reattaching after a stopped session or a rebuilt DLL.
 | `-Size 2048` | Square eye resolution instead of the runtime's recommendation (not with `-RenderScale`) |
 | `-Upscale 67` | The size the scene inside each eye is rendered at, in percent of the eye's size per side; the game's temporal anti-aliasing brings it to the eye's size (50-100; 67 by default, 100 is anti-aliasing alone) |
 | `-NoEyeAntialiasing` | The eyes as they were before October 10's eighth build: no anti-aliasing, no upscaling, for comparison |
-| `-NoPromptHelp` | Leave the game's own button prompts alone: Spidy neither reads which button they ask for nor names the VR control in them, and the interact button is the game's Y as before (the pad layer still gives the whole controller) |
+| `-NoPromptHelp` | Leave the game's own button prompts alone: Spidy neither reads which button they ask for nor names the VR control in them, the game's tutorials, tips and Moves List keep its own wording (`vr_texts`), and the interact button is the game's Y as before (the pad layer still gives the whole controller) |
 | `-NoWebGrab` | Webs swing only; they do not catch props or thugs |
 | `-NoAirWebs` | A web that meets nothing within 100 m misses instead of holding in open air |
 | `-NoWebShooter` | The trigger only reels |
@@ -1917,6 +1935,7 @@ still requires a running game or headset.
 | `src/tech_marks.cpp`, `include/spidy/soft_shapes.hpp` | The marks in UI STYLE TECH, the game's HUD look; the soft-edged shapes both styles draw with |
 | `src/prompt_buttons.cpp`, `include/spidy/prompt_buttons.hpp` | The game's own button vocabulary: what each icon id of its nine device families asks of the pad, the letters its prompt texts spell out (its `[BTN_*]` tokens and the `[ACTION_*]` words its virtual pad's Generic icons draw: `[ACTION_WEB_YANK]` is LB + RB), which of them VR play can send, what the player does instead, and a prompt text rewritten in those terms (`pairOnX`: LB + RB as X). Pure and covered by the core tests; `game_pad.hpp` is built on it |
 | `src/game_fp.cpp`, `include/spidy/game_fp.hpp` | First-person cutscenes (launcher: FIRST-PERSON CUTSCENES, CUTSCENE HEAD TRACKING, DISABLE THEATER SCREEN ENTIRELY; options bits 22, 23 and 24; `sceneCamera`: the scene's own camera, level, as the "head" where none is found or by choice): a worker thread finds the skeleton that plays the scene's character (the hero's entity, or the stand-in and its body twin while the hero is parked) through the entity pool (base pointer `0x7a44380`, count `0x7a4439c`, 0xc0 bytes an entry), the render thread samples its head joint (hash `0x37519912` through `0x1775a80`) once a game frame and keeps what sits at that joint hidden (DrawOff `0x191afb0`, DrawOn `0x191b880`); eye command `anchored 2` (`native_eyes::onHead`) puts the XR worker's relative eyes on that head in `stereo_probe.cpp`'s `resolveScene` |
+| `src/vr_texts.tsv`, `src/vr_texts_table.inc`, `src/vr_texts.cpp`, `include/spidy/vr_texts.hpp`, `tools/game_texts.py` | The game's tutorials, help lines, prompts, hint cards, loading tips, Moves List and skills in VR wording, buttons in plain text: 668 texts by tag, each with the hash the game's lookup takes and the English it replaces (only those words, so another language or a changed line keeps the game's own), and what a VR wording asks for (`asked`: the game's own buttons, which NamedPress sends). Pure and covered by the core tests; the TSV is the source, `game_texts.py table` writes the `.inc` |
 | `src/game_prompts.cpp`, `tools/probe_prompts.py` | What the game is asking for now: the prompt and QTE interface watched through `game_menu`'s hooks on the UI's call wrapper, its text lookup and its HUD prompt widget (show `0x7793d0`, hide `0x77a1e0`), the live demand the interact button sends, the rewritten copies of prompt texts the game is handed, the counters a session report carries; plus the October 11 research exports (for a game with no VR session running) |
 | `src/game_offers.cpp`, `src/game_warp.cpp`, `include/spidy/offer_pointing.hpp`, `tools/research_warp.py` | The game's interactions on Spidy's wall: the hero's offer processor, each offer's check and a vent's own check answered as the game's crawl would where the swing holds the player, and the offers it gathered near him; a hand pointing at one and the interact's use of it - the game's own crawl entry under him (`game_warp`), its pick, then its Y; the in-game check (`research_warp.py --use`) |
 | `src/game_xr.cpp`, `src/game_tracking.cpp` | Native eye presentation and Quest controls |

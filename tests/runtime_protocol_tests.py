@@ -185,15 +185,50 @@ class RuntimeTests(unittest.TestCase):
     def test_preflight_reports_the_runtime_it_used(self):
         detected=(self.steamvr,'Headset available: Test HMD; position tracking=1.\nRecommended eye 0: 2528x2704')
         with unittest.mock.patch.object(xr_runtime,'detect',return_value=detected) as detect, \
+             unittest.mock.patch.object(xr_runtime,'cpp_runtime_problem',return_value=None), \
              unittest.mock.patch('builtins.print'):
             manifest,runtime=run_game_vr.preflight('auto')
         detect.assert_called_once()
         self.assertEqual((manifest,runtime),(self.steamvr,dict(name='SteamVR',manifest=str(self.steamvr),automatic=True,
                                                               headset='Test HMD',recommended_eye=[2528,2704])))
         with unittest.mock.patch.object(xr_runtime,'probe',return_value=(False,'Headset unavailable: x.')), \
+             unittest.mock.patch.object(xr_runtime,'cpp_runtime_problem',return_value=None), \
              unittest.mock.patch('builtins.print'):
             with self.assertRaisesRegex(RuntimeError,'Headset unavailable: x. Connect your headset in Meta Quest Link'):
                 run_game_vr.preflight(str(self.oculus))
+
+    def test_an_old_cpp_runtime_is_named_before_and_with_no_headset(self):
+        # Under Proton nothing installs the runtime the launcher installs on Windows: three players' scripts
+        # found no headset until protontricks put Microsoft's in the game's prefix (GitHub #50).
+        problem=xr_runtime.cpp_runtime_problem
+        here=r'C:\windows\system32\msvcp140.dll'
+        self.assertIsNone(problem(lambda: ((14,44,35211,0),here),lambda: False))
+        self.assertIsNone(problem(lambda: ((14,40,33810,0),here),lambda: True))
+        old=problem(lambda: ((14,29,30133,0),here),lambda: False)
+        self.assertIn(f'is 14.29.30133.0 ({here}); Spidy\'s modules need 14.40 or newer',old)
+        self.assertIn('aka.ms/vs/17/release/vc_redist.x64.exe',old)
+        self.assertNotIn('protontricks',old)
+        proton=problem(lambda: ((14,29,30133,0),here),lambda: True)
+        self.assertIn('protontricks 1817070 -q vcrun2017 vcrun2022',proton)
+        self.assertIn('flatpak run com.github.Matoking.protontricks',proton)
+        # Microsoft's files carry a version: none on Windows passes, none under Wine is Wine's own stand-in.
+        self.assertIsNone(problem(lambda: (None,here),lambda: False))
+        self.assertIn("here is Wine's own;",problem(lambda: (None,here),lambda: True))
+        self.assertIn('here is missing;',problem(lambda: (None,None),lambda: False))
+        # This PC's own, read as the session reads it.
+        version,path=xr_runtime.cpp_runtime()
+        self.assertTrue(path.lower().endswith('msvcp140.dll'))
+        self.assertEqual(len(version),4)
+        self.assertFalse(xr_runtime.under_wine())
+        # The session says it first, and again with the error when no headset is found.
+        said='The Microsoft Visual C++ runtime here is missing; Spidy\'s modules need 14.40 or newer.'
+        with unittest.mock.patch.object(xr_runtime,'cpp_runtime_problem',return_value=said), \
+             unittest.mock.patch.object(xr_runtime,'detect',side_effect=RuntimeError('No headset found (WiVRn: x).')), \
+             unittest.mock.patch('builtins.print') as shown:
+            with self.assertRaises(RuntimeError) as raised:
+                run_game_vr.preflight('auto')
+        self.assertEqual(str(raised.exception),f'No headset found (WiVRn: x). {said}')
+        shown.assert_any_call(f'WARNING: {said}',flush=True)
 
     def test_xr_config_v7_carries_the_manifest_null_terminated(self):
         packed=run_game_vr.runtime_path(r'C:\Program Files\Virtual Desktop Streamer\OpenXR\virtualdesktop-openxr.json')

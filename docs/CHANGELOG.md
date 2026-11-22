@@ -3,7 +3,100 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
-**Latest build (November 16): fixes from the players' reports on 0.8.6 and
+**Latest build (November 22): what the players' reports on 0.8.7 needed
+said.** Four reports ended in a line that told the player nothing to do.
+
+- **Linux: the C++ runtime in the game's Proton prefix.** "A lot of Linux
+  users have issues with getting the spidy mod to run ... The script will
+  tell the user that the headset is not connected" (der_pelikan, 0.8.7;
+  Bunbun12345 and runaofspades the same, and GitHub #50). Their runtime
+  found the headset (`PROTON_LOG=1` showed `WiVRn HMD`), and
+  `protontricks 1817070 -q vcrun2017 vcrun2022` ended it for all three.
+  Spidy's modules and headset probe are built with MSVC 14.40 or later and
+  need Microsoft's C++ runtime at least that new. On Windows the launcher
+  checks it and offers the installer; under Proton the launcher does not
+  run, and Wine's own stand-in is not enough. The session now reads the
+  runtime it would load (`xr_runtime.cpp_runtime_problem`): one older than
+  14.40, missing, or Wine's own (no version) is a WARNING before the
+  headset is looked for, and is added to the error when none is found,
+  with the protontricks line under Wine and the installer on Windows.
+  LINUX.md has it as a setup step.
+- **"Game GPU does not match OpenXR GPU" names both cards and what to
+  set.** A Pico 4 Ultra on SteamVR (0.8.6) ended with that line alone. The
+  game drew on another graphics card than the one SteamVR uses: a laptop's
+  two, or a desktop's built-in one with the monitor on it. The message now
+  names both (`xr_session.cpp`, `adapterName`), and the session adds a
+  "Spidy VR unavailable" line, which the launcher shows: Windows Settings >
+  System > Display > Graphics, Spider-Man.exe at High performance, or the
+  monitor on the graphics card.
+- **A module the game did not load says why.** "Bridge failed to load from
+  the expected staging path" (0.8.7, Virtual Desktop) was all a player had.
+  Now the session says which module, Windows' own error when the same file
+  does not load outside the game either, and a C++ runtime the game holds
+  that is older than 14.40 or from outside Windows' folder (another
+  program's copy, which every module loaded after it gets). It names an
+  antivirus too, which blocks or removes unsigned files.
+- **Steam Input, more symptoms.** A that did not jump on the ground (it did
+  in the air, or with X held) and a phone that closed at the menu button
+  (0.8.7, Quest 3 on Virtual Desktop) ended with Steam Input off for the
+  game, as Klibo told that player. PLAYERS.md lists them with the old
+  ones. Why Steam Input does this is still not known: no report of it yet
+  carries 0.8.7's line naming a controller that holds a button.
+
+What ran: the Python protocol suites (new: the runtime's version under
+Windows and Wine, the two-card advice, the load refusal). Not run: the game,
+a headset, Proton, or a PC with two graphics cards.
+
+**Also in this build: the game's tutorials in VR words.** The game teaches
+its controls in its own text: help lines in play, hint cards, loading tips,
+the Moves List and the skills ("Hold LT and tap RB to fire webs and seal
+the leaks"), and its HUD prompts and hint cards name buttons by Xbox
+icons. A VR player has no bumpers, D-pad or stick clicks for most of those.
+
+- **668 of the game's texts have a VR wording** (`src/vr_texts.tsv`), its
+  buttons written out in plain text and the motion said where VR plays it
+  its own way: "Hold your left trigger and pull your right one to fire
+  webs and seal the leaks", "Raise a hand beside your head and pull its
+  trigger to scan the room", "Push the right stick straight up and hold it
+  to zip to a point", "Throw a fast fist at an enemy to attack", "Swing a
+  fist up into an enemy to launch them into the air", "Y: Interact",
+  "Press A to continue". A help line names the VR control that sends the
+  button the game waits for while the line is up (NamedPress), or Spidy's
+  own gesture for it; where a punch is the game's X while it asks (a
+  takedown, a counter) or a quick step aside its dodge, the line says so.
+  Tips, the Moves List and the skills say how VR plays the move. Left as
+  the game wrote them: the controls, accessibility and key binding screens,
+  the menus' bare button names, and four lines no VR control is known for.
+- **How.** Every text of the game goes through one function, the table's
+  lookup by hash (`0x1748d90`), under both the lookup by hash
+  (`0x1749970`) and the one by tag (`0x1749a20`). The help lines take the
+  one by tag, which is why the October 13 reading never saw them in
+  `0x1749970`. `game_menu` hooks it, and a text comes back in VR wording
+  only where the game's words are the English the wording was written for,
+  so another language or a game update keeps the game's own. What a line in
+  VR wording asks for is still read from the game's English (`vr_texts::
+  asked`), so the triggers still send its LT and RB. On in a VR session
+  with the prompts read, on the game screen too (hint cards and loading
+  tips show there); off with SWITCH TO GAME SCREEN and with
+  `--no-prompt-help`. Each text given counts in the report's prompt
+  `rewrites` and puts `VR text TAG` in its timeline.
+- **The game's texts, read from its archives.** `tools/game_texts.py`
+  reads `asset_archive` with no game running (the toc, the DSAR archives'
+  LZ4 blocks, the localization asset; REFERENCE.md has the layout): `dump`
+  writes all 57,403 English texts and the 1,509 tutorial, help and prompt
+  texts to `reports/game-texts/`, `table` builds the wording table from the
+  TSV, `check` tells whether a game update changed a line it replaces.
+
+What ran for the tutorials: core tests 841/841 and the Python suites
+(new: `game_texts_protocol_tests.py`); in the game with no headset
+(`tools/probe_vr_texts.py`), every text given in VR wording through both
+of the game's lookups (664 of the 668 run; the last four are keyboard
+lines), loading tips shown in VR wording on the loading screen, the Moves
+List in plain text, and in a new game's first mission the swing
+tutorial's help panel in VR wording (VALIDATION.md). Not run: a headset,
+and a HUD prompt such as "Y: Interact" seen on screen.
+
+**November 16: fixes from the players' reports on 0.8.6 and
 GitHub issues #81 and #84.**
 
 - **X at a mailbox or a manhole cover is the game's.** "Can't catch pigeons

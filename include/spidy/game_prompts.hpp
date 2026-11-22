@@ -185,6 +185,20 @@ void note(const char* text, bool diagnostics = true);
 // The copy is the game's to read for the rest of the session; what it named
 // before stays known to the readers here, so it still asks for LB + RB.
 const char* observeText(const char* text);
+// Whether the game's texts are given in VR wording (vr_texts.hpp): in a VR
+// session with the prompts read (not with --no-prompt-help) and not while the
+// game is played on its screen as it is (SWITCH TO GAME SCREEN). Unlike
+// setRewriting this holds on the game screen of a VR session too: its hint
+// cards, loading tips and Moves List show there and teach VR play.
+void setVrTexts(bool);
+// One of the game's texts as its table gives it (game_menu's hook on the
+// lookup under both of the game's own, 0x1748d90: `hash` and the text found
+// for it, or null). Returns the text to use: the VR wording where there is one
+// for these words and setVrTexts is on, else `text`. A text given so counts in
+// Live::rewritten once, and the reading's timeline gets a `VR text TAG` line.
+// What a VR wording asks for is what the game's own words named: the readers
+// here take its demand from the English text (vr_texts::englishOf).
+const char* tableText(uint32_t hash, const char* text);
 // The HUD's prompt list (the throw's "[ACTION_WEB_YANK] (Hold) Throw" on a
 // street, "[BTN_Y] Interact" by a passer-by), from game_menu's hooks on its
 // widget: a line of `kind` (0-20, the widget's own) shown with `text`, which
@@ -227,4 +241,18 @@ struct Watched {
 // (six counters then four words) and Calls at 80 (count, perName[10],
 // line[32][128], names, calls[48], example[48][160]).
 static_assert(sizeof(Live) == 64 && sizeof(Calls) == 12016 && sizeof(Watched) == 12096);
+// The VR wording checked in the running game, for a probe with no headset
+// (`SpidyVrTextsCheck`, tools/probe_vr_texts.py; the menu's hooks carry it, so
+// SpidyMenuStart must have run): every entry's text through the game's own
+// lookups, by hash (0x1749970) and by tag (0x1749a20), once with the wording
+// off and once on; setVrTexts is put back as it was. `english` counts the
+// entries whose text the game has in the English the table was written for,
+// `keptBy*` those it gave as its own with the wording off, `vrBy*` those it gave
+// in VR wording with it on; `firstMiss` is the first entry that did not.
+struct TextsCheck {
+    uint32_t magic = 0x54585456, version = 1, bytes = sizeof(TextsCheck), status{};
+    uint32_t entries{}, english{}, keptByHash{}, keptByTag{}, vrByHash{}, vrByTag{}, reserved[2]{};
+    char firstMiss[64]{};
+};
+static_assert(sizeof(TextsCheck) == 112);
 } // namespace spidy::game_prompts

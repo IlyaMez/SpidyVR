@@ -7,6 +7,7 @@ unless one is asked for. Run as a script, it lists the runtimes as JSON; with --
 headset the way a session does.
 """
 import argparse
+import ctypes
 import json
 import os
 import pathlib
@@ -33,6 +34,15 @@ KNOWN = (('virtualdesktop', 'Virtual Desktop'), ('steamxr', 'SteamVR'), ('oculus
 SERVICES = (('SteamVR', 'vrserver.exe'), ('Meta Quest Link', 'ovrserver_x64.exe'))
 NONE_INSTALLED = ('No OpenXR runtime is installed. Install Virtual Desktop (the tested way to play), SteamVR or '
                   'the Meta Quest Link app.')
+# Spidy's modules and its headset probe are built with MSVC 14.40 or later and need the Microsoft C++ runtime
+# at least that new (std::mutex changed: apps/launcher/system.cpp, kMinimumRuntime). The launcher checks it on
+# Windows and offers the installer. Under Proton the launcher does not run (docs/LINUX.md), and a game prefix
+# with Wine's own runtime or an older one left the probe with no headset to report, on WiVRn and SteamVR alike,
+# until the players installed the runtime there with CPP_RUNTIME_PROTON (GitHub #50; der_pelikan, Bunbun12345
+# and runaofspades on Discord, November 16-20).
+CPP_RUNTIME_MINIMUM = (14, 40)
+CPP_RUNTIME_PROTON = 'protontricks 1817070 -q vcrun2017 vcrun2022'
+CPP_RUNTIME_WINDOWS = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
 
 
 def _machine_key(path):
@@ -132,6 +142,61 @@ def probe(manifest, timeout=60, program=PROBE):
         return False, f'no answer within {timeout} seconds'
     said = result.stdout if result.returncode == 0 else (result.stderr or result.stdout)
     return result.returncode == 0, (said or '').strip()
+
+
+def under_wine():
+    """Whether this runs under Wine, Proton among them (their ntdll has wine_get_version)."""
+    try:
+        return hasattr(ctypes.WinDLL('ntdll'), 'wine_get_version')
+    except OSError:
+        return False
+
+
+def cpp_runtime():
+    """(version, path) of the Microsoft C++ runtime's msvcp140.dll as a program started here loads it; the
+    version as a tuple of numbers, None when the file has none; (None, None) when there is no such library."""
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.LoadLibraryW.restype = ctypes.c_void_p
+    kernel32.LoadLibraryW.argtypes = [ctypes.c_wchar_p]
+    kernel32.GetModuleFileNameW.restype = ctypes.c_uint32
+    kernel32.GetModuleFileNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint32]
+    kernel32.FreeLibrary.argtypes = [ctypes.c_void_p]
+    handle = kernel32.LoadLibraryW('msvcp140.dll')
+    if not handle:
+        return None, None
+    try:
+        buffer = ctypes.create_unicode_buffer(1024)
+        path = buffer.value if kernel32.GetModuleFileNameW(handle, buffer, len(buffer)) else 'msvcp140.dll'
+    finally:
+        kernel32.FreeLibrary(handle)
+    from inspect_game import file_version
+    text = file_version(path)
+    try:
+        return (tuple(int(part) for part in text.split('.')) if text else None), path
+    except ValueError:
+        return None, path
+
+
+def cpp_runtime_problem(found=cpp_runtime, wine=under_wine):
+    """What keeps Spidy's modules from starting here, as the session says it, or None: the Microsoft C++
+    runtime missing or older than CPP_RUNTIME_MINIMUM. Microsoft's own files carry their version, so one
+    without a version passes on Windows; under Wine it is Wine's own stand-in, which does not do."""
+    version, path = found()
+    if version is not None and version[:2] >= CPP_RUNTIME_MINIMUM:
+        return None
+    proton = wine()
+    if path is not None and version is None and not proton:
+        return None
+    have = (f"is {'.'.join(map(str, version))} ({path})" if version else
+            "is Wine's own" if path else 'is missing')
+    fix = (f"Install Microsoft's into the game's Proton prefix: {CPP_RUNTIME_PROTON} (with the Flatpak "
+           'protontricks: flatpak run com.github.Matoking.protontricks 1817070 -q vcrun2017 vcrun2022), then '
+           'start the game again from Steam.' if proton else
+           f"Install it in the launcher (Visual C++ runtime: Install), or from {CPP_RUNTIME_WINDOWS}, then press "
+           'START VR.')
+    return (f"The Microsoft Visual C++ runtime here {have}; Spidy's modules need "
+            f"{'.'.join(map(str, CPP_RUNTIME_MINIMUM))} or newer and do not start without it (no headset is "
+            f'found). {fix}')
 
 
 def candidates(installed, running):

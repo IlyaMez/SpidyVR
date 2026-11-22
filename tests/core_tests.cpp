@@ -56,6 +56,7 @@
 #include "spidy/spider_sense.hpp"
 #include "spidy/game_sound.hpp"
 #include "spidy/prompt_buttons.hpp"
+#include "spidy/vr_texts.hpp"
 #include "spidy/xr_layers.hpp"
 #include "spidy/offer_pointing.hpp"
 #include "spidy/tech_marks.hpp"
@@ -27868,6 +27869,87 @@ int main() {
         check(lines <= 2 * static_cast<int>(StateLog::perSecond) && lines >= static_cast<int>(StateLog::perSecond) &&
                   summed,
               "flapping not capped and summed up");
+    });
+    test("the game's texts in VR wording: each for its English words only, its buttons in plain text", [] {
+        const auto all = vr_texts::all();
+        check(all.size() >= 600, "the VR wording table is nearly empty");
+        bool ordered = true, filled = true, found = true, given = true, back = true, tokens = true, plain = true,
+             spans = true, short_labels = true;
+        uint32_t absent = 1;
+        for (size_t i = 0; i < all.size(); ++i) {
+            const auto& e = all[i];
+            ordered &= !i || all[i - 1].hash < e.hash;
+            filled &= !e.tag.empty() && !e.english.empty() && !e.vr.empty() && e.vr != e.english;
+            found &= vr_texts::find(e.hash) == &e;
+            // Only for the English words it was written for: another language, or a changed line, keeps its own.
+            const std::string other = std::string(e.english) + " ";
+            given &= vr_texts::forText(e.hash, e.english) == e.vr.data() && !vr_texts::forText(e.hash, other);
+            // The demand stays the game's: the wording, by pointer or copied on, asks for what the English named
+            // (with the other texts' it stands for too, where several share it).
+            const std::string copied(e.vr);
+            const auto english = prompt_buttons::forText(e.english);
+            prompt_buttons::Demand byPointer, byWords;
+            back &= vr_texts::asked(e.vr.data(), {}, byPointer) && vr_texts::asked(copied.c_str(), copied, byWords) &&
+                    byPointer == byWords && (byPointer.buttons & english.buttons) == english.buttons &&
+                    (byPointer.leftTrigger || !english.leftTrigger) &&
+                    (byPointer.rightTrigger || !english.rightTrigger) && (byPointer.hold || !english.hold);
+            for (size_t at = e.vr.find('['); at != std::string_view::npos; at = e.vr.find('[', at + 1)) {
+                const size_t end = e.vr.find(']', at);
+                tokens &= end != std::string_view::npos && vr_texts::tokenAllowed(e.vr.substr(at, end - at + 1));
+            }
+            for (const char c : e.vr)
+                plain &= c >= ' ' && c <= '~' && c != '`';
+            size_t opened = 0, closed = 0;
+            for (size_t at = e.vr.find("<span"); at != std::string_view::npos; at = e.vr.find("<span", at + 1))
+                ++opened;
+            for (size_t at = e.vr.find("</span>"); at != std::string_view::npos; at = e.vr.find("</span>", at + 1))
+                ++closed;
+            spans &= opened == closed && e.vr.find('*') == std::string_view::npos;
+            // The HUD's prompt lines and the Moves List's button column are short.
+            if (e.tag.starts_with("CTRL_ACTION_") || e.tag.starts_with("HUD_MSG_") || e.tag.ends_with("_BTNS"))
+                short_labels &= e.vr.size() <= 40;
+            absent += absent == e.hash;
+        }
+        check(ordered, "the table is not in the order of its hashes");
+        check(filled, "an entry with no tag, no English or no VR wording");
+        check(found, "an entry not found by its hash");
+        check(given, "a VR wording given for words it was not written for");
+        check(back, "a VR wording that does not lead back to the game's English");
+        check(tokens, "a VR wording shows a button's icon instead of its name");
+        check(plain, "a VR wording with a character beyond plain ASCII (curly quotes, dashes) or a control");
+        check(spans, "a VR wording with unbalanced emphasis");
+        check(short_labels, "a prompt line or a button column over 40 characters");
+        check(!vr_texts::find(absent) && !vr_texts::forText(absent, "Press [BTN_A] to jump."),
+              "a hash with no entry was given one");
+        prompt_buttons::Demand none;
+        check(!vr_texts::asked("[BTN_Y] Interact", "[BTN_Y] Interact", none) && !vr_texts::asked(nullptr, {}, none),
+              "a text that is no VR wording was taken for one");
+        check(vr_texts::tokenAllowed("[BLACKCAT_ICON]") && !vr_texts::tokenAllowed("[BTN_A]") &&
+                  !vr_texts::tokenAllowed("[BTN_RB]") && !vr_texts::tokenAllowed("[STICK_LEFT]") &&
+                  !vr_texts::tokenAllowed("[DPAD_DOWN]") && !vr_texts::tokenAllowed("[ACTION_WEB_YANK]"),
+              "the game's pictures a VR wording may show, and no button's icon");
+        // A help line in VR wording still asks for the game's own buttons (game_prompts::askedBy reads them from
+        // the English): the leaks' wording names triggers, the game waits for its LT and RB. The gadget wheel's
+        // three lines share one wording, which asks for each one's bumper.
+        int seen = 0;
+        for (const auto& e : all) {
+            prompt_buttons::Demand d;
+            if (e.tag == "TUT_OM_ACID_LEAKS") {
+                ++seen;
+                check(vr_texts::asked(e.vr.data(), {}, d) && d.leftTrigger &&
+                          (d.buttons & prompt_buttons::padRightShoulder),
+                      "the leaks' VR wording lost the game's LT and RB");
+                check(!prompt_buttons::forText(e.vr).any(), "the leaks' VR wording names a pad button itself");
+            }
+            if (e.tag == "TUT_WEAPONWHEEL_ALT") {
+                ++seen;
+                check(vr_texts::asked(e.vr.data(), {}, d) &&
+                          (d.buttons & (prompt_buttons::padLeftShoulder | prompt_buttons::padRightShoulder)) ==
+                              (prompt_buttons::padLeftShoulder | prompt_buttons::padRightShoulder),
+                      "the gadget wheel's shared wording lost a variant's bumper");
+            }
+        }
+        check(seen == 2, "the leaks' or the gadget wheel's line is not in the table");
     });
     std::cout << total - failed << '/' << total << " tests passed\n";
     return failed ? 1 : 0;

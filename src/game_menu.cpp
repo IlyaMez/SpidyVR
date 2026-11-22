@@ -574,6 +574,15 @@ const char* __fastcall textHook(uint32_t hash, const char* fallback) {
 bool __fastcall hasTextHook(uint32_t hash) {
     return (buildingTab && textFor(hash)) || originalHasText(hash);
 }
+// The game's text table itself (the table, a tag's hash): under the lookup by
+// hash above and the one by tag (0x1749a20, which help lines and hint cards
+// take, and which never passes 0x1749970). In a VR session a text the game
+// teaches its controls with comes back in VR wording (game_prompts::tableText).
+using TableTextFn = const char*(__fastcall*)(void*, uint32_t);
+TableTextFn originalTableText{};
+const char* __fastcall tableTextHook(void* table, uint32_t hash) {
+    return game_prompts::tableText(hash, originalTableText(table, hash));
+}
 // The HUD's prompt list: its widget showing a line of `kind` (0-20) with a
 // text, and hiding one - what game_prompts keeps as asked for while it is up
 // (promptShown), and the line it shows in VR play. The show takes eight
@@ -631,6 +640,8 @@ const Hook hooks[] = {
      {0x48, 0x8b, 0xc4, 0x48, 0x89, 0x58, 0x08, 0x48, 0x89, 0x70}, 10},
     {0x77a1e0, reinterpret_cast<void*>(&promptHideHook), reinterpret_cast<void**>(&originalPromptHide),
      {0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x6c, 0x24, 0x10}, 10},
+    {0x1748d90, reinterpret_cast<void*>(&tableTextHook), reinterpret_cast<void**>(&originalTableText),
+     {0x40, 0x53, 0x48, 0x83, 0xec, 0x20, 0x44, 0x8b, 0x41, 0x30}, 10},
 };
 bool matches(uintptr_t at, const unsigned char* bytes, size_t count) {
     __try {

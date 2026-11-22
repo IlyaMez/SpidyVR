@@ -4,7 +4,9 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
+#include <string>
 #include <thread>
 namespace spidy {
 namespace {
@@ -20,6 +22,22 @@ XrPosef identity() {
     XrPosef p{};
     p.orientation.w = 1;
     return p;
+}
+// The name Windows gives the graphics card `luid`, at most 80 bytes of UTF-8, or "unknown".
+std::string adapterName(LUID luid) {
+    ComPtr<IDXGIFactory4> factory;
+    ComPtr<IDXGIAdapter1> adapter;
+    DXGI_ADAPTER_DESC1 desc{};
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) ||
+        FAILED(factory->EnumAdapterByLuid(luid, IID_PPV_ARGS(&adapter))) || FAILED(adapter->GetDesc1(&desc)))
+        return "unknown";
+    char name[4 * std::size(desc.Description)]{};
+    if (WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, sizeof(name), nullptr, nullptr) <= 1)
+        return "unknown";
+    std::string text(name);
+    if (text.size() > 80)
+        text.resize(80);
+    return text;
 }
 } // namespace
 XrRuntime::~XrRuntime() {
@@ -144,9 +162,12 @@ void XrRuntime::initialize(
     if (!graphics.device || !graphics.queue)
         throw std::invalid_argument("OpenXR requires a D3D12 device and queue");
     const auto luid = graphics.device->GetAdapterLuid();
-    if (luid.LowPart != requirements.adapterLuid.LowPart ||
-        luid.HighPart != requirements.adapterLuid.HighPart)
-        throw std::runtime_error("Game GPU does not match OpenXR GPU");
+    // Two graphics cards (a laptop's two, or a desktop's built-in one with the monitor on it) and the game
+    // on the other one than the headset's: a Pico 4 Ultra on SteamVR, November 16. The session's console
+    // turns this into what to change (run_game_vr.py, gpu_mismatch_advice), so keep the wording.
+    if (luid.LowPart != requirements.adapterLuid.LowPart || luid.HighPart != requirements.adapterLuid.HighPart)
+        throw std::runtime_error("Game GPU does not match OpenXR GPU: the game draws on " + adapterName(luid) +
+                                 ", the headset's runtime on " + adapterName(requirements.adapterLuid) + ".");
     if (graphics.queue->GetDesc().Type != D3D12_COMMAND_LIST_TYPE_DIRECT)
         throw std::runtime_error("OpenXR requires a direct command queue");
     ComPtr<ID3D12Device> queueDevice;

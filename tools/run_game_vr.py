@@ -260,6 +260,24 @@ def device_lost_advice(reason, play_frames):
             'display; the newest graphics driver. If it happens again, post the session report in #spidy-bugs '
             'on Discord (press Reports, zip the three newest game-vr- files).')
 
+
+def gpu_mismatch_advice(message):
+    """The console's line when VR could not start because the game draws on another graphics card than the
+    one the headset's runtime uses (xr_session.cpp names both), or None for any other XR message. A PC with
+    two cards: a laptop's, or a desktop's built-in one with the monitor on it (a Pico 4 Ultra on SteamVR,
+    November 16: the message alone, which told the player nothing to do)."""
+    found = re.match(r"Game GPU does not match OpenXR GPU(?:: the game draws on (.*), the headset's runtime "
+                     r"on (.*)\.)?$", message or '')
+    if not found:
+        return None
+    game = found[1] if found[1] and found[1] != 'unknown' else None
+    headset = found[2] if found[2] and found[2] != 'unknown' else None
+    return ('Spidy VR unavailable: this PC has two graphics cards, and the game started on '
+            f"{game or 'one'} while your headset's VR runtime uses {headset or 'the other'}. In Windows Settings > "
+            "System > Display > Graphics, add Spider-Man.exe from the game's folder and set it to High "
+            f"performance{f' ({headset})' if headset else ''}, close the game, then press START VR. On a desktop "
+            'PC, plug the monitor into the graphics card rather than the motherboard.')
+
 # Windows' own libraries, by name. A program loads a library from its own folder first, so a file with
 # one of these names beside Spider-Man.exe is neither Windows' nor the game's, whose folder holds none of
 # them: it is how another mod, an overlay or a trainer gets into the game, and it takes the calls the
@@ -436,19 +454,28 @@ def accepted(result):
 def preflight(requested):
     """The session's OpenXR runtime, once it has a headset: the one asked for, or by default ('auto') the one
     the headset is connected to (xr_runtime.detect). No session is started. Returns (manifest, what the
-    report says about it)."""
+    report says about it). An old or missing C++ runtime is said first, and again with the error when no
+    headset is found: the probe cannot start without it (under Proton the launcher's own check never runs)."""
     automatic = not requested or str(requested).lower() == 'auto'
-    if not automatic:
-        manifest = xr_runtime.choose(requested)
-        runtime = xr_runtime.name(manifest)
-        print(f'VR runtime: {runtime} ({manifest}).', flush=True)
-        found, said = xr_runtime.probe(manifest)
-        if not found:
-            raise RuntimeError(f'{said} Connect your headset in {runtime} before starting Spidy VR.')
-    else:
-        manifest, said = xr_runtime.detect(say=lambda line: print(line, flush=True))
-        runtime = xr_runtime.name(manifest)
-        print(f'VR runtime: {runtime} ({manifest}), found automatically.', flush=True)
+    runtime_problem = xr_runtime.cpp_runtime_problem()
+    if runtime_problem:
+        print(f'WARNING: {runtime_problem}', flush=True)
+    try:
+        if not automatic:
+            manifest = xr_runtime.choose(requested)
+            runtime = xr_runtime.name(manifest)
+            print(f'VR runtime: {runtime} ({manifest}).', flush=True)
+            found, said = xr_runtime.probe(manifest)
+            if not found:
+                raise RuntimeError(f'{said} Connect your headset in {runtime} before starting Spidy VR.')
+        else:
+            manifest, said = xr_runtime.detect(say=lambda line: print(line, flush=True))
+            runtime = xr_runtime.name(manifest)
+            print(f'VR runtime: {runtime} ({manifest}), found automatically.', flush=True)
+    except RuntimeError as error:
+        if runtime_problem:
+            raise RuntimeError(f'{error} {runtime_problem}') from error
+        raise
     print(said, flush=True)
     headset = next((line[len('Headset available: '):].split(';')[0] for line in said.splitlines()
                     if line.startswith('Headset available: ')), None)
@@ -3199,6 +3226,8 @@ def session(a, startup):
                   f"{memory['ring_mb']:.0f} MB; {memory['overflow_frames']} of {memory['frames']} frames "
                   'did not fit.', flush=True)
         tell_device_lost()
+        if advice := gpu_mismatch_advice((final or {}).get('message')):
+            print(advice, flush=True)
         print(f"Test {'passed' if result['passed'] else 'failed'}; report: {a.output.resolve()}", flush=True)
         return 0 if result['passed'] else 1
     finally:
