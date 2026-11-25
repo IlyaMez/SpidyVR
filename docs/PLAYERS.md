@@ -58,14 +58,34 @@ PLAY
 3. Press START VR. Steam starts the game. Its intro and menus show on a screen
    in the headset; pick your save with the VR controllers. VR takes over as
    soon as you play.
-4. The first time, a panel asks you to calibrate your body: stand tall, look
-   ahead, stretch both arms straight out to the sides (a T-pose) and hold
-   both triggers until the bar fills, about a second and a half. Spider-Man
-   then has your height and arm length, so his hands sit on your
-   controllers. B skips it. The launcher remembers it; "Redo" on its Options
-   tab, or CALIBRATE BODY in VR SETUP (below), does it again. Rather enter
-   your height? Set HEIGHT (VR SETUP, or "Height" in the launcher's options).
-   Playing seated? Switch SEATED on first (below), then calibrate sitting up.
+4. The first time, after the intro, pick your profile: the game's Settings
+   then open by themselves on SPIDY VR SETUP, a page of the game's own
+   Settings. (Start playing before that, and they open at the next session's
+   title instead.) Pick with the left stick (left and right change a row),
+   then press B:
+   - PLAY STYLE: ARCADE (light and assisted), BALANCED (real ropes, softer
+     catches; where you start) or PRO (heavy, no assists, and webs need a
+     surface to stick to).
+   - WEB BUTTON: the grip or the trigger shoots and holds your webs.
+   - COMFORT VIGNETTE: the edge of your view darkens while you swing, fall
+     or turn. New to VR, or does swinging make you queasy? Keep it on, or
+     raise it. You start on LOW.
+   - SMOOTH TURN and SNAP TURN: snap turning (smooth turn OFF) is the
+     easiest on the stomach.
+   - SEATED and HEIGHT, if you play sitting down or want to enter your
+     height.
+   - CUTSCENES: on the game screen ahead of you, or in FIRST PERSON around
+     you.
+   - CALIBRATE BODY: ON RESUME asks for a T-pose as soon as you play.
+   You can change all of these later: Settings > SPIDY VR SETUP at the title
+   screen, or VR SETUP in the pause menu's Settings. "Show again" in the
+   launcher's Options > Setup brings the setup back next session.
+5. The T-pose: stand tall, look ahead, stretch both arms straight out to
+   the sides and hold both triggers until the bar fills, about a second and
+   a half. Spider-Man then has your height and arm length, so his hands sit
+   on your controllers. B skips it. The launcher remembers it; "Redo" on its
+   Options tab, or CALIBRATE BODY in VR SETUP (below), does it again.
+   Playing seated? Switch SEATED on first, then calibrate sitting up.
 
 Keep the game window in front on the desktop: the game pauses while another
 window is in front of it, the launcher included. If the headset shows a still
@@ -787,8 +807,10 @@ VR settings
   Y resets only the current VR category, and B goes back. Other categories,
   launcher-only tuning and the pause menu's VR VIEW are left as they are.
 
-  VR SETUP ....... turning, body calibration, height and seated play (5 controls).
-  VR WEBS ........ anchors, aiming, web tie and web lines (16 controls).
+  VR SETUP ....... play style, web button, comfort vignette, turning, seated
+                   play, height, cutscenes and body calibration (9 controls):
+                   the first-time setup's choices.
+  VR WEBS ........ anchors, aiming, web tie and web lines (15 controls).
   VR SWINGING .... swing feel, slingshots and hand gestures (12 controls).
   VR MOVEMENT .... running, jumps, landings, walls, combat and run logs (19 controls).
   VR FLIPS ....... flip controls, momentum, dodge tumble and reprojection (12 controls).
@@ -820,7 +842,8 @@ VR settings
   reference below describes each feature by topic, rather than tab order.
   WEBS ........... WEB STYLE (REALISTIC or ARCADE, below); the WEB BUTTON
                    (GRIP or TRIGGER: the one that shoots and holds a web;
-                   the other reels in and shoots web balls); AIM MARKERS;
+                   the other reels in and shoots web balls; in VR SETUP);
+                   AIM MARKERS;
                    webs holding in open air (a web that meets nothing
                    within WEB RANGE holds there; off, it misses); SMART
                    ANCHOR (off until you switch it on): with open-air
@@ -1165,14 +1188,17 @@ VR settings
   them and bend them round their corners.
   Catching props and thugs, the web shooter, your own body and punching are
   always on.
-  The title screen's Options have no VR category tabs: load your save first, or
-  set them in the launcher.
+  The title screen's Settings have SPIDY VR SETUP, the VR SETUP rows, as a
+  page before GAME. The other VR categories are in the pause menu's Settings
+  (load your save first) or in the launcher.
 
 Gameplay presets (Play > Profile)
   Arcade: light assisted swings, air webs, no flips.
-  Balanced: real anchors with assistance, softer catches, manual flips.
-  Pro: heavy unassisted momentum, hand climbing and realistic flips.
-  Pick directly on Play with VR stopped; Manage opens Options > Profiles.
+  Balanced: real ropes, softer catches, air webs, manual flips.
+  Pro: heavy unassisted momentum, no air webs, hand climbing and realistic
+  flips.
+  Pick directly on Play with VR stopped; Manage opens Options > Profiles. In
+  the headset, PLAY STYLE in Settings > VR SETUP picks the same three.
   All 52 gameplay settings change together. Your seated mode, turning,
   calibration, button/aim setup, haptics, display, graphics and recording stay.
   No preset is applied automatically. A gameplay edit adds *; Save as a
@@ -1404,6 +1430,12 @@ IF SOMETHING IS WRONG
 - You would rather turn smoothly than in steps: SMOOTH TURN in Settings >
   VR SETUP (or "Smooth turn" in the launcher's options). If it makes you
   uneasy, try a slower speed, or OFF for snap turning again.
+- Swinging makes you queasy: COMFORT VIGNETTE in Settings > VR SETUP (or
+  "Comfort vignette" in the launcher's options) at MEDIUM or HIGH darkens
+  the edge of your view while you swing, fall or turn. Snap turning, ARCADE
+  or BALANCED play style (PRO rotates you in the air and leans the view in
+  dodges), and short sessions help too. Stop when you feel it coming: it
+  gets worse if you push through.
 - The menu screen is too small or too large: "Game screen size" in Settings
   > VR DISPLAY.
 - A cutscene's depth strains your eyes, or things come too far out of the

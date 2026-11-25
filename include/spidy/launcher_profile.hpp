@@ -97,6 +97,7 @@ inline constexpr ProfileSetting profileSettings[] = {
     retired("wall_run", 1),
     launcherOption("snap_turn", Item::snapTurn, 0, 90, &SessionOptions::snapTurn),
     launcherOption("smooth_turn", Item::smoothTurn, 0, 360, &SessionOptions::smoothTurn),
+    tabOnly("comfort_vignette", Item::comfortVignette, 0, 3, &Values::comfortVignette),
     launcherOption("haptics", Item::haptics, 0, 100, &SessionOptions::haptics),
     tabOnly("reel_haptics", Item::reelHaptics, &Values::reelHaptics),
     tabOnly("swing_haptics", Item::swingHaptics, &Values::swingHaptics),

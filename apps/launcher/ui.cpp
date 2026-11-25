@@ -1854,7 +1854,11 @@ void App::options(ImVec2 origin, ImVec2 size) {
         endCard();
         columnY[column] = ImGui::GetItemRectMax().y + gap;
     };
-    group(0, 0, "Turning", [&] {
+    group(0, 0, "Comfort", [&] {
+        settingOption(Item::comfortVignette, "Comfort vignette",
+                      "The edge of your view darkens while you swing, fall or turn, so less of the city rushes past "
+                      "at the corner of your eye. Helps with motion sickness.",
+                      S(150), [&] { tabCombo("##vignette", Item::comfortVignette); });
         settingOption(Item::smoothTurn, "Smooth turn", "Turn steadily while you hold the right stick; off, it snap turns.", S(150), [&] {
             stepCombo("##smooth", kSmoothTurns, kSmoothValues, static_cast<int>(std::size(kSmoothValues)),
                       &o.smoothTurn);
@@ -1862,6 +1866,20 @@ void App::options(ImVec2 origin, ImVec2 size) {
         settingOption(Item::snapTurn, "Snap turn", "How far a flick of the right stick turns you.", S(150), [&] {
             stepCombo("##snap", kSnapTurns, kSnapValues, static_cast<int>(std::size(kSnapValues)), &o.snapTurn);
         });
+    });
+    group(0, 0, "First-time setup", [&] {
+        settingOption(Item::none, "Setup in the headset",
+                      o.firstSetup ? "At the title screen, the next session opens the game's Settings on SPIDY VR "
+                                     "SETUP: play style, web button, comfort, turning, cutscenes and your body. "
+                                     "Start playing before that and it comes up a second into play instead."
+                                   : "Done. Settings > SPIDY VR SETUP at the title, or VR SETUP in the pause menu, has "
+                                     "the same choices. Show again opens it at the next session's title screen.",
+                      S(116), [&] {
+                          if (!o.firstSetup && button("Show again", S(116))) {
+                              o.firstSetup = true;
+                              changed = true;
+                          }
+                      });
     });
     group(0, 1, "Your body", [&] {
         // The T-pose calibration made in the headset; Redo forgets it, and the next session asks for it again.
@@ -2551,6 +2569,7 @@ void App::profileCard(float width) {
             o.eyeHeightMm = kept.eyeHeightMm;
             o.armLengthMm = kept.armLengthMm;
             o.calibrationPrompt = kept.calibrationPrompt;
+            o.firstSetup = kept.firstSetup;
             save();
             // And those spidy_vr.ini keeps.
             if (!(tabOnly_ == spidy::vr_settings::Values{})) {

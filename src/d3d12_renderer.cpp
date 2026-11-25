@@ -342,6 +342,9 @@ void D3D12Renderer::renderViews(std::span<const ViewTarget> views, std::span<con
                           picture->halfHeight > 0;
     if (painting)
         preparePicture(format);
+    const bool closing = grade && grade->vignetted();
+    if (closing)
+        prepareVignette(format);
     if (!depth_ || width != width_ || height != height_) {
         depth_.Reset();
         width_ = width;
@@ -457,6 +460,8 @@ void D3D12Renderer::renderViews(std::span<const ViewTarget> views, std::span<con
             list_->SetPipelineState(translucent_.Get());
             list_->DrawInstanced(static_cast<UINT>(translucent.size()), 1, static_cast<UINT>(vertices.size()), 0);
         }
+        if (closing)
+            recordVignette(views[eye], rtv, *grade, static_cast<unsigned>(eye));
     }
     hr(list_->Close(), "Close render list");
     ID3D12CommandList* lists[] = {list_.Get()};
@@ -816,6 +821,110 @@ void D3D12Renderer::recordGrade(const ViewTarget& target, D3D12_CPU_DESCRIPTOR_H
     list_->SetDescriptorHeaps(1, heaps);
     list_->SetGraphicsRootDescriptorTable(0, gradeHeap_->GetGPUDescriptorHandleForHeapStart());
     list_->SetGraphicsRoot32BitConstants(1, 12, constants, 0);
+    list_->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+    D3D12_VIEWPORT viewport{0, 0, static_cast<float>(target.width), static_cast<float>(target.height), 0, 1};
+    D3D12_RECT rect{0, 0, static_cast<LONG>(target.width), static_cast<LONG>(target.height)};
+    list_->RSSetViewports(1, &viewport);
+    list_->RSSetScissorRects(1, &rect);
+    list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    list_->DrawInstanced(3, 1, 0, 0);
+}
+void D3D12Renderer::prepareVignette(DXGI_FORMAT targetFormat) {
+    if (!vignetteRoot_) {
+        D3D12_ROOT_PARAMETER parameter{};
+        parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        parameter.Constants.Num32BitValues = 8;
+        parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        D3D12_ROOT_SIGNATURE_DESC rs{1, &parameter, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE};
+        ComPtr<ID3DBlob> signature, error;
+        hr(D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error),
+           "Serialize vignette root signature");
+        hr(device_->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(),
+                                        IID_PPV_ARGS(&vignetteRoot_)),
+           "Create vignette root signature");
+    }
+    if (vignettePipeline_ && vignetteFormat_ == targetFormat)
+        return;
+    // Black blended over the view by a cover that grows from `inner` to full
+    // over `feather`, measured out from the lens's axis so that 1 is the
+    // middle of each edge of the view (the corners are further out). Black is
+    // black in light and display values alike: no encoding.
+    const char* shader = R"(
+cbuffer Vignette : register(b0) {
+    float4 lens; // tangents of the view: left, right, up, down
+    float2 pixel;
+    float inner, feather;
+};
+float4 vs(uint id : SV_VertexID) : SV_POSITION {
+    const float2 corner = float2((id << 1) & 2, id & 2);
+    return float4(corner * float2(2, -2) + float2(-1, 1), 0, 1);
+}
+float4 ps(float4 position : SV_POSITION) : SV_TARGET {
+    const float2 uv = position.xy * pixel;
+    const float2 t = float2(lerp(lens.x, lens.y, uv.x), lerp(lens.z, lens.w, uv.y));
+    const float2 edge = float2(t.x < 0 ? max(-lens.x, 1e-3) : max(lens.y, 1e-3),
+                               t.y > 0 ? max(lens.z, 1e-3) : max(-lens.w, 1e-3));
+    return float4(0, 0, 0, smoothstep(inner, inner + feather, length(t / edge)));
+}
+)";
+    ComPtr<ID3DBlob> vs, ps;
+    const auto compileStage = [&](const char* entry, const char* target, ComPtr<ID3DBlob>& out) {
+        ComPtr<ID3DBlob> error;
+        const auto result = D3DCompile(shader, std::strlen(shader), "spidy_vignette", nullptr, nullptr, entry,
+                                       target, D3DCOMPILE_ENABLE_STRICTNESS, 0, &out, &error);
+        if (FAILED(result) && error)
+            throw std::runtime_error(std::string("Compile vignette shader: ") +
+                                     static_cast<const char*>(error->GetBufferPointer()));
+        hr(result, "Compile vignette shader");
+    };
+    compileStage("vs", "vs_5_0", vs);
+    compileStage("ps", "ps_5_0", ps);
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};
+    p.pRootSignature = vignetteRoot_.Get();
+    p.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
+    p.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
+    p.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    p.NumRenderTargets = 1;
+    p.RTVFormats[0] = targetFormat;
+    p.SampleDesc.Count = 1;
+    p.SampleMask = UINT_MAX;
+    p.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    p.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    p.RasterizerState.DepthClipEnable = TRUE;
+    // Over the colour by the cover; the image's own alpha stays as it is.
+    auto& blend = p.BlendState.RenderTarget[0];
+    blend.BlendEnable = TRUE;
+    blend.SrcBlend = D3D12_BLEND_SRC_ALPHA;
+    blend.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+    blend.SrcBlendAlpha = D3D12_BLEND_ZERO;
+    blend.DestBlendAlpha = D3D12_BLEND_ONE;
+    blend.BlendOp = blend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    blend.LogicOp = D3D12_LOGIC_OP_NOOP;
+    blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    vignettePipeline_.Reset();
+    hr(device_->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&vignettePipeline_)), "Create vignette pipeline");
+    vignetteFormat_ = targetFormat;
+}
+void D3D12Renderer::recordVignette(const ViewTarget& target, D3D12_CPU_DESCRIPTOR_HANDLE rtv, const Grade& grade,
+                                   unsigned view) {
+    const auto& lens = grade.tangents[view < 2 ? view : 0];
+    const auto value = [](float v, float lo, float hi) {
+        return std::bit_cast<UINT>(std::isfinite(v) ? std::clamp(v, lo, hi) : lo);
+    };
+    // Closed all the way, dark from 0.45 of the way to an edge and black from 0.8; open, the cover starts
+    // past the corners.
+    const float closed = std::isfinite(grade.vignette) ? std::clamp(grade.vignette, 0.f, 1.f) : 0.f;
+    const UINT constants[8] = {value(lens[0], -8, 8),
+                               value(lens[1], -8, 8),
+                               value(lens[2], -8, 8),
+                               value(lens[3], -8, 8),
+                               std::bit_cast<UINT>(1.f / static_cast<float>(target.width)),
+                               std::bit_cast<UINT>(1.f / static_cast<float>(target.height)),
+                               std::bit_cast<UINT>(1.45f - closed),
+                               std::bit_cast<UINT>(.35f)};
+    list_->SetPipelineState(vignettePipeline_.Get());
+    list_->SetGraphicsRootSignature(vignetteRoot_.Get());
+    list_->SetGraphicsRoot32BitConstants(0, 8, constants, 0);
     list_->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
     D3D12_VIEWPORT viewport{0, 0, static_cast<float>(target.width), static_cast<float>(target.height), 0, 1};
     D3D12_RECT rect{0, 0, static_cast<LONG>(target.width), static_cast<LONG>(target.height)};

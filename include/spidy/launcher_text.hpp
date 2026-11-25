@@ -531,6 +531,10 @@ struct SessionOptions {
     // calibrationPrompt is off (you skipped it).
     int eyeHeightMm = 0, armLengthMm = 0;
     bool calibrationPrompt = true;
+    // The first-time setup in the headset (game_menu::beginSetup): the first session pauses at its first
+    // moments of play on the game's Settings, SET UP SPIDY VR alone. Off once a session has shown it (or for
+    // a player from before it, whose launcher.ini has no first_setup line).
+    bool firstSetup = true;
     // Upscaling: percent of the eye's size, per side, the eyes' scene is rendered at (eye_resolution.hpp);
     // the game's temporal anti-aliasing brings it to the eye's size. 100 only anti-aliases.
     int upscale = static_cast<int>(defaultEyeUpscale);
@@ -577,7 +581,8 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
         args.emplace_back(L"--arcade-webs");
     if (options.firstPersonCutscenes)
         args.emplace_back(L"--first-person-cutscenes");
-    if (options.firstPersonCutscenes && !options.cutsceneHeadTracking)
+    // Said whether or not first-person cutscenes start on: CUTSCENES in the headset can turn them on.
+    if (!options.cutsceneHeadTracking)
         args.emplace_back(L"--no-cutscene-head-tracking");
     if (options.disableTheater)
         args.emplace_back(L"--disable-theater-screen");
@@ -593,6 +598,8 @@ inline std::vector<std::wstring> sessionArguments(const SessionOptions& options,
     } else if (!options.calibrationPrompt) {
         args.emplace_back(L"--no-calibration-prompt");
     }
+    if (!options.firstSetup)
+        args.emplace_back(L"--no-first-setup");
     // The game's Settings offer these too (SPIDY VR), all but the render scale, the upscaling and the
     // monitor's rate; the defaults go unsaid.
     const std::pair<int, std::pair<const wchar_t*, int>> settings[] = {
@@ -702,6 +709,8 @@ inline bool headsetSettings(std::string_view line, SessionOptions& options) {
             next.armLengthMm = number;
         else if (key == "calibration_prompt")
             next.calibrationPrompt = number != 0;
+        else if (key == "first_setup")
+            next.firstSetup = number != 0;
     }
     // A calibration is both measurements within their ranges, or none at all; anything else keeps the old one.
     if (!calibrated(next) && (next.eyeHeightMm || next.armLengthMm)) {

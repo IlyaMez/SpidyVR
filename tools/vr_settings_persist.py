@@ -17,7 +17,8 @@ import sys
 PREFIX = 'VR settings from the headset: '
 # Switches: the setting, the value that needs saying, the argument that says it.
 SWITCHES = (('aim_markers', 0, '--no-aim-markers'), ('air_webs', 0, '--no-air-webs'), ('flips', 1, '--flips'),
-            ('trigger_webs', 1, '--trigger-webs'), ('arcade_webs', 1, '--arcade-webs'))
+            ('trigger_webs', 1, '--trigger-webs'), ('arcade_webs', 1, '--arcade-webs'),
+            ('first_person_cutscenes', 1, '--first-person-cutscenes'), ('first_setup', 0, '--no-first-setup'))
 # Numbers: the setting, its range, its default and its argument.
 NUMBERS = (('swing_speed', 10, 65, 32, '--swing-speed'), ('snap_turn', 0, 90, 30, '--snap-turn'),
            ('smooth_turn', 0, 360, 0, '--smooth-turn'), ('haptics', 0, 100, 100, '--haptics'),
@@ -55,6 +56,9 @@ def calibrated(values):
 def arguments(values):
     """run_game_vr.py's arguments for `values`, as the launcher would start a session with them."""
     args = [flag for key, said, flag in SWITCHES if key in values and int(values[key] != 0) == said]
+    # Settings saved by a session from before the first-time setup: that player has played already.
+    if values and 'first_setup' not in values:
+        args.append('--no-first-setup')
     if calibrated(values):
         args += ['--eye-height', str(values['eye_height_mm']), '--arm-length', str(values['arm_length_mm'])]
     elif values.get('calibration_prompt') == 0:

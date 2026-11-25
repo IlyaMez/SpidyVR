@@ -523,6 +523,7 @@ Settings loadSettings() {
     std::istringstream lines(readText(settingsPath(), 1 << 16));
     std::string line;
     int weight = 0, percentWeight = 0, legacyWeight = 0;
+    bool anySetting = false, firstSetupSaid = false;
     while (std::getline(lines, line)) {
         if (!line.empty() && line.back() == '\r')
             line.pop_back();
@@ -532,6 +533,7 @@ Settings loadSettings() {
         const std::string key = line.substr(0, equals), value = line.substr(equals + 1);
         const auto number = [&] { return std::atoi(value.c_str()); };
         auto& o = settings.options;
+        anySetting = true;
         // "runtime" (before October 7's automatic runtime) mostly held the launcher's own first pick,
         // Virtual Desktop when installed: such settings start on Automatic.
         if (key == "game") settings.gameExe = widen(value);
@@ -582,6 +584,10 @@ Settings loadSettings() {
         else if (key == "eye_height_mm") o.eyeHeightMm = number();
         else if (key == "arm_length_mm") o.armLengthMm = number();
         else if (key == "calibration_prompt") o.calibrationPrompt = number() != 0;
+        else if (key == "first_setup") {
+            o.firstSetup = number() != 0;
+            firstSetupSaid = true;
+        }
         else if (key == "hash_path") settings.hashPath = widen(value);
         else if (key == "hash_size") settings.hashSize = std::strtoull(value.c_str(), nullptr, 10);
         else if (key == "hash_time") settings.hashTime = std::strtoull(value.c_str(), nullptr, 10);
@@ -596,6 +602,9 @@ Settings loadSettings() {
         settings.options.weight = percentWeight;
     else if (!percentWeight && legacyWeight && legacyWeight != 60)
         settings.options.weight = legacyWeight;
+    // Settings from a launcher before the first-time setup: that player has played already.
+    if (anySetting && !firstSetupSaid)
+        settings.options.firstSetup = false;
     // A calibration is both measurements within their ranges, or none.
     if (!text::calibrated(settings.options))
         settings.options.eyeHeightMm = settings.options.armLengthMm = 0;
@@ -628,6 +637,7 @@ void saveSettings(const Settings& settings) {
          << "\nhud=" << o.hud
          << "\nflip_speed=" << o.flipSpeed << "\neye_height_mm=" << o.eyeHeightMm
          << "\narm_length_mm=" << o.armLengthMm << "\ncalibration_prompt=" << o.calibrationPrompt
+         << "\nfirst_setup=" << o.firstSetup
          << "\nhash_path=" << narrow(settings.hashPath)
          << "\nhash_size=" << settings.hashSize << "\nhash_time=" << settings.hashTime
          << "\nhash=" << settings.hashValue << "\nshortcuts_asked=" << settings.shortcutsAsked

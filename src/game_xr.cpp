@@ -6,6 +6,7 @@
 // The input bridge remains a separately verified, separately stoppable module.
 #include "spidy/bhaptics_output.hpp"
 #include "spidy/body_calibration.hpp"
+#include "spidy/comfort_vignette.hpp"
 #include "spidy/body_haptics.hpp"
 #include "spidy/crawl_hands.hpp"
 #include "spidy/crawl_stick.hpp"
@@ -122,7 +123,9 @@ struct XrConfig {
     // inside the hero's head, instead of on the game screen: game_fp.hpp, game_fp.cpp);
     // bit 23: with bit 22, the scene's own camera aims the view, not the player's head;
     // bit 24: no theatre screen: every scene the game plays is shown round the player, from the
-    // scene's own camera without bit 22 (game_fp::sceneCamera)
+    // scene's own camera without bit 22 (game_fp::sceneCamera);
+    // bit 26: no first-time setup (the player has seen it: game_menu::beginSetup). Bit 25 is taken by
+    // the single-frame stereo branch.
     uint32_t options{};
     // OpenXR runtime manifest the launcher chose; empty: Virtual Desktop's if
     // installed, else Windows' active runtime.
@@ -204,7 +207,7 @@ struct XrData {
     // 2 punch, 4 body, 8 webs in open air, 16 web shooter, 32 flips, 64 the
     // trigger webs (WEB BUTTON: TRIGGER; the grip reels), 128 STAND ON WALLS,
     // 256 PHYSICAL WEBS (until October 15), 512 arcade webs (WEB STYLE:
-    // ARCADE).
+    // ARCADE), 1024 first-person cutscenes (CUTSCENES: FIRST PERSON).
     // Then the changes
     // made in that tab so far, the times the game built its Settings with it,
     // whether its hooks are in, and why it is missing (game_menu: 93xx-94xx
@@ -232,7 +235,9 @@ struct XrData {
     // and arm length the body is sized to (mm; 0: the headset's running height
     // and the hero's own arms); calibrations finished and skipped this session;
     // calibrationFlags bit 0: a session without one asks for none at its first
-    // gameplay (skipped); each arm's reach at the last one (m, 0 the left).
+    // gameplay (skipped); bit 1: the next session shows no first-time setup;
+    // bits 8-15 that setup's state now (game_menu::Setup), 16-23 the builds of
+    // its Settings; each arm's reach at the last one (m, 0 the left).
     uint32_t calibrationPhase{}, calibrationHint{};
     float calibrationProgress{};
     uint32_t eyeHeightMm{}, armLengthMm{}, calibrations{}, calibrationSkips{}, calibrationFlags{};
@@ -1089,6 +1094,9 @@ DWORD WINAPI run(void*) {
         values.triggerWebs = config.options & 4096;
         values.standOnWalls = !(config.options & 8192);
         values.arcadeWebs = config.options & 0x200000;
+        // CUTSCENES (the tab's; options bit 22 at the start): first-person scenes can be switched on and off
+        // during play.
+        values.firstPersonCutscenes = config.options & 0x400000;
         values.swingSpeed = config.swingSpeed;
         values.snapTurn = static_cast<int>(config.snapTurn);
         values.smoothTurn = static_cast<int>(config.smoothTurn);
@@ -1394,6 +1402,19 @@ DWORD WINAPI run(void*) {
         // Reading the game's prompts and naming the VR control in them.
         const bool promptHelp = !(config.options & 0x100000);
         bool calibrationWanted = calibrationPrompt && !config.eyeHeightMm && values.body;
+        // The first-time setup (game_menu::beginSetup): a new player's title Settings open on VR SETUP; the
+        // T-pose follows at the first play (CALIBRATE BODY: ON RESUME). firstSetupWanted: this session shows it
+        // (options bit 26 off); firstSetupDone: the next one does not (reported, calibrationFlags bit 1);
+        // whether the body had a calibration when it began.
+        bool firstSetupWanted = !(config.options & 0x4000000);
+        bool firstSetupDone = !firstSetupWanted;
+        bool setupCalibrates{};
+        // The setup's starting values given, the title's setup begun, the main menus seen so far.
+        bool setupStarted{}, titleSetupTried{};
+        uint64_t mainMenusSeen{};
+        uint32_t titleOpenSeen{};
+        // COMFORT VIGNETTE (comfort_vignette.hpp): how far the view is closed for the next eye pair.
+        comfort_vignette::Vignette comfortVignette;
         body_calibration::Calibration calibration;
         body_calibration::Measurements lastCalibration{};
         // The panel's place in the tracking space, ahead of where the player
@@ -1706,6 +1727,17 @@ DWORD WINAPI run(void*) {
                 bodyStarted = !native_body::start(config.base);
         };
         applySettings();
+        // A change of the values, made in the tab or by the worker itself (the first-time setup's starting
+        // values): applied at once, counted, and the tab's own ones saved.
+        auto keepValues = [&] {
+            ++settingChanges;
+            applySettings();
+            if (auto text = vr_settings::tabOnlyText(values); text != tabOnlySaved) {
+                if (!writeTabOnly(text))
+                    message(3, 0, "VR settings: the SPIDY VR tab's own settings were not saved");
+                tabOnlySaved = std::move(text);
+            }
+        };
         auto controls = [&](uint32_t keys) {
             bridge::Control c;
             c.modes = bridge::Mode::input;
@@ -2304,7 +2336,7 @@ DWORD WINAPI run(void*) {
                     // scene facing as it did before it, as it always has.
                     {
                         const auto sceneTime = game_time::telemetry();
-                        rig.scene((config.options & 0x1400000) && !flatScreen &&
+                        rig.scene((values.firstPersonCutscenes || (config.options & 0x1000000)) && !flatScreen &&
                                   sceneClock.running(sceneTime.installed && sceneTime.gameFrame > 0,
                                                      GetTickCount64()));
                         // The heading the first-person scene's view had at its last frame, for 4 s after it
@@ -2372,7 +2404,7 @@ DWORD WINAPI run(void*) {
                     // first-person view is held up to 1.5 s (never into play, which is `vrPlay`), so the next
                     // scene replaces it in place.
                     const uint64_t fpNow = GetTickCount64();
-                    const bool fpBase = (config.options & 0x400000) && !flatScreen;
+                    const bool fpBase = values.firstPersonCutscenes && !flatScreen;
                     // DISABLE THEATER SCREEN ENTIRELY (options bit 24): every scene the game plays is
                     // rendered around the viewer, from inside the character's head with first-person
                     // cutscenes on, from the scene's own camera without them or where no head is found
@@ -2541,15 +2573,8 @@ DWORD WINAPI run(void*) {
                     // loading tips show, but not with the game played as it is.
                     game_prompts::setVrTexts(promptHelp && !flatScreen);
                     // A change in the SPIDY VR tab takes effect at once.
-                    if (game_menu::take(values)) {
-                        ++settingChanges;
-                        applySettings();
-                        if (auto text = vr_settings::tabOnlyText(values); text != tabOnlySaved) {
-                            if (!writeTabOnly(text))
-                                message(3, 0, "VR settings: the SPIDY VR tab's own settings were not saved");
-                            tabOnlySaved = std::move(text);
-                        }
-                    }
+                    if (game_menu::take(values))
+                        keepValues();
                     game_menu::publish(values);
                     const uint32_t gate =
                         (player.hero ? 0 : gateNoPlayer) | (bridgeRunning ? 0 : gateBridge) |
@@ -2595,6 +2620,68 @@ DWORD WINAPI run(void*) {
                         immersiveSince = nowMs;
                     const bool skipPressed = (frame.buttons & buttonB) && !skipHeld;
                     skipHeld = (frame.buttons & buttonB) != 0;
+                    // The first-time setup (game_menu::beginSetup): the game's own Settings on VR SETUP for a new
+                    // player. Armed as the title screen shows (its update runs), before the game builds the title's
+                    // Settings with the profile's main menu: built then, they open on VR SETUP, and once the main
+                    // menu takes input the title's update clicks SETTINGS as a mouse would (game_menu). B back from
+                    // it ends the setup. No presses on the pad: in the headset (November 23) they were lost while
+                    // the main menu came in and A landed on QUIT GAME. A game loaded first: the next session's
+                    // title has the setup again. A new player starts on the recommended PLAY STYLE (when the values
+                    // are no preset's) and a light COMFORT VIGNETTE, and CALIBRATE BODY says ON RESUME while the
+                    // body has no calibration: the T-pose follows at the first play.
+                    using game_menu::Setup;
+                    using game_menu::SetupFlow;
+                    const auto menuNow = game_menu::telemetry();
+                    if (firstSetupWanted && !firstSetupDone && !titleSetupTried && !player.hero &&
+                        (menuNow.titleUpdates > 0 || menuNow.mainMenus > mainMenusSeen) &&
+                        game_menu::setupAvailable(SetupFlow::title)) {
+                        titleSetupTried = true;
+                        if (!setupStarted) {
+                            setupStarted = true;
+                            if (vr_settings::presetOf(values) < 0)
+                                values = vr_settings::withPreset(values, vr_settings::recommendedPreset);
+                            if (!values.comfortVignette)
+                                values.comfortVignette = 1;
+                            setupCalibrates = calibrationWanted;
+                            values.calibrate = values.calibrate || calibrationWanted;
+                            calibrationWanted = false;
+                            keepValues();
+                            game_menu::publish(values);
+                        }
+                        game_menu::beginSetup(SetupFlow::title);
+                        message(3, 0, "First-time setup: the title's SETTINGS open on SPIDY VR SETUP by themselves "
+                                      "once the main menu is up");
+                    }
+                    mainMenusSeen = menuNow.mainMenus;
+                    // The title's Settings opened by the setup (3), or not (4: the player's SETTINGS still opens
+                    // them on VR SETUP).
+                    if (titleSetupTried && menuNow.titleOpen != titleOpenSeen) {
+                        titleOpenSeen = menuNow.titleOpen;
+                        if (titleOpenSeen == 3)
+                            message(3, 0, "First-time setup: the title's Settings opened on SPIDY VR SETUP");
+                        else if (titleOpenSeen == 4) {
+                            char text[200];
+                            std::snprintf(text, sizeof(text),
+                                          "First-time setup: the title's Settings did not open by themselves (%u, %u "
+                                          "clicks); SETTINGS in the main menu opens them on SPIDY VR SETUP",
+                                          menuNow.setupStatus, menuNow.titleClicks);
+                            message(3, 0, text);
+                        }
+                    }
+                    if (titleSetupTried && !firstSetupDone && menuNow.setupFlow == SetupFlow::title) {
+                        if (menuNow.setup == Setup::done) {
+                            firstSetupDone = true;
+                            // NO for CALIBRATE BODY in it is a skip, as B on the T-pose's panel is.
+                            if (setupCalibrates && !values.calibrate) {
+                                calibrationPrompt = false;
+                                ++calibrationSkips;
+                            }
+                            message(3, 0, "First-time setup done at the title: Settings > SPIDY VR SETUP has the "
+                                          "same choices");
+                        } else if (player.hero) {
+                            game_menu::cancelSetup(); // a game loaded first: the next session's title has it
+                        }
+                    }
                     if (calibration.phase() == CalibrationPhase::idle && (calibrationWanted || values.calibrate) &&
                         immersive && nowMs - immersiveSince >= 1500 && !swingState.owned) {
                         calibration.start();
@@ -4959,7 +5046,8 @@ DWORD WINAPI run(void*) {
                         d.settings = (values.webGrab ? 1u : 0u) | (values.punch ? 2u : 0u) | (values.body ? 4u : 0u) |
                                      (values.airWebs ? 8u : 0u) | (values.webShooter ? 16u : 0u) |
                                      (values.flips ? 32u : 0u) | (values.triggerWebs ? 64u : 0u) |
-                                     (values.standOnWalls ? 128u : 0u) | (values.arcadeWebs ? 512u : 0u);
+                                     (values.standOnWalls ? 128u : 0u) | (values.arcadeWebs ? 512u : 0u) |
+                                     (values.firstPersonCutscenes ? 1024u : 0u);
                         d.scans = templePress.scans();
                         d.chargeJumps = chargeJump.charges();
                         const auto prompts = game_prompts::live();
@@ -5157,7 +5245,14 @@ DWORD WINAPI run(void*) {
                         d.armLengthMm = static_cast<uint32_t>(std::lround(calibratedArm * 1000));
                         d.calibrations = calibrations;
                         d.calibrationSkips = calibrationSkips;
-                        d.calibrationFlags = calibrationPrompt ? 0u : 1u;
+                        // Bit 1: the next session shows no first-time setup; bit 2: its flow is the title
+                        // screen's; bits 8-15 the setup's state now (game_menu::Setup), 16-23 its builds
+                        // (at most 255).
+                        const auto setupMenu = game_menu::telemetry();
+                        d.calibrationFlags = (calibrationPrompt ? 0u : 1u) | (firstSetupDone ? 2u : 0u) |
+                                             (setupMenu.setupFlow == game_menu::SetupFlow::title ? 4u : 0u) |
+                                             static_cast<uint32_t>(setupMenu.setup) << 8 |
+                                             std::min<uint32_t>(setupMenu.setupBuilds, 0xff) << 16;
                         d.calibrationReach[0] = lastCalibration.reach[0];
                         d.calibrationReach[1] = lastCalibration.reach[1];
                         std::memcpy(d.head, motion.head.data(), 64);
@@ -5539,6 +5634,11 @@ DWORD WINAPI run(void*) {
                     saved.screenPose = screenPose;
                     saved.screenAspect = SpidyFlatAspect();
                     saved.slow = values.combatVisuals ? moments.view(slowMotion.view()) : slowMotion.view();
+                    // COMFORT VIGNETTE: from the motion of the tracking space in the world, the head's own taken
+                    // out (its world orientation against its tracked one).
+                    saved.vignette = comfortVignette.update(
+                        frame.seconds, motion.anchor, motion.headPose.orientation * frame.head.orientation.conjugate(),
+                        motion.active && !flatScreen, values.comfortVignette);
                     saved.padLayer = padLayer.latched();
                     if (gadgetWheel.open()) {
                         // The gadget wheel, from tracking space into this frame's
@@ -6205,6 +6305,7 @@ DWORD WINAPI run(void*) {
                         grade.ripple = saved->slow.ripple;
                         grade.rippleStrength = saved->slow.entering ? 1.f : .7f;
                         grade.entering = saved->slow.entering;
+                        grade.vignette = saved->scene || saved->flatScreen ? 0.f : saved->vignette;
                         for (unsigned eye = 0; eye < 2; ++eye) {
                             const auto& f = rendered.fovs[eye];
                             grade.tangents[eye] = {std::tan(f.left), std::tan(f.right), std::tan(f.up),
@@ -6433,7 +6534,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI SpidyXrStart(void* input) {
         config.runtime[std::size(config.runtime) - 1] ||
         config.base != reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr)) ||
         !GetModuleHandleW(L"Spider-Man.exe") || !config.queue || !config.bridgeModule || !config.rayModule ||
-        !config.motionModule || config.options > 0x1ffffff || config.snapTurn > 90 || config.haptics > 100 ||
+        !config.motionModule || config.options > 0x7ffffff || config.snapTurn > 90 || config.haptics > 100 ||
         !validEyeUpscale(config.upscale) || !validMonitorRate(config.monitorRate) ||
         config.screenSize > 2 || config.screenDepth > 3 || config.bodyHaptics > 100 || config.smoothTurn > 360 ||
         config.hud > 3 || config.flipSpeed < 90 ||

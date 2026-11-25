@@ -3,6 +3,13 @@
 Every build, newest first, with what changed, why, and what was measured.
 Per-check results are in [VALIDATION.md](VALIDATION.md).
 
+**First-time VR setup and comfort vignette**
+
+- **SPIDY VR SETUP** opens from the title screen after first-time profile selection. Choose a play style, web button, turning, seated mode, height, cutscenes, comfort vignette and body calibration in the game's Settings. Existing players can reopen setup from the launcher's Options > Setup.
+- **PLAY STYLE** applies the Arcade, Balanced and Pro presets in the headset. Arcade and Balanced allow webs in open air, while Pro requires a surface.
+- **COMFORT VIGNETTE** offers four levels. The view darkens at the edges during fast movement and smooth turns, then opens again as you slow down.
+- **CUTSCENES** switches between the game screen and first-person view from the in-game VR settings.
+
 **Latest build (November 22): what the players' reports on 0.8.7 needed
 said.** Four reports ended in a line that told the player nothing to do.
 

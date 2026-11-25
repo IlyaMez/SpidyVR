@@ -98,7 +98,12 @@ one **START VR** button.
 - **VR settings in the game's menu.** Seven short categories in the game's own
   Settings: Setup, Webs, Swinging, Movement, Flips, Haptics and Display.
   Changes apply at once; reset one category without changing the others.
-  The launcher's Options sidebar uses the same categories.
+  The launcher's Options sidebar uses the same categories. The title screen's
+  Settings open on Setup the first time, before you load a game: play style,
+  web button, turning, comfort, cutscenes and your body.
+- **Easier on the stomach.** COMFORT VIGNETTE darkens the edge of your view
+  while you swing, fall or turn, where motion sickness starts. Snap turning
+  is the default, and seated play raises you to your standing height.
 - **Menus and cutscenes on a screen.** Cutscenes in 3D: the game draws
   them once for each eye. Or turn on **First-person cutscenes** in the
   launcher: scenes then play all round you from inside Spider-Man's head,
@@ -186,6 +191,9 @@ Prefer to watch? [Set up Spidy in five steps](https://www.youtube.com/watch?v=aq
    you, and *Add shortcuts* puts Spidy VR on your desktop and Start menu.
 4. Connect your headset, close the game, and press **START VR**. Pick your save
    with the VR controllers; VR takes over as soon as you play.
+5. The first time, open SETTINGS in the title screen's main menu: they open
+   on **SPIDY VR SETUP**. Pick a play style, your web button, comfort and
+   turning, then press B.
 
 Keep the game window in front on the desktop: the game pauses behind other
 windows. If the headset shows a still picture, click the game window once.

@@ -602,6 +602,7 @@ def start_settings(a):
                 snap_turn=a.snap_turn, smooth_turn=a.smooth_turn, haptics=a.haptics, screen_size=a.screen_size,
                 flips=a.flips, flip_speed=a.flip_speed, trigger_webs=a.trigger_webs, hud=a.hud,
                 stand_on_walls=not a.no_stand_on_walls, screen_depth=a.screen_depth, arcade_webs=a.arcade_webs,
+                first_person_cutscenes=a.first_person_cutscenes, first_setup=not a.no_first_setup,
                 body_haptics=a.body_haptics, eye_height_mm=a.eye_height, arm_length_mm=a.arm_length,
                 calibration_prompt=not a.no_calibration_prompt)
 
@@ -837,6 +838,8 @@ def prompts_line(word):
 
 # The T-pose calibration's phases and what its panel asks for (body_calibration.hpp Phase, Hint).
 CALIBRATION_PHASES = {0: 'none', 1: 'waiting', 2: 'holding', 3: 'done'}
+# The first-time setup's state (game_menu::Setup): the pause menu's Settings opened by Spidy on SET UP SPIDY VR.
+SETUP_STATES = {0: 'off', 1: 'armed', 2: 'opening', 3: 'showing', 4: 'done'}
 CALIBRATION_HINTS = {0: None, 1: 'tracking', 2: 'stand_up', 3: 'arms_out', 4: 'straight', 5: 'look_ahead',
                      6: 'triggers', 7: 'still', 8: 'floor'}
 
@@ -1080,9 +1083,15 @@ def snapshot(game, address):
                                        trigger_webs=bool(flags & 64), hud=hud,
                                        stand_on_walls=bool(flags & 128),
                                        screen_depth=screen_depth, arcade_webs=bool(flags & 512),
+                                       first_person_cutscenes=bool(flags & 1024),
+                                       first_setup=not calibration_flags & 2,
                                        eye_height_mm=eye_height, arm_length_mm=arm_length,
                                        calibration_prompt=not calibration_flags & 1),
                       setting_changes=changes,
+                      first_setup=dict(state=SETUP_STATES.get(calibration_flags >> 8 & 0xff,
+                                                              calibration_flags >> 8 & 0xff),
+                                       flow='title' if calibration_flags & 4 else 'pause',
+                                       builds=calibration_flags >> 16 & 0xff),
                       calibration=dict(phase=CALIBRATION_PHASES.get(phase, phase),
                                        hint=CALIBRATION_HINTS.get(hint, hint), progress=round(progress, 3),
                                        done=calibrations, skipped=skips, reach_m=[round(r, 3) for r in reach]))
@@ -2330,8 +2339,9 @@ def main():
                    help="Cutscenes and story moments play in 3D around the player, from inside Spider-Man's head "
                         '(loaded as they play), instead of on the game screen')
     p.add_argument('--no-cutscene-head-tracking', action='store_true',
-                   help="With --first-person-cutscenes: the scene's own camera aims the view instead of the "
-                        "player's head (the position still follows the headset)")
+                   help="With first-person cutscenes (--first-person-cutscenes, or CUTSCENES: FIRST PERSON in the "
+                        "game's Settings): the scene's own camera aims the view instead of the player's head (the "
+                        'position still follows the headset)')
     p.add_argument('--disable-theater-screen', action='store_true',
                    help='No theatre screen for scenes the game plays: every one is rendered around the player in 3D, '
                         "from inside the character's head with --first-person-cutscenes, else from the scene's own "
@@ -2365,6 +2375,10 @@ def main():
     p.add_argument('--no-calibration-prompt', action='store_true',
                    help='Without a calibration, do not ask for the T-pose at the first gameplay (the SPIDY VR tab '
                         'in the game\'s Settings still offers it)')
+    p.add_argument('--no-first-setup', action='store_true',
+                   help="No first-time setup: without it, a session pauses at its first moments of play on the "
+                        "game's Settings, SET UP SPIDY VR alone (the player's first session; Settings > VR SETUP "
+                        'holds the same choices)')
     p.add_argument('--snap-turn', type=int, default=30,
                    help='Degrees a flick of the right stick turns you (0: no snap turning; default 30)')
     p.add_argument('--smooth-turn', type=int, default=0,
@@ -2611,8 +2625,9 @@ def session(a, startup):
                              (0x100000 if a.no_prompt_help else 0) | (0x80000 if a.eye_lens_distances else 0) |
                              (0x200000 if a.arcade_webs else 0) |
                              (0x400000 if a.first_person_cutscenes else 0) |
-                             (0x800000 if a.first_person_cutscenes and a.no_cutscene_head_tracking else 0) |
-                             (0x1000000 if a.disable_theater_screen else 0)) + \
+                             (0x800000 if a.no_cutscene_head_tracking else 0) |
+                             (0x1000000 if a.disable_theater_screen else 0) |
+                             (0x4000000 if a.no_first_setup else 0)) + \
             runtime_path(manifest) + struct.pack('<14I', a.snap_turn, a.haptics, a.screen_size, a.smooth_turn,
                                                  a.render_scale, a.weight, a.eye_height, a.arm_length, a.hud,
                                                  a.flip_speed, a.upscale, a.monitor_rate, a.screen_depth,

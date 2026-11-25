@@ -329,6 +329,16 @@ struct Values {
     // How much speed a fast one-hand web yank adds, percent (the tab's SINGLE
     // HAND YANK STRENGTH; Swing::singleHandYankStrength): 100 as before.
     int singleHandYankPercent = 100;
+    // Cutscenes and story moments in first person (the tab's CUTSCENES: FIRST
+    // PERSON; the launcher's First-person cutscenes, game_fp.hpp): the headset
+    // is inside the head of the character a scene plays, round you. Off (GAME
+    // SCREEN, the default), a scene plays on the game screen ahead.
+    bool firstPersonCutscenes = false;
+    // COMFORT VIGNETTE (comfort_vignette.hpp): the edge of the view darkens
+    // while the game moves you fast or turns you, against motion sickness. 0
+    // OFF (the default: as before), 1 LOW, 2 MEDIUM, 3 HIGH. The first-time
+    // setup starts a new player on LOW.
+    int comfortVignette = 0;
     bool operator==(const Values&) const = default;
 };
 inline constexpr int eyeAimShots = 1, eyeAimZips = 2;
@@ -466,8 +476,13 @@ enum class Item : uint8_t {
     webLines,
     airFists,
     enemyTypes,
+    // PLAY STYLE: one of the gameplay presets below, chosen whole (no value of
+    // its own: it shows the preset the values are, or CUSTOM).
+    playStyle,
+    cutscenes,
+    comfortVignette,
 };
-inline constexpr Item lastItem = Item::enemyTypes;
+inline constexpr Item lastItem = Item::comfortVignette;
 // Where a row shows: in the tab; on the pause menu's first page instead,
 // under RESUME: VR VIEW (the user, October 15: "move the VIEW: GAME SCREEN to
 // the first menu (the one with resume)"); or only in the launcher's options:
@@ -491,7 +506,7 @@ struct Row {
     Place place{};
 };
 // Stable row/setting numbers; categories below determine presentation order.
-const std::array<Row, 96>& rows();
+const std::array<Row, 99>& rows();
 const Row* rowFor(Item);
 enum class Category : uint8_t { setup, webs, swinging, movement, flips, feedback, display, count };
 inline constexpr size_t categoryCount = static_cast<size_t>(Category::count);
@@ -530,4 +545,82 @@ std::string tabOnlyText(const Values&);
 // The values with what such text holds, sanitized. A line with an unknown
 // key, or whose value is no whole number, is passed over.
 Values withTabOnly(Values, std::string_view text);
+
+// The gameplay presets (docs/GAMEPLAY-PRESETS.md): the launcher's built-in
+// profiles Arcade, Balanced and Pro, and the tab's PLAY STYLE. Each sets every
+// gameplay setting, by its profile key (launcher_profile.hpp's
+// profileSettings), to one value; the personal setup (turning, the web
+// button, seated play, haptics, the HUD, cutscenes...) stays as it is. Open-air
+// webs hold in Arcade and Balanced; only Pro's webs need something to hold.
+inline constexpr size_t presetCount = 3;
+inline constexpr const char* presetNames[presetCount] = {"Arcade", "Balanced", "Pro"};
+struct PresetSetting {
+    std::string_view key;
+    std::array<int, presetCount> values; // Arcade, Balanced, Pro
+};
+inline constexpr PresetSetting gameplayPresetSettings[] = {
+    {"arcade_webs", {1, 0, 0}},
+    {"aim_markers", {1, 1, 0}},
+    {"air_webs", {1, 1, 0}},
+    {"smart_anchor", {0, 0, 0}},
+    {"web_range_m", {150, 100, 100}},
+    {"web_speed", {0, 3, 3}},
+    {"swing_speed", {32, 40, 56}},
+    {"weight", {80, 125, 200}},
+    {"elastic_web", {2, 1, 0}},
+    {"soft_release", {2, 1, 0}},
+    {"swing_assist", {1, 1, 0}},
+    {"web_slingshot", {0, 1, 1}},
+    {"slingshot_speed", {40, 55, 80}},
+    {"better_climbing", {1, 1, 1}},
+    {"single_hand_yank_percent", {150, 125, 150}},
+    {"two_hand_zip", {0, 1, 1}},
+    {"rope_steering", {0, 1, 1}},
+    {"flips", {0, 0, 0}},
+    {"controlled_flips", {0, 1, 0}},
+    {"flip_speed", {180, 240, 300}},
+    {"hand_climb", {0, 0, 1}},
+    {"joystick_wall_run_camera", {1, 1, 0}},
+    {"wall_run_camera_tilt", {0, 1, 1}},
+    {"half_punch_damage", {0, 0, 0}},
+    {"web_tie", {0, 1, 1}},
+    {"native_run", {1, 1, 1}},
+    {"air_slingshot", {0, 0, 1}},
+    {"dodge_tumble", {0, 0, 1}},
+    {"run_curve", {1, 0, 0}},
+    {"native_run_at_percent", {70, 70, 80}},
+    {"running_leap", {0, 1, 1}},
+    {"early_jump", {1, 1, 0}},
+    {"soft_landing", {1, 1, 0}},
+    {"spidy_run", {0, 1, 1}},
+    {"spidy_run_from_standing", {0, 0, 1}},
+    {"web_landing_smooth", {1, 1, 1}},
+    {"web_landing_impact_speed", {24, 24, 24}},
+    {"steady_states", {1, 1, 1}},
+    {"combat_responsive", {1, 1, 1}},
+    {"spidy_run_jump", {1, 1, 1}},
+    {"web_lines", {0, 1, 1}},
+    {"realistic_flips", {0, 0, 1}},
+    {"rotation_strength", {25, 50, 25}},
+    {"rotation_speed", {240, 240, 360}},
+    {"flight_speed_min", {8, 8, 8}},
+    {"swing_momentum", {0, 0, 1}},
+    {"rotation_response_ms", {750, 500, 200}},
+    {"hand_momentum", {100, 100, 100}},
+    {"angular_drag_ms", {500, 1500, 1500}},
+    {"hand_speed_min_cm", {200, 200, 100}},
+    {"air_rotation_brake", {1, 1, 1}},
+    {"flips_in_combat", {0, 0, 0}},
+};
+// The preset a new player starts from in the first-time setup: BALANCED.
+inline constexpr size_t recommendedPreset = 1;
+// The values with every gameplay setting at the preset's (sanitized); the
+// values unchanged for a preset past the last.
+Values withPreset(Values, size_t preset);
+// The preset whose every gameplay setting the values hold, or -1 for none
+// (the tab's CUSTOM).
+int presetOf(const Values&);
+// Whether the values hold a setting of that profile key (all the presets'
+// keys do): what tests check the table against.
+bool presetKnows(std::string_view key);
 } // namespace spidy::vr_settings

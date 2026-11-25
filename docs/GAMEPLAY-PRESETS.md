@@ -2,13 +2,16 @@
 
 With VR stopped, open the **Profile** dropdown on **Play** to choose Arcade,
 Balanced, Pro, or one of your saved profiles. **Manage** opens Options > Profiles.
-Changing a preset is optional: installing this build keeps your current settings.
+In the headset, PLAY STYLE in VR SETUP (the pause menu's Settings, or SPIDY VR
+SETUP in the title screen's) picks the same three, and the first-time setup
+offers it at the title screen (a new player starts on Balanced). Changing a preset is optional: installing this build keeps
+your current settings.
 
 | | Arcade | Balanced | Pro |
 |---|---|---|---|
 | Feel | Light, forgiving, assisted | Real anchors with gentler catches | Heavy momentum and physical control |
 | Speed limit / weight | 32 m/s / 80% | 40 m/s / 125% | 56 m/s / 200% |
-| Webs | Arcade, open-air fallback | Realistic, near-miss anchor assistance | Realistic, deliberate aiming |
+| Webs | Arcade, open-air fallback | Realistic, open-air fallback | Realistic, deliberate aiming: no open-air webs |
 | Catch / release | Medium elastic / soft | Low elastic / soft | Rigid / immediate |
 | Swing assist | On | On | Off |
 | Flips | Off | A in the air toggles manual left-stick flips | Arms and swing momentum rotate you; A rights you |
@@ -52,9 +55,12 @@ were not used as numerical evidence.
 - [SlickSwing](https://discord.com/channels/1557032200606842880/1562975865841909890/1562975865841909890)
   favors a slower response and higher gesture threshold. The
   [realistic/air-web hybrid](https://discord.com/channels/1557032200606842880/1563090120704393266/1563090120704393266)
-  shows that rope style and assistance can be chosen separately. Balanced uses
-  real surfaces with smart anchoring rather than air webs, and deliberate manual
-  flips rather than automatic rotation. Its exact values are our synthesis.
+  shows that rope style and assistance can be chosen separately. Balanced used
+  real surfaces with smart anchoring rather than air webs until November 22,
+  when the user decided that only Pro turns open-air webs off ("webs in air
+  should be disabled only on pro profile"); smart anchor then does nothing in
+  Balanced and is off. It keeps deliberate manual flips rather than automatic
+  rotation. Its exact values are our synthesis.
 - [Webhead](https://discord.com/channels/1557032200606842880/1562881824160743444/1562881824160743444)
   combines realistic ropes and more weight. The
   [200% weight / 150% yank pairing](https://discord.com/channels/1557032200606842880/1563495157578334338/1566631247868985356)
@@ -79,8 +85,8 @@ off/low/medium; early jump 1 is quick tap; dodge tumble 1 is lean.
 |---|---:|---:|---:|
 | `arcade_webs` | 1 | 0 | 0 |
 | `aim_markers` | 1 | 1 | 0 |
-| `air_webs` | 1 | 0 | 0 |
-| `smart_anchor` | 0 | 1 | 0 |
+| `air_webs` | 1 | 1 | 0 |
+| `smart_anchor` | 0 | 0 | 0 |
 | `web_range_m` | 150 | 100 | 100 |
 | `web_speed` | 0 | 3 | 3 |
 | `swing_speed` | 32 | 40 | 56 |

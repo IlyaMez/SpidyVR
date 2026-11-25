@@ -38,8 +38,16 @@ class D3D12Renderer {
         // Each view's lens: the tangents of its field of view, left, right,
         // up and down (left and down negative).
         std::array<std::array<float, 4>, 2> tangents{};
+        // The comfort vignette (comfort_vignette.hpp): how far the edge of the
+        // view closes in, 0 not at all to 1 (dark from a little past half way
+        // out). Drawn last, over the overlay too, and with no copy of the
+        // image: it only darkens.
+        float vignette{};
         bool visible() const {
             return amount > .002f || (ripple >= 0 && ripple < 1 && rippleStrength > 0);
+        }
+        bool vignetted() const {
+            return vignette > .002f;
         }
     };
     // A flat picture shown on a quad in the views: the phone's screen. Its
@@ -113,6 +121,11 @@ class D3D12Renderer {
     // through the render target view at `rtv`.
     void prepareGrade(DXGI_FORMAT targetFormat);
     void recordGrade(const ViewTarget& target, D3D12_CPU_DESCRIPTOR_HANDLE rtv, const Grade& grade, unsigned view);
+    // The comfort vignette's pipeline for a target format, and its pass over
+    // one view (a full-view triangle blended over what is there).
+    void prepareVignette(DXGI_FORMAT targetFormat);
+    void recordVignette(const ViewTarget& target, D3D12_CPU_DESCRIPTOR_HANDLE rtv, const Grade& grade,
+                        unsigned view);
     // The picture's texture, depth, views and pipelines (made once; the
     // quad's again for another target format), its drawing into list_ (open,
     // its vertices `first` on in the bound vertex buffer, the texture left
@@ -155,6 +168,10 @@ class D3D12Renderer {
     ComPtr<ID3D12Resource> gradeCopy_;
     D3D12_RESOURCE_STATES gradeCopyState_ = D3D12_RESOURCE_STATE_COPY_DEST;
     DXGI_FORMAT gradeViewFormat_ = DXGI_FORMAT_UNKNOWN;
+    // The comfort vignette: constants only.
+    ComPtr<ID3D12RootSignature> vignetteRoot_;
+    ComPtr<ID3D12PipelineState> vignettePipeline_;
+    DXGI_FORMAT vignetteFormat_ = DXGI_FORMAT_UNKNOWN;
     // The picture: its sRGB texture with its mips and its depth, a render
     // target view a mip, a shader view a mip and one of them all, and the
     // pipelines that draw it, shrink each mip from the one above, and show it.

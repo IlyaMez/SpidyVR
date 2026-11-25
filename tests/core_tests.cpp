@@ -25,6 +25,8 @@
 #include "spidy/monitor_rate.hpp"
 #include "spidy/eye_snapshot.hpp"
 #include "spidy/vr_settings.hpp"
+#include "spidy/comfort_vignette.hpp"
+#include "spidy/menu_presses.hpp"
 #include "spidy/recording_fov.hpp"
 #include "spidy/native_stream.hpp"
 #include "spidy/native_pace.hpp"
@@ -10839,7 +10841,8 @@ int main() {
                            "the row is not the launcher's switch");
                  }
              check(found == 1, "the row is not there once");
-             check(vr_settings::lastItem == Item::enemyTypes, "enemy types is not the last item");
+             check(static_cast<int>(Item::playStyle) == static_cast<int>(Item::enemyTypes) + 1,
+                   "enemy types is not the last item before the first-time setup's");
              vr_settings::Values on;
              on.enemyTypes = true;
              for (size_t i = 0; i < vr_settings::categoryCount; ++i)
@@ -24327,11 +24330,22 @@ int main() {
                                   Item::automaticMinimumSpeed, Item::automaticReleaseFlip, Item::automaticResponse,
                                   Item::automaticHandStrength, Item::automaticFalloff,     Item::automaticHandThreshold,
                                   Item::automaticAirBrake,     Item::automaticCombat};
-        // The realistic flips' rows come last, after the EXPERIMENTAL rows before them, AIR FISTS and the
-        // launcher's ENEMY TYPES.
+        // The realistic flips' rows come last, after the EXPERIMENTAL rows before them, AIR FISTS, the
+        // launcher's ENEMY TYPES and the first-time setup's PLAY STYLE, CUTSCENES and COMFORT VIGNETTE.
         check(all[84].item == Item::enemyTypes && all[84].place == Place::launcher,
-              "ENEMY TYPES is not the row before the realistic flips'");
-        constexpr size_t firstRealistic = 85;
+              "ENEMY TYPES is not the row after AIR FISTS");
+        check(all[85].item == Item::playStyle && std::strcmp(all[85].title, "PLAY STYLE") == 0 &&
+                  all[85].choices.size() == presetCount + 1 && std::strcmp(all[85].choices[3], "CUSTOM") == 0 &&
+                  all[85].place == Place::tab,
+              "PLAY STYLE: ARCADE, BALANCED, PRO and CUSTOM, after ENEMY TYPES");
+        check(all[86].item == Item::cutscenes && std::strcmp(all[86].title, "CUTSCENES") == 0 &&
+                  all[86].choices.size() == 2 && std::strcmp(all[86].choices[1], "FIRST PERSON") == 0 &&
+                  all[86].place == Place::tab,
+              "CUTSCENES: GAME SCREEN or FIRST PERSON, after PLAY STYLE");
+        check(all[87].item == Item::comfortVignette && std::strcmp(all[87].title, "COMFORT VIGNETTE") == 0 &&
+                  all[87].choices.size() == 4 && all[87].place == Place::tab,
+              "COMFORT VIGNETTE: OFF to HIGH, after CUTSCENES");
+        constexpr size_t firstRealistic = 88;
         check(all.size() == firstRealistic + std::size(realistic), "the realistic flips' rows are not the last");
         for (size_t i = 0; i < std::size(realistic); ++i)
             check(all[firstRealistic + i].item == realistic[i], "the realistic flips' rows out of order");
@@ -24550,7 +24564,7 @@ int main() {
                                                          : Place::tab),
                   "a row in the wrong place");
         }
-        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 90,
+        check(std::count_if(all.begin(), all.end(), [](const Row& r) { return r.place == Place::tab; }) == 93,
               "the tab's own rows");
         check(all[1].item == Item::webStyle && std::strcmp(all[1].title, "WEB STYLE") == 0 &&
                   all[1].choices.size() == 2 && std::strcmp(all[1].choices[0], "REALISTIC") == 0 &&
@@ -24600,6 +24614,154 @@ int main() {
                   choicesOf(Item::airWebs) == 0 && choicesOf(Item::aimMarkers) == 0,
               "lists: one choice per step; switches: the game's own ON and OFF");
         check(choicesOf(Item::calibrate) == 2, "the calibration's switch names its two choices");
+    });
+    test("first-time setup: VR SETUP holds its choices, the body's calibration last", [] {
+        using namespace vr_settings;
+        const auto& setup = screens()[static_cast<size_t>(Category::setup)];
+        const Item wanted[] = {Item::playStyle, Item::webButton, Item::comfortVignette, Item::smoothTurn,
+                               Item::snapTurn,  Item::seated,    Item::height,          Item::cutscenes,
+                               Item::calibrate};
+        check(setup.items.size() == std::size(wanted) &&
+                  std::equal(setup.items.begin(), setup.items.end(), std::begin(wanted)),
+              "VR SETUP is not play style, web button, comfort, turning, body, cutscenes, calibration");
+        for (const auto& screen : screens())
+            if (&screen != &setup)
+                check(std::find(screen.items.begin(), screen.items.end(), Item::webButton) == screen.items.end(),
+                      "WEB BUTTON in a second category");
+        // Its reset leaves the play style (a preset is no default) and puts the rest back.
+        Values v = withPreset({}, 2);
+        v.triggerWebs = v.firstPersonCutscenes = v.seated = true;
+        v.comfortVignette = 3;
+        const Values reset = resetCategory(Category::setup, v);
+        check(presetOf(reset) == 2 && !reset.triggerWebs && !reset.firstPersonCutscenes && !reset.seated &&
+                  reset.comfortVignette == 0,
+              "VR SETUP's RESET ALL");
+    });
+    test("gameplay presets: one table for the launcher and PLAY STYLE, open-air webs but in Pro", [] {
+        using namespace vr_settings;
+        for (const auto& setting : gameplayPresetSettings)
+            check(presetKnows(setting.key), std::string(setting.key).c_str());
+        check(!presetKnows("trigger_webs") && !presetKnows("snap_turn"), "personal setup in the presets");
+        for (size_t p = 0; p < presetCount; ++p) {
+            // From the defaults and from every other preset, the same values; each one is its own.
+            const Values direct = withPreset({}, p);
+            check(presetOf(direct) == static_cast<int>(p) && sanitized(direct) == direct, presetNames[p]);
+            for (size_t q = 0; q < presetCount; ++q)
+                check(withPreset(withPreset({}, q), p) == direct, "a preset leaked another's values");
+            // Personal setup stays.
+            Values mine;
+            mine.triggerWebs = mine.seated = mine.firstPersonCutscenes = true;
+            mine.snapTurn = 45;
+            mine.smoothTurn = 120;
+            mine.comfortVignette = 2;
+            mine.heightCm = 180;
+            const Values after = withPreset(mine, p);
+            check(after.triggerWebs && after.seated && after.firstPersonCutscenes && after.snapTurn == 45 &&
+                      after.smoothTurn == 120 && after.comfortVignette == 2 && after.heightCm == 180,
+                  "a preset changed the personal setup");
+            check(!(after.airWebs && after.smartAnchor), "open-air webs and smart anchor both on");
+        }
+        check(withPreset({}, 0).airWebs && withPreset({}, 1).airWebs && !withPreset({}, 2).airWebs,
+              "open-air webs hold in Arcade and Balanced, not in Pro");
+        check(presetOf({}) == -1 && withPreset({}, presetCount) == Values{}, "the defaults are a preset");
+        // PLAY STYLE shows the preset, or CUSTOM, and choosing CUSTOM changes nothing.
+        Values v;
+        check(choice(Item::playStyle, v) == 3 && !choose(Item::playStyle, 3, v) && v == Values{},
+              "CUSTOM is not the defaults' play style");
+        check(choose(Item::playStyle, 1, v) && choice(Item::playStyle, v) == 1 && presetOf(v) == 1,
+              "BALANCED not chosen");
+        check(!choose(Item::playStyle, 1, v) && !choose(Item::playStyle, 4, v), "the same preset again changed it");
+        v.weight = 150;
+        check(choice(Item::playStyle, v) == 3, "an edited preset is not CUSTOM");
+        check(choose(Item::playStyle, 2, v) && v.weight == 200 && v.realisticFlips, "PRO not chosen");
+        // A swing speed the launcher set between the steps still counts by its whole metres a second.
+        v.swingSpeed = 56.2f;
+        check(presetOf(v) == 2, "a swing speed off by a fraction is no preset");
+    });
+    test("menu presses: a wait, then each button held briefly and let go before the next", [] {
+        MenuPresses presses;
+        check(!presses.active() && presses.update(.01f) == 0, "pressing with nothing to press");
+        presses.start({0x1, 0x1000}, .5f);
+        float t = 0;
+        std::vector<std::pair<float, uint16_t>> downs;
+        uint16_t was = 0;
+        while (presses.active() && t < 5) {
+            const uint16_t now = presses.update(1.f / 90);
+            t += 1.f / 90;
+            if (now && !was)
+                downs.push_back({t, now});
+            was = now;
+        }
+        check(downs.size() == 2 && downs[0].second == 0x1 && downs[1].second == 0x1000,
+              "not one press of each, in order");
+        check(downs[0].first >= .5f && downs[0].first < .55f, "the first press did not wait for the screen");
+        check(downs[1].first - downs[0].first >= MenuPresses::holdSeconds + MenuPresses::gapSeconds - .02f,
+              "the presses run together");
+        check(!presses.active() && presses.update(.01f) == 0, "still pressing after the last");
+        presses.start({0x1}, 0);
+        presses.stop();
+        check(!presses.active() && presses.update(.01f) == 0, "stop did not stop");
+    });
+    test("CUTSCENES: a switch over first-person scenes, the launcher's option", [] {
+        using namespace vr_settings;
+        Values v;
+        check(!v.firstPersonCutscenes && defaultChoice(Item::cutscenes) == 0, "first person on by default");
+        check(choose(Item::cutscenes, 1, v) && v.firstPersonCutscenes && choice(Item::cutscenes, v) == 1,
+              "FIRST PERSON not chosen");
+        check(tabOnlyText(v).find("cutscene") == std::string::npos, "kept in spidy_vr.ini, not launcher.ini");
+    });
+    test("COMFORT VIGNETTE: a level kept as comfort_vignette, closed by the game's motion only", [] {
+        using namespace vr_settings;
+        Values v;
+        check(v.comfortVignette == 0 && defaultChoice(Item::comfortVignette) == 0, "on by default");
+        check(choose(Item::comfortVignette, 2, v) && v.comfortVignette == 2 && !choose(Item::comfortVignette, 4, v),
+              "MEDIUM, and nothing past HIGH");
+        check(tabOnlyText(v).find("comfort_vignette=2\n") != std::string::npos &&
+                  withTabOnly({}, "comfort_vignette=3\n").comfortVignette == 3 &&
+                  withTabOnly({}, "comfort_vignette=9\n").comfortVignette == 3,
+              "spidy_vr.ini keeps COMFORT VIGNETTE within its range");
+        using comfort_vignette::Vignette;
+        const float dt = 1.f / 90;
+        const auto run = [&](Vignette& w, float seconds, float speed, float turnRate, int level, bool playing = true,
+                             Vec3 start = {}) {
+            Vec3 feet = start;
+            float yaw = 0;
+            float closed = 0;
+            for (float t = 0; t < seconds; t += dt) {
+                feet = feet + Vec3{speed * dt, 0, 0};
+                yaw += turnRate * dt * 3.14159265f / 180;
+                closed = w.update(dt, feet, Quat::yaw(yaw), playing, level);
+            }
+            return closed;
+        };
+        {
+            Vignette w;
+            check(run(w, 1, 0, 0, 3) < .001f, "standing still closed the view");
+            check(run(w, 1, 4, 0, 3) < .001f, "walking closed the view");
+            const float fast = run(w, 1, 40, 0, 3);
+            check(std::abs(fast - comfort_vignette::closures[3]) < .02f, "a fast swing did not close it to HIGH's");
+            check(run(w, .5f, 40, 0, 3, false) == 0, "out of play it stayed closed");
+        }
+        {
+            Vignette low, high;
+            check(run(low, 1, 40, 0, 1) < run(high, 1, 40, 0, 3) && run(low, 1, 40, 0, 0) == 0,
+                  "LOW not lighter than HIGH, or OFF closes it");
+        }
+        {
+            Vignette w;
+            check(run(w, 1, 0, 200, 2) > comfort_vignette::closures[2] * .9f, "a fast turn did not close it");
+            Vignette opening;
+            run(opening, 1, 40, 0, 2);
+            const float after = run(opening, .1f, 0, 0, 2);
+            check(after > .3f && after < comfort_vignette::closures[2], "it opened at once instead of easing");
+        }
+        {
+            // A snap turn and a reload are jumps, not motion.
+            Vignette w;
+            run(w, .2f, 0, 0, 3);
+            w.update(dt, {}, Quat::yaw(.52f), true, 3);
+            check(w.update(dt, {300, 0, 0}, Quat::yaw(.52f), true, 3) < .001f, "a snap or a reload closed the view");
+        }
     });
     test("REEL HAPTICS: off by default, a switch kept as reel_haptics", [] {
         using namespace vr_settings;
@@ -24839,7 +25001,7 @@ int main() {
                   "jump=0\nsoft_landing=0\nspidy_run=0\nspidy_run_from_standing=0\nweb_aim_source=0\nforearm_"
                   "blend=100\nweb_landing_smooth=0\nweb_landing_impact_speed=24\nsteady_states=0\ncombat_"
                   "responsive=0\nspidy_run_jump=1\nforearm_aim_limit=180\npalm_shooters=0\nweb_lines=0\nair_"
-                  "fists=1\n",
+                  "fists=1\ncomfort_vignette=0\n",
               "the defaults' text");
         Values changed = defaults;
         changed.recordingFov = 140;

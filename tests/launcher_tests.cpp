@@ -257,7 +257,10 @@ int main() {
               "first-person cutscenes aimed by the scene's own camera");
         options.firstPersonCutscenes = false;
         args = sessionArguments(options, L"r.json", L"", L"");
-        check(args.size() == 7, "head tracking is said only with first-person cutscenes");
+        check(args.size() == 8 && args[7] == L"--no-cutscene-head-tracking",
+              "head tracking off is said without first-person cutscenes too: CUTSCENES in the headset turns "
+              "them on");
+        options.cutsceneHeadTracking = true;
         check(!options.disableTheater, "the theater screen stays in a new launcher");
         options.disableTheater = true;
         args = sessionArguments(options, L"r.json", L"", L"");
@@ -372,6 +375,23 @@ int main() {
                   options.haptics == 0 && options.weight == 40 && options.hud == 3 && options.flipSpeed == 480 &&
                   options.bodyHaptics == 100,
               "values outside their ranges, unreadable ones and unknown keys");
+    });
+    test("the first-time setup: once, from a new launcher, until Show again", [] {
+        SessionOptions options;
+        check(options.firstSetup, "a new launcher has none");
+        auto args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 7, "a first session is told something of it");
+        // Shown in the headset: the next sessions are not.
+        check(headsetSettings("VR settings from the headset: aim_markers=1 first_person_cutscenes=0 first_setup=0",
+                              options) &&
+                  !options.firstSetup,
+              "the setup seen in the headset did not come back");
+        args = sessionArguments(options, L"r.json", L"", L"");
+        check(args.size() == 8 && args[7] == L"--no-first-setup", "the next session shows it again");
+        // CUTSCENES chosen in it comes back as the launcher's own option.
+        check(headsetSettings("VR settings from the headset: first_person_cutscenes=1 first_setup=0", options) &&
+                  options.firstPersonCutscenes,
+              "first-person cutscenes chosen in the headset did not come back");
     });
     test("a T-pose calibration in the headset sizes every next session, until Redo", [] {
         SessionOptions options;
@@ -662,8 +682,9 @@ int main() {
         }
         check(settings[0].options.arcadeWebs && settings[0].options.airWebs && settings[0].tab.swingAssist,
               "Arcade lacks its forgiving webs");
-        check(!settings[1].options.airWebs && settings[1].tab.smartAnchor && settings[1].tab.controlledFlips,
-              "Balanced lacks real anchors or deliberate manual flips");
+        check(settings[1].options.airWebs && !settings[1].options.arcadeWebs && settings[1].tab.controlledFlips,
+              "Balanced lacks open-air webs, realistic ropes or deliberate manual flips");
+        check(!settings[2].options.airWebs, "Pro's webs hold in open air");
         check(!settings[2].tab.swingAssist && settings[2].tab.realisticFlips && settings[2].tab.handClimb,
               "Pro lacks physical control");
         check(settings[0].options.weight < settings[1].options.weight &&
@@ -678,7 +699,10 @@ int main() {
         for (const auto& row : spidy::vr_settings::rows()) {
             if (row.item == Item::none)
                 continue;
+            // Nor PLAY STYLE (a preset is the settings, not one of them) or CUTSCENES (the launcher's
+            // first_person_cutscenes, the personal choice a profile never held).
             const bool leftOut = row.item == Item::view || row.item == Item::calibrate ||
+                                 row.item == Item::playStyle || row.item == Item::cutscenes ||
                                  row.item == Item::height || row.item == Item::recordingFov ||
                                  row.item == Item::eyeAim || row.item == Item::recordingSmoothing ||
                                  row.item == Item::flipReprojection ||
@@ -834,6 +858,7 @@ int main() {
         t.swingAssist = true;
         t.slingshotSpeed = 200;
         t.recordingSmoothing = 50;
+        t.comfortVignette = 2;
         t.twoHandZip = t.ropeSteering = true;
         t.webRange = 500;
         t.webSpeed = 2;
@@ -857,7 +882,7 @@ int main() {
                   "soft_release=0\nswing_assist=0\nweb_slingshot=0\nslingshot_speed=0\n"
                   "better_climbing=0\nsingle_hand_yank_percent=100\ntwo_hand_zip=0\nrope_steering=0\nwall_"
                   "run=1\nsnap_turn=30\n"
-                  "smooth_turn=0\nhaptics=100\nreel_haptics=0\nswing_haptics=0\nblow_sounds=0\npc_media=0\n"
+                  "smooth_turn=0\ncomfort_vignette=0\nhaptics=100\nreel_haptics=0\nswing_haptics=0\nblow_sounds=0\npc_media=0\n"
                   "body_haptics=100\nbody_haptics_webs=1\nbody_haptics_wind=1\n"
                   "body_haptics_combat=1\nbody_haptics_movement=1\nscreen_size=1\nscreen_depth=2\nhud=2\n"
                   "ui_style=0\ncombat_visuals=1\nnear_clip_mm=20\nseated=0\nflips=0\ncontrolled_flips="

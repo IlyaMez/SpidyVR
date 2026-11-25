@@ -603,6 +603,35 @@ int main(int argc, char** argv) {
                     if (std::abs(middle[c] - wasMiddle[c]) > 2)
                         throw std::runtime_error("Slow motion's ring changed the middle of the view");
             }
+            // The comfort vignette nearly closed: the edges and corners of both views dark, their middles
+            // as they were, nothing recoloured. Open, it changes nothing.
+            grade.amount = 0;
+            grade.ripple = -1;
+            grade.vignette = .9f;
+            overlay.renderViews(pairedViews, wall, true);
+            overlay.renderViews(pairedViews, {}, true, true, {}, &grade);
+            for (unsigned eye = 0; eye < 2; ++eye) {
+                const auto image = overlay.readback(copied[eye].Get());
+                const auto sum = [](const std::array<int, 3>& c) { return c[0] + c[1] + c[2]; };
+                const auto corner = at(image, .02f, .03f), edge = at(image, .03f, .5f), top = at(image, .5f, .02f);
+                const auto middle = at(image, .5f, .5f), was = at(flat[eye], .5f, .5f);
+                if (sum(corner) > 12 || sum(edge) > 12 || sum(top) > 12)
+                    throw std::runtime_error("The comfort vignette left the edge of the view light (eye " +
+                                             std::to_string(eye) + ")");
+                for (int c = 0; c < 3; ++c)
+                    if (std::abs(middle[c] - was[c]) > 2)
+                        throw std::runtime_error("The comfort vignette changed the middle of the view");
+            }
+            if (argc >= 2)
+                saveBmp(std::filesystem::path(argv[1]) / "comfort-vignette.bmp", overlay.readback(copied[0].Get()),
+                        width, height);
+            grade.vignette = 0;
+            overlay.renderViews(pairedViews, wall, true);
+            overlay.renderViews(pairedViews, {}, true, true, {}, &grade);
+            for (unsigned eye = 0; eye < 2; ++eye)
+                if (overlay.readback(copied[eye].Get()) != flat[eye])
+                    throw std::runtime_error("The comfort vignette open changed the image");
+            std::cout << "PASS comfort vignette: the edge dark, the middle as it was, nothing when open.\n";
             // The meter over the left wrist, 62% full, in slow motion, drawn over
             // the recoloured image as the headset draws it. Saved for inspection.
             SlowMotionView view;

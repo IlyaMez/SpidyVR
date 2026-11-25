@@ -1974,6 +1974,7 @@ class ProtocolTests(unittest.TestCase):
                                                      snap_turn=45, smooth_turn=120, haptics=50, screen_size=2,
                                                      flips=False, flip_speed=300, trigger_webs=False, hud=3,
                                                      stand_on_walls=False, screen_depth=3, arcade_webs=False,
+                                                     first_person_cutscenes=False, first_setup=True,
                                                      eye_height_mm=0, arm_length_mm=0, calibration_prompt=True))
         # The HUD switched off in the tab.
         struct.pack_into('<I', raw, 748, 0)
@@ -2412,18 +2413,33 @@ class ProtocolTests(unittest.TestCase):
         struct.pack_into('<2If5I2f', raw, 752, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0)
         result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
         self.assertEqual((result['calibration']['skipped'], result['vr_settings']['calibration_prompt']), (1, False))
+        self.assertEqual((result['first_setup'], result['vr_settings']['first_setup']),
+                         (dict(state='off', flow='pause', builds=0), True))
+        # The first-time setup showing, its Settings built twice; then left (bit 1: none at the next session),
+        # with CUTSCENES: FIRST PERSON chosen in it (settings bit 1024).
+        struct.pack_into('<I', raw, 780, 1 | 3 << 8 | 2 << 16)
+        result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
+        self.assertEqual((result['first_setup'], result['vr_settings']['first_setup']),
+                         (dict(state='showing', flow='pause', builds=2), True))
+        struct.pack_into('<I', raw, 780, 1 | 2 | 4 | 4 << 8 | 3 << 16)
+        struct.pack_into('<I', raw, 664, 1024)
+        result = xr_snapshot(Reader(raw, struct.pack('<Q', 4)), 0)
+        self.assertEqual((result['first_setup'], result['vr_settings']['first_setup'],
+                          result['vr_settings']['first_person_cutscenes']),
+                         (dict(state='done', flow='title', builds=3), False, True))
 
     def test_settings_the_headset_changed_go_to_the_launcher_on_one_line(self):
         args = Mock(no_aim_markers=False, no_web_grab=False, no_air_webs=False, no_web_shooter=False, no_punch=True,
                     no_body=False, swing_speed=32.0, weight=60, snap_turn=30, smooth_turn=0, haptics=100,
                     screen_size=1, flips=False, flip_speed=180, trigger_webs=False, hud=2, eye_height=0,
                     arm_length=0, no_calibration_prompt=False, no_stand_on_walls=False, screen_depth=2,
-                    arcade_webs=False, body_haptics=100)
+                    arcade_webs=False, body_haptics=100, first_person_cutscenes=False, no_first_setup=False)
         start = start_settings(args)
         self.assertEqual(start, dict(aim_markers=True, web_grab=True, air_webs=True, web_shooter=True, punch=False,
                                      body=True, swing_speed=32.0, weight=60, snap_turn=30, smooth_turn=0,
                                      haptics=100, screen_size=1, flips=False, flip_speed=180, trigger_webs=False,
                                      hud=2, stand_on_walls=True, screen_depth=2, arcade_webs=False,
+                                     first_person_cutscenes=False, first_setup=True,
                                      body_haptics=100, eye_height_mm=0, arm_length_mm=0, calibration_prompt=True))
         # Nothing changed, or no sample: no line.
         self.assertIsNone(settings_line(start, dict(frames=1, vr_settings=dict(start))))
@@ -2439,8 +2455,13 @@ class ProtocolTests(unittest.TestCase):
                          SETTINGS_LINE + 'aim_markers=1 web_grab=1 air_webs=0 web_shooter=0 punch=1 body=1 '
                                          'swing_speed=48 weight=150 snap_turn=0 smooth_turn=90 haptics=100 '
                                          'screen_size=1 flips=0 flip_speed=180 trigger_webs=0 hud=2 '
-                                         'stand_on_walls=1 screen_depth=2 arcade_webs=0 body_haptics=100 '
-                                         'eye_height_mm=0 arm_length_mm=0 calibration_prompt=1')
+                                         'stand_on_walls=1 screen_depth=2 arcade_webs=0 first_person_cutscenes=0 '
+                                         'first_setup=1 body_haptics=100 eye_height_mm=0 arm_length_mm=0 '
+                                         'calibration_prompt=1')
+        # The first-time setup seen in the headset, CUTSCENES: FIRST PERSON chosen in it: both for the next session.
+        self.assertIn(' first_person_cutscenes=1 first_setup=0 ',
+                      settings_line(start, dict(frames=1, vr_settings=dict(start, first_person_cutscenes=True,
+                                                                         first_setup=False))))
         # BODY HAPTICS turned down in the headset stays for the next session.
         self.assertIn(' body_haptics=25 ', settings_line(start, dict(frames=1, vr_settings=dict(start, body_haptics=25))))
         # The experimental flips switched on in the headset go to the launcher too; so do their speed, the web
@@ -2466,7 +2487,8 @@ class ProtocolTests(unittest.TestCase):
         start = dict(aim_markers=True, web_grab=True, air_webs=True, web_shooter=True, punch=True, body=True,
                      swing_speed=32.0, weight=100, snap_turn=30, smooth_turn=0, haptics=100, screen_size=1,
                      flips=False, flip_speed=180, trigger_webs=False, hud=2, stand_on_walls=True, screen_depth=2,
-                     arcade_webs=False, body_haptics=100, eye_height_mm=0, arm_length_mm=0, calibration_prompt=True)
+                     arcade_webs=False, first_person_cutscenes=False, first_setup=True, body_haptics=100,
+                     eye_height_mm=0, arm_length_mm=0, calibration_prompt=True)
         with tempfile.TemporaryDirectory() as folder:
             saved = pathlib.Path(folder)/'spidy'/'vr_settings.txt'
             # Nothing saved yet: no arguments, not even an empty one.
@@ -2486,6 +2508,16 @@ class ProtocolTests(unittest.TestCase):
             args = persist.arguments(persist.parse(saved.read_text()))
             self.assertIn('--hud', args)
             self.assertEqual(args[args.index('--eye-height') + 1], '1630')
+            self.assertNotIn('--no-first-setup', args)
+            # The first-time setup seen in the headset, CUTSCENES: FIRST PERSON chosen in it.
+            persist.save(settings_line(start, dict(frames=1, vr_settings=dict(start, first_setup=False,
+                                                                    first_person_cutscenes=True))), saved)
+            args = persist.arguments(persist.parse(saved.read_text()))
+            self.assertIn('--no-first-setup', args)
+            self.assertIn('--first-person-cutscenes', args)
+        # Settings a session saved before the first-time setup was: that player has played.
+        self.assertIn('--no-first-setup', persist.arguments(dict(air_webs=0)))
+        self.assertNotIn('--no-first-setup', persist.arguments(dict(air_webs=0, first_setup=1)))
         # Every argument it gives is one run_game_vr.py takes.
         script = (pathlib.Path(__file__).resolve().parents[1]/'tools'/'run_game_vr.py').read_text(encoding='utf-8')
         flags = [flag for *_, flag in persist.SWITCHES + persist.NUMBERS] + ['--eye-height', '--arm-length',

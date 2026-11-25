@@ -136,6 +136,12 @@ static_assert(std::size(webLandingImpactChoices) == std::size(webLandingImpactSt
 constexpr int forearmBlends[] = {0, 25, 50, 75, 100};
 constexpr const char* forearmBlendChoices[] = {"0%", "25%", "50%", "75%", "100%"};
 static_assert(std::size(forearmBlendChoices) == std::size(forearmBlends));
+// PLAY STYLE: the presets in their order, then CUSTOM, which the row shows
+// for values that are no preset's and which choosing does nothing.
+constexpr const char* playStyleChoices[] = {"ARCADE", "BALANCED", "PRO", "CUSTOM"};
+static_assert(std::size(playStyleChoices) == presetCount + 1);
+// CUTSCENES, a switch named by where a scene plays.
+constexpr const char* cutsceneChoices[] = {"GAME SCREEN", "FIRST PERSON"};
 } // namespace
 
 std::span<const int> steps(Item item) {
@@ -161,6 +167,7 @@ std::span<const int> steps(Item item) {
         return depthSteps;
     case Item::elasticWeb:
     case Item::softRelease:
+    case Item::comfortVignette:
         return levelSteps;
     case Item::slingshotSpeed:
         return slingshotSpeeds;
@@ -245,6 +252,8 @@ float numberOf(Item item, const Values& v) {
         return static_cast<float>(v.elasticWeb);
     case Item::softRelease:
         return static_cast<float>(v.softRelease);
+    case Item::comfortVignette:
+        return static_cast<float>(v.comfortVignette);
     case Item::slingshotSpeed:
         return static_cast<float>(v.slingshotSpeed);
     case Item::recordingSmoothing:
@@ -406,6 +415,8 @@ template <class V> auto switchOf(Item item, V& v) -> decltype(&v.aimMarkers) {
         return &v.flipReprojection;
     case Item::steadyHud:
         return &v.steadyHud;
+    case Item::cutscenes:
+        return &v.firstPersonCutscenes;
     default:
         return nullptr;
     }
@@ -425,6 +436,7 @@ Values sanitized(Values v) {
     v.screenDepth = std::clamp(v.screenDepth, 0, 3);
     v.elasticWeb = std::clamp(v.elasticWeb, 0, 3);
     v.softRelease = std::clamp(v.softRelease, 0, 3);
+    v.comfortVignette = std::clamp(v.comfortVignette, 0, 3);
     v.slingshotSpeed = v.slingshotSpeed <= 0 ? 0 : std::clamp(v.slingshotSpeed, 20, 300);
     v.recordingSmoothing = std::clamp(v.recordingSmoothing, 0, 100);
     v.webRange = std::clamp(v.webRange, 10, 1000);
@@ -454,9 +466,9 @@ Values sanitized(Values v) {
     v.automaticHandThreshold = std::clamp(v.automaticHandThreshold, 50, 300);
     return v;
 }
-const std::array<Row, 96>& rows() {
+const std::array<Row, 99>& rows() {
     // The help fits the game's description column beside the rows.
-    static const std::array<Row, 96> all{{
+    static const std::array<Row, 99> all{{
         {Item::none, "WEBS", nullptr, {}},
         {Item::webStyle, "WEB STYLE",
          "Arcade: webs pass lamp posts, signs and cars, and swings stay above the street.", webStyleChoices},
@@ -706,6 +718,14 @@ const std::array<Row, 96>& rows() {
          "Enemies that block in the base game block base attacks until webbed or stunned.",
          {},
          Place::launcher},
+        // The first-time setup's own rows (November 22), on the VR SETUP screen: before the realistic flips'
+        // rows too, the rows before them keeping their numbers.
+        {Item::playStyle, "PLAY STYLE",
+         "Arcade: light, assisted. Balanced: real ropes. Pro: heavy, no open-air webs.", playStyleChoices},
+        {Item::cutscenes, "CUTSCENES", "First person: scenes play around you, from inside the hero's head.",
+         cutsceneChoices},
+        {Item::comfortVignette, "COMFORT VIGNETTE",
+         "Darkens the edge of your view as you swing, fall or turn. Eases motion sickness.", levelChoices},
         {Item::realisticFlips,
          "REALISTIC FLIPS",
          "Momentum rotation from arms and webs. FLIPS also enables left-stick steering.",
@@ -750,12 +770,14 @@ const Row* rowFor(Item item) {
     return nullptr;
 }
 const std::array<Screen, categoryCount>& screens() {
+    // VR SETUP is also the first-time setup (game_menu's beginSetup): the choices to make before the first
+    // swing, the body's calibration last, as it follows them.
     static constexpr Item setup[] = {
-        Item::smoothTurn, Item::snapTurn, Item::calibrate, Item::height,
-        Item::seated,
+        Item::playStyle, Item::webButton, Item::comfortVignette, Item::smoothTurn, Item::snapTurn,
+        Item::seated,    Item::height,    Item::cutscenes,       Item::calibrate,
     };
     static constexpr Item webs[] = {
-        Item::webStyle, Item::webButton, Item::aimMarkers, Item::airWebs,
+        Item::webStyle, Item::aimMarkers, Item::airWebs,
         Item::smartAnchor, Item::webRange, Item::webSpeed, Item::eyeAim,
         Item::webAimSource, Item::forearmBlend, Item::forearmAimLimit, Item::wristShooters,
         Item::palmShooters, Item::webAngle, Item::webTie, Item::webLines,
@@ -865,6 +887,10 @@ Values resetCategory(Category category, Values v) {
     return v;
 }
 int choice(Item item, const Values& v) {
+    if (item == Item::playStyle) {
+        const int preset = presetOf(v);
+        return preset < 0 ? static_cast<int>(presetCount) : preset;
+    }
     if (const bool* on = switchOf(item, v))
         return *on ? 1 : 0;
     const auto s = steps(item);
@@ -878,6 +904,14 @@ int choice(Item item, const Values& v) {
     return best;
 }
 bool choose(Item item, int index, Values& v) {
+    // A preset sets every gameplay setting; CUSTOM is no values of its own.
+    if (item == Item::playStyle) {
+        if (index < 0 || index >= static_cast<int>(presetCount))
+            return false;
+        const Values before = v;
+        v = withPreset(v, static_cast<size_t>(index));
+        return !(v == before);
+    }
     if (bool* on = switchOf(item, v)) {
         if (index != 0 && index != 1)
             return false;
@@ -925,6 +959,9 @@ bool choose(Item item, int index, Values& v) {
         break;
     case Item::softRelease:
         v.softRelease = s[index];
+        break;
+    case Item::comfortVignette:
+        v.comfortVignette = s[index];
         break;
     case Item::slingshotSpeed:
         v.slingshotSpeed = s[index];
@@ -1092,6 +1129,7 @@ constexpr TabOnly tabOnly[] = {
     {"palm_shooters", &Values::palmShooters, nullptr},
     {"web_lines", &Values::webLines, nullptr},
     {"air_fists", &Values::airFists, nullptr},
+    {"comfort_vignette", nullptr, &Values::comfortVignette},
 };
 } // namespace
 std::string tabOnlyText(const Values& v) {
@@ -1126,5 +1164,61 @@ Values withTabOnly(Values v, std::string_view text) {
             }
     }
     return sanitized(v);
+}
+namespace {
+// The presets' settings that launcher.ini keeps rather than spidy_vr.ini (launcher_profile.hpp's
+// launcherOption lines): the swing speed, a float here, apart.
+constexpr TabOnly launcherKept[] = {
+    {"arcade_webs", &Values::arcadeWebs, nullptr}, {"aim_markers", &Values::aimMarkers, nullptr},
+    {"air_webs", &Values::airWebs, nullptr},       {"flips", &Values::flips, nullptr},
+    {"weight", nullptr, &Values::weight},          {"flip_speed", nullptr, &Values::flipSpeed},
+};
+constexpr std::string_view swingSpeedKey = "swing_speed";
+const TabOnly* keyed(std::string_view key) {
+    for (const auto& s : tabOnly)
+        if (s.key == key)
+            return &s;
+    for (const auto& s : launcherKept)
+        if (s.key == key)
+            return &s;
+    return nullptr;
+}
+} // namespace
+bool presetKnows(std::string_view key) {
+    return key == swingSpeedKey || keyed(key) != nullptr;
+}
+Values withPreset(Values v, size_t preset) {
+    if (preset >= presetCount)
+        return v;
+    for (const auto& setting : gameplayPresetSettings) {
+        const int value = setting.values[preset];
+        if (setting.key == swingSpeedKey)
+            v.swingSpeed = static_cast<float>(value);
+        else if (const TabOnly* s = keyed(setting.key); s && s->flag)
+            v.*s->flag = value != 0;
+        else if (s)
+            v.*s->number = value;
+    }
+    return sanitized(v);
+}
+int presetOf(const Values& v) {
+    for (size_t preset = 0; preset < presetCount; ++preset) {
+        bool all = true;
+        for (const auto& setting : gameplayPresetSettings) {
+            const int value = setting.values[preset];
+            const TabOnly* s = keyed(setting.key);
+            const bool same = setting.key == swingSpeedKey ? std::lround(v.swingSpeed) == value
+                              : !s                         ? true
+                              : s->flag                    ? (v.*s->flag) == (value != 0)
+                                                           : v.*s->number == value;
+            if (!same) {
+                all = false;
+                break;
+            }
+        }
+        if (all)
+            return static_cast<int>(preset);
+    }
+    return -1;
 }
 } // namespace spidy::vr_settings
